@@ -2,6 +2,10 @@ const GROQ_CHAT_COMPLETIONS =
   "https://api.groq.com/openai/v1/chat/completions";
 const GEMINI_CHAT_COMPLETIONS =
   "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions";
+const ANTHROPIC_CHAT_COMPLETIONS =
+  "https://api.anthropic.com/v1/chat/completions";
+
+const CLAUDE_EFFORTS = new Set(["low", "medium", "high", "xhigh", "max"]);
 
 function normalizeModelMap(modelMap) {
   if (modelMap === null || typeof modelMap !== "object" || Array.isArray(modelMap)) {
@@ -75,4 +79,53 @@ export function createGeminiUpstream({
   endpoint = GEMINI_CHAT_COMPLETIONS,
 }) {
   return createOpenAICompatibleUpstream({ alias, endpoint, getApiKey, modelMap });
+}
+
+export function createAnthropicUpstream({
+  alias,
+  getApiKey,
+  getWorkspaceId,
+  modelMap = { "frontier-code": "claude-sonnet-5" },
+  effort = "medium",
+  endpoint = ANTHROPIC_CHAT_COMPLETIONS,
+}) {
+  if (typeof getWorkspaceId !== "function") {
+    throw new TypeError("getWorkspaceId must be a function");
+  }
+  if (!CLAUDE_EFFORTS.has(effort)) {
+    throw new TypeError("effort must be low, medium, high, xhigh, or max");
+  }
+
+  const compatible = createOpenAICompatibleUpstream({
+    alias,
+    endpoint,
+    getApiKey,
+    modelMap,
+  });
+
+  return Object.freeze({
+    ...compatible,
+    async getSecretHeaders() {
+      const headers = await compatible.getSecretHeaders();
+      const workspaceId = await getWorkspaceId();
+      if (typeof workspaceId !== "string" || !/^wrkspc_[A-Za-z0-9]+$/.test(workspaceId)) {
+        throw new TypeError(`workspace ID unavailable for upstream: ${alias}`);
+      }
+      return {
+        ...headers,
+        "anthropic-workspace-id": workspaceId,
+      };
+    },
+    transformRequest(body) {
+      const transformed = compatible.transformRequest(body);
+      const { reasoning_effort: _ignored, ...request } = transformed;
+      return {
+        ...request,
+        output_config: {
+          ...(request.output_config ?? {}),
+          effort,
+        },
+      };
+    },
+  });
 }

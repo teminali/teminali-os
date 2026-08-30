@@ -1,6 +1,10 @@
 import { readFileSync } from "node:fs";
 
-import { createGeminiUpstream, createGroqUpstream } from "./provider-adapters.js";
+import {
+  createAnthropicUpstream,
+  createGeminiUpstream,
+  createGroqUpstream,
+} from "./provider-adapters.js";
 import { normalizePricing, parseUsdMicros } from "./run-budget.js";
 
 const LANE_FIELDS = new Set([
@@ -8,12 +12,15 @@ const LANE_FIELDS = new Set([
   "provider",
   "quotaGroup",
   "apiKeyEnv",
+  "workspaceIdEnv",
   "providerModel",
+  "effort",
   "limits",
   "pricing",
 ]);
 const LIMIT_FIELDS = new Set(["rpm", "rpd", "tpm", "tpd"]);
 const ENV_NAME = /^[A-Z][A-Z0-9_]*$/;
+const CLAUDE_EFFORTS = new Set(["low", "medium", "high", "xhigh", "max"]);
 
 function positiveInteger(value, name, fallback) {
   const candidate = value === undefined ? fallback : Number(value);
@@ -77,8 +84,8 @@ function normalizeLane(lane, index, env, logicalModel) {
 
   const alias = nonEmptyString(lane.alias, `lane ${index}.alias`);
   const provider = nonEmptyString(lane.provider, `lane ${index}.provider`);
-  if (provider !== "gemini" && provider !== "groq") {
-    throw new TypeError(`lane ${index}.provider must be gemini or groq`);
+  if (provider !== "gemini" && provider !== "groq" && provider !== "anthropic") {
+    throw new TypeError(`lane ${index}.provider must be anthropic, gemini, or groq`);
   }
   const quotaGroup = nonEmptyString(lane.quotaGroup, `lane ${index}.quotaGroup`);
   const apiKeyEnv = nonEmptyString(lane.apiKeyEnv, `lane ${index}.apiKeyEnv`);
@@ -91,6 +98,35 @@ function normalizeLane(lane, index, env, logicalModel) {
   );
   if (typeof env[apiKeyEnv] !== "string" || env[apiKeyEnv].length < 8) {
     throw new TypeError(`credential environment variable is unavailable: ${apiKeyEnv}`);
+  }
+
+  let workspaceIdEnv;
+  let effort;
+  if (provider === "anthropic") {
+    workspaceIdEnv = nonEmptyString(
+      lane.workspaceIdEnv,
+      `lane ${index}.workspaceIdEnv`,
+    );
+    if (!ENV_NAME.test(workspaceIdEnv)) {
+      throw new TypeError(
+        `lane ${index}.workspaceIdEnv must be an uppercase environment name`,
+      );
+    }
+    if (!/^wrkspc_[A-Za-z0-9]+$/.test(env[workspaceIdEnv] ?? "")) {
+      throw new TypeError(
+        `workspace environment variable is unavailable: ${workspaceIdEnv}`,
+      );
+    }
+    effort = nonEmptyString(lane.effort, `lane ${index}.effort`);
+    if (!CLAUDE_EFFORTS.has(effort)) {
+      throw new TypeError(
+        `lane ${index}.effort must be low, medium, high, xhigh, or max`,
+      );
+    }
+  } else if (lane.workspaceIdEnv !== undefined || lane.effort !== undefined) {
+    throw new TypeError(
+      `lane ${index}.workspaceIdEnv and effort are supported only for anthropic`,
+    );
   }
 
   if (lane.limits === null || typeof lane.limits !== "object" || Array.isArray(lane.limits)) {
@@ -121,16 +157,32 @@ function normalizeLane(lane, index, env, logicalModel) {
     getApiKey: () => env[apiKeyEnv],
     modelMap: { [logicalModel]: providerModel },
   };
-  const upstream =
-    provider === "gemini"
-      ? createGeminiUpstream(adapterOptions)
-      : createGroqUpstream(adapterOptions);
+  let upstream;
+  if (provider === "gemini") {
+    upstream = createGeminiUpstream(adapterOptions);
+  } else if (provider === "groq") {
+    upstream = createGroqUpstream(adapterOptions);
+  } else {
+    upstream = createAnthropicUpstream({
+      ...adapterOptions,
+      getWorkspaceId: () => env[workspaceIdEnv],
+      effort,
+    });
+  }
 
   return {
     lane: { alias, quotaGroup, provider, limits },
     upstream,
     pricing,
-    safe: { alias, quotaGroup, provider, providerModel, limits, pricing },
+    safe: {
+      alias,
+      quotaGroup,
+      provider,
+      providerModel,
+      ...(effort === undefined ? {} : { effort }),
+      limits,
+      pricing,
+    },
   };
 }
 

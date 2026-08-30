@@ -62,6 +62,17 @@ The gateway is a product prototype, not a mechanism for evading provider terms.
 - `GET /health`
 - `GET /metrics` with non-secret counters only
 
+## Provider profiles
+
+- `gateway/lanes.controlled-claude-sonnet.json`: Sonnet 5 medium, pinned, no fallback.
+- `gateway/lanes.controlled-claude-opus.json`: Opus 5 high, pinned, no fallback.
+- `gateway/lanes.enhanced-claude-groq.example.json`: Sonnet 5 primary plus three
+  separately authorized Groq organization lanes.
+- Anthropic identity-linked keys require both `ANTHROPIC_API_KEY` and
+  `ANTHROPIC_WORKSPACE_ID`; both remain runtime-only and are never committed.
+- Claude Sonnet 5 is budgeted at $2/M input and $10/M output; Opus 5 at $5/M
+  input and $25/M output. The gateway reserves requested worst-case output before dispatch.
+
 ## Runtime launcher
 
 Run `npm run gateway:start` only after defining:
@@ -89,6 +100,17 @@ environment variables holding credentials; credential values never belong in
 `gateway/lanes.controlled-gemini.json` is the first-live-test profile.
 `gateway/lanes.enhanced.example.json` is the Gemini-primary plus three independent
 Groq-organization profile. Both contain configuration only; they contain no keys.
+
+`npm run agent:start-claude` launches controlled Sonnet 5. `npm run
+agent:start-opus` is an explicit escalation path. `npm run agent:start-enhanced`
+requires one Anthropic key/workspace plus three separately authorized Groq keys.
+The default interactive run cap is 12 requests, 60,000 estimated tokens, and
+USD 0.20. `npm run claude:diagnose` and `npm run claude:diagnose-opus` each use
+one request with a USD 0.005 hard cap.
+
+Benchmark 001 is under `benchmarks/sonnet5-vs-antigravity-gemini37`. Preparation
+creates two identical disposable Git repositories under the system temporary
+directory. The hidden oracle stays outside both agent workspaces.
 
 For the first controlled live validation, `npm run agent:start` prompts privately
 for `GEMINI_API_KEY`, generates an ephemeral local access token, caps the gateway

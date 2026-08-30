@@ -4,8 +4,18 @@
   "type": "module",
   "scripts": {
     "agent:start": "zsh scripts/start-controlled-agent.zsh",
+    "agent:start-claude": "AGENT_PROFILE=claude-sonnet zsh scripts/start-frontier-agent.zsh",
+    "agent:start-opus": "AGENT_PROFILE=claude-opus zsh scripts/start-frontier-agent.zsh",
+    "agent:start-enhanced": "AGENT_PROFILE=claude-groq-enhanced zsh scripts/start-frontier-agent.zsh",
+    "claude:diagnose": "zsh scripts/diagnose-claude.zsh",
+    "claude:diagnose-direct": "zsh scripts/diagnose-claude-direct.zsh",
+    "claude:diagnose-opus": "zsh scripts/diagnose-claude-opus.zsh",
+    "benchmark:prepare": "node scripts/prepare-sonnet-antigravity-benchmark.mjs",
+    "benchmark:start-sonnet": "zsh scripts/start-sonnet-benchmark.zsh",
+    "benchmark:score": "node scripts/score-sonnet-antigravity-benchmark.mjs",
     "gemini:diagnose": "zsh scripts/diagnose-gemini.zsh",
+    "gemini:diagnose-direct": "zsh scripts/diagnose-gemini-direct.zsh",
     "gateway:start": "node gateway/start-gateway.js",
-    "test": "node --test"
+    "test": "node --test calculator.test.js gateway/*.test.js"
   }
 }

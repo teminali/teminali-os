@@ -11,18 +11,21 @@ objective.
 
 ## Two evaluation tracks
 
-### Controlled Gemini baseline
+### Controlled frontier comparison
 
-- OpenCode harness with `gemini-3.7-flash` at medium reasoning.
-- Antigravity with the same model and reasoning level.
+- OpenCode harness with `claude-sonnet-5` at medium effort.
+- Antigravity with `gemini-3.7-flash` at medium reasoning.
 - Identical repository snapshot, task prompt, acceptance criteria, and time budget.
 - No helper model, cross-provider fallback, or human coding assistance during a
   scored run.
+- Report this as a cross-model, cross-harness comparison; do not claim it isolates
+  harness quality.
 - Preserve the existing GPT-OSS-120B baseline as a separate historical track.
 
 ### Enhanced frontier system
 
-- Gemini 3.7 Flash Medium as the default builder and general reasoning model.
+- Claude Sonnet 5 Medium as the default builder and general reasoning model while
+  Gemini prepaid credits are unavailable.
 - Explicit escalation to higher reasoning only for tasks that justify it.
 - Add specialized architect, verifier, and reviewer roles only after the
   single-agent Gemini baseline is stable and measured.
@@ -63,10 +66,10 @@ objective.
   bounded retry, circuit breaking, and non-secret metrics.
 - Support a controlled single-provider mode and an explicit enhanced mode.
 
-### Phase 2 — Gemini single-agent baseline
+### Phase 2 — Claude single-agent baseline
 
-- Add a Gemini 3.7 Flash adapter with streaming and function-call tests.
-- Start with medium reasoning and bounded outputs.
+- Add an Anthropic workspace-aware adapter with streaming and function-call tests.
+- Start Sonnet 5 with medium effort and bounded outputs.
 - Validate inspect/edit/test/report, malformed-tool recovery, long-task state,
   and interruption recovery.
 - Run at least 10 controlled tasks and score them.
@@ -96,7 +99,9 @@ objective.
 ### Phase 6 — Antigravity comparison
 
 - Freeze a benchmark suite and scoring rubric before running comparisons.
-- Run OpenCode Gemini 3.7 Medium and Antigravity Gemini 3.7 Medium independently.
+- Run OpenCode Claude Sonnet 5 Medium and Antigravity Gemini 3.7 Flash Medium independently.
+- Keep a future same-model Gemini-vs-Gemini control as a separate track when
+  Gemini billing is available.
 - Compare correctness, tests, regressions, time, tokens, cost, retries, recovery,
   and quality of evidence.
 - Publish controlled and enhanced results separately.

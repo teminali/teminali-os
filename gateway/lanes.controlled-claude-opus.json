@@ -1,0 +1,21 @@
+[
+  {
+    "alias": "anthropic-opus-escalation",
+    "provider": "anthropic",
+    "quotaGroup": "anthropic-workspace-opus5",
+    "apiKeyEnv": "ANTHROPIC_API_KEY",
+    "workspaceIdEnv": "ANTHROPIC_WORKSPACE_ID",
+    "providerModel": "claude-opus-5",
+    "effort": "high",
+    "limits": {
+      "rpm": 3,
+      "rpd": 100,
+      "tpm": 50000,
+      "tpd": 100000
+    },
+    "pricing": {
+      "inputUsdPerMillion": "5",
+      "outputUsdPerMillion": "25"
+    }
+  }
+]

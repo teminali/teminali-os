@@ -1,6 +1,8 @@
 # Task State
 ## Objective
-Build and verify the provider-agnostic gateway foundation for a frontier coding agent.
+Wire and verify Claude Sonnet 5 as the controlled OpenCode coding model, preserve
+explicit Groq recovery, and prepare the first frozen comparison against
+Antigravity Gemini 3.7 Flash Medium.
 ## Acceptance Criteria
 - Quota routing models organization-scoped limits and rejects duplicate quota groups.
 - The HTTP gateway authenticates clients, streams responses, fails over safely before streaming, and never exposes provider secrets.
@@ -26,12 +28,24 @@ Build and verify the provider-agnostic gateway foundation for a frontier coding 
 - Confirmed automatic retries were blocked locally after the one-request budget was consumed.
 - Added bounded, credential-redacted provider error diagnostics and a one-call diagnostic launcher.
 - Verified 33 offline tests and a clean diff check.
+- Diagnosed Gemini HTTP 429 directly: the terralink project's prepaid credits are depleted.
+- Verified the Anthropic identity-linked key can list Claude Opus 5 and Sonnet 5.
+- Added Anthropic workspace routing over the official OpenAI-compatible API surface.
+- Mapped OpenCode medium reasoning to Claude `output_config.effort=medium`.
+- Added controlled Sonnet 5, controlled Opus 5, and Sonnet-plus-three-Groq profiles.
+- Added hard-capped Sonnet and Opus live diagnostic launchers.
+- Added a frozen, disposable Sonnet 5 versus Antigravity Gemini 3.7 Flash benchmark.
+- Added an oracle scorer, fixture-integrity checks, identical baseline preparation,
+  and a 20-minute controlled-run policy.
+- Verified 38 offline tests, all launcher smoke tests, benchmark preparation/scoring,
+  shell syntax, OpenCode config resolution, cleanup, and diff checks.
 ## Active
-- Diagnose Gemini's upstream HTTP 429 without OpenCode retry noise.
+- Run the first capped Claude generation checks, then execute benchmark 001.
 ## Blocked
-- A second live diagnostic call requires explicit USD 0.01 approval and private Gemini key entry.
+- Live Claude calls require private API-key entry in the user's terminal.
 ## Next Action
-- After approval, run `npm run gemini:diagnose` and inspect the sanitized provider code and message.
+- Run `npm run claude:diagnose-opus` and confirm `CLAUDE OPUS 5 READY` before
+  spending on the controlled Sonnet benchmark.
 ## Evidence
 - “GROQ GPT OSS 120B READY”
 - `npm test --silent`: 33 passed, 0 failed.
@@ -39,3 +53,12 @@ Build and verify the provider-agnostic gateway foundation for a frontier coding 
 - `opencode debug config --pure` resolved the gateway model and preserved the Groq baseline.
 - Dummy-key `npm run agent:start` reached health, exited successfully, and left no listener behind.
 - The failed live run transitioned from provider cooldown to local `Run budget exhausted` without another upstream call.
+- Direct Gemini error: `RESOURCE_EXHAUSTED` because prepayment credits are depleted.
+- Anthropic model catalog includes `claude-opus-5` and `claude-sonnet-5`.
+- `npm test --silent`: 38 passed, 0 failed.
+- Controlled Sonnet, Opus, enhanced, and benchmark launchers start and cleanly stop
+  a loopback gateway with dummy credentials and leave no port 8787 listener.
+- OpenCode resolves `Claude Sonnet 5 Controlled Benchmark` at medium and
+  `Claude Opus 5 Controlled Escalation` at high.
+- Benchmark seed scores 30/90 automated before repair, confirming the scorer
+  distinguishes the intended defects.

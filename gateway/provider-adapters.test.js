@@ -1,7 +1,11 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { createGeminiUpstream, createGroqUpstream } from "./provider-adapters.js";
+import {
+  createAnthropicUpstream,
+  createGeminiUpstream,
+  createGroqUpstream,
+} from "./provider-adapters.js";
 
 const SECRET = "provider-secret-value";
 
@@ -58,4 +62,52 @@ test("adapter rejects unmapped models and missing credentials", async () => {
     /model is not mapped/,
   );
   await assert.rejects(upstream.getSecretHeaders(), /API key unavailable/);
+});
+
+test("Anthropic adapter supplies workspace routing and maps medium effort", async () => {
+  const upstream = createAnthropicUpstream({
+    alias: "anthropic-sonnet",
+    getApiKey: () => SECRET,
+    getWorkspaceId: () => "wrkspc_01ExampleWorkspace",
+  });
+  const body = {
+    model: "frontier-code",
+    messages: [{ role: "user", content: "hello" }],
+    tools: [{ type: "function", function: { name: "read_file" } }],
+    reasoning_effort: "high",
+    stream: true,
+  };
+
+  assert.equal(upstream.endpoint, "https://api.anthropic.com/v1/chat/completions");
+  assert.deepEqual(await upstream.getSecretHeaders(), {
+    authorization: `Bearer ${SECRET}`,
+    "anthropic-workspace-id": "wrkspc_01ExampleWorkspace",
+  });
+  assert.deepEqual(upstream.transformRequest(body), {
+    model: "claude-sonnet-5",
+    messages: body.messages,
+    tools: body.tools,
+    stream: true,
+    output_config: { effort: "medium" },
+  });
+  assert.equal(body.reasoning_effort, "high");
+});
+
+test("Anthropic adapter rejects missing workspace routing and invalid effort", async () => {
+  const missingWorkspace = createAnthropicUpstream({
+    alias: "anthropic-sonnet",
+    getApiKey: () => SECRET,
+    getWorkspaceId: () => "",
+  });
+  await assert.rejects(missingWorkspace.getSecretHeaders(), /workspace ID unavailable/);
+  assert.throws(
+    () =>
+      createAnthropicUpstream({
+        alias: "anthropic-sonnet",
+        getApiKey: () => SECRET,
+        getWorkspaceId: () => "wrkspc_01ExampleWorkspace",
+        effort: "turbo",
+      }),
+    /effort must be/,
+  );
 });

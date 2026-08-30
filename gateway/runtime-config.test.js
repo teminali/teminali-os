@@ -7,6 +7,8 @@ import { startGateway } from "./start-gateway.js";
 const ACCESS_TOKEN = "local-gateway-access-token";
 const GEMINI_SECRET = "gemini-provider-secret";
 const GROQ_SECRET = "groq-provider-secret";
+const ANTHROPIC_SECRET = "anthropic-provider-secret";
+const ANTHROPIC_WORKSPACE = "wrkspc_01ExampleWorkspace";
 
 function validEnv() {
   return {
@@ -34,6 +36,30 @@ function validEnv() {
         providerModel: "openai/gpt-oss-120b",
         limits: { rpm: 30, rpd: 1_000, tpm: 8_000, tpd: 200_000 },
         pricing: { inputUsdPerMillion: "0.15", outputUsdPerMillion: "0.60" },
+      },
+    ]),
+  };
+}
+
+function anthropicEnv() {
+  return {
+    GATEWAY_ACCESS_TOKEN: ACCESS_TOKEN,
+    GATEWAY_MAX_REQUESTS_PER_RUN: "8",
+    GATEWAY_MAX_TOKENS_PER_RUN: "60000",
+    GATEWAY_MAX_USD_PER_RUN: "0.20",
+    ANTHROPIC_KEY_MAIN: ANTHROPIC_SECRET,
+    ANTHROPIC_WORKSPACE_MAIN: ANTHROPIC_WORKSPACE,
+    GATEWAY_LANES_JSON: JSON.stringify([
+      {
+        alias: "anthropic-sonnet",
+        provider: "anthropic",
+        quotaGroup: "anthropic-workspace-sonnet5",
+        apiKeyEnv: "ANTHROPIC_KEY_MAIN",
+        workspaceIdEnv: "ANTHROPIC_WORKSPACE_MAIN",
+        providerModel: "claude-sonnet-5",
+        effort: "medium",
+        limits: { rpm: 5, rpd: 200, tpm: 50000, tpd: 200000 },
+        pricing: { inputUsdPerMillion: "2", outputUsdPerMillion: "10" },
       },
     ]),
   };
@@ -146,4 +172,37 @@ test("launcher reports only a safe startup summary", async () => {
   assert.equal(output.includes(ACCESS_TOKEN), false);
   assert.equal(output.includes(GEMINI_SECRET), false);
   assert.equal(output.includes(GROQ_SECRET), false);
+});
+
+test("runtime config builds a strict Anthropic workspace lane", async () => {
+  const runtime = loadRuntimeConfig(anthropicEnv());
+  const gatewayOptions = runtime.getGatewayOptions();
+  assert.equal(runtime.safeSummary.lanes[0].provider, "anthropic");
+  assert.equal(runtime.safeSummary.lanes[0].effort, "medium");
+  assert.equal(
+    gatewayOptions.upstreams[0].transformRequest({
+      model: "frontier-code",
+      messages: [],
+    }).model,
+    "claude-sonnet-5",
+  );
+  assert.deepEqual(await gatewayOptions.upstreams[0].getSecretHeaders(), {
+    authorization: `Bearer ${ANTHROPIC_SECRET}`,
+    "anthropic-workspace-id": ANTHROPIC_WORKSPACE,
+  });
+  const serialized = JSON.stringify(runtime);
+  assert.equal(serialized.includes(ANTHROPIC_SECRET), false);
+  assert.equal(serialized.includes(ANTHROPIC_WORKSPACE), false);
+});
+
+test("runtime config requires Anthropic workspace routing and valid effort", () => {
+  const missingWorkspace = anthropicEnv();
+  delete missingWorkspace.ANTHROPIC_WORKSPACE_MAIN;
+  assert.throws(() => loadRuntimeConfig(missingWorkspace), /workspace environment/);
+
+  const invalidEffort = anthropicEnv();
+  const lanes = JSON.parse(invalidEffort.GATEWAY_LANES_JSON);
+  lanes[0].effort = "turbo";
+  invalidEffort.GATEWAY_LANES_JSON = JSON.stringify(lanes);
+  assert.throws(() => loadRuntimeConfig(invalidEffort), /effort must be/);
 });

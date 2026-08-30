@@ -3,7 +3,11 @@ import { createServer } from "node:http";
 import test from "node:test";
 
 import { createGateway, estimateRequestTokens } from "./http-gateway.js";
-import { createGeminiUpstream, createGroqUpstream } from "./provider-adapters.js";
+import {
+  createAnthropicUpstream,
+  createGeminiUpstream,
+  createGroqUpstream,
+} from "./provider-adapters.js";
 
 const ACCESS_TOKEN = "local-test-access-token";
 const MODEL = "openai/gpt-oss-120b";
@@ -360,6 +364,62 @@ test("heterogeneous failover applies each provider model mapping", async (t) => 
   assert.equal(response.status, 200);
   assert.equal(response.headers.get("x-gateway-lane"), "groq-a");
   assert.equal((await response.json()).choices[0].message.content, "fallback-ok");
+});
+
+test("Anthropic OpenAI-compatible lane forwards workspace, tools, and effort", async (t) => {
+  const secret = "anthropic-secret-value";
+  const workspaceId = "wrkspc_01ExampleWorkspace";
+  const upstream = await startFakeUpstream(async (req, res) => {
+    assert.equal(req.headers.authorization, `Bearer ${secret}`);
+    assert.equal(req.headers["anthropic-workspace-id"], workspaceId);
+    const body = await requestBody(req);
+    assert.equal(body.model, "claude-sonnet-5");
+    assert.equal(body.reasoning_effort, undefined);
+    assert.deepEqual(body.output_config, { effort: "medium" });
+    assert.equal(body.tools[0].function.name, "read_file");
+    res.writeHead(200, { "content-type": "application/json" });
+    res.end(
+      JSON.stringify({
+        id: "chatcmpl_claude",
+        choices: [{ message: { role: "assistant", content: "ready" } }],
+      }),
+    );
+  });
+  t.after(upstream.close);
+
+  const gateway = createGateway({
+    accessToken: ACCESS_TOKEN,
+    quotaLanes: [
+      {
+        alias: "anthropic-sonnet",
+        quotaGroup: "anthropic-workspace-sonnet5",
+        provider: "anthropic",
+        limits: { rpm: 5, rpd: 200, tpm: 50_000, tpd: 200_000 },
+      },
+    ],
+    upstreams: [
+      createAnthropicUpstream({
+        alias: "anthropic-sonnet",
+        getApiKey: () => secret,
+        getWorkspaceId: () => workspaceId,
+        endpoint: upstream.endpoint,
+      }),
+    ],
+    allowedModels: ["frontier-code"],
+  });
+  t.after(() => gateway.close());
+  const url = await gateway.listen();
+
+  const response = await chatRequest(url, {
+    model: "frontier-code",
+    messages: [{ role: "user", content: "inspect" }],
+    tools: [{ type: "function", function: { name: "read_file" } }],
+    reasoning_effort: "high",
+    max_tokens: 128,
+  });
+  assert.equal(response.status, 200);
+  assert.equal(response.headers.get("x-gateway-lane"), "anthropic-sonnet");
+  assert.equal((await response.json()).choices[0].message.content, "ready");
 });
 
 test("hard run budget rejects locally before contacting an upstream", async (t) => {

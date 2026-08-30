@@ -1,0 +1,21 @@
+[
+  {
+    "alias": "anthropic-sonnet-primary",
+    "provider": "anthropic",
+    "quotaGroup": "anthropic-workspace-sonnet5",
+    "apiKeyEnv": "ANTHROPIC_API_KEY",
+    "workspaceIdEnv": "ANTHROPIC_WORKSPACE_ID",
+    "providerModel": "claude-sonnet-5",
+    "effort": "medium",
+    "limits": {
+      "rpm": 5,
+      "rpd": 200,
+      "tpm": 50000,
+      "tpd": 200000
+    },
+    "pricing": {
+      "inputUsdPerMillion": "2",
+      "outputUsdPerMillion": "10"
+    }
+  }
+]

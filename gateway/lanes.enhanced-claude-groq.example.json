@@ -1,0 +1,48 @@
+[
+  {
+    "alias": "anthropic-sonnet-primary",
+    "provider": "anthropic",
+    "quotaGroup": "anthropic-workspace-sonnet5",
+    "apiKeyEnv": "ANTHROPIC_API_KEY",
+    "workspaceIdEnv": "ANTHROPIC_WORKSPACE_ID",
+    "providerModel": "claude-sonnet-5",
+    "effort": "medium",
+    "limits": {
+      "rpm": 5,
+      "rpd": 200,
+      "tpm": 50000,
+      "tpd": 200000
+    },
+    "pricing": {
+      "inputUsdPerMillion": "2",
+      "outputUsdPerMillion": "10"
+    }
+  },
+  {
+    "alias": "groq-a",
+    "provider": "groq",
+    "quotaGroup": "groq-org-a",
+    "apiKeyEnv": "GROQ_API_KEY_A",
+    "providerModel": "openai/gpt-oss-120b",
+    "limits": { "rpm": 30, "rpd": 1000, "tpm": 8000, "tpd": 200000 },
+    "pricing": { "inputUsdPerMillion": "0.15", "outputUsdPerMillion": "0.60" }
+  },
+  {
+    "alias": "groq-b",
+    "provider": "groq",
+    "quotaGroup": "groq-org-b",
+    "apiKeyEnv": "GROQ_API_KEY_B",
+    "providerModel": "openai/gpt-oss-120b",
+    "limits": { "rpm": 30, "rpd": 1000, "tpm": 8000, "tpd": 200000 },
+    "pricing": { "inputUsdPerMillion": "0.15", "outputUsdPerMillion": "0.60" }
+  },
+  {
+    "alias": "groq-c",
+    "provider": "groq",
+    "quotaGroup": "groq-org-c",
+    "apiKeyEnv": "GROQ_API_KEY_C",
+    "providerModel": "openai/gpt-oss-120b",
+    "limits": { "rpm": 30, "rpd": 1000, "tpm": 8000, "tpd": 200000 },
+    "pricing": { "inputUsdPerMillion": "0.15", "outputUsdPerMillion": "0.60" }
+  }
+]
