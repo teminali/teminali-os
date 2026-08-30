@@ -4,6 +4,9 @@ set -euo pipefail
 SCRIPT_DIR=${0:A:h}
 LAB_DIR=${SCRIPT_DIR:h}
 OPENCODE_BIN=${OPENCODE_BIN:-$(command -v opencode || true)}
+if [[ -z "$OPENCODE_BIN" && -x "${HOME}/.opencode/bin/opencode" ]]; then
+  OPENCODE_BIN="${HOME}/.opencode/bin/opencode"
+fi
 AGENT_PROFILE=${AGENT_PROFILE:-claude-sonnet}
 AGENT_TARGET_DIR=${AGENT_TARGET_DIR:-$LAB_DIR}
 
