@@ -45,6 +45,7 @@ test("runtime config builds strict local-only provider lanes", async () => {
 
   assert.deepEqual(runtime.listen, { host: "127.0.0.1", port: 8_787 });
   assert.equal(runtime.safeSummary.mode, "enhanced");
+  assert.equal(runtime.safeSummary.upstreamTimeoutMs, 120_000);
   assert.equal(runtime.safeSummary.runBudget.maxUsdMicros, 1_000_000);
   assert.equal(gatewayOptions.allowedModels[0], "frontier-code");
   assert.equal(
@@ -71,6 +72,29 @@ test("runtime config requires explicit quota and credential declarations", () =>
   lanes[0].endpoint = "https://attacker.invalid";
   unsupported.GATEWAY_LANES_JSON = JSON.stringify(lanes);
   assert.throws(() => loadRuntimeConfig(unsupported), /unsupported field: endpoint/);
+});
+
+test("runtime config accepts one bounded non-secret lane file", () => {
+  const env = validEnv();
+  const laneJson = env.GATEWAY_LANES_JSON;
+  delete env.GATEWAY_LANES_JSON;
+  env.GATEWAY_LANES_FILE = "/safe/lanes.json";
+  let receivedPath;
+  const runtime = loadRuntimeConfig(env, {
+    readTextFile(path, encoding) {
+      receivedPath = path;
+      assert.equal(encoding, "utf8");
+      return laneJson;
+    },
+  });
+  assert.equal(receivedPath, "/safe/lanes.json");
+  assert.equal(runtime.safeSummary.lanes.length, 2);
+
+  env.GATEWAY_LANES_JSON = laneJson;
+  assert.throws(
+    () => loadRuntimeConfig(env, { readTextFile: () => laneJson }),
+    /exactly one/,
+  );
 });
 
 test("runtime config requires all hard run budgets and lane pricing", () => {

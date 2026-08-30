@@ -1,0 +1,18 @@
+[
+  {
+    "alias": "gemini-main",
+    "provider": "gemini",
+    "quotaGroup": "gemini-project-terralink",
+    "apiKeyEnv": "GEMINI_API_KEY",
+    "providerModel": "gemini-3.7-flash",
+    "limits": {
+      "rpm": 1000,
+      "rpd": 10000,
+      "tpm": 2000000
+    },
+    "pricing": {
+      "inputUsdPerMillion": "0.75",
+      "outputUsdPerMillion": "3.75"
+    }
+  }
+]

@@ -354,3 +354,47 @@ test("hard run budget rejects locally before contacting an upstream", async (t) 
   assert.equal(payload.budget.requests, 0);
   assert.equal(hits, 0);
 });
+
+test("aborts a slow upstream at the configured deadline", async (t) => {
+  let observedAbort = false;
+  const gateway = createGateway({
+    accessToken: ACCESS_TOKEN,
+    quotaLanes: [quotaLane("groq-a")],
+    upstreams: [
+      createGroqUpstream({
+        alias: "groq-a",
+        getApiKey: () => "groq-secret-value",
+      }),
+    ],
+    allowedModels: ["frontier-code"],
+    upstreamTimeoutMs: 10,
+    fetchImpl: (_url, options) =>
+      new Promise((_resolve, reject) => {
+        options.signal.addEventListener(
+          "abort",
+          () => {
+            observedAbort = true;
+            reject(options.signal.reason);
+          },
+          { once: true },
+        );
+      }),
+  });
+  t.after(() => gateway.close());
+  const url = await gateway.listen();
+
+  const response = await chatRequest(url, {
+    model: "frontier-code",
+    messages: [{ role: "user", content: "timeout" }],
+    max_tokens: 128,
+  });
+  assert.equal(response.status, 504);
+  assert.equal((await response.json()).error.type, "upstream_timeout");
+  assert.equal(observedAbort, true);
+
+  const metricsResponse = await fetch(`${url}/metrics`, {
+    headers: { authorization: `Bearer ${ACCESS_TOKEN}` },
+  });
+  const metrics = await metricsResponse.json();
+  assert.equal(metrics.upstreamTimeouts, 1);
+});

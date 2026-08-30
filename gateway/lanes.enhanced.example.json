@@ -1,0 +1,69 @@
+[
+  {
+    "alias": "gemini-main",
+    "provider": "gemini",
+    "quotaGroup": "gemini-project-terralink",
+    "apiKeyEnv": "GEMINI_API_KEY",
+    "providerModel": "gemini-3.7-flash",
+    "limits": {
+      "rpm": 1000,
+      "rpd": 10000,
+      "tpm": 2000000
+    },
+    "pricing": {
+      "inputUsdPerMillion": "0.75",
+      "outputUsdPerMillion": "3.75"
+    }
+  },
+  {
+    "alias": "groq-a",
+    "provider": "groq",
+    "quotaGroup": "groq-org-a",
+    "apiKeyEnv": "GROQ_API_KEY_A",
+    "providerModel": "openai/gpt-oss-120b",
+    "limits": {
+      "rpm": 30,
+      "rpd": 1000,
+      "tpm": 8000,
+      "tpd": 200000
+    },
+    "pricing": {
+      "inputUsdPerMillion": "0.15",
+      "outputUsdPerMillion": "0.60"
+    }
+  },
+  {
+    "alias": "groq-b",
+    "provider": "groq",
+    "quotaGroup": "groq-org-b",
+    "apiKeyEnv": "GROQ_API_KEY_B",
+    "providerModel": "openai/gpt-oss-120b",
+    "limits": {
+      "rpm": 30,
+      "rpd": 1000,
+      "tpm": 8000,
+      "tpd": 200000
+    },
+    "pricing": {
+      "inputUsdPerMillion": "0.15",
+      "outputUsdPerMillion": "0.60"
+    }
+  },
+  {
+    "alias": "groq-c",
+    "provider": "groq",
+    "quotaGroup": "groq-org-c",
+    "apiKeyEnv": "GROQ_API_KEY_C",
+    "providerModel": "openai/gpt-oss-120b",
+    "limits": {
+      "rpm": 30,
+      "rpd": 1000,
+      "tpm": 8000,
+      "tpd": 200000
+    },
+    "pricing": {
+      "inputUsdPerMillion": "0.15",
+      "outputUsdPerMillion": "0.60"
+    }
+  }
+]

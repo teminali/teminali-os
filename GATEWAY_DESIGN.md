@@ -67,7 +67,8 @@ The gateway is a product prototype, not a mechanism for evading provider terms.
 Run `npm run gateway:start` only after defining:
 
 - `GATEWAY_ACCESS_TOKEN`: local caller credential, at least 12 characters.
-- `GATEWAY_LANES_JSON`: a JSON array of explicitly authorized lanes. Each lane
+- Exactly one of `GATEWAY_LANES_JSON` or `GATEWAY_LANES_FILE`. It supplies a JSON
+  array of explicitly authorized lanes. Each lane
   must contain `alias`, `provider`, `quotaGroup`, `apiKeyEnv`, `providerModel`,
   exact `limits` from that provider project or organization, and current
   `pricing.inputUsdPerMillion` and `pricing.outputUsdPerMillion`.
@@ -77,16 +78,31 @@ Run `npm run gateway:start` only after defining:
 
 Optional controls are `GATEWAY_PINNED_ALIAS`, `GATEWAY_PORT`,
 `GATEWAY_LOGICAL_MODEL`, `GATEWAY_MAX_ATTEMPTS`,
-`GATEWAY_MAX_OUTPUT_TOKENS`, and `GATEWAY_DEFAULT_OUTPUT_TOKENS`.
+`GATEWAY_MAX_OUTPUT_TOKENS`, `GATEWAY_DEFAULT_OUTPUT_TOKENS`, and
+`GATEWAY_UPSTREAM_TIMEOUT_MS`.
 
 The launcher binds only to `127.0.0.1`. It rejects endpoint overrides and does
 not serialize provider keys or the local access token. Configuration names the
 environment variables holding credentials; credential values never belong in
 `GATEWAY_LANES_JSON`, files, logs, metrics, or commits.
 
+`gateway/lanes.controlled-gemini.json` is the first-live-test profile.
+`gateway/lanes.enhanced.example.json` is the Gemini-primary plus three independent
+Groq-organization profile. Both contain configuration only; they contain no keys.
+
+For the first controlled live validation, `npm run agent:start` prompts privately
+for `GEMINI_API_KEY`, generates an ephemeral local access token, caps the gateway
+at 3 requests, 5,000 estimated tokens, and USD 0.05, then opens OpenCode. Exiting
+OpenCode stops the gateway and deletes its temporary startup log.
+
 Run budgets reset only when the gateway process restarts. Request attempts are
 never refunded. Pre-stream failures release their estimated token and USD
 reservation, while completed upstream responses commit the conservative estimate.
+
+After the gateway is running, `opencode.gateway.jsonc` can be selected through
+`OPENCODE_CONFIG`. It connects OpenCode to `frontier-code` over loopback and
+reads only the local gateway access token from the environment. The original
+`opencode.jsonc` remains the controlled Groq baseline.
 
 ## Acceptance criteria
 

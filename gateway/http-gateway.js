@@ -94,6 +94,7 @@ export function createGateway({
   maxRequestBytes = 1_048_576,
   maxOutputTokens = 4_096,
   defaultOutputTokens = 1_024,
+  upstreamTimeoutMs = 120_000,
   runBudgetLimits,
   pricingByAlias,
   clock = Date.now,
@@ -111,6 +112,9 @@ export function createGateway({
   }
   if (!Number.isInteger(maxAttempts) || maxAttempts <= 0 || maxAttempts > 2) {
     throw new TypeError("maxAttempts must be one or two");
+  }
+  if (!Number.isInteger(upstreamTimeoutMs) || upstreamTimeoutMs <= 0) {
+    throw new TypeError("upstreamTimeoutMs must be a positive integer");
   }
 
   const modelSet = new Set(allowedModels);
@@ -192,6 +196,7 @@ export function createGateway({
     upstreamAttempts: 0,
     upstreamRateLimits: 0,
     upstreamErrors: 0,
+    upstreamTimeouts: 0,
     failovers: 0,
     budgetRejections: 0,
   };
@@ -338,6 +343,7 @@ export function createGateway({
       });
 
       let upstreamResponse;
+      const timeoutSignal = AbortSignal.timeout(upstreamTimeoutMs);
       try {
         upstreamResponse = await fetchImpl(upstream.endpoint, {
           method: "POST",
@@ -347,10 +353,24 @@ export function createGateway({
             ...secretHeaders,
           },
           body: JSON.stringify(upstreamBody),
+          signal: timeoutSignal,
         });
       } catch {
         lease.cancel();
         budgetLease?.releaseUsage();
+        if (timeoutSignal.aborted) {
+          metrics.upstreamTimeouts += 1;
+          emit("upstream_timeout", {
+            lane: lease.alias,
+            provider: lease.provider,
+            attempt,
+            timeoutMs: upstreamTimeoutMs,
+          });
+          json(res, 504, {
+            error: { type: "upstream_timeout", message: "Upstream timed out" },
+          });
+          return;
+        }
         metrics.upstreamErrors += 1;
         emit("upstream_error", { lane: lease.alias, provider: lease.provider, attempt });
         json(res, 502, { error: { type: "upstream_error", message: "Upstream unavailable" } });

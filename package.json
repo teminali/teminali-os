@@ -3,6 +3,7 @@
   "private": true,
   "type": "module",
   "scripts": {
+    "agent:start": "zsh scripts/start-controlled-agent.zsh",
     "gateway:start": "node gateway/start-gateway.js",
     "test": "node --test"
   }

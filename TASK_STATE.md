@@ -4,6 +4,8 @@ Build and verify the provider-agnostic gateway foundation for a frontier coding 
 ## Acceptance Criteria
 - Quota routing models organization-scoped limits and rejects duplicate quota groups.
 - The HTTP gateway authenticates clients, streams responses, fails over safely before streaming, and never exposes provider secrets.
+- Provider calls abort at a configured deadline and remain within hard run budgets.
+- OpenCode resolves the gateway model without replacing the controlled Groq baseline.
 - Offline tests pass without real credentials, provider traffic, spending, or changes to `commercial-editor`.
 ## Completed
 - Groq health check passed.
@@ -16,16 +18,20 @@ Build and verify the provider-agnostic gateway foundation for a frontier coding 
 - Added requests-per-day enforcement alongside RPM, TPM, and daily-token limits.
 - Implemented process-scoped request, estimated-token, and integer micro-USD guards.
 - Required explicit per-lane pricing and verified local rejection before dispatch.
-- Verified 30 offline tests and a clean diff check.
+- Added bounded upstream abort handling and a distinct timeout response and metric.
+- Added controlled Gemini and enhanced Gemini-plus-three-Groq non-secret profiles.
+- Verified OpenCode resolves `frontier-gateway/frontier-code` at medium reasoning.
+- Added and smoke-tested the one-command controlled-agent launcher with dummy credentials.
+- Verified 32 offline tests and a clean diff check.
 ## Active
-- Save the verified hard-budget checkpoint.
+- Run the first controlled live Gemini validation.
 ## Blocked
-- Live provider traffic still requires explicit user approval and interactive secret setup.
+- Awaiting explicit approval for a maximum USD 0.05 live run and private Gemini key entry in the user's terminal.
 ## Next Action
-- Implement a bounded upstream timeout with abort and offline failure-path tests.
+- After approval, run `npm run agent:start`, enter the Gemini key privately, and send the exact-response health prompt in OpenCode.
 ## Evidence
 - “GROQ GPT OSS 120B READY”
-- `npm test --silent`: 30 passed, 0 failed.
+- `npm test --silent`: 32 passed, 0 failed.
 - `git diff --check` passed.
-- `gateway/run-budget.js` uses conservative reservations and integer micro-dollar accounting.
-- The hard-budget integration test records zero upstream hits after USD exhaustion.
+- `opencode debug config --pure` resolved the gateway model and preserved the Groq baseline.
+- Dummy-key `npm run agent:start` reached health, exited successfully, and left no listener behind.

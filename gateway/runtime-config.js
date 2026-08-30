@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+
 import { createGeminiUpstream, createGroqUpstream } from "./provider-adapters.js";
 import { normalizePricing, parseUsdMicros } from "./run-budget.js";
 
@@ -43,6 +45,26 @@ function parseLanes(raw) {
     throw new TypeError("GATEWAY_LANES_JSON must contain at least one lane");
   }
   return lanes;
+}
+
+function laneSource(env, readTextFile) {
+  const hasJson = typeof env.GATEWAY_LANES_JSON === "string" && env.GATEWAY_LANES_JSON.length > 0;
+  const hasFile = typeof env.GATEWAY_LANES_FILE === "string" && env.GATEWAY_LANES_FILE.length > 0;
+  if (hasJson === hasFile) {
+    throw new TypeError("set exactly one of GATEWAY_LANES_JSON or GATEWAY_LANES_FILE");
+  }
+  if (hasJson) return env.GATEWAY_LANES_JSON;
+
+  let contents;
+  try {
+    contents = readTextFile(env.GATEWAY_LANES_FILE, "utf8");
+  } catch {
+    throw new TypeError("GATEWAY_LANES_FILE could not be read");
+  }
+  if (Buffer.byteLength(contents) > 65_536) {
+    throw new TypeError("GATEWAY_LANES_FILE exceeds 65536 bytes");
+  }
+  return contents;
 }
 
 function normalizeLane(lane, index, env, logicalModel) {
@@ -112,7 +134,10 @@ function normalizeLane(lane, index, env, logicalModel) {
   };
 }
 
-export function loadRuntimeConfig(env = process.env) {
+export function loadRuntimeConfig(
+  env = process.env,
+  { readTextFile = readFileSync } = {},
+) {
   const accessToken = nonEmptyString(
     env.GATEWAY_ACCESS_TOKEN,
     "GATEWAY_ACCESS_TOKEN",
@@ -123,7 +148,7 @@ export function loadRuntimeConfig(env = process.env) {
 
   const logicalModel = env.GATEWAY_LOGICAL_MODEL ?? "frontier-code";
   nonEmptyString(logicalModel, "GATEWAY_LOGICAL_MODEL");
-  const lanes = parseLanes(env.GATEWAY_LANES_JSON).map((lane, index) =>
+  const lanes = parseLanes(laneSource(env, readTextFile)).map((lane, index) =>
     normalizeLane(lane, index, env, logicalModel),
   );
   const aliases = new Set(lanes.map(({ lane }) => lane.alias));
@@ -153,6 +178,11 @@ export function loadRuntimeConfig(env = process.env) {
     2,
   );
   if (maxAttempts > 2) throw new TypeError("GATEWAY_MAX_ATTEMPTS must be one or two");
+  const upstreamTimeoutMs = positiveInteger(
+    env.GATEWAY_UPSTREAM_TIMEOUT_MS,
+    "GATEWAY_UPSTREAM_TIMEOUT_MS",
+    120_000,
+  );
   const maxRequests = positiveInteger(
     env.GATEWAY_MAX_REQUESTS_PER_RUN,
     "GATEWAY_MAX_REQUESTS_PER_RUN",
@@ -184,6 +214,7 @@ export function loadRuntimeConfig(env = process.env) {
     maxAttempts,
     maxOutputTokens,
     defaultOutputTokens,
+    upstreamTimeoutMs,
     runBudget: runBudgetLimits,
   });
 
@@ -200,6 +231,7 @@ export function loadRuntimeConfig(env = process.env) {
         maxAttempts,
         maxOutputTokens,
         defaultOutputTokens,
+        upstreamTimeoutMs,
         runBudgetLimits,
         pricingByAlias: Object.fromEntries(
           lanes.map(({ lane, pricing }) => [lane.alias, pricing]),
