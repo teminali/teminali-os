@@ -46,8 +46,8 @@ export function renderHeroBanner() {
   const width = getTerminalWidth();
   
   // Compact, ultra-clean 2-line pixel font that fits any terminal width without breaking
-  const logoLine1 = `${C.bold}${C.white}█▀▀ █▀█ █▀█ █▄░█ ▀█▀ █ █▀▀ █▀█   █▀▀ █▀█ █▀▄ █▀▀${C.reset}`;
-  const logoLine2 = `${C.bold}${C.gray}█▀░ █▀▄ █▄█ █░▀█ ░█░ █ ██▄ █▀▄   █▄▄ █▄█ █▄▀ ██▄${C.reset}`;
+  const logoLine1 = `${C.bold}${C.white}█▀▀▀ █▀▀█ █▀▀█ █▄ █   ▀█▀ █ █▀▀█ █▀▀█${C.reset}`;
+  const logoLine2 = `${C.bold}${C.gray}█▀▀  █▄▄▀ █  █ █ ▀█    █  █ █▀▀  █▄▄▀${C.reset}`;
   
   return `\n${centerText(logoLine1, width)}\n${centerText(logoLine2, width)}\n`;
 }

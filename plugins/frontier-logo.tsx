@@ -7,9 +7,18 @@ const tui = async (api) => {
       home_logo() {
         return (
           <box flexDirection="column" alignItems="center">
-            <text fg="#38bdf8" bold={true}>█▀▀ █▀▀█ █▀▀█ █▀▄█ ▀█▀ █ █▀▀█ █▀▀█   █▀▀▀ █▀▀█ █▀▀█ █▀▀█</text>
-            <text fg="#cbd5e1" bold={true}>█▀▀ █▀▀▄ █  █ █  █  █  █ █▀▀▀ █▀▀▄   █    █  █ █  █ █▀▀▀</text>
-            <text fg="#64748b" bold={true}>▀   ▀  ▀ ▀▀▀▀ ▀  ▀  ▀  ▀ ▀▀▀▀ ▀  ▀   ▀▀▀▀ ▀▀▀▀ ▀▀▀▀ ▀▀▀▀</text>
+            <box flexDirection="row" gap={2}>
+              <box flexDirection="column">
+                <text fg="#38bdf8" bold={true}>█▀▀▀ █▀▀█ █▀▀█ █▄ █</text>
+                <text fg="#38bdf8" bold={true}>█▀▀  █▄▄▀ █  █ █ ▀█</text>
+                <text fg="#38bdf8" bold={true}>▀    ▀  ▀ ▀▀▀▀ ▀  ▀</text>
+              </box>
+              <box flexDirection="column">
+                <text fg="#f8fafc" bold={true}>▀█▀ █ █▀▀█ █▀▀█</text>
+                <text fg="#f8fafc" bold={true}> █  █ █▀▀  █▄▄▀</text>
+                <text fg="#f8fafc" bold={true}> ▀  ▀ ▀▀▀▀ ▀  ▀</text>
+              </box>
+            </box>
           </box>
         );
       },

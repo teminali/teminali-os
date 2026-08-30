@@ -11,7 +11,7 @@
       },
       "models": {
         "frontier-code": {
-          "name": "Frontier Code · Devstral 24B Local ($0.00)",
+          "name": "Frontier · Devstral 24B Local ($0.00)",
           "limit": {
             "context": 131072,
             "output": 4096
