@@ -1,24 +1,26 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { renderBanner, renderStatusBar } from "./frontier-tui.js";
+import { renderHeroBanner, renderDashboardCards } from "./frontier-tui.js";
 
-test("renderBanner produces styled Frontier Code header", () => {
-  const banner = renderBanner();
+test("renderHeroBanner produces styled Frontier Code header", () => {
+  const banner = renderHeroBanner();
   assert.ok(typeof banner === "string");
   assert.ok(banner.includes("███████╗"));
-  assert.ok(banner.includes("The local-first, skill-native autonomous AI software engineering terminal."));
+  assert.ok(banner.includes("Local-First Speed"));
+  assert.ok(banner.includes("Skill-Native Specialist Roles"));
 });
 
-test("renderStatusBar formats directory, profile, skill, and budget", () => {
-  const status = renderStatusBar({
+test("renderDashboardCards formats directory, profile, skill, and budget", () => {
+  const status = renderDashboardCards({
     targetDir: "/Users/test/my-project",
-    profile: "local",
+    profile: "auto",
     skill: "website-builder",
     budget: "0.50",
   });
   assert.ok(typeof status === "string");
   assert.ok(status.includes("my-project"));
-  assert.ok(status.includes("local"));
+  assert.ok(status.includes("AUTO"));
   assert.ok(status.includes("website-builder"));
   assert.ok(status.includes("$0.50"));
+  assert.ok(status.includes("ROUTING & INTELLIGENCE"));
 });
