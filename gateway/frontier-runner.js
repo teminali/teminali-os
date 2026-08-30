@@ -10,6 +10,7 @@ import { loadRuntimeConfig } from "./runtime-config.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT_DIR = path.resolve(__dirname, "..");
+const SKILLS_DIR = path.resolve(ROOT_DIR, "skills");
 
 export const PROFILES = Object.freeze({
   local: {
@@ -41,6 +42,35 @@ export const PROFILES = Object.freeze({
   },
 });
 
+export function listAvailableSkills() {
+  if (!fs.existsSync(SKILLS_DIR)) return [];
+  const entries = fs.readdirSync(SKILLS_DIR, { withFileTypes: true });
+  const skills = [];
+  for (const entry of entries) {
+    if (entry.isDirectory()) {
+      const skillPath = path.join(SKILLS_DIR, entry.name, "SKILL.md");
+      if (fs.existsSync(skillPath)) {
+        const content = fs.readFileSync(skillPath, "utf8");
+        const matchDesc = /description:\s*([^\n]+)/.exec(content);
+        skills.push({
+          name: entry.name,
+          path: skillPath,
+          description: matchDesc ? matchDesc[1].trim() : "Custom specialist skill",
+        });
+      }
+    }
+  }
+  return skills;
+}
+
+export function loadSkillContent(skillName) {
+  const skillPath = path.join(SKILLS_DIR, skillName, "SKILL.md");
+  if (fs.existsSync(skillPath)) {
+    return fs.readFileSync(skillPath, "utf8");
+  }
+  return null;
+}
+
 export function findOpenCodeBinary(customPath) {
   if (customPath && fs.existsSync(customPath)) return customPath;
   const home = os.homedir();
@@ -64,6 +94,7 @@ export function parseCliArgs(argv = process.argv.slice(2)) {
     profile: "local",
     targetDir: process.cwd(),
     prompt: null,
+    skill: null,
     budget: "0.20",
     maxTokens: "300000",
     maxRequests: "20",
@@ -83,6 +114,10 @@ export function parseCliArgs(argv = process.argv.slice(2)) {
       options.benchmarkId = args.shift() || "003";
     } else if (current === "status" || current === "info") {
       options.command = "status";
+    } else if (current === "skills" || current === "skill:list") {
+      options.command = "skills";
+    } else if (current === "--skill" || current === "-s") {
+      options.skill = args.shift() || null;
     } else if (current === "--profile" || current === "-p") {
       options.profile = args.shift() || "local";
     } else if (current === "--budget" || current === "-b") {
@@ -141,9 +176,18 @@ export async function launchFrontier(options = {}) {
   process.once("SIGINT", cleanup);
   process.once("SIGTERM", cleanup);
 
+  let finalPrompt = parsed.prompt || "";
+  if (parsed.skill) {
+    const skillContent = loadSkillContent(parsed.skill);
+    if (skillContent) {
+      finalPrompt = `[SPECIALIST SKILL: ${parsed.skill}]\n\n${skillContent}\n\n---\n\n[TASK]\n${finalPrompt}`;
+    }
+  }
+
   if (parsed.verbose) {
     console.log(`[Frontier Code] Gateway active at ${url}`);
     console.log(`[Frontier Code] Profile: ${profileConfig.label}`);
+    if (parsed.skill) console.log(`[Frontier Code] Mounted Skill: ${parsed.skill}`);
     console.log(`[Frontier Code] Budget limit: USD $${parsed.budget}`);
   }
 
@@ -155,7 +199,7 @@ export async function launchFrontier(options = {}) {
 
   const opencodeArgs = [];
   if (parsed.command === "run") {
-    opencodeArgs.push("run", parsed.prompt, "--dir", parsed.targetDir);
+    opencodeArgs.push("run", finalPrompt, "--dir", parsed.targetDir);
   } else {
     opencodeArgs.push(parsed.targetDir);
   }

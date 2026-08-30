@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { parseCliArgs, PROFILES, findOpenCodeBinary } from "./frontier-runner.js";
+import { parseCliArgs, PROFILES, findOpenCodeBinary, listAvailableSkills, loadSkillContent } from "./frontier-runner.js";
 
 test("parseCliArgs parses default chat command", () => {
   const parsed = parseCliArgs([]);
@@ -10,9 +10,10 @@ test("parseCliArgs parses default chat command", () => {
 });
 
 test("parseCliArgs parses run command with prompt and options", () => {
-  const parsed = parseCliArgs(["run", "build website", "-p", "auto", "-b", "0.50", "-v"]);
+  const parsed = parseCliArgs(["run", "build website", "-s", "website-builder", "-p", "auto", "-b", "0.50", "-v"]);
   assert.equal(parsed.command, "run");
   assert.equal(parsed.prompt, "build website");
+  assert.equal(parsed.skill, "website-builder");
   assert.equal(parsed.profile, "auto");
   assert.equal(parsed.budget, "0.50");
   assert.equal(parsed.verbose, true);
@@ -29,4 +30,17 @@ test("PROFILES has valid configuration profiles", () => {
 test("findOpenCodeBinary discovers opencode executable", () => {
   const bin = findOpenCodeBinary();
   assert.ok(typeof bin === "string" && bin.length > 0);
+});
+
+test("listAvailableSkills returns registered skills", () => {
+  const skills = listAvailableSkills();
+  assert.ok(skills.length >= 2);
+  const names = skills.map((s) => s.name);
+  assert.ok(names.includes("website-builder"));
+  assert.ok(names.includes("frontiercut-copilot"));
+});
+
+test("loadSkillContent retrieves skill text", () => {
+  const content = loadSkillContent("website-builder");
+  assert.ok(typeof content === "string" && content.includes("Website Builder"));
 });
