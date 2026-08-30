@@ -226,6 +226,59 @@ test("controlled mode does not escape a pinned lane", async (t) => {
   assert.equal(backupHits, 0);
 });
 
+test("returns bounded sanitized provider details for a terminal 429", async (t) => {
+  const secret = "sensitive-provider-secret";
+  const upstream = await startFakeUpstream((_req, res) => {
+    res.writeHead(429, { "content-type": "application/json", "retry-after": "10" });
+    res.end(
+      JSON.stringify({
+        error: {
+          code: 429,
+          status: "RESOURCE_EXHAUSTED",
+          type: "quota_error",
+          message: `Quota unavailable for ${secret}`,
+          ignored: { nested: "must not escape" },
+        },
+        unrelated: "must not escape",
+      }),
+    );
+  });
+  t.after(upstream.close);
+  const gateway = createGateway({
+    accessToken: ACCESS_TOKEN,
+    quotaLanes: [quotaLane("groq-a")],
+    upstreams: [
+      createGroqUpstream({
+        alias: "groq-a",
+        getApiKey: () => secret,
+        endpoint: upstream.endpoint,
+      }),
+    ],
+    allowedModels: ["frontier-code"],
+    pinnedAlias: "groq-a",
+  });
+  t.after(() => gateway.close());
+  const url = await gateway.listen();
+
+  const response = await chatRequest(url, {
+    model: "frontier-code",
+    messages: [{ role: "user", content: "diagnose" }],
+    max_tokens: 64,
+  });
+  assert.equal(response.status, 429);
+  const payload = await response.json();
+  assert.equal(payload.error.message, "Quota unavailable for [REDACTED]");
+  assert.deepEqual(payload.provider_error, {
+    code: "429",
+    status: "RESOURCE_EXHAUSTED",
+    type: "quota_error",
+    message: "Quota unavailable for [REDACTED]",
+  });
+  const serialized = JSON.stringify(payload);
+  assert.equal(serialized.includes(secret), false);
+  assert.equal(serialized.includes("must not escape"), false);
+});
+
 test("rejects excessive output before contacting an upstream", async (t) => {
   let hits = 0;
   const upstream = await startFakeUpstream((_req, res) => {

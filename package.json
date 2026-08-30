@@ -4,6 +4,7 @@
   "type": "module",
   "scripts": {
     "agent:start": "zsh scripts/start-controlled-agent.zsh",
+    "gemini:diagnose": "zsh scripts/diagnose-gemini.zsh",
     "gateway:start": "node gateway/start-gateway.js",
     "test": "node --test"
   }

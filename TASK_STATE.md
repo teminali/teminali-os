@@ -22,16 +22,20 @@ Build and verify the provider-agnostic gateway foundation for a frontier coding 
 - Added controlled Gemini and enhanced Gemini-plus-three-Groq non-secret profiles.
 - Verified OpenCode resolves `frontier-gateway/frontier-code` at medium reasoning.
 - Added and smoke-tested the one-command controlled-agent launcher with dummy credentials.
-- Verified 32 offline tests and a clean diff check.
+- Ran the first controlled Gemini request; the provider returned HTTP 429.
+- Confirmed automatic retries were blocked locally after the one-request budget was consumed.
+- Added bounded, credential-redacted provider error diagnostics and a one-call diagnostic launcher.
+- Verified 33 offline tests and a clean diff check.
 ## Active
-- Run the first controlled live Gemini validation.
+- Diagnose Gemini's upstream HTTP 429 without OpenCode retry noise.
 ## Blocked
-- USD 0.01 live run approved; awaiting private Gemini key entry in the user's terminal.
+- A second live diagnostic call requires explicit USD 0.01 approval and private Gemini key entry.
 ## Next Action
-- After approval, run `npm run agent:start`, enter the Gemini key privately, and send the exact-response health prompt in OpenCode.
+- After approval, run `npm run gemini:diagnose` and inspect the sanitized provider code and message.
 ## Evidence
 - “GROQ GPT OSS 120B READY”
-- `npm test --silent`: 32 passed, 0 failed.
+- `npm test --silent`: 33 passed, 0 failed.
 - `git diff --check` passed.
 - `opencode debug config --pure` resolved the gateway model and preserved the Groq baseline.
 - Dummy-key `npm run agent:start` reached health, exited successfully, and left no listener behind.
+- The failed live run transitioned from provider cooldown to local `Run budget exhausted` without another upstream call.

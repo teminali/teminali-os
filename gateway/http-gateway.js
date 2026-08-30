@@ -65,6 +65,56 @@ function responseHeaders(upstream, lane, retryAfterMs) {
   return headers;
 }
 
+async function readBoundedText(response, maxBytes = 16_384) {
+  if (response.body === null) return "";
+  const reader = response.body.getReader();
+  const chunks = [];
+  let size = 0;
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    size += value.byteLength;
+    if (size > maxBytes) {
+      await reader.cancel();
+      return "";
+    }
+    chunks.push(value);
+  }
+  return Buffer.concat(chunks).toString("utf8");
+}
+
+function sanitizeErrorValue(value, secretHeaders, maxLength = 500) {
+  if (typeof value !== "string" && typeof value !== "number") return undefined;
+  let text = String(value).slice(0, maxLength);
+  for (const headerValue of Object.values(secretHeaders)) {
+    if (typeof headerValue !== "string") continue;
+    const fragments = [headerValue, headerValue.replace(/^Bearer\s+/i, "")];
+    for (const fragment of fragments) {
+      if (fragment.length >= 8) text = text.replaceAll(fragment, "[REDACTED]");
+    }
+  }
+  return text;
+}
+
+async function sanitizedUpstreamError(response, secretHeaders) {
+  const text = await readBoundedText(response);
+  if (text.length === 0) return null;
+  let payload;
+  try {
+    payload = JSON.parse(text);
+  } catch {
+    return null;
+  }
+  const error = payload?.error;
+  if (error === null || typeof error !== "object" || Array.isArray(error)) return null;
+  const sanitized = {};
+  for (const field of ["code", "status", "type", "message"]) {
+    const value = sanitizeErrorValue(error[field], secretHeaders);
+    if (value !== undefined) sanitized[field] = value;
+  }
+  return Object.keys(sanitized).length === 0 ? null : sanitized;
+}
+
 export function estimateRequestTokens(body, defaultOutputTokens = 1_024) {
   return estimateRequestUsage(body, defaultOutputTokens).totalTokens;
 }
@@ -378,6 +428,10 @@ export function createGateway({
       }
 
       if (upstreamResponse.status === 429) {
+        const providerError = await sanitizedUpstreamError(
+          upstreamResponse,
+          secretHeaders,
+        );
         lastRetryAfterMs = parseRetryAfter(upstreamResponse.headers.get("retry-after"));
         lease.rateLimited(lastRetryAfterMs);
         budgetLease?.releaseUsage();
@@ -399,9 +453,10 @@ export function createGateway({
           {
             error: {
               type: "upstream_rate_limit",
-              message: "Upstream rate limit reached",
+              message: providerError?.message ?? "Upstream rate limit reached",
               retry_after_ms: lastRetryAfterMs,
             },
+            provider_error: providerError,
           },
           { "retry-after": String(Math.max(1, Math.ceil(lastRetryAfterMs / 1_000))) },
         );
