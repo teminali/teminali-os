@@ -11,10 +11,10 @@
       },
       "models": {
         "frontier-code": {
-          "name": "Gemini 3.7 Flash + Groq Recovery",
+          "name": "Frontier Code · Devstral 24B Local ($0.00)",
           "limit": {
             "context": 131072,
-            "output": 256
+            "output": 4096
           },
           "variants": {
             "medium": {

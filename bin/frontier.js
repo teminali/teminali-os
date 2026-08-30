@@ -1,7 +1,6 @@
 #!/usr/bin/env node
 
 import { parseCliArgs, launchFrontier, PROFILES, listAvailableSkills } from "../gateway/frontier-runner.js";
-import { startFrontierTui } from "../gateway/frontier-tui.js";
 
 async function main() {
   const options = parseCliArgs(process.argv.slice(2));
@@ -12,7 +11,7 @@ async function main() {
 ⚡ Frontier Code — Autonomous AI Software Engineer
 
 Usage:
-  frontier                        Launch interactive Terminal UI (TUI)
+  frontier                        Launch interactive full-screen UI editor
   frontier run "<prompt>"         Execute an instruction autonomously
   frontier run -s <skill> "<p>"   Execute with specialized domain skill
   frontier chat [dir]             Launch interactive AI coding session
@@ -56,13 +55,7 @@ ${skills.map((s) => `  • ${s.name.padEnd(20)} ${s.description.slice(0, 70)}...
     process.exit(0);
   }
 
-  // Interactive Terminal UI Mode
-  if (options.command === "chat") {
-    await startFrontierTui(options);
-    return;
-  }
-
-  // Non-interactive Run Mode
+  // Launch real interactive full-screen TUI editor
   try {
     const result = await launchFrontier(options);
     process.exit(result.code ?? 0);
