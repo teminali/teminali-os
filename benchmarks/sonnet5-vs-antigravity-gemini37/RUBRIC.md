@@ -10,6 +10,9 @@ Both candidates receive the same repository commit, `TASK.md`, 20-minute wall
 clock limit, no human coding assistance, no fallback model, and no access to the
 oracle directory.
 
+The OpenCode candidate has a USD 0.50 hard process cap approved before the
+scored run. Hitting that cap is a benchmark outcome, not grounds for an unscored retry.
+
 Automated score (90 points):
 
 - Visible tests: 20

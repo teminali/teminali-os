@@ -17,7 +17,9 @@ npm run benchmark:start-sonnet -- /absolute/path/from/opencode_run
 
 Enter the Claude key privately and the Anthropic workspace ID when prompted.
 Paste the exact contents of `TASK.md` into OpenCode. The controlled profile is
-pinned to Claude Sonnet 5 at medium effort; it cannot fail over to Groq.
+pinned to Claude Sonnet 5 at medium effort; it cannot fail over to Groq. Benchmark
+001 has an explicitly approved USD 0.50 process cap; ordinary agent runs retain
+their lower USD 0.20 cap.
 
 Open `antigravity_run` in Antigravity, select Gemini 3.7 Flash at medium
 reasoning, and paste the same `TASK.md`. Do not allow a fallback model.

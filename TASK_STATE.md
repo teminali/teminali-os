@@ -41,6 +41,9 @@ Antigravity Gemini 3.7 Flash Medium.
   ceiling after two successful Claude tool turns, not a provider failure.
 - Raised only local Claude throughput/token-accounting ceilings for agentic turns;
   retained the USD 0.20 benchmark cap, pinned Sonnet lane, and no-fallback policy.
+- Observed the next clean attempt stop before editing because two conservative
+  turn reservations exhausted USD 0.20; the user approved USD 0.50 specifically
+  for benchmark 001. Ordinary runs remain at USD 0.20.
 - Added a frozen, disposable Sonnet 5 versus Antigravity Gemini 3.7 Flash benchmark.
 - Added an oracle scorer, fixture-integrity checks, identical baseline preparation,
   and a 20-minute controlled-run policy.
