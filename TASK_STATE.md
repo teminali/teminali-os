@@ -34,18 +34,20 @@ Antigravity Gemini 3.7 Flash Medium.
 - Mapped OpenCode medium reasoning to Claude `output_config.effort=medium`.
 - Added controlled Sonnet 5, controlled Opus 5, and Sonnet-plus-three-Groq profiles.
 - Added hard-capped Sonnet and Opus live diagnostic launchers.
+- Verified a live Opus 5 generation request through the controlled gateway: HTTP 200,
+  28 prompt tokens, 32 completion tokens, and no fallback.
 - Added a frozen, disposable Sonnet 5 versus Antigravity Gemini 3.7 Flash benchmark.
 - Added an oracle scorer, fixture-integrity checks, identical baseline preparation,
   and a 20-minute controlled-run policy.
 - Verified 38 offline tests, all launcher smoke tests, benchmark preparation/scoring,
   shell syntax, OpenCode config resolution, cleanup, and diff checks.
 ## Active
-- Run the first capped Claude generation checks, then execute benchmark 001.
+- Run the capped Sonnet 5 gateway check, then execute benchmark 001.
 ## Blocked
 - Live Claude calls require private API-key entry in the user's terminal.
 ## Next Action
-- Run `npm run claude:diagnose-opus` and confirm `CLAUDE OPUS 5 READY` before
-  spending on the controlled Sonnet benchmark.
+- Run `npm run claude:diagnose` and confirm `CLAUDE SONNET GATEWAY READY` before
+  spending on benchmark 001.
 ## Evidence
 - “GROQ GPT OSS 120B READY”
 - `npm test --silent`: 33 passed, 0 failed.
@@ -55,6 +57,9 @@ Antigravity Gemini 3.7 Flash Medium.
 - The failed live run transitioned from provider cooldown to local `Run budget exhausted` without another upstream call.
 - Direct Gemini error: `RESOURCE_EXHAUSTED` because prepayment credits are depleted.
 - Anthropic model catalog includes `claude-opus-5` and `claude-sonnet-5`.
+- Controlled Opus probe returned HTTP 200 from `claude-opus-5`; its 32-token
+  high-effort ceiling ended with `finish_reason: length`, confirming access while
+  motivating a larger diagnostic output allowance under the same USD 0.005 cap.
 - `npm test --silent`: 38 passed, 0 failed.
 - Controlled Sonnet, Opus, enhanced, and benchmark launchers start and cleanly stop
   a loopback gateway with dummy credentials and leave no port 8787 listener.
