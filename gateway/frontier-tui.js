@@ -4,70 +4,94 @@ import process from "node:process";
 import os from "node:os";
 import { PROFILES, listAvailableSkills, launchFrontier } from "./frontier-runner.js";
 
-// ANSI TrueColor and 256-Color Palette
+// ANSI Color Tokens
 const C = {
   reset: "\x1b[0m",
   bold: "\x1b[1m",
   dim: "\x1b[2m",
   italic: "\x1b[3m",
-  underline: "\x1b[4m",
   
-  // Vibrant Neon & Modern Pastels
-  brand: "\x1b[38;5;45m",       // Electric Cyan
-  brandPurple: "\x1b[38;5;141m", // Neon Lavender
-  brandGreen: "\x1b[38;5;49m",   // Emerald Neon
-  brandGold: "\x1b[38;5;221m",   // Warm Gold
-  brandRose: "\x1b[38;5;204m",   // Soft Rose
+  // Clean Modern Studio Colors (Matching OpenCode / Claude Code minimalism)
+  white: "\x1b[38;5;255m",
+  lightGray: "\x1b[38;5;250m",
+  gray: "\x1b[38;5;244m",
+  darkGray: "\x1b[38;5;238m",
+  faintGray: "\x1b[38;5;236m",
   
-  // Grays & Dark UI
-  gray: "\x1b[38;5;246m",
-  darkGray: "\x1b[38;5;239m",
-  dimBorder: "\x1b[38;5;238m",
-  activeBorder: "\x1b[38;5;75m",
-  bgSubtle: "\x1b[48;5;236m",
+  cyan: "\x1b[38;5;39m",
+  blue: "\x1b[38;5;75m",
+  purple: "\x1b[38;5;141m",
+  green: "\x1b[38;5;48m",
+  orange: "\x1b[38;5;214m",
+  yellow: "\x1b[38;5;221m",
+  red: "\x1b[38;5;196m",
+  
+  // Backgrounds
   bgCard: "\x1b[48;5;235m",
-  
-  // Status Colors
-  success: "\x1b[38;5;48m",
-  error: "\x1b[38;5;196m",
-  warning: "\x1b[38;5;214m",
-  info: "\x1b[38;5;117m",
+  bgSubtle: "\x1b[48;5;234m",
 };
 
-export function renderHeroBanner() {
-  const width = 80;
-  const topBorder = `${C.brand}╭${"─".repeat(width - 2)}╮${C.reset}`;
-  const bottomBorder = `${C.brand}╰${"─".repeat(width - 2)}╯${C.reset}`;
-  
-  return `
-${topBorder}
-${C.brand}│  ${C.bold}███████╗██████╗  ██████╗ ███╗   ██╗████████╗██╗███████╗██████╗ ${C.brandPurple} ██████╗ ██████╗ ██████╗ ███████╗${C.brand} │
-${C.brand}│  ${C.bold}██╔════╝██╔══██╗██╔═══██╗████╗  ██║╚══██╔══╝██║██╔════╝██╔══██╗${C.brandPurple}██╔════╝██╔═══██╗██╔══██╗██╔════╝${C.brand} │
-${C.brand}│  ${C.bold}█████╗  ██████╔╝██║   ██║██╔██╗ ██║   ██║   ██║█████╗  ██████╔╝${C.brandPurple}██║     ██║   ██║██║  ██║█████╗  ${C.brand} │
-${C.brand}│  ${C.bold}██╔══╝  ██╔══██╗██║   ██║██║╚██╗██║   ██║   ██║██╔══╝  ██╔══██╗${C.brandPurple}██║     ██║   ██║██║  ██║██╔══╝  ${C.brand} │
-${C.brand}│  ${C.bold}██║     ██║  ██║╚██████╔╝██║ ╚████║   ██║   ██║███████╗██║  ██║${C.brandPurple}╚██████╗╚██████╔╝██████╔╝███████╗${C.brand} │
-${C.brand}│  ${C.bold}╚═╝     ╚═╝  ╚═╝ ╚═════╝ ╚═╝  ╚═══╝   ╚═╝   ╚═╝╚══════╝╚═╝  ╚═╝${C.brandPurple} ╚═════╝ ╚═════╝ ╚═════╝ ╚══════╝${C.brand} │
-${C.brand}│                                                                              │
-${C.brand}│  ${C.gray}⚡ ${C.bold}Local-First Speed${C.reset}  •  ${C.gray}🧠 ${C.bold}Skill-Native Specialist Roles${C.reset}  •  ${C.gray}🛡️ ${C.bold}Hard Budget Control${C.reset}${C.brand}  │
-${bottomBorder}`;
+export function getTerminalWidth() {
+  return process.stdout.columns || 80;
 }
 
-export function renderDashboardCards(state) {
+export function centerText(text, width = getTerminalWidth()) {
+  const cleanLength = text.replace(/\x1b\[[0-9;]*m/g, "").length;
+  if (cleanLength >= width) return text;
+  const leftPad = Math.max(0, Math.floor((width - cleanLength) / 2));
+  return " ".repeat(leftPad) + text;
+}
+
+export function renderHeroBanner() {
+  const width = getTerminalWidth();
+  
+  // Compact, ultra-clean 2-line pixel font that fits any terminal width without breaking
+  const logoLine1 = `${C.bold}${C.white}█▀▀ █▀█ █▀█ █▄░█ ▀█▀ █ █▀▀ █▀█   █▀▀ █▀█ █▀▄ █▀▀${C.reset}`;
+  const logoLine2 = `${C.bold}${C.gray}█▀░ █▀▄ █▄█ █░▀█ ░█░ █ ██▄ █▀▄   █▄▄ █▄█ █▄▀ ██▄${C.reset}`;
+  
+  return `\n${centerText(logoLine1, width)}\n${centerText(logoLine2, width)}\n`;
+}
+
+export function renderInputCard(state) {
+  const width = Math.min(getTerminalWidth() - 4, 76);
   const profile = PROFILES[state.profile] || PROFILES.local;
   const isLocal = state.profile === "local";
-  const costLabel = isLocal ? `${C.brandGreen}● $0.00 / token (100% Free Local Loopback)${C.reset}` : `${C.brandGold}● Dynamic Cap: $${state.budget} max${C.reset}`;
-  const skillLabel = state.skill ? `${C.brandPurple}📦 ${state.skill}${C.reset}` : `${C.gray}Standard Engineering${C.reset}`;
-  const dirName = path.basename(state.targetDir) || state.targetDir;
   
-  return `
-${C.dimBorder}┌─ ${C.bold}${C.brand}ACTIVE WORKSPACE${C.reset}${C.dimBorder} ──────────────────────────────────────┬─ ${C.bold}${C.brandPurple}ROUTING & INTELLIGENCE${C.reset}${C.dimBorder} ───────────┐${C.reset}
-${C.dimBorder}│${C.reset}  📂 ${C.bold}${dirName.padEnd(24)}${C.reset} ${C.gray}[${state.targetDir.slice(-24)}]${C.reset}  ${C.dimBorder}│${C.reset}  ⚡ Mode:   ${C.bold}${C.brand}${state.profile.toUpperCase().padEnd(16)}${C.reset}       ${C.dimBorder}│${C.reset}
-${C.dimBorder}│${C.reset}  🛠️  Skill: ${skillLabel.padEnd(46)} ${C.dimBorder}│${C.reset}  🎯 Engine: ${C.dim}${profile.label.slice(0, 24).padEnd(24)}${C.reset} ${C.dimBorder}│${C.reset}
-${C.dimBorder}│${C.reset}  💰 Token Cost: ${costLabel.padEnd(43)} ${C.dimBorder}│${C.reset}  🛡️ Safety: Hard process isolation  ${C.dimBorder}│${C.reset}
-${C.dimBorder}└─────────────────────────────────────────────────────────┴───────────────────────────────────────┘${C.reset}
+  const modePill = `${C.blue}${C.bold}Build${C.reset}`;
+  const modelPill = isLocal 
+    ? `${C.white}Devstral 24B ${C.gray}Local${C.reset}`
+    : `${C.white}Claude Sonnet 5 ${C.gray}Frontier${C.reset}`;
+  const skillPill = state.skill ? `${C.purple}${state.skill}${C.reset}` : `${C.gray}medium${C.reset}`;
+  const costPill = isLocal ? `${C.green}$0.00 / tok${C.reset}` : `${C.orange}max $${state.budget}${C.reset}`;
+  
+  const topBar = `${C.blue}│${C.reset}`;
+  const placeholder = `${C.gray}Ask anything... "Refactor component to clean CSS tokens"${C.reset}`;
+  const metaLine = `${modePill}  ${C.darkGray}·${C.reset}  ${modelPill}  ${C.darkGray}·${C.reset}  ${skillPill}  ${C.darkGray}·${C.reset}  ${costPill}`;
+  
+  const card = [
+    `${C.bgCard}  ${topBar} ${placeholder}${" ".repeat(Math.max(0, width - placeholder.replace(/\x1b\[[0-9;]*m/g, "").length - 6))}  ${C.reset}`,
+    `${C.bgCard}  ${topBar}                                                                            ${C.reset}`,
+    `${C.bgCard}  ${topBar} ${metaLine}${" ".repeat(Math.max(0, width - metaLine.replace(/\x1b\[[0-9;]*m/g, "").length - 6))}  ${C.reset}`,
+  ].join("\n");
 
- ${C.gray}Quick Commands:${C.reset} ${C.cyan}/skills${C.reset} ${C.gray}(select specialist)${C.reset}  •  ${C.cyan}/profile${C.reset} ${C.gray}(switch model)${C.reset}  •  ${C.cyan}/budget${C.reset} ${C.gray}(set USD limit)${C.reset}  •  ${C.cyan}/help${C.reset}
+  const hints = `${C.bold}tab${C.reset} ${C.gray}skills${C.reset}   ${C.bold}ctrl+p${C.reset} ${C.gray}commands${C.reset}   ${C.bold}/profile${C.reset} ${C.gray}models${C.reset}`;
+  const tip = `${C.orange}●${C.reset} ${C.bold}Tip${C.reset} ${C.gray}Use${C.reset} ${C.white}/help${C.reset} ${C.gray}to show the command dialog${C.reset}`;
+
+  return `
+${card}
+
+${hints}
+
+  ${tip}
 `;
+}
+
+export function renderFooter(state) {
+  const dir = state.targetDir.replace(os.homedir(), "~");
+  const version = "1.0.0";
+  const width = getTerminalWidth();
+  const space = Math.max(2, width - dir.length - version.length - 2);
+  return `${C.darkGray}${dir}${" ".repeat(space)}${version}${C.reset}`;
 }
 
 export function renderBanner() {
@@ -75,7 +99,7 @@ export function renderBanner() {
 }
 
 export function renderStatusBar(state) {
-  return renderDashboardCards(state);
+  return renderInputCard(state);
 }
 
 export async function startFrontierTui(initialOptions = {}) {
@@ -87,14 +111,20 @@ export async function startFrontierTui(initialOptions = {}) {
     verbose: initialOptions.verbose || false,
   };
 
-  console.clear();
-  console.log(renderHeroBanner());
-  console.log(renderDashboardCards(state));
+  function redrawScreen() {
+    console.clear();
+    console.log(renderHeroBanner());
+    console.log(renderInputCard(state));
+    console.log("\n".repeat(Math.max(1, (process.stdout.rows || 24) - 16)));
+    console.log(renderFooter(state));
+  }
+
+  redrawScreen();
 
   const rl = readline.createInterface({
     input: process.stdin,
     output: process.stdout,
-    prompt: `\n${C.brand}${C.bold}frontier${C.reset} ${C.brandPurple}❯${C.reset} `,
+    prompt: `\x1b[38;5;39m❯\x1b[0m `,
   });
 
   rl.prompt();
@@ -103,6 +133,7 @@ export async function startFrontierTui(initialOptions = {}) {
     const input = rawLine.trim();
 
     if (!input) {
+      redrawScreen();
       rl.prompt();
       return;
     }
@@ -114,99 +145,91 @@ export async function startFrontierTui(initialOptions = {}) {
       switch (cmd.toLowerCase()) {
         case "/help":
           console.log(`
-${C.brand}${C.bold}╭─ FRONTIER CODE COMMAND MATRIX ──────────────────────────────────────────╮${C.reset}
-${C.brand}│${C.reset}  ${C.cyan}/skills${C.reset}             List all available specialist skill packs          ${C.brand}│${C.reset}
-${C.brand}│${C.reset}  ${C.cyan}/skill <name>${C.reset}       Mount specialist skill (website-builder, frontiercut) ${C.brand}│${C.reset}
-${C.brand}│${C.reset}  ${C.cyan}/profile <name>${C.reset}     Switch lane (local, auto, claude-sonnet, claude-opus)${C.brand}│${C.reset}
-${C.brand}│${C.reset}  ${C.cyan}/budget <usd>${C.reset}       Set maximum hard run budget in USD (e.g. 0.50)     ${C.brand}│${C.reset}
-${C.brand}│${C.reset}  ${C.cyan}/status${C.reset}             Refresh dashboard cards and model telemetry        ${C.brand}│${C.reset}
-${C.brand}│${C.reset}  ${C.cyan}/clear${C.reset}              Clear terminal and redraw dashboard                ${C.brand}│${C.reset}
-${C.brand}│${C.reset}  ${C.cyan}/exit${C.reset} or ${C.cyan}/quit${C.reset}         Safely terminate session and gateway               ${C.brand}│${C.reset}
-${C.brand}╰─────────────────────────────────────────────────────────────────────────╯${C.reset}
+${C.bold}Commands:${C.reset}
+  ${C.cyan}/skill <name>${C.reset}     Mount a specialist skill (website-builder, frontiercut-copilot)
+  ${C.cyan}/skills${C.reset}           List available specialist skills
+  ${C.cyan}/profile <name>${C.reset}   Switch model routing profile (local, auto, claude-sonnet, claude-opus)
+  ${C.cyan}/budget <usd>${C.reset}     Set maximum hard run budget in USD (e.g. 0.50)
+  ${C.cyan}/clear${C.reset}            Clear terminal screen
+  ${C.cyan}/exit${C.reset} or ${C.cyan}/quit${C.reset}   Exit Frontier Code
 `);
-          break;
+          rl.prompt();
+          return;
 
         case "/skills": {
           const skills = listAvailableSkills();
-          console.log(`\n${C.brandPurple}${C.bold}╭─ SPECIALIST SKILL PACKS ────────────────────────────────────────────────╮${C.reset}`);
+          console.log(`\n${C.bold}Available Skills:${C.reset}`);
           for (const s of skills) {
-            console.log(`${C.brandPurple}│${C.reset}  📦 ${C.bold}${C.brandGold}${s.name.padEnd(22)}${C.reset} ${C.gray}${s.description.slice(0, 46)}...${C.reset} ${C.brandPurple}│${C.reset}`);
+            console.log(`  ${C.purple}• ${s.name.padEnd(22)}${C.reset} ${C.gray}${s.description.slice(0, 50)}...${C.reset}`);
           }
-          console.log(`${C.brandPurple}╰─────────────────────────────────────────────────────────────────────────╯${C.reset}`);
-          console.log(`  ${C.gray}Mount a skill using:${C.reset} ${C.cyan}/skill ${skills[0]?.name || "website-builder"}${C.reset}\n`);
-          break;
+          console.log();
+          rl.prompt();
+          return;
         }
 
         case "/skill": {
           const skillName = args[0];
           if (!skillName || skillName === "none" || skillName === "clear") {
             state.skill = null;
-            console.log(`\n  ${C.gray}ℹ Specialist skill dismounted. Standard engineering active.${C.reset}\n`);
+            console.log(`${C.gray}Skill cleared.${C.reset}`);
           } else {
             const available = listAvailableSkills().map((s) => s.name);
             if (available.includes(skillName)) {
               state.skill = skillName;
-              console.log(`\n  ${C.brandGreen}✔ Mounted specialist skill: ${C.bold}${skillName}${C.reset}\n`);
+              console.log(`${C.green}Mounted skill: ${skillName}${C.reset}`);
             } else {
-              console.log(`\n  ${C.warning}⚠ Unknown skill: ${skillName}. Run /skills to see available packs.${C.reset}\n`);
+              console.log(`${C.yellow}Unknown skill: ${skillName}. Run /skills to see available packs.${C.reset}`);
             }
           }
-          break;
+          redrawScreen();
+          rl.prompt();
+          return;
         }
 
         case "/profile": {
           const profileName = args[0];
           if (PROFILES[profileName]) {
             state.profile = profileName;
-            console.log(`\n  ${C.brandGreen}✔ Switched to profile: ${C.bold}${profileName}${C.reset} (${C.dim}${PROFILES[profileName].label}${C.dim})\n`);
+            console.log(`${C.green}Switched to profile: ${profileName}${C.reset}`);
           } else {
-            console.log(`\n  ${C.warning}⚠ Unknown profile. Options: ${Object.keys(PROFILES).join(", ")}${C.reset}\n`);
+            console.log(`${C.yellow}Available profiles: ${Object.keys(PROFILES).join(", ")}${C.reset}`);
           }
-          break;
+          redrawScreen();
+          rl.prompt();
+          return;
         }
 
         case "/budget": {
           const budgetVal = args[0];
           if (budgetVal && !isNaN(parseFloat(budgetVal))) {
             state.budget = budgetVal;
-            console.log(`\n  ${C.brandGreen}✔ Budget limit set to USD $${budgetVal}${C.reset}\n`);
-          } else {
-            console.log(`\n  ${C.warning}⚠ Usage: /budget <usd_amount> (e.g. /budget 0.50)${C.reset}\n`);
           }
-          break;
+          redrawScreen();
+          rl.prompt();
+          return;
         }
 
-        case "/status":
-          console.log(renderDashboardCards(state));
-          break;
-
         case "/clear":
-          console.clear();
-          console.log(renderHeroBanner());
-          console.log(renderDashboardCards(state));
-          break;
+          redrawScreen();
+          rl.prompt();
+          return;
 
         case "/exit":
         case "/quit":
-          console.log(`\n  ${C.brandPurple}⚡ Frontier Code session terminated cleanly. Have a great day!${C.reset}\n`);
+          console.log(`${C.gray}Goodbye!${C.reset}`);
           process.exit(0);
           break;
 
         default:
-          console.log(`\n  ${C.warning}⚠ Unknown command: ${cmd}. Type /help for command list.${C.reset}\n`);
+          console.log(`${C.yellow}Unknown command: ${cmd}. Type /help for assistance.${C.reset}`);
+          rl.prompt();
+          return;
       }
-
-      rl.prompt();
-      return;
     }
 
-    // Execute Instruction with Visual Activity Card
+    // Execute Instruction
     rl.pause();
-    const skillBadge = state.skill ? ` [${state.skill}]` : "";
-    console.log(`\n${C.brand}┌─ DISPATCHING INSTRUCTION${skillBadge} ─────────────────────────────────┐${C.reset}`);
-    console.log(`${C.brand}│${C.reset}  💬 "${C.bold}${input.slice(0, 64)}${input.length > 64 ? "..." : ""}${C.reset}"`);
-    console.log(`${C.brand}│${C.reset}  🚀 Engine: ${C.cyan}${state.profile}${C.reset}  │  🛡️ Limit: ${C.cyan}$${state.budget}${C.reset}`);
-    console.log(`${C.brand}└─────────────────────────────────────────────────────────────────┘${C.reset}\n`);
+    console.log(`\n${C.blue}● Executing with Frontier Code...${C.reset}\n`);
 
     try {
       await launchFrontier({
@@ -218,9 +241,9 @@ ${C.brand}╰──────────────────────�
         targetDir: state.targetDir,
         verbose: state.verbose,
       });
-      console.log(`\n${C.brandGreen}${C.bold}✔ Execution complete.${C.reset}\n`);
+      console.log(`\n${C.green}✔ Finished.${C.reset}\n`);
     } catch (err) {
-      console.error(`\n${C.error}[Frontier Code Execution Error] ${err.message}${C.reset}\n`);
+      console.error(`\n${C.red}[Error] ${err.message}${C.reset}\n`);
     }
 
     rl.resume();
@@ -228,7 +251,7 @@ ${C.brand}╰──────────────────────�
   });
 
   rl.on("close", () => {
-    console.log(`\n${C.gray}Frontier Code session ended.${C.reset}\n`);
+    console.log(`\n${C.gray}Frontier Code session ended.${C.reset}`);
     process.exit(0);
   });
 }
