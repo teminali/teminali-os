@@ -1,0 +1,36 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "share": "disabled",
+  "provider": {
+    "groq": {
+      "models": {
+        "openai/gpt-oss-120b": {
+          "limit": {
+            "context": 131072,
+            "output": 512
+          }
+        }
+      }
+    }
+  },
+  "permission": {
+    "skill": {
+      "*": "deny"
+    }
+  },
+  "agent": {
+    "build": {
+      "tools": {
+        "skill": false,
+        "webfetch": false,
+        "websearch": false,
+        "codesearch": false,
+        "task": false,
+        "todowrite": false,
+        "todoread": false,
+        "question": false,
+        "lsp": false
+      }
+    }
+  }
+}
