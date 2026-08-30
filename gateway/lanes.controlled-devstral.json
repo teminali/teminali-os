@@ -1,0 +1,19 @@
+[
+  {
+    "alias": "ollama-devstral",
+    "provider": "ollama",
+    "quotaGroup": "local-devstral",
+    "providerModel": "devstral-small-2:24b-instruct-2512-q4_K_M",
+    "priority": 1,
+    "limits": {
+      "rpm": 60,
+      "rpd": 10000,
+      "tpm": 100000,
+      "tpd": 10000000
+    },
+    "pricing": {
+      "inputUsdPerMillion": "0",
+      "outputUsdPerMillion": "0"
+    }
+  }
+]

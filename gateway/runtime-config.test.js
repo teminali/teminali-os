@@ -206,3 +206,50 @@ test("runtime config requires Anthropic workspace routing and valid effort", () 
   invalidEffort.GATEWAY_LANES_JSON = JSON.stringify(lanes);
   assert.throws(() => loadRuntimeConfig(invalidEffort), /effort must be/);
 });
+
+test("runtime config parses Ollama local lane with zero pricing and priority", async () => {
+  const env = {
+    GATEWAY_ACCESS_TOKEN: ACCESS_TOKEN,
+    GATEWAY_MAX_REQUESTS_PER_RUN: "20",
+    GATEWAY_MAX_TOKENS_PER_RUN: "100000",
+    GATEWAY_MAX_USD_PER_RUN: "0.50",
+    ANTHROPIC_KEY_MAIN: ANTHROPIC_SECRET,
+    ANTHROPIC_WORKSPACE_MAIN: ANTHROPIC_WORKSPACE,
+    GATEWAY_LANES_JSON: JSON.stringify([
+      {
+        alias: "ollama-devstral",
+        provider: "ollama",
+        quotaGroup: "local-devstral",
+        providerModel: "devstral-small-2:24b-instruct-2512-q4_K_M",
+        priority: 1,
+        limits: { rpm: 60, rpd: 10_000, tpm: 100_000 },
+      },
+      {
+        alias: "anthropic-sonnet",
+        provider: "anthropic",
+        quotaGroup: "anthropic-workspace-sonnet5",
+        apiKeyEnv: "ANTHROPIC_KEY_MAIN",
+        workspaceIdEnv: "ANTHROPIC_WORKSPACE_MAIN",
+        providerModel: "claude-sonnet-5",
+        effort: "medium",
+        priority: 10,
+        limits: { rpm: 5, rpd: 200, tpm: 50000, tpd: 200000 },
+        pricing: { inputUsdPerMillion: "2", outputUsdPerMillion: "10" },
+      },
+    ]),
+  };
+
+  const runtime = loadRuntimeConfig(env);
+  const gatewayOptions = runtime.getGatewayOptions();
+
+  assert.equal(runtime.safeSummary.lanes[0].provider, "ollama");
+  assert.equal(runtime.safeSummary.lanes[0].priority, 1);
+  assert.deepEqual(runtime.safeSummary.lanes[0].pricing, {
+    inputUsdPerMillion: 0,
+    outputUsdPerMillion: 0,
+  });
+  assert.equal(gatewayOptions.quotaLanes[0].priority, 1);
+  assert.equal(gatewayOptions.quotaLanes[1].priority, 10);
+  assert.equal(gatewayOptions.upstreams[0].endpoint, "http://127.0.0.1:11434/v1/chat/completions");
+  assert.deepEqual(await gatewayOptions.upstreams[0].getSecretHeaders(), {});
+});

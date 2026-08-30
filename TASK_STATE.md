@@ -98,16 +98,20 @@ hard budgets, repository recovery, and reproducible domain evaluations.
 - Forward-tested the skill independently on a pre-launch B2B SaaS brief and closed
   the observed gaps in claim evidence, public-form safety, greenfield stack
   selection, and bounded handoffs/model calls.
+## Completed
+- Implemented loopback Ollama provider adapter with model mapping, loopback-only endpoint enforcement, and keyless authentication headers.
+- Added priority-aware quota selection to QuotaPool, ensuring deterministic local-first lane routing before cloud escalation.
+- Added Ollama provider configuration and default zero-cost pricing to RuntimeConfig.
+- Added lane profile definitions for controlled Devstral and enhanced Devstral-plus-Claude escalation.
+- Verified 49 offline tests covering Ollama request transformation, loopback enforcement, priority-first routing, zero-cost accounting, and local-to-cloud 429 failover.
 ## Active
-- Integrate local Devstral as the primary implementation lane for the website skill,
+- Await Devstral download completion and prepare frozen website-skill evaluation fixture. as the primary implementation lane for the website skill,
   with explicit ordered and classified cloud escalation.
 ## Blocked
 - Direct Gemini API calls remain blocked by depleted project prepayment credits;
   Antigravity model access is unaffected.
 ## Next Action
-- After the Devstral model pull completes, add and test the hardcoded-loopback
-  Ollama adapter and priority-aware lane selection, then prepare the first frozen
-  website-skill evaluation fixture.
+- Once Devstral finishes downloading, run a local smoke test through the Ollama adapter, then prepare the first frozen website-skill evaluation fixture.
 ## Evidence
 - “GROQ GPT OSS 120B READY”
 - `npm test --silent`: 33 passed, 0 failed.

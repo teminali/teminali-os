@@ -1,0 +1,62 @@
+{
+  "brand": {
+    "name": "DevStream",
+    "tagline": "Real-time Telemetry Ingestion at Microsecond Latency",
+    "verifiedMetrics": [
+      {
+        "label": "P99 Ingestion Latency",
+        "value": "1.2ms"
+      },
+      {
+        "label": "Peak Throughput",
+        "value": "10M events/sec"
+      },
+      {
+        "label": "Data Durability",
+        "value": "99.999999999%"
+      }
+    ]
+  },
+  "pricing": {
+    "monthly": [
+      {
+        "id": "starter",
+        "name": "Starter",
+        "price": 0,
+        "events": "1M events/mo"
+      },
+      {
+        "id": "pro",
+        "name": "Pro",
+        "price": 49,
+        "events": "50M events/mo"
+      },
+      {
+        "id": "enterprise",
+        "name": "Enterprise",
+        "price": "Custom",
+        "events": "Unlimited"
+      }
+    ],
+    "annual": [
+      {
+        "id": "starter",
+        "name": "Starter",
+        "price": 0,
+        "events": "1M events/mo"
+      },
+      {
+        "id": "pro",
+        "name": "Pro",
+        "price": 39,
+        "events": "50M events/mo"
+      },
+      {
+        "id": "enterprise",
+        "name": "Enterprise",
+        "price": "Custom",
+        "events": "Unlimited"
+      }
+    ]
+  }
+}

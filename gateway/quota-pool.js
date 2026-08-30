@@ -22,6 +22,14 @@ function normalizeLimit(value, name) {
   return requirePositiveInteger(value, name);
 }
 
+function normalizePriority(value, defaultPriority = 10) {
+  if (value === undefined) return defaultPriority;
+  if (!Number.isInteger(value) || value < 0) {
+    throw new TypeError("lane priority must be a non-negative integer");
+  }
+  return value;
+}
+
 export class QuotaPool {
   #clock;
   #lanes;
@@ -39,7 +47,7 @@ export class QuotaPool {
     const quotaGroups = new Set();
     this.#clock = clock;
     this.#lanes = lanes.map((lane) => {
-      const allowed = new Set(["alias", "quotaGroup", "provider", "limits"]);
+      const allowed = new Set(["alias", "quotaGroup", "provider", "priority", "limits"]);
       for (const key of Object.keys(lane)) {
         if (!allowed.has(key)) {
           throw new TypeError(`quota lane contains unsupported field: ${key}`);
@@ -66,6 +74,10 @@ export class QuotaPool {
         alias: lane.alias,
         quotaGroup: lane.quotaGroup,
         provider: lane.provider ?? "unknown",
+        priority: normalizePriority(
+          lane.priority,
+          lane.provider === "ollama" ? 1 : 10,
+        ),
         limits: Object.freeze({
           rpm: normalizeLimit(limits.rpm, `${lane.alias}.limits.rpm`),
           rpd: normalizeLimit(
@@ -151,6 +163,7 @@ export class QuotaPool {
       alias: lane.alias,
       quotaGroup: lane.quotaGroup,
       provider: lane.provider,
+      priority: lane.priority,
       commit(actualTokens = estimatedTokens) {
         settle("commit", actualTokens);
       },
@@ -209,6 +222,9 @@ export class QuotaPool {
   }
 
   #compare(left, right) {
+    const priorityDiff = left.priority - right.priority;
+    if (priorityDiff !== 0) return priorityDiff;
+
     const leftState = this.#states.get(left.alias);
     const rightState = this.#states.get(right.alias);
     const leftRemaining = (left.limits.tpm - leftState.minuteTokens) / left.limits.tpm;

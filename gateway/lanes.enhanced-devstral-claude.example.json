@@ -1,0 +1,39 @@
+[
+  {
+    "alias": "ollama-devstral",
+    "provider": "ollama",
+    "quotaGroup": "local-devstral",
+    "providerModel": "devstral-small-2:24b-instruct-2512-q4_K_M",
+    "priority": 1,
+    "limits": {
+      "rpm": 60,
+      "rpd": 10000,
+      "tpm": 100000,
+      "tpd": 10000000
+    },
+    "pricing": {
+      "inputUsdPerMillion": "0",
+      "outputUsdPerMillion": "0"
+    }
+  },
+  {
+    "alias": "claude-sonnet-escalation",
+    "provider": "anthropic",
+    "quotaGroup": "anthropic-workspace-sonnet5",
+    "apiKeyEnv": "ANTHROPIC_API_KEY",
+    "workspaceIdEnv": "ANTHROPIC_WORKSPACE_ID",
+    "providerModel": "claude-sonnet-5",
+    "effort": "medium",
+    "priority": 10,
+    "limits": {
+      "rpm": 5,
+      "rpd": 200,
+      "tpm": 50000,
+      "tpd": 200000
+    },
+    "pricing": {
+      "inputUsdPerMillion": "2",
+      "outputUsdPerMillion": "10"
+    }
+  }
+]

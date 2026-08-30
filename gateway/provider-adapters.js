@@ -150,3 +150,37 @@ export function createAnthropicUpstream({
     },
   });
 }
+
+const OLLAMA_CHAT_COMPLETIONS = "http://127.0.0.1:11434/v1/chat/completions";
+
+export function createOllamaUpstream({
+  alias,
+  modelMap = { "frontier-code": "devstral-small-2:24b-instruct-2512-q4_K_M" },
+  endpoint = OLLAMA_CHAT_COMPLETIONS,
+}) {
+  if (typeof alias !== "string" || alias.length === 0) {
+    throw new TypeError("alias must be a non-empty string");
+  }
+
+  const url = new URL(endpoint);
+  if (url.hostname !== "127.0.0.1" && url.hostname !== "localhost") {
+    throw new TypeError("Ollama endpoint must be a loopback address");
+  }
+
+  const models = normalizeModelMap(modelMap);
+
+  return Object.freeze({
+    alias,
+    endpoint,
+    async getSecretHeaders() {
+      return {};
+    },
+    transformRequest(body) {
+      const providerModel = models.get(body.model);
+      if (providerModel === undefined) {
+        throw new TypeError(`model is not mapped for upstream: ${alias}`);
+      }
+      return requestStreamUsage({ ...body, model: providerModel });
+    },
+  });
+}

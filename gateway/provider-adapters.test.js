@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  createOllamaUpstream,
   createAnthropicUpstream,
   createGeminiUpstream,
   createGroqUpstream,
@@ -133,5 +134,37 @@ test("Anthropic adapter rejects missing workspace routing and invalid effort", a
         effort: "turbo",
       }),
     /effort must be/,
+  );
+});
+
+
+test("Ollama adapter maps model, enforces loopback endpoint, and needs no key", async () => {
+  const upstream = createOllamaUpstream({
+    alias: "ollama-devstral",
+  });
+
+  assert.equal(upstream.endpoint, "http://127.0.0.1:11434/v1/chat/completions");
+  assert.deepEqual(await upstream.getSecretHeaders(), {});
+  assert.deepEqual(
+    upstream.transformRequest({
+      model: "frontier-code",
+      messages: [{ role: "user", content: "test" }],
+      stream: true,
+    }),
+    {
+      model: "devstral-small-2:24b-instruct-2512-q4_K_M",
+      messages: [{ role: "user", content: "test" }],
+      stream: true,
+      stream_options: { include_usage: true },
+    },
+  );
+
+  assert.throws(
+    () =>
+      createOllamaUpstream({
+        alias: "ollama-remote",
+        endpoint: "https://remote-server.com/v1/chat/completions",
+      }),
+    /Ollama endpoint must be a loopback address/,
   );
 });

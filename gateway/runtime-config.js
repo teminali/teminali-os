@@ -4,6 +4,7 @@ import {
   createAnthropicUpstream,
   createGeminiUpstream,
   createGroqUpstream,
+  createOllamaUpstream,
 } from "./provider-adapters.js";
 import { normalizePricing, parseUsdMicros } from "./run-budget.js";
 
@@ -15,6 +16,7 @@ const LANE_FIELDS = new Set([
   "workspaceIdEnv",
   "providerModel",
   "effort",
+  "priority",
   "limits",
   "pricing",
 ]);
@@ -26,6 +28,14 @@ function positiveInteger(value, name, fallback) {
   const candidate = value === undefined ? fallback : Number(value);
   if (!Number.isInteger(candidate) || candidate <= 0) {
     throw new TypeError(`${name} must be a positive integer`);
+  }
+  return candidate;
+}
+
+function nonNegativeInteger(value, name, fallback) {
+  const candidate = value === undefined ? fallback : Number(value);
+  if (!Number.isInteger(candidate) || candidate < 0) {
+    throw new TypeError(`${name} must be a non-negative integer`);
   }
   return candidate;
 }
@@ -84,20 +94,33 @@ function normalizeLane(lane, index, env, logicalModel) {
 
   const alias = nonEmptyString(lane.alias, `lane ${index}.alias`);
   const provider = nonEmptyString(lane.provider, `lane ${index}.provider`);
-  if (provider !== "gemini" && provider !== "groq" && provider !== "anthropic") {
-    throw new TypeError(`lane ${index}.provider must be anthropic, gemini, or groq`);
+  if (
+    provider !== "gemini" &&
+    provider !== "groq" &&
+    provider !== "anthropic" &&
+    provider !== "ollama"
+  ) {
+    throw new TypeError(
+      `lane ${index}.provider must be anthropic, gemini, groq, or ollama`,
+    );
   }
   const quotaGroup = nonEmptyString(lane.quotaGroup, `lane ${index}.quotaGroup`);
-  const apiKeyEnv = nonEmptyString(lane.apiKeyEnv, `lane ${index}.apiKeyEnv`);
-  if (!ENV_NAME.test(apiKeyEnv)) {
-    throw new TypeError(`lane ${index}.apiKeyEnv must be an uppercase environment name`);
-  }
   const providerModel = nonEmptyString(
     lane.providerModel,
     `lane ${index}.providerModel`,
   );
-  if (typeof env[apiKeyEnv] !== "string" || env[apiKeyEnv].length < 8) {
-    throw new TypeError(`credential environment variable is unavailable: ${apiKeyEnv}`);
+
+  let apiKeyEnv;
+  if (provider !== "ollama") {
+    apiKeyEnv = nonEmptyString(lane.apiKeyEnv, `lane ${index}.apiKeyEnv`);
+    if (!ENV_NAME.test(apiKeyEnv)) {
+      throw new TypeError(`lane ${index}.apiKeyEnv must be an uppercase environment name`);
+    }
+    if (typeof env[apiKeyEnv] !== "string" || env[apiKeyEnv].length < 8) {
+      throw new TypeError(`credential environment variable is unavailable: ${apiKeyEnv}`);
+    }
+  } else if (lane.apiKeyEnv !== undefined) {
+    apiKeyEnv = nonEmptyString(lane.apiKeyEnv, `lane ${index}.apiKeyEnv`);
   }
 
   let workspaceIdEnv;
@@ -129,6 +152,12 @@ function normalizeLane(lane, index, env, logicalModel) {
     );
   }
 
+  const priority = nonNegativeInteger(
+    lane.priority,
+    `lane ${index}.priority`,
+    provider === "ollama" ? 1 : 10,
+  );
+
   if (lane.limits === null || typeof lane.limits !== "object" || Array.isArray(lane.limits)) {
     throw new TypeError(`lane ${index}.limits must be an object`);
   }
@@ -146,15 +175,18 @@ function normalizeLane(lane, index, env, logicalModel) {
         ? Infinity
         : positiveInteger(lane.limits.tpd, `lane ${index}.limits.tpd`),
   };
+
   const pricing = {
-    inputUsdPerMillion: lane.pricing?.inputUsdPerMillion,
-    outputUsdPerMillion: lane.pricing?.outputUsdPerMillion,
+    inputUsdPerMillion:
+      lane.pricing?.inputUsdPerMillion ?? (provider === "ollama" ? 0 : undefined),
+    outputUsdPerMillion:
+      lane.pricing?.outputUsdPerMillion ?? (provider === "ollama" ? 0 : undefined),
   };
   normalizePricing(pricing, `lane ${index}.pricing`);
 
   const adapterOptions = {
     alias,
-    getApiKey: () => env[apiKeyEnv],
+    getApiKey: () => (apiKeyEnv ? env[apiKeyEnv] : ""),
     modelMap: { [logicalModel]: providerModel },
   };
   let upstream;
@@ -162,6 +194,11 @@ function normalizeLane(lane, index, env, logicalModel) {
     upstream = createGeminiUpstream(adapterOptions);
   } else if (provider === "groq") {
     upstream = createGroqUpstream(adapterOptions);
+  } else if (provider === "ollama") {
+    upstream = createOllamaUpstream({
+      alias,
+      modelMap: { [logicalModel]: providerModel },
+    });
   } else {
     upstream = createAnthropicUpstream({
       ...adapterOptions,
@@ -171,7 +208,7 @@ function normalizeLane(lane, index, env, logicalModel) {
   }
 
   return {
-    lane: { alias, quotaGroup, provider, limits },
+    lane: { alias, quotaGroup, provider, priority, limits },
     upstream,
     pricing,
     safe: {
@@ -179,6 +216,7 @@ function normalizeLane(lane, index, env, logicalModel) {
       quotaGroup,
       provider,
       providerModel,
+      priority,
       ...(effort === undefined ? {} : { effort }),
       limits,
       pricing,

@@ -1,0 +1,43 @@
+{
+  "schema_version": 1,
+  "benchmark": "frontier-code-agents-003-website-builder-saas-launch",
+  "comparison_type": "skill-native web engineering agent comparison",
+  "preregistered_on": "2026-08-30",
+  "candidates": [
+    {
+      "runner": "antigravity-1",
+      "product": "Antigravity",
+      "model": "Gemini 3.7 Flash",
+      "reasoning": "Medium"
+    },
+    {
+      "runner": "opencode-local-enhanced-1",
+      "product": "OpenCode Local-First",
+      "model": "Devstral 24B + Claude Sonnet 5 Escalation",
+      "reasoning": "Medium"
+    }
+  ],
+  "run_order": [
+    "antigravity-1",
+    "opencode-local-enhanced-1"
+  ],
+  "runs_per_candidate": 1,
+  "time_limit_seconds_per_run": 900,
+  "prompt_submissions_per_run": 1,
+  "network_allowed": false,
+  "allowed_changes": [
+    "src/index.html",
+    "src/styles.css",
+    "src/app.js",
+    "src/site-data.json"
+  ],
+  "scoring": {
+    "semantic_landmarks_and_hierarchy": 20,
+    "claims_and_content_integrity": 20,
+    "interactive_forms_and_validation": 20,
+    "responsive_tokens_and_layouts": 20,
+    "accessibility_and_performance": 20,
+    "total": 100,
+    "manual_points": 0
+  }
+}

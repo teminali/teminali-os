@@ -1,0 +1,66 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>DevStream - Telemetry Ingestion</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <header>
+    <nav aria-label="Main Navigation">
+      <a href="/" class="brand-logo">DevStream</a>
+      <ul class="nav-links">
+        <li><a href="#features">Features</a></li>
+        <li><a href="#pricing">Pricing</a></li>
+        <li><a href="#contact">Contact</a></li>
+      </ul>
+    </nav>
+  </header>
+
+  <main id="main-content">
+    <section id="hero" class="hero-section">
+      <h1>Real-time Telemetry Ingestion at Microsecond Latency</h1>
+      <p class="hero-subtitle">High-throughput event streaming built for distributed systems.</p>
+      <div class="cta-group">
+        <a href="#pricing" class="btn btn-primary">View Pricing</a>
+        <a href="#demo" class="btn btn-secondary">Request Demo</a>
+      </div>
+      <div class="metrics-grid" id="metrics-container"></div>
+    </section>
+
+    <section id="pricing" class="pricing-section">
+      <h2>Transparent Pricing for Modern Teams</h2>
+      <div class="billing-toggle">
+        <label for="billing-switch">Monthly</label>
+        <input type="checkbox" id="billing-switch" aria-label="Toggle Annual Billing (Save 20%)">
+        <span>Annual (Save 20%)</span>
+      </div>
+      <div class="pricing-grid" id="pricing-container"></div>
+    </section>
+
+    <section id="contact" class="contact-section">
+      <h2>Get Started with DevStream</h2>
+      <form id="lead-form" novalidate>
+        <div class="form-group">
+          <label for="lead-email">Work Email</label>
+          <input type="email" id="lead-email" name="email" required aria-describedby="email-error">
+          <div id="email-error" class="error-msg" aria-live="polite"></div>
+        </div>
+        <!-- Anti-spam honeypot -->
+        <div class="hp-field" style="display:none;" aria-hidden="true">
+          <input type="text" id="lead-hp" name="website_hp" tabindex="-1" autocomplete="off">
+        </div>
+        <button type="submit" class="btn btn-primary" id="lead-submit">Request Access</button>
+        <div id="form-status" class="status-msg" aria-live="polite"></div>
+      </form>
+    </section>
+  </main>
+
+  <footer>
+    <p>&copy; 2026 DevStream Inc. All rights reserved.</p>
+  </footer>
+
+  <script type="module" src="app.js"></script>
+</body>
+</html>

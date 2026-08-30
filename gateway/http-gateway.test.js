@@ -5,6 +5,7 @@ import test from "node:test";
 import { createGateway, estimateRequestTokens } from "./http-gateway.js";
 import {
   createAnthropicUpstream,
+  createOllamaUpstream,
   createGeminiUpstream,
   createGroqUpstream,
 } from "./provider-adapters.js";
@@ -722,4 +723,105 @@ test("aborts a slow upstream at the configured deadline", async (t) => {
   });
   const metrics = await metricsResponse.json();
   assert.equal(metrics.upstreamTimeouts, 1);
+});
+
+test("local-first Ollama lane routes requests locally and falls over to cloud upon 429", async (t) => {
+  let localHits = 0;
+  let cloudHits = 0;
+
+  const gateway = createGateway({
+    accessToken: ACCESS_TOKEN,
+    quotaLanes: [
+      {
+        alias: "ollama-devstral",
+        quotaGroup: "local-devstral",
+        provider: "ollama",
+        priority: 1,
+        limits: { rpm: 60, rpd: 1000, tpm: 50000, tpd: 100000 },
+      },
+      {
+        alias: "claude-sonnet",
+        quotaGroup: "anthropic-backup",
+        provider: "anthropic",
+        priority: 10,
+        limits: { rpm: 60, rpd: 1000, tpm: 50000, tpd: 100000 },
+      },
+    ],
+    upstreams: [
+      createOllamaUpstream({
+        alias: "ollama-devstral",
+        endpoint: "http://127.0.0.1:11434/v1/chat/completions",
+      }),
+      createAnthropicUpstream({
+        alias: "claude-sonnet",
+        getApiKey: () => "anthropic-secret-key",
+        getWorkspaceId: () => "wrkspc_01Test",
+      }),
+    ],
+    runBudgetLimits: { maxRequests: 10, maxTokens: 50000, maxUsdMicros: 1000000 },
+    pricingByAlias: {
+      "ollama-devstral": { inputUsdPerMillion: "0", outputUsdPerMillion: "0" },
+      "claude-sonnet": { inputUsdPerMillion: "2", outputUsdPerMillion: "10" },
+    },
+    allowedModels: ["frontier-code"],
+    fetchImpl: async (url, options) => {
+      const urlStr = String(url);
+      if (urlStr.includes("11434")) {
+        localHits += 1;
+        if (localHits === 1) {
+          // First call succeeds locally
+          return new Response(JSON.stringify({
+            id: "chatcmpl-local-1",
+            object: "chat.completion",
+            choices: [{ message: { role: "assistant", content: "local response" } }],
+            usage: { prompt_tokens: 10, completion_tokens: 10, total_tokens: 20 },
+          }), {
+            status: 200,
+            headers: { "content-type": "application/json" },
+          });
+        } else {
+          // Second call gets 429 rate-limited locally
+          return new Response(JSON.stringify({ error: { message: "Ollama busy" } }), {
+            status: 429,
+            headers: { "retry-after": "30", "content-type": "application/json" },
+          });
+        }
+      } else {
+        cloudHits += 1;
+        return new Response(JSON.stringify({
+          id: "chatcmpl-cloud-1",
+          object: "chat.completion",
+          choices: [{ message: { role: "assistant", content: "cloud fallback response" } }],
+          usage: { prompt_tokens: 10, completion_tokens: 10, total_tokens: 20 },
+        }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        });
+      }
+    },
+  });
+  t.after(() => gateway.close());
+  const url = await gateway.listen();
+
+  // First request should use local Ollama
+  const res1 = await chatRequest(url, {
+    model: "frontier-code",
+    messages: [{ role: "user", content: "task 1" }],
+    max_tokens: 64,
+  });
+  assert.equal(res1.status, 200);
+  assert.equal(res1.headers.get("x-gateway-lane"), "ollama-devstral");
+  assert.equal(localHits, 1);
+  assert.equal(cloudHits, 0);
+
+  // Second request: local 429 triggers failover to cloud lane
+  const res2 = await chatRequest(url, {
+    model: "frontier-code",
+    messages: [{ role: "user", content: "task 2" }],
+    max_tokens: 64,
+  });
+  assert.equal(res2.status, 200);
+  assert.equal(res2.headers.get("x-gateway-lane"), "claude-sonnet");
+  assert.equal(localHits, 2);
+  assert.equal(cloudHits, 1);
 });

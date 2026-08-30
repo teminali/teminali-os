@@ -150,3 +150,36 @@ test("snapshots expose aliases and counters but no credential material", () => {
     },
   ]);
 });
+
+test("prioritizes local lane over cloud lanes deterministically", () => {
+  const localLane = {
+    alias: "ollama-devstral",
+    quotaGroup: "local-devstral",
+    provider: "ollama",
+    priority: 1,
+    limits: { rpm: 60, rpd: 10_000, tpm: 100_000, tpd: 1_000_000 },
+  };
+  const cloudLane = {
+    alias: "claude-sonnet",
+    quotaGroup: "anthropic-primary",
+    provider: "anthropic",
+    priority: 10,
+    limits: { rpm: 60, rpd: 10_000, tpm: 200_000, tpd: 2_000_000 },
+  };
+
+  const pool = new QuotaPool({
+    lanes: [cloudLane, localLane],
+    clock: () => 0,
+  });
+
+  // Even though cloudLane has more available TPM, localLane is selected due to priority
+  const first = pool.reserve({ estimatedTokens: 1_000 });
+  assert.equal(first.alias, "ollama-devstral");
+  first.commit();
+
+  // When local lane is rate-limited / cooled down, fallback to cloud lane
+  pool.reserve({ estimatedTokens: 1_000 }).rateLimited(15_000);
+  const second = pool.reserve({ estimatedTokens: 1_000 });
+  assert.equal(second.alias, "claude-sonnet");
+  second.commit();
+});
