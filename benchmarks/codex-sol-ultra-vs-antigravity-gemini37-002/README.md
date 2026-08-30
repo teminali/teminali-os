@@ -35,3 +35,12 @@ npm run benchmark:002:score -- /absolute/path/to/manifest.json codex-1
 
 Repeat for `antigravity-1`. Scoring is offline and uses no provider credentials.
 Do not use or modify `commercial-editor`.
+
+## Recorded status
+
+The planned comparison was cancelled after `codex-1` started because the user
+chose to prioritize development of the OpenCode-based product over another
+external-agent comparison. Antigravity was not run. The eligible 100/100 Codex
+result is retained only as a diagnostic reference under
+[`results/`](results/002-codex-diagnostic-summary.md); no comparative winner is
+claimed.

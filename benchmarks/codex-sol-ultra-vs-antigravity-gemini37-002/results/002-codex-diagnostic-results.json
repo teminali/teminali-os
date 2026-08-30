@@ -1,0 +1,107 @@
+{
+  "benchmark": "frontier-code-agents-002-keyed-delivery-dispatcher",
+  "runner": "codex-1",
+  "configuration": {
+    "product": "Codex",
+    "model": "GPT-5.6 Sol",
+    "reasoning": "Ultra"
+  },
+  "preregistration_commit": "0b4760ee5a7b830dd375dd80b34442cb611b5dff",
+  "baseline_commit": "fa9b42015fe132762652c9f1b1070525e0ad7b37",
+  "eligible": true,
+  "ineligible_reasons": [],
+  "automated_score": 100,
+  "total_possible": 100,
+  "visible": {
+    "passed": true,
+    "points": 20,
+    "exit_code": 0,
+    "stdout": "✔ delivers an event and validates public inputs (1.071333ms)\n✔ serializes two events sharing a key (0.615333ms)\n✔ runs different keys up to maxConcurrent (0.193167ms)\n✔ coalesces concurrent duplicate ids (0.168542ms)\n✔ retries through the injected scheduler (0.336125ms)\nℹ tests 5\nℹ suites 0\nℹ pass 5\nℹ fail 0\nℹ cancelled 0\nℹ skipped 0\nℹ todo 0\nℹ duration_ms 63.384541",
+    "stderr": ""
+  },
+  "hidden": {
+    "checks": [
+      {
+        "name": "duplicate coalescing and fulfilled-result replay",
+        "passed": true,
+        "points": 10
+      },
+      {
+        "name": "terminal failure cleanup and later retry",
+        "passed": true,
+        "points": 10
+      },
+      {
+        "name": "same-key FIFO under settlement races",
+        "passed": true,
+        "points": 10
+      },
+      {
+        "name": "retrying head preserves per-key order",
+        "passed": true,
+        "points": 10
+      },
+      {
+        "name": "cross-key work conservation during retry backoff",
+        "passed": true,
+        "points": 10
+      },
+      {
+        "name": "global active-delivery concurrency bound",
+        "passed": true,
+        "points": 10
+      },
+      {
+        "name": "attempt numbering retry delay and exhaustion",
+        "passed": true,
+        "points": 10
+      },
+      {
+        "name": "no stale scheduled retry after terminal completion",
+        "passed": true,
+        "points": 10
+      }
+    ],
+    "error": null
+  },
+  "changed_files": [
+    "src/idempotency-registry.js",
+    "src/keyed-queue.js",
+    "src/reliable-dispatcher.js"
+  ],
+  "git_status": "M src/idempotency-registry.js\n M src/keyed-queue.js\n M src/reliable-dispatcher.js",
+  "production_diff_numstat": [
+    "7\t5\tsrc/idempotency-registry.js",
+    "12\t4\tsrc/keyed-queue.js",
+    "27\t20\tsrc/reliable-dispatcher.js"
+  ],
+  "timing": {
+    "operator_actions": [
+      {
+        "action": "prompt_submit",
+        "at": "2026-08-30T16:56:58.472Z"
+      },
+      {
+        "action": "stop",
+        "reason": "completed",
+        "at": "2026-08-30T17:00:51.359Z"
+      }
+    ],
+    "started_monotonic_ns": "465475250876333",
+    "started_at": "2026-08-30T16:56:58.472Z",
+    "stopped_monotonic_ns": "465708159021500",
+    "stopped_at": "2026-08-30T17:00:51.359Z",
+    "elapsed_ms": 232908.145167,
+    "stop_reason": "completed"
+  },
+  "telemetry": {
+    "tokens": null,
+    "incremental_cost_usd": null,
+    "provenance": "not exposed by the benchmark harness"
+  },
+  "environment": {
+    "platform": "darwin",
+    "architecture": "arm64",
+    "node": "v26.4.0"
+  }
+}

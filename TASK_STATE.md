@@ -69,15 +69,22 @@ while preserving secure Claude, Gemini, and Groq routing in the isolated lab.
 - Verified the benchmark 002 seed passes all five visible tests while scoring
   60/100 against the hidden oracle, and verified an independent allowlisted
   repair scores 100/100.
+- Completed the frozen `codex-1` diagnostic with GPT-5.6 Sol Ultra: eligible,
+  100/100, all visible and hidden checks passed, and 232.908 seconds elapsed.
+- Cancelled the planned Antigravity run after the user prioritized OpenCode
+  product development. Benchmark 002 is retained as a Codex diagnostic only;
+  no comparative winner is claimed.
 ## Active
-- Execute benchmark 002 without inspecting either result until both candidate
-  workspaces are final.
+- Identify and implement the highest-impact capability upgrade for the
+  OpenCode-based agent using the frozen benchmark evidence and observed runtime
+  failures.
 ## Blocked
 - Direct Gemini API calls remain blocked by depleted project prepayment credits;
   Antigravity model access is unaffected.
 ## Next Action
-- Prepare the two frozen benchmark 002 workspaces, then run `codex-1` in a clean
-  GPT-5.6 Sol Ultra context before opening the Antigravity workspace.
+- Audit the current agent launcher, hard-budget accounting, completion behavior,
+  and repository-backed recovery path; select the smallest general upgrade that
+  prevents known OpenCode failures without tuning to benchmark 002.
 ## Evidence
 - “GROQ GPT OSS 120B READY”
 - `npm test --silent`: 33 passed, 0 failed.
@@ -101,3 +108,5 @@ while preserving secure Claude, Gemini, and Groq routing in the isolated lab.
   completed three-candidate evidence and benchmark-integrity caveats.
 - Benchmark 002 validation: visible seed 5/5; baseline hidden 40/80 and total
   60/100; independent repaired fixture hidden 80/80 and total 100/100.
+- Benchmark 002 Codex diagnostic: eligible 100/100; five visible tests and all
+  eight hidden checks passed; elapsed time 232.908 seconds; Antigravity not run.

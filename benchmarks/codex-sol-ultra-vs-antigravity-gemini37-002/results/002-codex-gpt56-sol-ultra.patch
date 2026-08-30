@@ -1,0 +1,122 @@
+diff --git a/src/idempotency-registry.js b/src/idempotency-registry.js
+index 7099e10..2aca0d5 100644
+--- a/src/idempotency-registry.js
++++ b/src/idempotency-registry.js
+@@ -12,11 +12,13 @@ export class IdempotencyRegistry {
+     const promise = Promise.resolve().then(operation);
+     this.#records.set(id, promise);
+ 
+-    // Defect: fulfilled results should remain available for replay.
+-    promise.then(
+-      () => this.#records.delete(id),
+-      () => this.#records.delete(id),
+-    );
++    // Successful operations remain cached for replay.  A failed operation is
++    // forgotten so that a later call can try again.
++    promise.then(undefined, () => {
++      if (this.#records.get(id) === promise) {
++        this.#records.delete(id);
++      }
++    });
+     return promise;
+   }
+ }
+diff --git a/src/keyed-queue.js b/src/keyed-queue.js
+index a7e04b3..f0b0c2e 100644
+--- a/src/keyed-queue.js
++++ b/src/keyed-queue.js
+@@ -7,14 +7,22 @@ export class KeyedQueue {
+     }
+ 
+     const previous = this.#tails.get(key) ?? Promise.resolve();
+-    const current = previous.then(operation, operation);
++    const current = previous.then(
++      () => operation(),
++      () => operation(),
++    );
+     this.#tails.set(key, current);
+ 
+-    // Defect: an older completion can delete a newer tail for the same key.
+     current.then(
+-      () => this.#tails.delete(key),
+-      () => this.#tails.delete(key),
++      () => this.#removeTail(key, current),
++      () => this.#removeTail(key, current),
+     );
+     return current;
+   }
++
++  #removeTail(key, tail) {
++    if (this.#tails.get(key) === tail) {
++      this.#tails.delete(key);
++    }
++  }
+ }
+diff --git a/src/reliable-dispatcher.js b/src/reliable-dispatcher.js
+index ca641e8..f0fb975 100644
+--- a/src/reliable-dispatcher.js
++++ b/src/reliable-dispatcher.js
+@@ -45,36 +45,43 @@ export class ReliableDispatcher {
+     if (!event || typeof event !== "object") {
+       throw new TypeError("event must be an object");
+     }
+-    if (typeof event.id !== "string" || event.id.length === 0) {
++    const id = event.id;
++    if (typeof id !== "string" || id.length === 0) {
+       throw new TypeError("event.id must be a non-empty string");
+     }
+-    if (typeof event.key !== "string" || event.key.length === 0) {
++    const key = event.key;
++    if (typeof key !== "string" || key.length === 0) {
+       throw new TypeError("event.key must be a non-empty string");
+     }
+ 
+-    return this.#registry.run(event.id, () =>
+-      this.#queue.enqueue(event.key, () => this.#run(event)),
++    return this.#registry.run(id, () =>
++      this.#queue.enqueue(key, () => this.#run(event)),
+     );
+   }
+ 
+   async #run(event) {
+-    // Defect: one delivery slot remains occupied during retry backoff.
+-    await this.#acquire();
+-    try {
+-      for (let attempt = 1; attempt <= this.#maxAttempts; attempt += 1) {
+-        try {
+-          return await this.#deliver(event, attempt);
+-        } catch (error) {
+-          if (error?.retryable !== true || attempt === this.#maxAttempts) {
+-            throw error;
+-          }
+-          // Defect: an explicit zero retry delay is ignored.
+-          const delay = error.retryAfterMs || this.#baseDelayMs * 2 ** (attempt - 1);
+-          await this.#scheduler.sleep(delay);
+-        }
++    for (let attempt = 1; attempt <= this.#maxAttempts; attempt += 1) {
++      let error;
++
++      await this.#acquire();
++      try {
++        return await this.#deliver(event, attempt);
++      } catch (deliveryError) {
++        error = deliveryError;
++      } finally {
++        this.#release();
++      }
++
++      if (error?.retryable !== true || attempt === this.#maxAttempts) {
++        throw error;
+       }
+-    } finally {
+-      this.#release();
++
++      const retryAfterMs = error?.retryAfterMs;
++      const delay =
++        Number.isFinite(retryAfterMs) && retryAfterMs >= 0
++          ? retryAfterMs
++          : this.#baseDelayMs * 2 ** (attempt - 1);
++      await this.#scheduler.sleep(delay);
+     }
+   }
+ 

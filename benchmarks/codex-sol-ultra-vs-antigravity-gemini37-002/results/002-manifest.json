@@ -1,0 +1,72 @@
+{
+  "benchmark": "frontier-code-agents-002-keyed-delivery-dispatcher",
+  "preregistration_commit": "0b4760ee5a7b830dd375dd80b34442cb611b5dff",
+  "baseline_commit": "fa9b42015fe132762652c9f1b1070525e0ad7b37",
+  "created_at": "2026-08-30T16:55:56.770Z",
+  "time_limit_seconds": 900,
+  "run_order": [
+    "codex-1",
+    "antigravity-1"
+  ],
+  "runs": [
+    {
+      "id": "codex-1",
+      "directory": "codex-gpt56-sol-ultra",
+      "product": "Codex",
+      "model": "GPT-5.6 Sol",
+      "reasoning": "Ultra",
+      "path": "/var/folders/4m/x6x_6_gd7_n_cg7y8dclghbr0000gn/T/frontier-benchmark-002-tg67Pk/codex-gpt56-sol-ultra",
+      "prompt": "/var/folders/4m/x6x_6_gd7_n_cg7y8dclghbr0000gn/T/frontier-benchmark-002-tg67Pk/codex-gpt56-sol-ultra/TASK.md"
+    },
+    {
+      "id": "antigravity-1",
+      "directory": "antigravity-gemini37-flash-medium",
+      "product": "Antigravity",
+      "model": "Gemini 3.7 Flash",
+      "reasoning": "Medium",
+      "path": "/var/folders/4m/x6x_6_gd7_n_cg7y8dclghbr0000gn/T/frontier-benchmark-002-tg67Pk/antigravity-gemini37-flash-medium",
+      "prompt": "/var/folders/4m/x6x_6_gd7_n_cg7y8dclghbr0000gn/T/frontier-benchmark-002-tg67Pk/antigravity-gemini37-flash-medium/TASK.md"
+    }
+  ],
+  "allowed_changes": [
+    "src/idempotency-registry.js",
+    "src/keyed-queue.js",
+    "src/reliable-dispatcher.js"
+  ],
+  "baseline_files_sha256": {
+    "package.json": "aa52b3c4daac6cbdbfd36af98400899ed418a62748ff4ea7a6035d8975931c7c",
+    "src/errors.js": "4d6c0fa6f244a87997e230593ed115a59f90e425ad470298c23347a2dd1660d1",
+    "src/idempotency-registry.js": "30656958cce4033da8d8da4b10aacbe624ebfdff427d301c7110c52a72d1011b",
+    "src/index.js": "033fd6357698cc5f6f59affa25b5ff1ba53b4646fece12a942a70720d6d84de5",
+    "src/keyed-queue.js": "a62f979089fc027dd52da5bf4985e6c431d6c6b3b794a57556c2ef9d37de7700",
+    "src/reliable-dispatcher.js": "605db7839a3dd4c5d49721cd655dc30c8e06b910101dcef870b076aadbd3df8c",
+    "TASK.md": "3a359c7d02c13c838ab0ae32fda77e9862b6f8ab0f3529961de18f3932527042",
+    "test/fake-scheduler.js": "39fe5d734e9a0d66c972e264bc84be1d096c1064cce98d534cae4792f9b2b72b",
+    "test/reliable-dispatcher.test.js": "3f1749d3c36c16251c883f4d0348ab299dbeb1f3db17b334ccba949e02676a79"
+  },
+  "frozen_inputs_sha256": {
+    "benchmarks/codex-sol-ultra-vs-antigravity-gemini37-002/oracle/score.mjs": "7e6d916cca0489eafa2675c9c620fb0dc4660039cb02531cb14dfba4468f0c20",
+    "benchmarks/codex-sol-ultra-vs-antigravity-gemini37-002/PREREGISTRATION.json": "0cee59f6e9ab2cd55c9a5202f809109a31d6e77c6ea82bb238e3831e2015e1a8",
+    "benchmarks/codex-sol-ultra-vs-antigravity-gemini37-002/README.md": "4d4ffaf13e56f75af859fc2cd019b975b6dd20095682b530b02a65453dfb9d05",
+    "benchmarks/codex-sol-ultra-vs-antigravity-gemini37-002/RUBRIC.md": "4c94022e73ddcaf9046c9e5243e5efefe3b3253e578d3def789f22451d1b6015",
+    "benchmarks/codex-sol-ultra-vs-antigravity-gemini37-002/seed/package.json": "aa52b3c4daac6cbdbfd36af98400899ed418a62748ff4ea7a6035d8975931c7c",
+    "benchmarks/codex-sol-ultra-vs-antigravity-gemini37-002/seed/src/errors.js": "4d6c0fa6f244a87997e230593ed115a59f90e425ad470298c23347a2dd1660d1",
+    "benchmarks/codex-sol-ultra-vs-antigravity-gemini37-002/seed/src/idempotency-registry.js": "30656958cce4033da8d8da4b10aacbe624ebfdff427d301c7110c52a72d1011b",
+    "benchmarks/codex-sol-ultra-vs-antigravity-gemini37-002/seed/src/index.js": "033fd6357698cc5f6f59affa25b5ff1ba53b4646fece12a942a70720d6d84de5",
+    "benchmarks/codex-sol-ultra-vs-antigravity-gemini37-002/seed/src/keyed-queue.js": "a62f979089fc027dd52da5bf4985e6c431d6c6b3b794a57556c2ef9d37de7700",
+    "benchmarks/codex-sol-ultra-vs-antigravity-gemini37-002/seed/src/reliable-dispatcher.js": "605db7839a3dd4c5d49721cd655dc30c8e06b910101dcef870b076aadbd3df8c",
+    "benchmarks/codex-sol-ultra-vs-antigravity-gemini37-002/seed/test/fake-scheduler.js": "39fe5d734e9a0d66c972e264bc84be1d096c1064cce98d534cae4792f9b2b72b",
+    "benchmarks/codex-sol-ultra-vs-antigravity-gemini37-002/seed/test/reliable-dispatcher.test.js": "3f1749d3c36c16251c883f4d0348ab299dbeb1f3db17b334ccba949e02676a79",
+    "benchmarks/codex-sol-ultra-vs-antigravity-gemini37-002/TASK.md": "3a359c7d02c13c838ab0ae32fda77e9862b6f8ab0f3529961de18f3932527042",
+    "scripts/benchmark-002-clock.mjs": "aaee019baa6176ffe2956b6e2da6b81077fcdaaec57a8adfa33b2ac6767254fc",
+    "scripts/prepare-frontier-benchmark-002.mjs": "1a027a673c4cf8e8aefe0567b411c4e76e839492e1699b325ab91e641633ab20",
+    "scripts/score-frontier-benchmark-002.mjs": "adb1699c576d826e7fe347958417e31aa067488920290b53c12d24ab0632a0a8"
+  },
+  "timing_path": "/var/folders/4m/x6x_6_gd7_n_cg7y8dclghbr0000gn/T/frontier-benchmark-002-tg67Pk/timing.json",
+  "environment": {
+    "platform": "darwin",
+    "architecture": "arm64",
+    "node": "v26.4.0"
+  },
+  "manifest_path": "/var/folders/4m/x6x_6_gd7_n_cg7y8dclghbr0000gn/T/frontier-benchmark-002-tg67Pk/manifest.json"
+}
