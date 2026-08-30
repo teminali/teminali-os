@@ -24,6 +24,7 @@ test("Groq adapter maps the logical model and preserves the request", async () =
   assert.deepEqual(upstream.transformRequest(body), {
     ...body,
     model: "openai/gpt-oss-120b",
+    stream_options: { include_usage: true },
   });
   assert.equal(body.model, "frontier-code");
   assert.deepEqual(await upstream.getSecretHeaders(), {
@@ -88,9 +89,32 @@ test("Anthropic adapter supplies workspace routing and maps medium effort", asyn
     messages: body.messages,
     tools: body.tools,
     stream: true,
+    stream_options: { include_usage: true },
     output_config: { effort: "medium" },
   });
   assert.equal(body.reasoning_effort, "high");
+});
+
+test("adapters preserve an explicit stream-usage opt-out and non-stream requests", () => {
+  const upstream = createGroqUpstream({
+    alias: "groq-a",
+    getApiKey: () => SECRET,
+  });
+  const optedOut = {
+    model: "frontier-code",
+    messages: [],
+    stream: true,
+    stream_options: { include_usage: false },
+  };
+
+  assert.deepEqual(upstream.transformRequest(optedOut), {
+    ...optedOut,
+    model: "openai/gpt-oss-120b",
+  });
+  assert.deepEqual(
+    upstream.transformRequest({ model: "frontier-code", messages: [] }),
+    { model: "openai/gpt-oss-120b", messages: [] },
+  );
 });
 
 test("Anthropic adapter rejects missing workspace routing and invalid effort", async () => {

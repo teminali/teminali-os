@@ -17,6 +17,13 @@ function positiveInteger(value, name) {
   return value;
 }
 
+function nonNegativeInteger(value, name) {
+  if (!Number.isSafeInteger(value) || value < 0) {
+    throw new TypeError(`${name} must be a non-negative safe integer`);
+  }
+  return value;
+}
+
 export function parseUsdMicros(value, name = "USD value") {
   const text = String(value);
   const match = /^(0|[1-9]\d*)(?:\.(\d{1,6}))?$/.exec(text);
@@ -110,25 +117,58 @@ export class RunBudget {
     this.#reservedTokens += estimatedTokens;
     this.#reservedUsdMicros += estimatedUsdMicros;
     let settled = false;
-    const settle = (commit) => {
+    const settle = (actualUsage) => {
+      if (settled) throw new Error("budget lease is already settled");
+      let committedTokens = estimatedTokens;
+      let committedUsdMicros = estimatedUsdMicros;
+      if (actualUsage !== undefined) {
+        if (
+          actualUsage === null ||
+          typeof actualUsage !== "object" ||
+          Array.isArray(actualUsage)
+        ) {
+          throw new TypeError("actualUsage must be an object");
+        }
+        const inputTokens = nonNegativeInteger(
+          actualUsage.inputTokens,
+          "actualUsage.inputTokens",
+        );
+        const outputTokens = nonNegativeInteger(
+          actualUsage.outputTokens,
+          "actualUsage.outputTokens",
+        );
+        committedTokens = inputTokens + outputTokens;
+        if (!Number.isSafeInteger(committedTokens) || committedTokens <= 0) {
+          throw new TypeError("actualUsage total must be a positive safe integer");
+        }
+        committedUsdMicros = estimatedCostMicros(
+          inputTokens,
+          outputTokens,
+          normalizedPricing,
+        );
+      }
+
+      settled = true;
+      this.#reservedTokens -= estimatedTokens;
+      this.#reservedUsdMicros -= estimatedUsdMicros;
+      this.#tokens += committedTokens;
+      this.#usdMicros += committedUsdMicros;
+    };
+    const release = () => {
       if (settled) throw new Error("budget lease is already settled");
       settled = true;
       this.#reservedTokens -= estimatedTokens;
       this.#reservedUsdMicros -= estimatedUsdMicros;
-      if (commit) {
-        this.#tokens += estimatedTokens;
-        this.#usdMicros += estimatedUsdMicros;
-      }
     };
 
     return Object.freeze({
       estimatedTokens,
       estimatedUsdMicros,
-      commit() {
-        settle(true);
+      commit(actualUsage) {
+        settle(actualUsage);
       },
       releaseUsage() {
-        settle(false);
+        release();
       },
     });
   }

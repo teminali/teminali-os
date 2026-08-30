@@ -55,6 +55,63 @@ test("commits a conservative worst-case token and USD reservation", () => {
   });
 });
 
+test("reconciles a successful reservation to reported actual usage", () => {
+  const budget = new RunBudget({
+    maxRequests: 2,
+    maxTokens: 10_000,
+    maxUsdMicros: 20_000,
+  });
+  const lease = budget.reserve({
+    inputTokens: 1_000,
+    outputTokens: 2_000,
+    pricing: GEMINI_PRICING,
+  });
+
+  lease.commit({ inputTokens: 100, outputTokens: 50 });
+
+  const snapshot = budget.snapshot();
+  assert.equal(snapshot.requests, 1);
+  assert.equal(snapshot.tokens, 150);
+  assert.equal(snapshot.usdMicros, 263);
+  assert.equal(snapshot.reservedTokens, 0);
+  assert.equal(snapshot.reservedUsdMicros, 0);
+  assert.equal(snapshot.remainingTokens, 9_850);
+});
+
+test("validates actual usage atomically and records truthful overruns", () => {
+  const budget = new RunBudget({
+    maxRequests: 2,
+    maxTokens: 100,
+    maxUsdMicros: 1_000_000,
+  });
+  const lease = budget.reserve({
+    inputTokens: 40,
+    outputTokens: 40,
+    pricing: GEMINI_PRICING,
+  });
+
+  assert.throws(
+    () => lease.commit({ inputTokens: 10, outputTokens: -1 }),
+    /non-negative safe integer/,
+  );
+  assert.equal(budget.snapshot().reservedTokens, 80);
+
+  lease.commit({ inputTokens: 125, outputTokens: 0 });
+  const snapshot = budget.snapshot();
+  assert.equal(snapshot.tokens, 125);
+  assert.equal(snapshot.remainingTokens, -25);
+  assert.equal(snapshot.reservedTokens, 0);
+  assert.throws(
+    () =>
+      budget.reserve({
+        inputTokens: 1,
+        outputTokens: 1,
+        pricing: GEMINI_PRICING,
+      }),
+    (error) => error instanceof BudgetExceededError && error.reason === "tokens",
+  );
+});
+
 test("a failed upstream releases token and USD usage but consumes an attempt", () => {
   const budget = new RunBudget({
     maxRequests: 1,

@@ -1,7 +1,8 @@
 import { createServer } from "node:http";
 import { timingSafeEqual } from "node:crypto";
-import { Readable } from "node:stream";
+import { Readable, Transform } from "node:stream";
 import { pipeline } from "node:stream/promises";
+import { StringDecoder } from "node:string_decoder";
 
 import { QuotaPool, QuotaUnavailableError } from "./quota-pool.js";
 import {
@@ -113,6 +114,116 @@ async function sanitizedUpstreamError(response, secretHeaders) {
     if (value !== undefined) sanitized[field] = value;
   }
   return Object.keys(sanitized).length === 0 ? null : sanitized;
+}
+
+function reportedUsage(payload) {
+  const usage = payload?.usage;
+  if (usage === null || typeof usage !== "object" || Array.isArray(usage)) {
+    return null;
+  }
+  const inputTokens = usage.prompt_tokens ?? usage.input_tokens;
+  const outputTokens = usage.completion_tokens ?? usage.output_tokens;
+  if (
+    !Number.isSafeInteger(inputTokens) ||
+    inputTokens < 0 ||
+    !Number.isSafeInteger(outputTokens) ||
+    outputTokens < 0
+  ) {
+    return null;
+  }
+  const totalTokens = inputTokens + outputTokens;
+  if (!Number.isSafeInteger(totalTokens) || totalTokens <= 0) return null;
+  if (
+    usage.total_tokens !== undefined &&
+    (!Number.isSafeInteger(usage.total_tokens) || usage.total_tokens !== totalTokens)
+  ) {
+    return null;
+  }
+  return Object.freeze({ inputTokens, outputTokens, totalTokens });
+}
+
+function createUsageCapture(contentType, maxBytes = 1_048_576) {
+  const isEventStream = /^text\/event-stream(?:;|$)/i.test(contentType ?? "");
+  const decoder = new StringDecoder("utf8");
+  const jsonChunks = [];
+  let capturedBytes = 0;
+  let overflowed = false;
+  let lineBuffer = "";
+  let eventData = [];
+  let usage = null;
+
+  const inspectPayload = (text) => {
+    if (text === "[DONE]" || text.length === 0) return;
+    try {
+      const candidate = reportedUsage(JSON.parse(text));
+      if (candidate !== null) usage = candidate;
+    } catch {
+      // Usage telemetry is optional and must never affect transparent proxying.
+    }
+  };
+  const finishEvent = () => {
+    if (eventData.length > 0) inspectPayload(eventData.join("\n"));
+    eventData = [];
+  };
+  const inspectSseText = (text, final = false) => {
+    lineBuffer += text;
+    while (true) {
+      const newline = lineBuffer.indexOf("\n");
+      if (newline < 0) break;
+      let line = lineBuffer.slice(0, newline);
+      lineBuffer = lineBuffer.slice(newline + 1);
+      if (line.endsWith("\r")) line = line.slice(0, -1);
+      if (line.length === 0) {
+        finishEvent();
+      } else if (line.startsWith("data:")) {
+        eventData.push(line.slice(5).replace(/^ /, ""));
+      }
+    }
+    if (final) {
+      let line = lineBuffer;
+      if (line.endsWith("\r")) line = line.slice(0, -1);
+      if (line.startsWith("data:")) eventData.push(line.slice(5).replace(/^ /, ""));
+      lineBuffer = "";
+      finishEvent();
+    }
+  };
+
+  const stream = new Transform({
+    transform(chunk, _encoding, callback) {
+      if (!overflowed) {
+        capturedBytes += chunk.length;
+        if (capturedBytes > maxBytes) {
+          overflowed = true;
+          jsonChunks.length = 0;
+          lineBuffer = "";
+          eventData = [];
+          usage = null;
+        } else if (isEventStream) {
+          inspectSseText(decoder.write(chunk));
+        } else {
+          jsonChunks.push(Buffer.from(chunk));
+        }
+      }
+      callback(null, chunk);
+    },
+    flush(callback) {
+      if (!overflowed) {
+        if (isEventStream) {
+          inspectSseText(decoder.end(), true);
+        } else {
+          inspectPayload(Buffer.concat(jsonChunks).toString("utf8"));
+        }
+      }
+      callback();
+    },
+  });
+
+  return Object.freeze({
+    stream,
+    usage() {
+      return usage;
+    },
+  });
 }
 
 export function estimateRequestTokens(body, defaultOutputTokens = 1_024) {
@@ -428,13 +539,15 @@ export function createGateway({
       }
 
       if (upstreamResponse.status === 429) {
-        const providerError = await sanitizedUpstreamError(
-          upstreamResponse,
-          secretHeaders,
-        );
         lastRetryAfterMs = parseRetryAfter(upstreamResponse.headers.get("retry-after"));
         lease.rateLimited(lastRetryAfterMs);
         budgetLease?.releaseUsage();
+        let providerError = null;
+        try {
+          providerError = await sanitizedUpstreamError(upstreamResponse, secretHeaders);
+        } catch {
+          // A diagnostic body failure must not strand quota or budget reservations.
+        }
         metrics.upstreamRateLimits += 1;
         emit("upstream_rate_limit", {
           lane: lease.alias,
@@ -463,27 +576,59 @@ export function createGateway({
         return;
       }
 
-      lease.commit(estimatedTokens);
-      budgetLease?.commit();
-      metrics.completed += 1;
-      emit("upstream_response", {
-        lane: lease.alias,
-        provider: lease.provider,
-        attempt,
-        status: upstreamResponse.status,
-      });
-
-      res.writeHead(
-        upstreamResponse.status,
-        responseHeaders(upstreamResponse, lease.alias),
+      const usageCapture = createUsageCapture(
+        upstreamResponse.headers.get("content-type"),
       );
-      if (upstreamResponse.body === null) {
-        res.end();
-      } else {
-        try {
-          await pipeline(Readable.fromWeb(upstreamResponse.body), res);
-        } catch {
-          if (!res.destroyed) res.destroy();
+      let delivered = false;
+      try {
+        res.writeHead(
+          upstreamResponse.status,
+          responseHeaders(upstreamResponse, lease.alias),
+        );
+        if (upstreamResponse.body === null) {
+          res.end();
+          delivered = true;
+        } else {
+          await pipeline(
+            Readable.fromWeb(upstreamResponse.body),
+            usageCapture.stream,
+            res,
+          );
+          delivered = true;
+        }
+      } catch {
+        if (!res.destroyed) res.destroy();
+      } finally {
+        const usage = usageCapture.usage();
+        if (usage === null) {
+          budgetLease?.commit();
+          lease.commit(estimatedTokens);
+        } else {
+          budgetLease?.commit({
+            inputTokens: usage.inputTokens,
+            outputTokens: usage.outputTokens,
+          });
+          lease.commit(usage.totalTokens);
+        }
+
+        if (delivered && upstreamResponse.ok) {
+          metrics.completed += 1;
+          emit("upstream_response", {
+            lane: lease.alias,
+            provider: lease.provider,
+            attempt,
+            status: upstreamResponse.status,
+            accounting: usage === null ? "estimated" : "reported",
+          });
+        } else {
+          metrics.upstreamErrors += 1;
+          emit(delivered ? "upstream_http_error" : "upstream_stream_error", {
+            lane: lease.alias,
+            provider: lease.provider,
+            attempt,
+            status: upstreamResponse.status,
+            accounting: usage === null ? "estimated" : "reported",
+          });
         }
       }
       return;

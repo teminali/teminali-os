@@ -28,6 +28,27 @@ function normalizeModelMap(modelMap) {
   );
 }
 
+function requestStreamUsage(body) {
+  if (body.stream !== true) return body;
+  const streamOptions = body.stream_options;
+  if (
+    streamOptions !== undefined &&
+    (streamOptions === null ||
+      typeof streamOptions !== "object" ||
+      Array.isArray(streamOptions))
+  ) {
+    return body;
+  }
+  if (streamOptions?.include_usage === false) return body;
+  return {
+    ...body,
+    stream_options: {
+      ...(streamOptions ?? {}),
+      include_usage: true,
+    },
+  };
+}
+
 function createOpenAICompatibleUpstream({
   alias,
   endpoint,
@@ -58,7 +79,7 @@ function createOpenAICompatibleUpstream({
       if (providerModel === undefined) {
         throw new TypeError(`model is not mapped for upstream: ${alias}`);
       }
-      return { ...body, model: providerModel };
+      return requestStreamUsage({ ...body, model: providerModel });
     },
   });
 }

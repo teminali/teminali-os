@@ -74,17 +74,27 @@ while preserving secure Claude, Gemini, and Groq routing in the isolated lab.
 - Cancelled the planned Antigravity run after the user prioritized OpenCode
   product development. Benchmark 002 is retained as a Codex diagnostic only;
   no comparative winner is claimed.
+- Audited benchmark 001 telemetry and identified conservative output reservations
+  as the cause of false local budget exhaustion despite substantially lower actual
+  provider usage.
+- Implemented two-phase run-budget and quota accounting: reserve worst case before
+  dispatch, then settle to strict provider-reported input/output usage at body EOF.
+- Updated official OpenAI-compatible provider adapters to request streaming usage
+  while preserving an explicit caller opt-out and non-stream requests.
+- Added bounded, byte-preserving JSON/SSE usage capture with conservative fallback
+  for missing, malformed, oversized, non-success, and interrupted responses.
+- Verified 45 offline tests, including actual JSON/SSE reconciliation, atomic
+  validation, transparent fragmented streaming, and interruption cleanup.
 ## Active
-- Identify and implement the highest-impact capability upgrade for the
-  OpenCode-based agent using the frozen benchmark evidence and observed runtime
-  failures.
+- Add explicit ordered primary/fallback semantics and integrate local Devstral as
+  the default low-cost coding lane, with cloud models retained as controlled
+  escalation and recovery lanes.
 ## Blocked
 - Direct Gemini API calls remain blocked by depleted project prepayment credits;
   Antigravity model access is unaffected.
 ## Next Action
-- Audit the current agent launcher, hard-budget accounting, completion behavior,
-  and repository-backed recovery path; select the smallest general upgrade that
-  prevents known OpenCode failures without tuning to benchmark 002.
+- After the Devstral model pull completes, add and test a local Ollama adapter and
+  priority-aware lane selection before enabling any live agent run.
 ## Evidence
 - “GROQ GPT OSS 120B READY”
 - `npm test --silent`: 33 passed, 0 failed.
@@ -110,3 +120,8 @@ while preserving secure Claude, Gemini, and Groq routing in the isolated lab.
   60/100; independent repaired fixture hidden 80/80 and total 100/100.
 - Benchmark 002 Codex diagnostic: eligible 100/100; five visible tests and all
   eight hidden checks passed; elapsed time 232.908 seconds; Antigravity not run.
+- Benchmark 001 audit: gateway reserved 28,672 output tokens while OpenCode
+  reported 3,905 actual output tokens; conservative accounting recorded
+  $0.474238 versus approximately $0.23838 at nominal actual usage.
+- `npm test`: 45 passed, 0 failed after actual-usage settlement and interrupted-
+  stream regression coverage.

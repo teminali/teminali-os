@@ -26,9 +26,12 @@ The gateway is a product prototype, not a mechanism for evading provider terms.
    output, and worst-case USD cost against the process-scoped run budget.
 5. It forwards the request without changing messages, tools, or reasoning options.
 6. It streams the upstream response transparently.
-7. On a pre-stream `429`, it records `retry-after`, cools down that credential,
+7. At response EOF, it settles token, quota, and USD accounting to strict canonical
+   provider usage when available. Missing, malformed, oversized, or interrupted
+   telemetry retains the conservative reservation.
+8. On a pre-stream `429`, it records `retry-after`, cools down that credential,
    and tries another eligible credential at most once.
-8. If quota or run budget is unavailable, it returns a local `429` without
+9. If quota or run budget is unavailable, it returns a local `429` without
    contacting another provider.
 
 ## Safety and security requirements
@@ -44,6 +47,8 @@ The gateway is a product prototype, not a mechanism for evading provider terms.
 - Bound request size, retry count, and request duration.
 - Require process-scoped maximum requests, estimated tokens, and USD before start.
 - Price output at its requested maximum, including reasoning/thinking tokens.
+- Reconcile successful responses only from validated input/output usage fields;
+  never trust inconsistent totals or partial telemetry.
 - Preserve provider error codes and useful non-secret rate-limit metadata.
 
 ## Routing requirements
@@ -53,6 +58,8 @@ The gateway is a product prototype, not a mechanism for evading provider terms.
 - Use conservative token estimates before dispatch.
 - Do not send a request whose estimated size exceeds a credential's remaining
   budget.
+- Settle completed usage after the response body finishes; interrupted responses
+  keep conservative accounting so disconnects cannot bypass limits.
 - Use deterministic selection so runs can be audited and reproduced.
 - Emit credential aliases such as `groq-a`, never key fragments.
 
@@ -71,7 +78,8 @@ The gateway is a product prototype, not a mechanism for evading provider terms.
 - Anthropic identity-linked keys require both `ANTHROPIC_API_KEY` and
   `ANTHROPIC_WORKSPACE_ID`; both remain runtime-only and are never committed.
 - Claude Sonnet 5 is budgeted at $2/M input and $10/M output; Opus 5 at $5/M
-  input and $25/M output. The gateway reserves requested worst-case output before dispatch.
+  input and $25/M output. The gateway reserves requested worst-case output before
+  dispatch and reconciles it to validated reported usage after response completion.
 
 ## Runtime launcher
 
@@ -119,7 +127,10 @@ OpenCode stops the gateway and deletes its temporary startup log.
 
 Run budgets reset only when the gateway process restarts. Request attempts are
 never refunded. Pre-stream failures release their estimated token and USD
-reservation, while completed upstream responses commit the conservative estimate.
+reservation. Completed JSON and SSE responses settle to canonical reported usage
+when valid. Missing or malformed telemetry, oversized capture, non-success HTTP
+responses, and interrupted streams commit the conservative estimate. A request is
+counted as completed only after a successful 2xx body is fully delivered.
 
 After the gateway is running, `opencode.gateway.jsonc` can be selected through
 `OPENCODE_CONFIG`. It connects OpenCode to `frontier-code` over loopback and
@@ -134,6 +145,10 @@ reads only the local gateway access token from the environment. The original
 - A test proves secrets never appear in logs or responses.
 - A test proves exhausted credentials produce a bounded local `429`.
 - A test proves an exhausted run budget contacts no upstream.
+- Tests prove JSON and fragmented SSE bodies remain byte-identical while valid
+  usage reconciles quota and cost.
+- A test proves an interrupted response releases reservations, keeps conservative
+  accounting, and is not counted as completed.
 - Controlled mode never uses more than its pinned credential.
 - `npm test` passes without contacting Groq or any external service.
 

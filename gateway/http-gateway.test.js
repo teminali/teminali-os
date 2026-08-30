@@ -11,6 +11,10 @@ import {
 
 const ACCESS_TOKEN = "local-test-access-token";
 const MODEL = "openai/gpt-oss-120b";
+const GROQ_PRICING = {
+  inputUsdPerMillion: "0.15",
+  outputUsdPerMillion: "0.60",
+};
 
 function quotaLane(alias) {
   return {
@@ -145,6 +149,54 @@ test("forwards an allowed request and never logs secrets or prompt content", asy
   assert.equal(serializedEvents.includes(prompt), false);
 });
 
+test("reconciles non-streaming quota and budget to reported usage", async (t) => {
+  const expectedBody = JSON.stringify({
+    id: "fake",
+    choices: [{ message: { role: "assistant", content: "ok" } }],
+    usage: { prompt_tokens: 10, completion_tokens: 5, total_tokens: 15 },
+  });
+  const upstream = await startFakeUpstream((_req, res) => {
+    res.writeHead(200, { "content-type": "application/json" });
+    res.end(expectedBody);
+  });
+  t.after(upstream.close);
+  const gateway = createGateway({
+    accessToken: ACCESS_TOKEN,
+    quotaLanes: [quotaLane("groq-a")],
+    upstreams: [
+      { alias: "groq-a", endpoint: upstream.endpoint, getSecretHeaders: () => ({}) },
+    ],
+    allowedModels: [MODEL],
+    runBudgetLimits: {
+      maxRequests: 2,
+      maxTokens: 10_000,
+      maxUsdMicros: 10_000,
+    },
+    pricingByAlias: { "groq-a": GROQ_PRICING },
+  });
+  t.after(() => gateway.close());
+  const url = await gateway.listen();
+
+  const response = await chatRequest(url, {
+    model: MODEL,
+    messages: [{ role: "user", content: "actual usage" }],
+    max_tokens: 128,
+  });
+  assert.equal(await response.text(), expectedBody);
+
+  const metrics = await (
+    await fetch(`${url}/metrics`, {
+      headers: { authorization: `Bearer ${ACCESS_TOKEN}` },
+    })
+  ).json();
+  assert.equal(metrics.completed, 1);
+  assert.equal(metrics.budget.tokens, 15);
+  assert.equal(metrics.budget.usdMicros, 5);
+  assert.equal(metrics.budget.reservedTokens, 0);
+  assert.equal(metrics.quotas[0].minuteTokens, 15);
+  assert.equal(metrics.quotas[0].inFlight, 0);
+});
+
 test("fails over once on a pre-stream 429 and preserves an SSE response", async (t) => {
   const first = await startFakeUpstream((_req, res) => {
     res.writeHead(429, { "content-type": "application/json", "retry-after": "30" });
@@ -193,6 +245,166 @@ test("fails over once on a pre-stream 429 and preserves an SSE response", async 
   assert.equal(metrics.completed, 1);
   assert.ok(metrics.quotas[0].cooldownRemainingMs > 0);
   assert.ok(metrics.quotas[0].cooldownRemainingMs <= 30_000);
+});
+
+test("preserves fragmented SSE while settling terminal reported usage", async (t) => {
+  const expectedStream =
+    'data: {"choices":[{"delta":{"content":"ok"}}]}\n\n' +
+    'data: {"choices":[],"usage":{"prompt_tokens":12,"completion_tokens":7,"total_tokens":19}}\n\n' +
+    "data: [DONE]\n\n";
+  const upstream = await startFakeUpstream(async (req, res) => {
+    const body = await requestBody(req);
+    assert.deepEqual(body.stream_options, { include_usage: true });
+    res.writeHead(200, { "content-type": "text/event-stream; charset=utf-8" });
+    const firstSplit = expectedStream.indexOf('"prompt_tokens"') + 9;
+    const secondSplit = expectedStream.indexOf("[DONE]") + 2;
+    res.write(expectedStream.slice(0, firstSplit));
+    res.write(expectedStream.slice(firstSplit, secondSplit));
+    res.end(expectedStream.slice(secondSplit));
+  });
+  t.after(upstream.close);
+  const gateway = createGateway({
+    accessToken: ACCESS_TOKEN,
+    quotaLanes: [quotaLane("groq-a")],
+    upstreams: [
+      createGroqUpstream({
+        alias: "groq-a",
+        getApiKey: () => "groq-secret-value",
+        endpoint: upstream.endpoint,
+      }),
+    ],
+    allowedModels: ["frontier-code"],
+    runBudgetLimits: {
+      maxRequests: 2,
+      maxTokens: 10_000,
+      maxUsdMicros: 10_000,
+    },
+    pricingByAlias: { "groq-a": GROQ_PRICING },
+  });
+  t.after(() => gateway.close());
+  const url = await gateway.listen();
+
+  const response = await chatRequest(url, {
+    model: "frontier-code",
+    messages: [{ role: "user", content: "stream actual usage" }],
+    stream: true,
+    max_tokens: 128,
+  });
+  assert.equal(await response.text(), expectedStream);
+
+  const metrics = await (
+    await fetch(`${url}/metrics`, {
+      headers: { authorization: `Bearer ${ACCESS_TOKEN}` },
+    })
+  ).json();
+  assert.equal(metrics.completed, 1);
+  assert.equal(metrics.budget.tokens, 19);
+  assert.equal(metrics.budget.usdMicros, 6);
+  assert.equal(metrics.quotas[0].minuteTokens, 19);
+  assert.equal(metrics.quotas[0].inFlight, 0);
+});
+
+test("falls back to conservative settlement for malformed usage", async (t) => {
+  const upstream = await startFakeUpstream((_req, res) => {
+    res.writeHead(200, { "content-type": "application/json" });
+    res.end(
+      JSON.stringify({
+        choices: [{ message: { role: "assistant", content: "ok" } }],
+        usage: { prompt_tokens: 10, completion_tokens: 5, total_tokens: 99 },
+      }),
+    );
+  });
+  t.after(upstream.close);
+  const gateway = createGateway({
+    accessToken: ACCESS_TOKEN,
+    quotaLanes: [quotaLane("groq-a")],
+    upstreams: [
+      { alias: "groq-a", endpoint: upstream.endpoint, getSecretHeaders: () => ({}) },
+    ],
+    allowedModels: [MODEL],
+    runBudgetLimits: {
+      maxRequests: 2,
+      maxTokens: 10_000,
+      maxUsdMicros: 10_000,
+    },
+    pricingByAlias: { "groq-a": GROQ_PRICING },
+  });
+  t.after(() => gateway.close());
+  const url = await gateway.listen();
+  const body = {
+    model: MODEL,
+    messages: [{ role: "user", content: "malformed usage" }],
+    max_tokens: 128,
+  };
+  const estimatedTokens = estimateRequestTokens(body);
+
+  const response = await chatRequest(url, body);
+  assert.equal(response.status, 200);
+  await response.text();
+  const metrics = await (
+    await fetch(`${url}/metrics`, {
+      headers: { authorization: `Bearer ${ACCESS_TOKEN}` },
+    })
+  ).json();
+  assert.equal(metrics.budget.tokens, estimatedTokens);
+  assert.equal(metrics.quotas[0].minuteTokens, estimatedTokens);
+  assert.equal(metrics.budget.reservedTokens, 0);
+});
+
+test("settles conservatively and releases reservations when a response stream fails", async (t) => {
+  const body = {
+    model: MODEL,
+    messages: [{ role: "user", content: "interrupted stream" }],
+    stream: true,
+    max_tokens: 128,
+  };
+  const estimatedTokens = estimateRequestTokens(body);
+  const encoder = new TextEncoder();
+  const gateway = createGateway({
+    accessToken: ACCESS_TOKEN,
+    quotaLanes: [quotaLane("groq-a")],
+    upstreams: [
+      { alias: "groq-a", endpoint: "https://unused.invalid", getSecretHeaders: () => ({}) },
+    ],
+    allowedModels: [MODEL],
+    runBudgetLimits: {
+      maxRequests: 2,
+      maxTokens: 10_000,
+      maxUsdMicros: 10_000,
+    },
+    pricingByAlias: { "groq-a": GROQ_PRICING },
+    fetchImpl: async () =>
+      new Response(
+        new ReadableStream({
+          start(controller) {
+            controller.enqueue(
+              encoder.encode('data: {"choices":[{"delta":{"content":"partial"}}]}\n\n'),
+            );
+            controller.error(new Error("simulated upstream disconnect"));
+          },
+        }),
+        { status: 200, headers: { "content-type": "text/event-stream" } },
+      ),
+  });
+  t.after(() => gateway.close());
+  const url = await gateway.listen();
+
+  await assert.rejects(async () => {
+    const response = await chatRequest(url, body);
+    await response.text();
+  });
+
+  const metrics = await (
+    await fetch(`${url}/metrics`, {
+      headers: { authorization: `Bearer ${ACCESS_TOKEN}` },
+    })
+  ).json();
+  assert.equal(metrics.completed, 0);
+  assert.equal(metrics.upstreamErrors, 1);
+  assert.equal(metrics.budget.tokens, estimatedTokens);
+  assert.equal(metrics.budget.reservedTokens, 0);
+  assert.equal(metrics.quotas[0].minuteTokens, estimatedTokens);
+  assert.equal(metrics.quotas[0].inFlight, 0);
 });
 
 test("controlled mode does not escape a pinned lane", async (t) => {
