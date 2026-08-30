@@ -26,7 +26,7 @@ Build and verify the provider-agnostic gateway foundation for a frontier coding 
 ## Active
 - Run the first controlled live Gemini validation.
 ## Blocked
-- Awaiting explicit approval for a maximum USD 0.05 live run and private Gemini key entry in the user's terminal.
+- USD 0.01 live run approved; awaiting private Gemini key entry in the user's terminal.
 ## Next Action
 - After approval, run `npm run agent:start`, enter the Gemini key privately, and send the exact-response health prompt in OpenCode.
 ## Evidence

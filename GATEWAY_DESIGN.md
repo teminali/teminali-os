@@ -92,7 +92,7 @@ Groq-organization profile. Both contain configuration only; they contain no keys
 
 For the first controlled live validation, `npm run agent:start` prompts privately
 for `GEMINI_API_KEY`, generates an ephemeral local access token, caps the gateway
-at 3 requests, 5,000 estimated tokens, and USD 0.05, then opens OpenCode. Exiting
+at 1 request, 6,000 estimated tokens, 256 output tokens, and USD 0.01, then opens OpenCode. Exiting
 OpenCode stops the gateway and deletes its temporary startup log.
 
 Run budgets reset only when the gateway process restarts. Request attempts are

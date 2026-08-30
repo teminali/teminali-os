@@ -23,11 +23,11 @@ fi
 export GATEWAY_ACCESS_TOKEN=$(openssl rand -hex 32)
 export GATEWAY_LANES_FILE="$LAB_DIR/gateway/lanes.controlled-gemini.json"
 export GATEWAY_PINNED_ALIAS="gemini-main"
-export GATEWAY_MAX_REQUESTS_PER_RUN="3"
-export GATEWAY_MAX_TOKENS_PER_RUN="5000"
-export GATEWAY_MAX_USD_PER_RUN="0.05"
-export GATEWAY_MAX_OUTPUT_TOKENS="1024"
-export GATEWAY_DEFAULT_OUTPUT_TOKENS="1024"
+export GATEWAY_MAX_REQUESTS_PER_RUN="1"
+export GATEWAY_MAX_TOKENS_PER_RUN="6000"
+export GATEWAY_MAX_USD_PER_RUN="0.01"
+export GATEWAY_MAX_OUTPUT_TOKENS="256"
+export GATEWAY_DEFAULT_OUTPUT_TOKENS="256"
 export GATEWAY_UPSTREAM_TIMEOUT_MS="120000"
 export OPENCODE_CONFIG="$LAB_DIR/opencode.gateway.jsonc"
 
@@ -48,7 +48,7 @@ GATEWAY_PID=$!
 
 for _ in {1..50}; do
   if curl --fail --silent http://127.0.0.1:8787/health >/dev/null 2>&1; then
-    print "Frontier gateway ready: controlled Gemini, 3 requests, 5000 tokens, USD 0.05 maximum"
+    print "Frontier gateway ready: controlled Gemini, 1 request, 6000 tokens, USD 0.01 maximum"
     "$OPENCODE_BIN" "$LAB_DIR"
     exit $?
   fi

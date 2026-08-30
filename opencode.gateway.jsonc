@@ -14,7 +14,7 @@
           "name": "Gemini 3.7 Flash + Groq Recovery",
           "limit": {
             "context": 131072,
-            "output": 1024
+            "output": 256
           },
           "variants": {
             "medium": {
