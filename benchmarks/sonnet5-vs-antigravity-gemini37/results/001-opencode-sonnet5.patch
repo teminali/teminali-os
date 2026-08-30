@@ -1,0 +1,62 @@
+diff --git a/src/async-memo-cache.js b/src/async-memo-cache.js
+index 1a6bcb3..1adc268 100644
+--- a/src/async-memo-cache.js
++++ b/src/async-memo-cache.js
+@@ -1,5 +1,6 @@
+ export class AsyncMemoCache {
+   #entries = new Map();
++  #pending = new Map();
+   #maxEntries;
+   #ttlMs;
+   #clock;
+@@ -24,22 +25,38 @@ export class AsyncMemoCache {
+       throw new TypeError("loader must be a function");
+     }
+ 
+-    const startedAt = this.#clock();
+     const existing = this.#entries.get(key);
+-    if (existing && existing.expiresAt > startedAt) {
++    if (existing && existing.expiresAt > this.#clock()) {
++      this.#entries.delete(key);
++      this.#entries.set(key, existing);
+       return existing.value;
+     }
+ 
+-    const value = await loader();
+-    this.#entries.set(key, {
+-      value,
+-      expiresAt: startedAt + this.#ttlMs,
+-    });
+-
+-    if (this.#entries.size > this.#maxEntries) {
+-      const oldestKey = this.#entries.keys().next().value;
+-      this.#entries.delete(oldestKey);
++    const pending = this.#pending.get(key);
++    if (pending) {
++      return pending;
+     }
+-    return value;
++
++    const loadPromise = (async () => {
++      try {
++        const value = await loader();
++        this.#entries.delete(key);
++        this.#entries.set(key, {
++          value,
++          expiresAt: this.#clock() + this.#ttlMs,
++        });
++
++        while (this.#entries.size > this.#maxEntries) {
++          const oldestKey = this.#entries.keys().next().value;
++          this.#entries.delete(oldestKey);
++        }
++        return value;
++      } finally {
++        this.#pending.delete(key);
++      }
++    })();
++
++    this.#pending.set(key, loadPromise);
++    return loadPromise;
+   }
+ }

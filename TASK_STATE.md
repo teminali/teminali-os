@@ -1,8 +1,7 @@
 # Task State
 ## Objective
-Wire and verify Claude Sonnet 5 as the controlled OpenCode coding model, preserve
-explicit Groq recovery, and prepare the first frozen comparison against
-Antigravity Gemini 3.7 Flash Medium.
+Measure frontier coding-agent configurations with frozen, reproducible tasks
+while preserving secure Claude, Gemini, and Groq routing in the isolated lab.
 ## Acceptance Criteria
 - Quota routing models organization-scoped limits and rejects duplicate quota groups.
 - The HTTP gateway authenticates clients, streams responses, fails over safely before streaming, and never exposes provider secrets.
@@ -49,13 +48,25 @@ Antigravity Gemini 3.7 Flash Medium.
   and a 20-minute controlled-run policy.
 - Verified 38 offline tests, all launcher smoke tests, benchmark preparation/scoring,
   shell syntax, OpenCode config resolution, cleanup, and diff checks.
+- Completed benchmark 001 on the identical frozen commit with OpenCode Claude
+  Sonnet 5 Medium and Antigravity Gemini 3.7 Flash Medium.
+- Both original candidates passed every visible and hidden functional check;
+  Antigravity won the pre-registered comparison 100-90 because Sonnet exhausted
+  its USD 0.50 process cap before producing the required final evidence report.
+- Added a post-hoc clean-context Codex GPT-5.6 Sol Ultra candidate. It scored
+  100/100 and formally edged Antigravity on the frozen line-churn tie-breaker,
+  while Antigravity completed much faster (79 seconds versus 289 seconds).
+- Archived the exact scores, methodology caveats, reports, telemetry, and three
+  production patches under the benchmark `results` directory.
 ## Active
-- Run the capped Sonnet 5 gateway check, then execute benchmark 001.
+- Design and pre-register benchmark 002 before running any candidate.
 ## Blocked
-- Live Claude calls require private API-key entry in the user's terminal.
+- Direct Gemini API calls remain blocked by depleted project prepayment credits;
+  Antigravity model access is unaffected.
 ## Next Action
-- Run `npm run claude:diagnose` and confirm `CLAUDE SONNET GATEWAY READY` before
-  spending on benchmark 001.
+- Freeze a harder multi-file benchmark 002 with an independent oracle and
+  pre-register Codex GPT-5.6 Sol Ultra versus Antigravity Gemini 3.7 Flash
+  Medium before either model sees the task.
 ## Evidence
 - “GROQ GPT OSS 120B READY”
 - `npm test --silent`: 33 passed, 0 failed.
@@ -75,3 +86,5 @@ Antigravity Gemini 3.7 Flash Medium.
   `Claude Opus 5 Controlled Escalation` at high.
 - Benchmark seed scores 30/90 automated before repair, confirming the scorer
   distinguishes the intended defects.
+- `benchmarks/sonnet5-vs-antigravity-gemini37/results/001-summary.md` records the
+  completed three-candidate evidence and benchmark-integrity caveats.

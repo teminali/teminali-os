@@ -34,3 +34,13 @@ npm run benchmark:score -- /absolute/run/path antigravity-gemini37 117
 
 The final argument is elapsed wall-clock seconds. Results are printed as JSON.
 Do not use `commercial-editor` for this benchmark.
+
+## Recorded result
+
+Benchmark 001 is complete. The frozen summary, machine-readable scores, and
+candidate patches are under [`results/`](results/001-summary.md).
+
+The original pre-registered comparison was Sonnet 5 versus Antigravity Gemini
+3.7 Flash. A clean GPT-5.6 Sol Ultra Codex run was added afterward as an
+explicitly post-hoc third candidate; it used the same baseline, prompt, oracle,
+and scoring rules but is not represented as pre-registered.

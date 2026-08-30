@@ -1,0 +1,106 @@
+{
+  "benchmark": "sonnet5-vs-antigravity-gemini37-001",
+  "baseline_commit": "cde4872d164422abf92f26d06ba45f51133b5b87",
+  "time_limit_minutes": 20,
+  "original_comparison_preregistered": true,
+  "codex_candidate_post_hoc": true,
+  "automated_checks": [
+    "visible tests",
+    "concurrent request coalescing",
+    "failed-load recovery",
+    "TTL begins on resolution",
+    "LRU refresh and eviction",
+    "in-flight capacity behavior",
+    "expiration behavior",
+    "fixture integrity"
+  ],
+  "candidates": [
+    {
+      "id": "opencode-sonnet5-medium",
+      "harness": "OpenCode + frontier gateway",
+      "model": "claude-sonnet-5",
+      "reasoning": "medium",
+      "fallback": false,
+      "automated_score": 90,
+      "manual_evidence_score": 0,
+      "total_score": 90,
+      "elapsed_seconds": 137,
+      "visible_tests_passed": true,
+      "hidden_checks_passed": 6,
+      "fixture_integrity": true,
+      "production_insertions": 29,
+      "production_deletions": 12,
+      "production_lines_changed": 41,
+      "final_report": null,
+      "stop_reason": "gateway_budget_exhausted_usd",
+      "usage": {
+        "opencode_input_tokens": 99665,
+        "opencode_output_tokens": 3905,
+        "gateway_estimated_tokens": 122431,
+        "gateway_accounted_usd": 0.474238,
+        "gateway_max_usd": 0.5,
+        "provider_invoice_cost": null
+      },
+      "human_interventions": []
+    },
+    {
+      "id": "antigravity-gemini37-flash-medium",
+      "harness": "Antigravity",
+      "model": "gemini-3.7-flash",
+      "reasoning": "medium",
+      "fallback": false,
+      "automated_score": 90,
+      "manual_evidence_score": 10,
+      "total_score": 100,
+      "elapsed_seconds": 79,
+      "visible_tests_passed": true,
+      "hidden_checks_passed": 6,
+      "fixture_integrity": true,
+      "production_insertions": 45,
+      "production_deletions": 15,
+      "production_lines_changed": 60,
+      "final_report": "Accurate change summary with verified npm test output.",
+      "stop_reason": "completed",
+      "usage": {
+        "input_tokens": null,
+        "output_tokens": null,
+        "provider_cost": null
+      },
+      "human_interventions": [
+        "Mechanical Accept all approval; no manual edit or coding assistance."
+      ]
+    },
+    {
+      "id": "codex-gpt56-sol-ultra",
+      "harness": "Codex isolated candidate",
+      "model": "gpt-5.6-sol",
+      "reasoning": "ultra",
+      "fallback": false,
+      "automated_score": 90,
+      "manual_evidence_score": 10,
+      "total_score": 100,
+      "elapsed_seconds": 289,
+      "visible_tests_passed": true,
+      "hidden_checks_passed": 6,
+      "fixture_integrity": true,
+      "production_insertions": 47,
+      "production_deletions": 10,
+      "production_lines_changed": 57,
+      "final_report": "Accurate concise change summary with verified tests and diff check.",
+      "stop_reason": "completed",
+      "usage": {
+        "input_tokens": null,
+        "output_tokens": null,
+        "provider_cost": null
+      },
+      "human_interventions": []
+    }
+  ],
+  "original_winner": "antigravity-gemini37-flash-medium",
+  "post_hoc_tie_break_winner": "codex-gpt56-sol-ultra",
+  "tie_break_reason": "57 production lines changed versus Antigravity's 60",
+  "security": {
+    "provider_secrets_archived": false,
+    "commercial_editor_modified": false
+  }
+}

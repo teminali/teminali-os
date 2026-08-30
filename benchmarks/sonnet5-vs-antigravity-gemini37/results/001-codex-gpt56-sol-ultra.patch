@@ -1,0 +1,80 @@
+diff --git a/src/async-memo-cache.js b/src/async-memo-cache.js
+index 1a6bcb3..12f54b7 100644
+--- a/src/async-memo-cache.js
++++ b/src/async-memo-cache.js
+@@ -1,5 +1,6 @@
+ export class AsyncMemoCache {
+   #entries = new Map();
++  #inFlight = new Map();
+   #maxEntries;
+   #ttlMs;
+   #clock;
+@@ -24,22 +25,58 @@ export class AsyncMemoCache {
+       throw new TypeError("loader must be a function");
+     }
+ 
+-    const startedAt = this.#clock();
++    const now = this.#clock();
+     const existing = this.#entries.get(key);
+-    if (existing && existing.expiresAt > startedAt) {
++    if (existing && existing.expiresAt > now) {
++      this.#entries.delete(key);
++      this.#entries.set(key, existing);
+       return existing.value;
+     }
++    if (existing) {
++      this.#entries.delete(key);
++    }
++
++    const pending = this.#inFlight.get(key);
++    if (pending) {
++      return pending;
++    }
+ 
+-    const value = await loader();
+-    this.#entries.set(key, {
+-      value,
+-      expiresAt: startedAt + this.#ttlMs,
++    let resolveLoad;
++    let rejectLoad;
++    const load = new Promise((resolve, reject) => {
++      resolveLoad = resolve;
++      rejectLoad = reject;
+     });
++    this.#inFlight.set(key, load);
++    try {
++      resolveLoad(loader());
++    } catch (error) {
++      rejectLoad(error);
++    }
++
++    try {
++      const value = await load;
++      const resolvedAt = this.#clock();
++      this.#inFlight.delete(key);
++      this.#entries.set(key, {
++        value,
++        expiresAt: resolvedAt + this.#ttlMs,
++      });
+ 
+-    if (this.#entries.size > this.#maxEntries) {
+-      const oldestKey = this.#entries.keys().next().value;
+-      this.#entries.delete(oldestKey);
++      if (this.#entries.size > this.#maxEntries) {
++        let oldestKey = this.#entries.keys().next().value;
++        for (const [entryKey, entry] of this.#entries) {
++          if (entry.expiresAt <= resolvedAt) {
++            oldestKey = entryKey;
++            break;
++          }
++        }
++        this.#entries.delete(oldestKey);
++      }
++      return value;
++    } catch (error) {
++      this.#inFlight.delete(key);
++      throw error;
+     }
+-    return value;
+   }
+ }

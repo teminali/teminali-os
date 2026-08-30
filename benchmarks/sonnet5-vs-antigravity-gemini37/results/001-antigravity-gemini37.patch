@@ -1,0 +1,78 @@
+diff --git a/src/async-memo-cache.js b/src/async-memo-cache.js
+index 1a6bcb3..b2aa551 100644
+--- a/src/async-memo-cache.js
++++ b/src/async-memo-cache.js
+@@ -1,5 +1,6 @@
+ export class AsyncMemoCache {
+-  #entries = new Map();
++  #resolved = new Map();
++  #inFlight = new Map();
+   #maxEntries;
+   #ttlMs;
+   #clock;
+@@ -24,22 +25,51 @@ export class AsyncMemoCache {
+       throw new TypeError("loader must be a function");
+     }
+ 
+-    const startedAt = this.#clock();
+-    const existing = this.#entries.get(key);
+-    if (existing && existing.expiresAt > startedAt) {
+-      return existing.value;
++    const now = this.#clock();
++    const existing = this.#resolved.get(key);
++    if (existing !== undefined) {
++      if (existing.expiresAt > now) {
++        this.#resolved.delete(key);
++        this.#resolved.set(key, existing);
++        return existing.value;
++      }
++      this.#resolved.delete(key);
+     }
+ 
+-    const value = await loader();
+-    this.#entries.set(key, {
+-      value,
+-      expiresAt: startedAt + this.#ttlMs,
+-    });
+-
+-    if (this.#entries.size > this.#maxEntries) {
+-      const oldestKey = this.#entries.keys().next().value;
+-      this.#entries.delete(oldestKey);
++    if (this.#inFlight.has(key)) {
++      return this.#inFlight.get(key);
+     }
+-    return value;
++
++    const promise = (async () => {
++      try {
++        const value = await loader();
++        const resolvedAt = this.#clock();
++
++        for (const [k, entry] of this.#resolved) {
++          if (entry.expiresAt <= resolvedAt) {
++            this.#resolved.delete(k);
++          }
++        }
++
++        this.#resolved.delete(key);
++        this.#resolved.set(key, {
++          value,
++          expiresAt: resolvedAt + this.#ttlMs,
++        });
++
++        while (this.#resolved.size > this.#maxEntries) {
++          const oldestKey = this.#resolved.keys().next().value;
++          this.#resolved.delete(oldestKey);
++        }
++
++        return value;
++      } finally {
++        this.#inFlight.delete(key);
++      }
++    })();
++
++    this.#inFlight.set(key, promise);
++    return promise;
+   }
+ }
++
