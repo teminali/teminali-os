@@ -1,12 +1,18 @@
 # Task State
 ## Objective
-Measure frontier coding-agent configurations with frozen, reproducible tasks
-while preserving secure Claude, Gemini, and Groq routing in the isolated lab.
+Build a skill-native, local-first website creation agent, beginning with
+world-class landing and marketing sites, while retaining secure model routing,
+hard budgets, repository recovery, and reproducible domain evaluations.
 ## Acceptance Criteria
-- Quota routing models organization-scoped limits and rejects duplicate quota groups.
-- The HTTP gateway authenticates clients, streams responses, fails over safely before streaming, and never exposes provider secrets.
-- Provider calls abort at a configured deadline and remain within hard run budgets.
-- OpenCode resolves the gateway model without replacing the controlled Groq baseline.
+- The website skill routes distinct site types, preserves supplied facts and brand,
+  and enforces observable conversion, visual, responsive, accessibility,
+  performance, and engineering gates.
+- The orchestration workflow uses bounded specialist roles, one implementation
+  owner, repository-backed handoffs, and skill-specific evaluation evidence.
+- Local Devstral is the preferred eligible coding lane; authorized cloud models are
+  explicit, budgeted escalation or recovery lanes rather than silent defaults.
+- The HTTP gateway authenticates clients, streams transparently, reconciles actual
+  usage, fails over only under classified policy, and never exposes secrets.
 - Offline tests pass without real credentials, provider traffic, spending, or changes to `commercial-editor`.
 ## Completed
 - Groq health check passed.
@@ -85,16 +91,23 @@ while preserving secure Claude, Gemini, and Groq routing in the isolated lab.
   for missing, malformed, oversized, non-success, and interrupted responses.
 - Verified 45 offline tests, including actual JSON/SSE reconciliation, atomic
   validation, transparent fragmented streaming, and interruption cleanup.
+- Established the skill-native product direction with `website-builder` as the
+  first focused domain pack.
+- Added a concise website router plus progressively loaded site-structure,
+  quality-gate, and efficient-agent-workflow references.
+- Forward-tested the skill independently on a pre-launch B2B SaaS brief and closed
+  the observed gaps in claim evidence, public-form safety, greenfield stack
+  selection, and bounded handoffs/model calls.
 ## Active
-- Add explicit ordered primary/fallback semantics and integrate local Devstral as
-  the default low-cost coding lane, with cloud models retained as controlled
-  escalation and recovery lanes.
+- Integrate local Devstral as the primary implementation lane for the website skill,
+  with explicit ordered and classified cloud escalation.
 ## Blocked
 - Direct Gemini API calls remain blocked by depleted project prepayment credits;
   Antigravity model access is unaffected.
 ## Next Action
-- After the Devstral model pull completes, add and test a local Ollama adapter and
-  priority-aware lane selection before enabling any live agent run.
+- After the Devstral model pull completes, add and test the hardcoded-loopback
+  Ollama adapter and priority-aware lane selection, then prepare the first frozen
+  website-skill evaluation fixture.
 ## Evidence
 - “GROQ GPT OSS 120B READY”
 - `npm test --silent`: 33 passed, 0 failed.
@@ -125,3 +138,6 @@ while preserving secure Claude, Gemini, and Groq routing in the isolated lab.
   $0.474238 versus approximately $0.23838 at nominal actual usage.
 - `npm test`: 45 passed, 0 failed after actual-usage settlement and interrupted-
   stream regression coverage.
+- `website-builder` passed the official skill validator with no scaffold
+  placeholders; its independent forward test produced a concrete, evidence-aware
+  launch-site plan without editing either repository.

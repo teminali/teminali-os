@@ -1,0 +1,4 @@
+interface:
+  display_name: "Website Builder"
+  short_description: "Build polished, production-ready websites"
+  default_prompt: "Use $website-builder to plan, build, and verify a production-ready website."
