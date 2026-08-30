@@ -8,7 +8,7 @@ function groqLane(alias, quotaGroup = alias) {
     alias,
     quotaGroup,
     provider: "groq",
-    limits: { rpm: 30, tpm: 8_000, tpd: 200_000 },
+    limits: { rpm: 30, rpd: 1_000, tpm: 8_000, tpd: 200_000 },
   };
 }
 
@@ -88,6 +88,27 @@ test("minute budgets reset deterministically", () => {
   lease.cancel();
 });
 
+test("daily request budgets do not reset with the minute window", () => {
+  let now = 0;
+  const lane = groqLane("groq-a");
+  lane.limits = { ...lane.limits, rpm: 1, rpd: 1 };
+  const pool = new QuotaPool({ lanes: [lane], clock: () => now });
+
+  pool.reserve({ estimatedTokens: 100 }).commit();
+  now = 60_000;
+  assert.throws(
+    () => pool.reserve({ estimatedTokens: 100 }),
+    (error) =>
+      error instanceof QuotaUnavailableError &&
+      error.retryAfterMs === 86_340_000,
+  );
+
+  now = 86_400_000;
+  const lease = pool.reserve({ estimatedTokens: 100 });
+  assert.equal(lease.alias, "groq-a");
+  lease.cancel();
+});
+
 test("rejects duplicate organization quota groups", () => {
   assert.throws(
     () =>
@@ -121,6 +142,7 @@ test("snapshots expose aliases and counters but no credential material", () => {
       quotaGroup: "groq-a",
       provider: "groq",
       minuteRequests: 1,
+      dayRequests: 1,
       minuteTokens: 750,
       dayTokens: 750,
       inFlight: 0,

@@ -3,6 +3,7 @@
   "private": true,
   "type": "module",
   "scripts": {
+    "gateway:start": "node gateway/start-gateway.js",
     "test": "node --test"
   }
 }

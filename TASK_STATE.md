@@ -12,15 +12,18 @@ Build and verify the provider-agnostic gateway foundation for a frontier coding 
 - Implemented the organization-aware quota pool and authenticated streaming HTTP gateway.
 - Implemented strict Gemini and Groq adapters with logical model mapping.
 - Verified heterogeneous Gemini-to-Groq failover using fake upstreams.
-- Verified 19 offline tests and a clean diff check.
+- Implemented a strict local-only environment launcher with redacted startup output.
+- Added requests-per-day enforcement alongside RPM, TPM, and daily-token limits.
+- Verified 24 offline tests and a clean diff check.
 ## Active
-- Save the verified provider-adapter checkpoint.
+- Save the verified runtime-launcher checkpoint.
 ## Blocked
-- Live provider adapters require explicit secret handling and spending approval.
+- Live provider traffic requires hard request, token, and spending budgets plus explicit approval.
 ## Next Action
-- Implement an environment-based launcher with strict configuration validation, without live provider traffic.
+- Implement hard per-run request, token, and USD budget guards with offline tests.
 ## Evidence
 - “GROQ GPT OSS 120B READY”
-- `npm test --silent`: 19 passed, 0 failed.
+- `npm test --silent`: 24 passed, 0 failed.
 - `git diff --check` passed.
-- `gateway/provider-adapters.js` maps the logical model to official OpenAI-compatible Gemini and Groq endpoints.
+- `gateway/runtime-config.js` rejects implicit quotas, endpoint overrides, and unavailable credential variables.
+- `gateway/start-gateway.js` starts only on loopback and prints a non-secret summary.

@@ -68,6 +68,10 @@ export class QuotaPool {
         provider: lane.provider ?? "unknown",
         limits: Object.freeze({
           rpm: normalizeLimit(limits.rpm, `${lane.alias}.limits.rpm`),
+          rpd: normalizeLimit(
+            limits.rpd ?? Infinity,
+            `${lane.alias}.limits.rpd`,
+          ),
           tpm: normalizeLimit(limits.tpm, `${lane.alias}.limits.tpm`),
           tpd: normalizeLimit(limits.tpd ?? Infinity, `${lane.alias}.limits.tpd`),
         }),
@@ -82,6 +86,7 @@ export class QuotaPool {
           minuteStartedAt: now,
           dayStartedAt: now,
           minuteRequests: 0,
+          dayRequests: 0,
           minuteTokens: 0,
           dayTokens: 0,
           inFlight: 0,
@@ -113,6 +118,7 @@ export class QuotaPool {
     const lane = candidates[0];
     const state = this.#states.get(lane.alias);
     state.minuteRequests += 1;
+    state.dayRequests += 1;
     state.minuteTokens += estimatedTokens;
     state.dayTokens += estimatedTokens;
     state.inFlight += 1;
@@ -132,6 +138,7 @@ export class QuotaPool {
       }
 
       state.minuteRequests = Math.max(0, state.minuteRequests - 1);
+      state.dayRequests = Math.max(0, state.dayRequests - 1);
       state.minuteTokens = Math.max(0, state.minuteTokens - estimatedTokens);
       state.dayTokens = Math.max(0, state.dayTokens - estimatedTokens);
       if (kind === "rate-limit") {
@@ -166,6 +173,7 @@ export class QuotaPool {
         quotaGroup: lane.quotaGroup,
         provider: lane.provider,
         minuteRequests: state.minuteRequests,
+        dayRequests: state.dayRequests,
         minuteTokens: state.minuteTokens,
         dayTokens: state.dayTokens,
         inFlight: state.inFlight,
@@ -183,6 +191,7 @@ export class QuotaPool {
       }
       if (now - state.dayStartedAt >= DAY_MS) {
         state.dayStartedAt = now;
+        state.dayRequests = 0;
         state.dayTokens = 0;
       }
     }
@@ -193,6 +202,7 @@ export class QuotaPool {
     return (
       state.cooldownUntil <= now &&
       state.minuteRequests + 1 <= lane.limits.rpm &&
+      state.dayRequests + 1 <= lane.limits.rpd &&
       state.minuteTokens + tokens <= lane.limits.tpm &&
       state.dayTokens + tokens <= lane.limits.tpd
     );
@@ -229,7 +239,10 @@ export class QuotaPool {
           ) {
             readyAt = Math.max(readyAt, state.minuteStartedAt + MINUTE_MS);
           }
-          if (state.dayTokens + tokens > lane.limits.tpd) {
+          if (
+            state.dayRequests + 1 > lane.limits.rpd ||
+            state.dayTokens + tokens > lane.limits.tpd
+          ) {
             readyAt = Math.max(readyAt, state.dayStartedAt + DAY_MS);
           }
           return readyAt - now;

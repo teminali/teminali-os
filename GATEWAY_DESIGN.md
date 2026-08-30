@@ -43,7 +43,7 @@ The gateway is a product prototype, not a mechanism for evading provider terms.
 
 ## Routing requirements
 
-- Maintain per-credential RPM, TPM, daily-token, cooldown, and in-flight state.
+- Maintain per-quota-group RPM, RPD, TPM, daily-token, cooldown, and in-flight state.
 - Prefer response rate-limit headers over estimates when available.
 - Use conservative token estimates before dispatch.
 - Do not send a request whose estimated size exceeds a credential's remaining
@@ -56,6 +56,25 @@ The gateway is a product prototype, not a mechanism for evading provider terms.
 - `POST /v1/chat/completions`
 - `GET /health`
 - `GET /metrics` with non-secret counters only
+
+## Runtime launcher
+
+Run `npm run gateway:start` only after defining:
+
+- `GATEWAY_ACCESS_TOKEN`: local caller credential, at least 12 characters.
+- `GATEWAY_LANES_JSON`: a JSON array of explicitly authorized lanes. Each lane
+  must contain `alias`, `provider`, `quotaGroup`, `apiKeyEnv`, `providerModel`,
+  and exact `limits` from that provider project or organization.
+- The environment variable named by each lane's `apiKeyEnv`.
+
+Optional controls are `GATEWAY_PINNED_ALIAS`, `GATEWAY_PORT`,
+`GATEWAY_LOGICAL_MODEL`, `GATEWAY_MAX_ATTEMPTS`,
+`GATEWAY_MAX_OUTPUT_TOKENS`, and `GATEWAY_DEFAULT_OUTPUT_TOKENS`.
+
+The launcher binds only to `127.0.0.1`. It rejects endpoint overrides and does
+not serialize provider keys or the local access token. Configuration names the
+environment variables holding credentials; credential values never belong in
+`GATEWAY_LANES_JSON`, files, logs, metrics, or commits.
 
 ## Acceptance criteria
 
