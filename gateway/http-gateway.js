@@ -101,7 +101,12 @@ export function createGateway({
   const modelSet = new Set(allowedModels);
   const upstreamByAlias = new Map();
   for (const upstream of upstreams) {
-    const allowed = new Set(["alias", "endpoint", "getSecretHeaders"]);
+    const allowed = new Set([
+      "alias",
+      "endpoint",
+      "getSecretHeaders",
+      "transformRequest",
+    ]);
     for (const key of Object.keys(upstream)) {
       if (!allowed.has(key)) {
         throw new TypeError(`upstream contains unsupported field: ${key}`);
@@ -116,6 +121,12 @@ export function createGateway({
     }
     if (typeof upstream.getSecretHeaders !== "function") {
       throw new TypeError("upstream getSecretHeaders must be a function");
+    }
+    if (
+      upstream.transformRequest !== undefined &&
+      typeof upstream.transformRequest !== "function"
+    ) {
+      throw new TypeError("upstream transformRequest must be a function");
     }
     upstreamByAlias.set(upstream.alias, { ...upstream, endpoint });
   }
@@ -234,6 +245,9 @@ export function createGateway({
       let upstreamResponse;
       try {
         const secretHeaders = await upstream.getSecretHeaders();
+        const upstreamBody = upstream.transformRequest
+          ? await upstream.transformRequest(body)
+          : body;
         upstreamResponse = await fetchImpl(upstream.endpoint, {
           method: "POST",
           headers: {
@@ -241,7 +255,7 @@ export function createGateway({
             "content-type": "application/json",
             ...secretHeaders,
           },
-          body: JSON.stringify(body),
+          body: JSON.stringify(upstreamBody),
         });
       } catch {
         lease.cancel();

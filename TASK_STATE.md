@@ -10,15 +10,17 @@ Build and verify the provider-agnostic gateway foundation for a frontier coding 
 - Fresh session successfully recovered Active, Blocked, and Next Action with no file changes.
 - Defined the capability-first frontier-agent roadmap and gateway contract.
 - Implemented the organization-aware quota pool and authenticated streaming HTTP gateway.
-- Verified 15 offline tests and a clean diff check.
+- Implemented strict Gemini and Groq adapters with logical model mapping.
+- Verified heterogeneous Gemini-to-Groq failover using fake upstreams.
+- Verified 19 offline tests and a clean diff check.
 ## Active
-- Save the verified gateway foundation checkpoint.
+- Save the verified provider-adapter checkpoint.
 ## Blocked
 - Live provider adapters require explicit secret handling and spending approval.
 ## Next Action
-- Implement fake-tested Gemini and Groq provider adapters plus an environment-based launcher, without live provider traffic.
+- Implement an environment-based launcher with strict configuration validation, without live provider traffic.
 ## Evidence
 - “GROQ GPT OSS 120B READY”
-- `npm test --silent`: 15 passed, 0 failed.
+- `npm test --silent`: 19 passed, 0 failed.
 - `git diff --check` passed.
-- `GATEWAY_DESIGN.md`, `FRONTIER_AGENT_ROADMAP.md`, and `gateway/` contain the verified foundation.
+- `gateway/provider-adapters.js` maps the logical model to official OpenAI-compatible Gemini and Groq endpoints.

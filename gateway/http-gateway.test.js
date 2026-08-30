@@ -3,6 +3,7 @@ import { createServer } from "node:http";
 import test from "node:test";
 
 import { createGateway, estimateRequestTokens } from "./http-gateway.js";
+import { createGeminiUpstream, createGroqUpstream } from "./provider-adapters.js";
 
 const ACCESS_TOKEN = "local-test-access-token";
 const MODEL = "openai/gpt-oss-120b";
@@ -250,4 +251,60 @@ test("rejects excessive output before contacting an upstream", async (t) => {
   assert.equal(response.status, 400);
   assert.equal((await response.json()).error.type, "output_limit_exceeded");
   assert.equal(hits, 0);
+});
+
+test("heterogeneous failover applies each provider model mapping", async (t) => {
+  const geminiSecret = "gemini-secret-value";
+  const groqSecret = "groq-secret-value";
+  const first = await startFakeUpstream(async (req, res) => {
+    assert.equal(req.headers.authorization, `Bearer ${geminiSecret}`);
+    assert.equal((await requestBody(req)).model, "gemini-3.7-flash");
+    res.writeHead(429, { "retry-after": "10" });
+    res.end();
+  });
+  const second = await startFakeUpstream(async (req, res) => {
+    assert.equal(req.headers.authorization, `Bearer ${groqSecret}`);
+    assert.equal((await requestBody(req)).model, "openai/gpt-oss-120b");
+    res.writeHead(200, { "content-type": "application/json" });
+    res.end(JSON.stringify({ choices: [{ message: { content: "fallback-ok" } }] }));
+  });
+  t.after(first.close);
+  t.after(second.close);
+
+  const gateway = createGateway({
+    accessToken: ACCESS_TOKEN,
+    quotaLanes: [
+      {
+        alias: "gemini-a",
+        quotaGroup: "gemini-project-a",
+        provider: "gemini",
+        limits: { rpm: 1_000, tpm: 2_000_000, tpd: Infinity },
+      },
+      quotaLane("groq-a"),
+    ],
+    upstreams: [
+      createGeminiUpstream({
+        alias: "gemini-a",
+        getApiKey: () => geminiSecret,
+        endpoint: first.endpoint,
+      }),
+      createGroqUpstream({
+        alias: "groq-a",
+        getApiKey: () => groqSecret,
+        endpoint: second.endpoint,
+      }),
+    ],
+    allowedModels: ["frontier-code"],
+  });
+  t.after(() => gateway.close());
+  const url = await gateway.listen();
+
+  const response = await chatRequest(url, {
+    model: "frontier-code",
+    messages: [{ role: "user", content: "use fallback" }],
+    max_tokens: 128,
+  });
+  assert.equal(response.status, 200);
+  assert.equal(response.headers.get("x-gateway-lane"), "groq-a");
+  assert.equal((await response.json()).choices[0].message.content, "fallback-ok");
 });
