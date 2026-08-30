@@ -104,7 +104,7 @@ Groq-organization profile. Both contain configuration only; they contain no keys
 `npm run agent:start-claude` launches controlled Sonnet 5. `npm run
 agent:start-opus` is an explicit escalation path. `npm run agent:start-enhanced`
 requires one Anthropic key/workspace plus three separately authorized Groq keys.
-The default interactive run cap is 12 requests, 60,000 estimated tokens, and
+The default interactive run cap is 12 requests, 300,000 estimated tokens, and
 USD 0.20. `npm run claude:diagnose` and `npm run claude:diagnose-opus` each use
 one request with a USD 0.005 hard cap.
 

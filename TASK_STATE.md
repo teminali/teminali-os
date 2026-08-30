@@ -36,6 +36,11 @@ Antigravity Gemini 3.7 Flash Medium.
 - Added hard-capped Sonnet and Opus live diagnostic launchers.
 - Verified a live Opus 5 generation request through the controlled gateway: HTTP 200,
   28 prompt tokens, 32 completion tokens, and no fallback.
+- Verified live Sonnet 5 through the controlled gateway with the exact expected response.
+- Identified the first benchmark interruption as an artificial local 50K TPM
+  ceiling after two successful Claude tool turns, not a provider failure.
+- Raised only local Claude throughput/token-accounting ceilings for agentic turns;
+  retained the USD 0.20 benchmark cap, pinned Sonnet lane, and no-fallback policy.
 - Added a frozen, disposable Sonnet 5 versus Antigravity Gemini 3.7 Flash benchmark.
 - Added an oracle scorer, fixture-integrity checks, identical baseline preparation,
   and a 20-minute controlled-run policy.

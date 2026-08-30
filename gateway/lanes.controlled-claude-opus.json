@@ -10,8 +10,8 @@
     "limits": {
       "rpm": 3,
       "rpd": 100,
-      "tpm": 50000,
-      "tpd": 100000
+      "tpm": 400000,
+      "tpd": 1000000
     },
     "pricing": {
       "inputUsdPerMillion": "5",
