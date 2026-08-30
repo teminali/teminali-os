@@ -16,6 +16,20 @@
   "permission": {
     "skill": {
       "*": "deny"
+    },
+    "external_directory": "deny",
+    "bash": {
+      "*": "ask",
+      "npm test*": "allow",
+      "git status*": "allow",
+      "git diff*": "allow",
+      "git log*": "allow",
+      "git show*": "allow",
+      "rm *": "deny",
+      "git reset *": "deny",
+      "git clean *": "deny",
+      "git push*": "deny",
+      "npm publish*": "deny"
     }
   },
   "agent": {
