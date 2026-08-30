@@ -22,11 +22,14 @@ The gateway is a product prototype, not a mechanism for evading provider terms.
 1. OpenCode calls the gateway's `/v1/chat/completions` endpoint.
 2. The gateway authenticates the local caller.
 3. It selects an eligible credential with the most conservative available quota.
-4. It forwards the request without changing messages, tools, or reasoning options.
-5. It streams the upstream response transparently.
-6. On a pre-stream `429`, it records `retry-after`, cools down that credential,
+4. It reserves the request attempt, conservative input estimate, requested maximum
+   output, and worst-case USD cost against the process-scoped run budget.
+5. It forwards the request without changing messages, tools, or reasoning options.
+6. It streams the upstream response transparently.
+7. On a pre-stream `429`, it records `retry-after`, cools down that credential,
    and tries another eligible credential at most once.
-7. If none are eligible, it returns a clear `429` with the earliest safe retry time.
+8. If quota or run budget is unavailable, it returns a local `429` without
+   contacting another provider.
 
 ## Safety and security requirements
 
@@ -39,6 +42,8 @@ The gateway is a product prototype, not a mechanism for evading provider terms.
 - Keep credential state isolated; do not mix credentials between tenants.
 - Reject unsupported upstream hosts and models.
 - Bound request size, retry count, and request duration.
+- Require process-scoped maximum requests, estimated tokens, and USD before start.
+- Price output at its requested maximum, including reasoning/thinking tokens.
 - Preserve provider error codes and useful non-secret rate-limit metadata.
 
 ## Routing requirements
@@ -64,8 +69,11 @@ Run `npm run gateway:start` only after defining:
 - `GATEWAY_ACCESS_TOKEN`: local caller credential, at least 12 characters.
 - `GATEWAY_LANES_JSON`: a JSON array of explicitly authorized lanes. Each lane
   must contain `alias`, `provider`, `quotaGroup`, `apiKeyEnv`, `providerModel`,
-  and exact `limits` from that provider project or organization.
+  exact `limits` from that provider project or organization, and current
+  `pricing.inputUsdPerMillion` and `pricing.outputUsdPerMillion`.
 - The environment variable named by each lane's `apiKeyEnv`.
+- `GATEWAY_MAX_REQUESTS_PER_RUN`, `GATEWAY_MAX_TOKENS_PER_RUN`, and
+  `GATEWAY_MAX_USD_PER_RUN`.
 
 Optional controls are `GATEWAY_PINNED_ALIAS`, `GATEWAY_PORT`,
 `GATEWAY_LOGICAL_MODEL`, `GATEWAY_MAX_ATTEMPTS`,
@@ -76,6 +84,10 @@ not serialize provider keys or the local access token. Configuration names the
 environment variables holding credentials; credential values never belong in
 `GATEWAY_LANES_JSON`, files, logs, metrics, or commits.
 
+Run budgets reset only when the gateway process restarts. Request attempts are
+never refunded. Pre-stream failures release their estimated token and USD
+reservation, while completed upstream responses commit the conservative estimate.
+
 ## Acceptance criteria
 
 - Works with streaming and non-streaming OpenAI chat-completion requests.
@@ -83,6 +95,7 @@ environment variables holding credentials; credential values never belong in
 - A fake-upstream test proves a `429` fails over to a second authorized credential.
 - A test proves secrets never appear in logs or responses.
 - A test proves exhausted credentials produce a bounded local `429`.
+- A test proves an exhausted run budget contacts no upstream.
 - Controlled mode never uses more than its pinned credential.
 - `npm test` passes without contacting Groq or any external service.
 

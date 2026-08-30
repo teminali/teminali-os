@@ -1,4 +1,5 @@
 import { createGeminiUpstream, createGroqUpstream } from "./provider-adapters.js";
+import { normalizePricing, parseUsdMicros } from "./run-budget.js";
 
 const LANE_FIELDS = new Set([
   "alias",
@@ -7,6 +8,7 @@ const LANE_FIELDS = new Set([
   "apiKeyEnv",
   "providerModel",
   "limits",
+  "pricing",
 ]);
 const LIMIT_FIELDS = new Set(["rpm", "rpd", "tpm", "tpd"]);
 const ENV_NAME = /^[A-Z][A-Z0-9_]*$/;
@@ -86,6 +88,11 @@ function normalizeLane(lane, index, env, logicalModel) {
         ? Infinity
         : positiveInteger(lane.limits.tpd, `lane ${index}.limits.tpd`),
   };
+  const pricing = {
+    inputUsdPerMillion: lane.pricing?.inputUsdPerMillion,
+    outputUsdPerMillion: lane.pricing?.outputUsdPerMillion,
+  };
+  normalizePricing(pricing, `lane ${index}.pricing`);
 
   const adapterOptions = {
     alias,
@@ -100,7 +107,8 @@ function normalizeLane(lane, index, env, logicalModel) {
   return {
     lane: { alias, quotaGroup, provider, limits },
     upstream,
-    safe: { alias, quotaGroup, provider, providerModel, limits },
+    pricing,
+    safe: { alias, quotaGroup, provider, providerModel, limits, pricing },
   };
 }
 
@@ -145,6 +153,26 @@ export function loadRuntimeConfig(env = process.env) {
     2,
   );
   if (maxAttempts > 2) throw new TypeError("GATEWAY_MAX_ATTEMPTS must be one or two");
+  const maxRequests = positiveInteger(
+    env.GATEWAY_MAX_REQUESTS_PER_RUN,
+    "GATEWAY_MAX_REQUESTS_PER_RUN",
+  );
+  const maxTokens = positiveInteger(
+    env.GATEWAY_MAX_TOKENS_PER_RUN,
+    "GATEWAY_MAX_TOKENS_PER_RUN",
+  );
+  const maxUsdMicros = parseUsdMicros(
+    env.GATEWAY_MAX_USD_PER_RUN,
+    "GATEWAY_MAX_USD_PER_RUN",
+  );
+  if (maxUsdMicros <= 0) {
+    throw new TypeError("GATEWAY_MAX_USD_PER_RUN must be greater than zero");
+  }
+  const runBudgetLimits = Object.freeze({
+    maxRequests,
+    maxTokens,
+    maxUsdMicros,
+  });
 
   const safeSummary = Object.freeze({
     host: "127.0.0.1",
@@ -156,6 +184,7 @@ export function loadRuntimeConfig(env = process.env) {
     maxAttempts,
     maxOutputTokens,
     defaultOutputTokens,
+    runBudget: runBudgetLimits,
   });
 
   return Object.freeze({
@@ -171,6 +200,10 @@ export function loadRuntimeConfig(env = process.env) {
         maxAttempts,
         maxOutputTokens,
         defaultOutputTokens,
+        runBudgetLimits,
+        pricingByAlias: Object.fromEntries(
+          lanes.map(({ lane, pricing }) => [lane.alias, pricing]),
+        ),
       });
     },
   });

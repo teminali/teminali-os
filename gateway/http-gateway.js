@@ -4,6 +4,11 @@ import { Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
 
 import { QuotaPool, QuotaUnavailableError } from "./quota-pool.js";
+import {
+  BudgetExceededError,
+  normalizePricing,
+  RunBudget,
+} from "./run-budget.js";
 
 class RequestTooLargeError extends Error {}
 
@@ -61,14 +66,22 @@ function responseHeaders(upstream, lane, retryAfterMs) {
 }
 
 export function estimateRequestTokens(body, defaultOutputTokens = 1_024) {
+  return estimateRequestUsage(body, defaultOutputTokens).totalTokens;
+}
+
+export function estimateRequestUsage(body, defaultOutputTokens = 1_024) {
   const serialized = JSON.stringify(body);
-  const estimatedInput = Math.max(1, Math.ceil(Buffer.byteLength(serialized) / 3));
-  const requestedOutput =
+  const inputTokens = Math.max(1, Math.ceil(Buffer.byteLength(serialized) / 3));
+  const outputTokens =
     body.max_completion_tokens ?? body.max_tokens ?? defaultOutputTokens;
-  if (!Number.isInteger(requestedOutput) || requestedOutput <= 0) {
+  if (!Number.isInteger(outputTokens) || outputTokens <= 0) {
     throw new TypeError("max output tokens must be a positive integer");
   }
-  return estimatedInput + requestedOutput;
+  return Object.freeze({
+    inputTokens,
+    outputTokens,
+    totalTokens: inputTokens + outputTokens,
+  });
 }
 
 export function createGateway({
@@ -81,6 +94,8 @@ export function createGateway({
   maxRequestBytes = 1_048_576,
   maxOutputTokens = 4_096,
   defaultOutputTokens = 1_024,
+  runBudgetLimits,
+  pricingByAlias,
   clock = Date.now,
   fetchImpl = fetch,
   logger = () => {},
@@ -137,6 +152,38 @@ export function createGateway({
   }
 
   const quotaPool = new QuotaPool({ lanes: quotaLanes, clock });
+  let runBudget = null;
+  const pricingByLane = new Map();
+  if (runBudgetLimits !== undefined || pricingByAlias !== undefined) {
+    if (runBudgetLimits === undefined || pricingByAlias === undefined) {
+      throw new TypeError("runBudgetLimits and pricingByAlias must be configured together");
+    }
+    if (
+      pricingByAlias === null ||
+      typeof pricingByAlias !== "object" ||
+      Array.isArray(pricingByAlias)
+    ) {
+      throw new TypeError("pricingByAlias must be an object");
+    }
+    runBudget = new RunBudget(runBudgetLimits);
+    const pricingAliases = new Set(Object.keys(pricingByAlias));
+    for (const lane of quotaLanes) {
+      if (!pricingAliases.has(lane.alias)) {
+        throw new TypeError(`missing pricing for quota lane: ${lane.alias}`);
+      }
+    }
+    for (const alias of pricingAliases) {
+      if (!upstreamByAlias.has(alias)) {
+        throw new TypeError(`pricing configured for unknown lane: ${alias}`);
+      }
+      const pricing = Object.freeze({
+        inputUsdPerMillion: pricingByAlias[alias]?.inputUsdPerMillion,
+        outputUsdPerMillion: pricingByAlias[alias]?.outputUsdPerMillion,
+      });
+      normalizePricing(pricing, `pricingByAlias.${alias}`);
+      pricingByLane.set(alias, pricing);
+    }
+  }
   const metrics = {
     requests: 0,
     completed: 0,
@@ -146,6 +193,7 @@ export function createGateway({
     upstreamRateLimits: 0,
     upstreamErrors: 0,
     failovers: 0,
+    budgetRejections: 0,
   };
 
   const emit = (event, fields = {}) => logger({ event, ...fields });
@@ -165,7 +213,11 @@ export function createGateway({
     }
 
     if (req.method === "GET" && url.pathname === "/metrics") {
-      json(res, 200, { ...metrics, quotas: quotaPool.snapshot() });
+      json(res, 200, {
+        ...metrics,
+        quotas: quotaPool.snapshot(),
+        budget: runBudget?.snapshot() ?? null,
+      });
       return;
     }
 
@@ -208,7 +260,8 @@ export function createGateway({
       return;
     }
 
-    const estimatedTokens = estimateRequestTokens(body, defaultOutputTokens);
+    const estimatedUsage = estimateRequestUsage(body, defaultOutputTokens);
+    const estimatedTokens = estimatedUsage.totalTokens;
     let lastRetryAfterMs = 60_000;
 
     for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
@@ -234,6 +287,48 @@ export function createGateway({
       }
 
       const upstream = upstreamByAlias.get(lease.alias);
+      let upstreamBody;
+      let secretHeaders;
+      try {
+        secretHeaders = await upstream.getSecretHeaders();
+        upstreamBody = upstream.transformRequest
+          ? await upstream.transformRequest(body)
+          : body;
+      } catch {
+        lease.cancel();
+        metrics.upstreamErrors += 1;
+        emit("upstream_configuration_error", {
+          lane: lease.alias,
+          provider: lease.provider,
+          attempt,
+        });
+        json(res, 502, { error: { type: "upstream_error", message: "Upstream unavailable" } });
+        return;
+      }
+
+      let budgetLease;
+      try {
+        budgetLease = runBudget?.reserve({
+          inputTokens: estimatedUsage.inputTokens,
+          outputTokens: estimatedUsage.outputTokens,
+          pricing: pricingByLane.get(lease.alias),
+        });
+      } catch (error) {
+        lease.cancel();
+        if (!(error instanceof BudgetExceededError)) throw error;
+        metrics.budgetRejections += 1;
+        emit("budget_rejection", { reason: error.reason, lane: lease.alias });
+        json(res, 429, {
+          error: {
+            type: "gateway_budget_exhausted",
+            message: "Run budget exhausted",
+            reason: error.reason,
+          },
+          budget: runBudget.snapshot(),
+        });
+        return;
+      }
+
       metrics.upstreamAttempts += 1;
       emit("upstream_attempt", {
         lane: lease.alias,
@@ -244,10 +339,6 @@ export function createGateway({
 
       let upstreamResponse;
       try {
-        const secretHeaders = await upstream.getSecretHeaders();
-        const upstreamBody = upstream.transformRequest
-          ? await upstream.transformRequest(body)
-          : body;
         upstreamResponse = await fetchImpl(upstream.endpoint, {
           method: "POST",
           headers: {
@@ -259,6 +350,7 @@ export function createGateway({
         });
       } catch {
         lease.cancel();
+        budgetLease?.releaseUsage();
         metrics.upstreamErrors += 1;
         emit("upstream_error", { lane: lease.alias, provider: lease.provider, attempt });
         json(res, 502, { error: { type: "upstream_error", message: "Upstream unavailable" } });
@@ -268,6 +360,7 @@ export function createGateway({
       if (upstreamResponse.status === 429) {
         lastRetryAfterMs = parseRetryAfter(upstreamResponse.headers.get("retry-after"));
         lease.rateLimited(lastRetryAfterMs);
+        budgetLease?.releaseUsage();
         metrics.upstreamRateLimits += 1;
         emit("upstream_rate_limit", {
           lane: lease.alias,
@@ -296,6 +389,7 @@ export function createGateway({
       }
 
       lease.commit(estimatedTokens);
+      budgetLease?.commit();
       metrics.completed += 1;
       emit("upstream_response", {
         lane: lease.alias,

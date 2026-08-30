@@ -308,3 +308,49 @@ test("heterogeneous failover applies each provider model mapping", async (t) => 
   assert.equal(response.headers.get("x-gateway-lane"), "groq-a");
   assert.equal((await response.json()).choices[0].message.content, "fallback-ok");
 });
+
+test("hard run budget rejects locally before contacting an upstream", async (t) => {
+  let hits = 0;
+  const upstream = await startFakeUpstream((_req, res) => {
+    hits += 1;
+    res.end();
+  });
+  t.after(upstream.close);
+  const gateway = createGateway({
+    accessToken: ACCESS_TOKEN,
+    quotaLanes: [quotaLane("groq-a")],
+    upstreams: [
+      createGroqUpstream({
+        alias: "groq-a",
+        getApiKey: () => "groq-secret-value",
+        endpoint: upstream.endpoint,
+      }),
+    ],
+    allowedModels: ["frontier-code"],
+    runBudgetLimits: {
+      maxRequests: 10,
+      maxTokens: 10_000,
+      maxUsdMicros: 1,
+    },
+    pricingByAlias: {
+      "groq-a": {
+        inputUsdPerMillion: "0.15",
+        outputUsdPerMillion: "0.60",
+      },
+    },
+  });
+  t.after(() => gateway.close());
+  const url = await gateway.listen();
+
+  const response = await chatRequest(url, {
+    model: "frontier-code",
+    messages: [{ role: "user", content: "must remain local" }],
+    max_tokens: 128,
+  });
+  assert.equal(response.status, 429);
+  const payload = await response.json();
+  assert.equal(payload.error.type, "gateway_budget_exhausted");
+  assert.equal(payload.error.reason, "usd");
+  assert.equal(payload.budget.requests, 0);
+  assert.equal(hits, 0);
+});

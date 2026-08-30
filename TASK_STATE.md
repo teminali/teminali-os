@@ -14,16 +14,18 @@ Build and verify the provider-agnostic gateway foundation for a frontier coding 
 - Verified heterogeneous Gemini-to-Groq failover using fake upstreams.
 - Implemented a strict local-only environment launcher with redacted startup output.
 - Added requests-per-day enforcement alongside RPM, TPM, and daily-token limits.
-- Verified 24 offline tests and a clean diff check.
+- Implemented process-scoped request, estimated-token, and integer micro-USD guards.
+- Required explicit per-lane pricing and verified local rejection before dispatch.
+- Verified 30 offline tests and a clean diff check.
 ## Active
-- Save the verified runtime-launcher checkpoint.
+- Save the verified hard-budget checkpoint.
 ## Blocked
-- Live provider traffic requires hard request, token, and spending budgets plus explicit approval.
+- Live provider traffic still requires explicit user approval and interactive secret setup.
 ## Next Action
-- Implement hard per-run request, token, and USD budget guards with offline tests.
+- Implement a bounded upstream timeout with abort and offline failure-path tests.
 ## Evidence
 - “GROQ GPT OSS 120B READY”
-- `npm test --silent`: 24 passed, 0 failed.
+- `npm test --silent`: 30 passed, 0 failed.
 - `git diff --check` passed.
-- `gateway/runtime-config.js` rejects implicit quotas, endpoint overrides, and unavailable credential variables.
-- `gateway/start-gateway.js` starts only on loopback and prints a non-secret summary.
+- `gateway/run-budget.js` uses conservative reservations and integer micro-dollar accounting.
+- The hard-budget integration test records zero upstream hits after USD exhaustion.
