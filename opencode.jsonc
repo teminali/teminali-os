@@ -7,7 +7,7 @@
         "openai/gpt-oss-120b": {
           "limit": {
             "context": 131072,
-            "output": 512
+            "output": 1024
           }
         }
       }
