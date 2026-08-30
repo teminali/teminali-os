@@ -20,6 +20,11 @@
     "gemini:diagnose-direct": "zsh scripts/diagnose-gemini-direct.zsh",
     "gateway:start": "node gateway/start-gateway.js",
     "test": "node --test calculator.test.js gateway/*.test.js",
-    "benchmark:003:score": "node benchmarks/website-builder-saas-launch-003/oracle/score.mjs"
+    "benchmark:003:score": "node benchmarks/website-builder-saas-launch-003/oracle/score.mjs",
+    "frontier": "node bin/frontier.js"
+  },
+  "bin": {
+    "frontier": "./bin/frontier.js",
+    "frontier-code": "./bin/frontier.js"
   }
 }
