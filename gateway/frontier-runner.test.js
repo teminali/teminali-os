@@ -24,7 +24,7 @@ test("PROFILES has valid configuration profiles", () => {
   assert.ok(PROFILES.auto);
   assert.ok(PROFILES["claude-sonnet"]);
   assert.ok(PROFILES["claude-opus"]);
-  assert.equal(PROFILES.local.pinnedAlias, "ollama-devstral-local");
+  assert.equal(PROFILES.local.pinnedAlias, "ollama-devstral");
 });
 
 test("findOpenCodeBinary discovers opencode executable", () => {

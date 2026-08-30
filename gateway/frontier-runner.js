@@ -16,7 +16,7 @@ export const PROFILES = Object.freeze({
   local: {
     label: "Local-First Devstral 24B ($0 / token)",
     lanesFile: "gateway/lanes.controlled-devstral.json",
-    pinnedAlias: "ollama-devstral-local",
+    pinnedAlias: "ollama-devstral",
     configFile: "opencode.gateway.jsonc",
     needsKeys: [],
   },
