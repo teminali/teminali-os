@@ -1,0 +1,72 @@
+{
+  "schema_version": 1,
+  "benchmark": "frontier-code-agents-002-keyed-delivery-dispatcher",
+  "comparison_type": "coding-agent configuration comparison",
+  "preregistered_on": "2026-08-30",
+  "candidates": [
+    {
+      "runner": "codex-1",
+      "product": "Codex",
+      "model": "GPT-5.6 Sol",
+      "reasoning": "Ultra"
+    },
+    {
+      "runner": "antigravity-1",
+      "product": "Antigravity",
+      "model": "Gemini 3.7 Flash",
+      "reasoning": "Medium"
+    }
+  ],
+  "run_order": [
+    "codex-1",
+    "antigravity-1"
+  ],
+  "runs_per_candidate": 1,
+  "time_limit_seconds_per_run": 900,
+  "prompt_submissions_per_run": 1,
+  "network_allowed": false,
+  "fallback_allowed": false,
+  "external_helpers_allowed": false,
+  "oracle_visible_to_candidates": false,
+  "direct_paid_api_or_upgrade_allowed": false,
+  "allowed_changes": [
+    "src/idempotency-registry.js",
+    "src/keyed-queue.js",
+    "src/reliable-dispatcher.js"
+  ],
+  "eligibility": {
+    "baseline_head_must_match": true,
+    "only_allowlisted_paths_may_change": true,
+    "frozen_fixture_hashes_must_match": true,
+    "complete_monotonic_timing_required": true,
+    "time_limit_must_not_be_exceeded": true,
+    "ineligible_score": 0
+  },
+  "scoring": {
+    "visible_suite": 20,
+    "duplicate_coalescing_and_replay": 10,
+    "terminal_failure_recovery": 10,
+    "same_key_fifo_settlement_race": 10,
+    "retrying_head_order": 10,
+    "cross_key_work_conservation": 10,
+    "global_concurrency_bound": 10,
+    "retry_policy_and_exhaustion": 10,
+    "scheduler_cleanup": 10,
+    "total": 100,
+    "manual_points": 0
+  },
+  "tie_breakers": [
+    "higher automated score",
+    "lower active wall-clock time",
+    "lower complete comparable raw token use",
+    "lower complete comparable actual incremental cost",
+    "otherwise tie"
+  ],
+  "permitted_operator_actions": [
+    "launch clean session",
+    "start and stop supplied timer",
+    "submit exact frozen prompt once",
+    "one uniform accept-all action if required"
+  ],
+  "replication_policy": "Run two fresh repetitions per candidate only if the fast comparison is tied, unstable, or used for a broader product claim."
+}

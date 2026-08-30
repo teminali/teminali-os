@@ -58,15 +58,26 @@ while preserving secure Claude, Gemini, and Groq routing in the isolated lab.
   while Antigravity completed much faster (79 seconds versus 289 seconds).
 - Archived the exact scores, methodology caveats, reports, telemetry, and three
   production patches under the benchmark `results` directory.
+- Pre-registered benchmark 002 as a fast, frozen comparison of Codex GPT-5.6
+  Sol Ultra and Antigravity Gemini 3.7 Flash Medium on a deterministic
+  three-module keyed delivery dispatcher repair.
+- Removed manual-report points and line-churn tie-breaking from benchmark 002;
+  its primary score is 100% automated with strict scope and fixture eligibility
+  gates, monotonic timing, frozen hashes, no fallback, and no external help.
+- Limited the fast comparison to one clean 15-minute run per configuration;
+  replication is reserved for a tied, unstable, or broader product claim.
+- Verified the benchmark 002 seed passes all five visible tests while scoring
+  60/100 against the hidden oracle, and verified an independent allowlisted
+  repair scores 100/100.
 ## Active
-- Design and pre-register benchmark 002 before running any candidate.
+- Execute benchmark 002 without inspecting either result until both candidate
+  workspaces are final.
 ## Blocked
 - Direct Gemini API calls remain blocked by depleted project prepayment credits;
   Antigravity model access is unaffected.
 ## Next Action
-- Freeze a harder multi-file benchmark 002 with an independent oracle and
-  pre-register Codex GPT-5.6 Sol Ultra versus Antigravity Gemini 3.7 Flash
-  Medium before either model sees the task.
+- Prepare the two frozen benchmark 002 workspaces, then run `codex-1` in a clean
+  GPT-5.6 Sol Ultra context before opening the Antigravity workspace.
 ## Evidence
 - “GROQ GPT OSS 120B READY”
 - `npm test --silent`: 33 passed, 0 failed.
@@ -88,3 +99,5 @@ while preserving secure Claude, Gemini, and Groq routing in the isolated lab.
   distinguishes the intended defects.
 - `benchmarks/sonnet5-vs-antigravity-gemini37/results/001-summary.md` records the
   completed three-candidate evidence and benchmark-integrity caveats.
+- Benchmark 002 validation: visible seed 5/5; baseline hidden 40/80 and total
+  60/100; independent repaired fixture hidden 80/80 and total 100/100.
