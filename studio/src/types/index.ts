@@ -82,6 +82,7 @@ export interface ToolCall {
 }
 
 export interface ChatMessage {
+  images?: string[];
   id: string;
   role: "user" | "assistant" | "system";
   content: string;

@@ -39,7 +39,7 @@ export function createConfig(environment = process.env, overrides = {}) {
     mcpUrl: loopbackUrl(environment.TEMINALI_CUT_MCP_URL || environment.KERF_MCP_URL, "http://127.0.0.1:3888", "TEMINALI_CUT_MCP_URL"),
     anthropicUrl: new URL("https://api.anthropic.com"),
     anthropicApiKey: environment.ANTHROPIC_API_KEY || "",
-    requestTimeoutMs: positiveInteger(environment.FRONTIER_REQUEST_TIMEOUT_MS, 120_000),
+    requestTimeoutMs: positiveInteger(environment.FRONTIER_REQUEST_TIMEOUT_MS, 600_000),
     healthTimeoutMs: positiveInteger(environment.FRONTIER_HEALTH_TIMEOUT_MS, 1_500),
     maxJsonBytes: positiveInteger(environment.FRONTIER_MAX_JSON_BYTES, 1024 * 1024),
     maxOllamaJsonBytes: positiveInteger(environment.FRONTIER_MAX_OLLAMA_JSON_BYTES, 8 * 1024 * 1024),

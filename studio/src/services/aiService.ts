@@ -339,10 +339,16 @@ CRITICAL VISUAL DESIGN RULES:
     const cancelFromCaller = () => controller.abort(externalSignal?.reason);
     if (externalSignal?.aborted) cancelFromCaller();
     else externalSignal?.addEventListener("abort", cancelFromCaller, { once: true });
-    const timeout = window.setTimeout(() => {
-      timedOut = true;
-      controller.abort();
-    }, 120_000);
+    let watchdogTimer: number | null = null;
+    const resetWatchdog = (timeoutMs = 90_000) => {
+      if (watchdogTimer !== null) window.clearTimeout(watchdogTimer);
+      watchdogTimer = window.setTimeout(() => {
+        timedOut = true;
+        controller.abort();
+      }, timeoutMs);
+    };
+    // Allow up to 3 minutes for initial model loading & prompt evaluation
+    resetWatchdog(180_000);
     try {
       const response = await GatewayClient.request("/api/ollama/chat", {
         method: "POST",
@@ -369,6 +375,7 @@ CRITICAL VISUAL DESIGN RULES:
           if (firstTokenAt === null) firstTokenAt = performance.now();
           accumulated += chunk.message.content;
           callbacks.onToken(chunk.message.content);
+          resetWatchdog(90_000);
         }
         if (chunk.done) finalChunk = chunk;
       };
@@ -389,11 +396,11 @@ CRITICAL VISUAL DESIGN RULES:
         if (externalSignal?.aborted && !timedOut) {
           throw new GatewayError("Generation stopped by the user.", "INFERENCE_CANCELLED", 499);
         }
-        throw new GatewayError("Local inference exceeded the 120-second request budget and was cancelled.", "INFERENCE_TIMEOUT", 504);
+        throw new GatewayError("Local inference stream paused after extended inactivity. You can tap retry to continue.", "INFERENCE_TIMEOUT", 504);
       }
       throw error;
     } finally {
-      window.clearTimeout(timeout);
+      if (watchdogTimer !== null) window.clearTimeout(watchdogTimer);
       externalSignal?.removeEventListener("abort", cancelFromCaller);
     }
 

@@ -4,7 +4,6 @@ import {
   ChevronRight,
   Brain,
   Search,
-  FileCode,
   CheckCircle2,
   Loader2,
   Sparkles,
@@ -25,56 +24,57 @@ export const CursorStreamingSteps: React.FC<{
   introText?: string;
 }> = ({
   steps = [],
-  elapsedSeconds = 12,
+  elapsedSeconds = 0,
   isStreaming = false,
-  introText = "I'll explore the repository structure and key docs to give you a clear project overview.",
+  introText,
 }) => {
-  const [isOpen, setIsOpen] = useState(true);
+  // Streaming: open by default if requested; Finished: closed by default to avoid clutter
+  const [isOpen, setIsOpen] = useState(isStreaming);
+
+  // If not streaming and no elapsed time, return null
+  if (!isStreaming && elapsedSeconds <= 0 && !introText) return null;
 
   return (
-    <div className="my-3 font-sans text-xs select-none space-y-2">
-      {/* Collapsible Worked Summary Pill */}
+    <div className="my-2 font-sans text-xs select-none space-y-1.5">
+      {/* Collapsible Header */}
       <button
         type="button"
         onClick={() => setIsOpen((prev) => !prev)}
-        className="flex items-center gap-1.5 text-gray-400 hover:text-gray-200 transition-colors font-medium py-1"
+        className="flex items-center gap-1.5 text-xs text-gray-400 hover:text-gray-200 transition-colors font-medium py-1 px-2 rounded-lg hover:bg-white/5"
       >
-        <span>Worked for {elapsedSeconds}s</span>
-        {isOpen ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
+        {isStreaming ? (
+          <div className="flex items-center gap-1.5 text-[#38bdf8]">
+            <Loader2 size={12} className="animate-spin" />
+            <span className="font-semibold font-mono">Thinking · {elapsedSeconds}s</span>
+          </div>
+        ) : (
+          <div className="flex items-center gap-1.5 text-gray-400">
+            <Sparkles size={12} className="text-[#38bdf8]" />
+            <span>Worked for {elapsedSeconds > 0 ? `${elapsedSeconds}s` : "a few seconds"}</span>
+          </div>
+        )}
+        {isOpen ? <ChevronDown size={12} className="text-gray-500" /> : <ChevronRight size={12} className="text-gray-500" />}
       </button>
 
-      {/* Expanded Steps List */}
+      {/* Expanded Details */}
       {isOpen && (
-        <div className="pl-1 space-y-2 border-l border-white/5 ml-1 py-1 text-gray-400">
-          {/* Thought line */}
-          <div className="flex items-center gap-2 pl-3">
-            <span className="font-medium text-gray-300">Thought</span>
-            <span className="text-gray-500">briefly</span>
-          </div>
-
-          {/* Intro text */}
+        <div className="pl-3 py-1 space-y-1.5 border-l border-white/10 ml-3 text-xs text-gray-400 bg-white/[0.02] rounded-r-lg p-2">
           {introText && (
-            <div className="pl-3 text-gray-300 leading-relaxed font-normal">
+            <div className="text-gray-300 leading-relaxed font-normal text-xs">
               {introText}
             </div>
           )}
 
-          {/* Dynamic Exploration & Planning Steps */}
-          <div className="pl-3 space-y-1.5">
-            <div className="flex items-center gap-2 text-gray-400">
-              <Search size={13} className="text-gray-500" />
-              <span>Explored 15 files, 7 searches</span>
-            </div>
-
+          <div className="space-y-1">
             {isStreaming ? (
-              <div className="flex items-center gap-2 text-[#38bdf8] animate-pulse">
-                <Loader2 size={13} className="animate-spin" />
-                <span>Planning next moves...</span>
+              <div className="flex items-center gap-2 text-[#38bdf8] text-xs">
+                <Loader2 size={11} className="animate-spin" />
+                <span>Generating code and verifying components...</span>
               </div>
             ) : (
-              <div className="flex items-center gap-2 text-gray-500">
-                <CheckCircle2 size={13} className="text-[#22c55e]" />
-                <span>Completed initial planning</span>
+              <div className="flex items-center gap-1.5 text-gray-400 text-3xs font-mono">
+                <CheckCircle2 size={11} className="text-emerald-400" />
+                <span>Generation finished</span>
               </div>
             )}
           </div>
