@@ -24,6 +24,7 @@ import {
 import { useStudioStore, ChatSession } from "../../store/studioStore";
 import { WorkspaceService } from "../../services/workspaceService";
 import { FileIcon } from "../sidebar/FileTree";
+import { SegmentedTabs, Badge } from "../ui";
 import type { FileItem } from "../../types";
 
 type FilterTab = "all" | "agents" | "files" | "actions" | "settings";
