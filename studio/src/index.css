@@ -341,54 +341,18 @@ body { background: #07090c; }
 .copilot-live-edit-line { background: linear-gradient(90deg,rgba(48,208,171,.16),rgba(48,208,171,.035)) !important; box-shadow: inset 2px 0 #41d8b3; }
 @keyframes live-edit-pulse { 0%,100% { opacity: .5; transform: scale(.8); } 50% { opacity: 1; transform: scale(1.15); } }
 
-.editor-area > .preview-surface { flex: 1 1 auto; min-height: 0; }
-.preview-surface { display: flex; flex-direction: column; overflow: hidden; background: #080c11; }
-.preview-toolbar { min-height: 45px; display: flex; align-items: center; gap: 12px; padding: 6px 10px; border-bottom: 1px solid #26313c; background: linear-gradient(180deg,#17202a,#11171e); }
-.preview-live-edit { height: 29px; display: flex; align-items: center; gap: 7px; padding: 2px 3px 2px 8px; border: 1px solid rgba(63,216,182,.35); border-radius: 7px; background: rgba(31,139,117,.12); color: #9bf4d6; font-size: 10px; white-space: nowrap; }
-.preview-live-edit span, .preview-live-edit button { display: flex; align-items: center; gap: 5px; }
-.preview-live-edit i { width: 6px; height: 6px; border-radius: 999px; background: #4be0b1; box-shadow: 0 0 9px rgba(75,224,177,.9); animation: live-edit-pulse 1.2s ease-in-out infinite; }
-.preview-live-edit button { height: 22px; padding: 0 6px; border-radius: 5px; background: rgba(234,102,87,.15); color: #ffb4a8; }
-.preview-surface-switch { display: flex; flex: 0 0 auto; gap: 2px; padding: 2px; border: 1px solid #33414e; border-radius: 8px; background: #0b1015; }
-.preview-surface-switch button { height: 27px; display: flex; align-items: center; gap: 6px; padding: 0 9px; border-radius: 6px; background: transparent; color: #8798a8; font-size: 11px; }
-.preview-surface-switch button.active { background: #203342; color: #dff7ff; box-shadow: inset 0 0 0 1px rgba(74,190,230,.2); }
-.preview-file-meta { min-width: 0; display: flex; align-items: center; gap: 8px; margin-left: auto; color: #8b9cac; }
-.preview-file-meta strong { max-width: 260px; overflow: hidden; color: #dbe5ee; font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
-.preview-file-meta span { font-size: 10px; }
-.preview-file-meta button, .browser-controls > button, .browser-controls > a { width: 29px; height: 29px; display: grid; flex: 0 0 auto; place-items: center; border: 1px solid #33414e; border-radius: 7px; background: #10171e; color: #9eb0c1; }
-.preview-file-meta button:hover, .browser-controls > button:hover, .browser-controls > a:hover { color: #fff; border-color: #4d6275; }
-.preview-file-meta button:disabled, .browser-controls > button:disabled { cursor: not-allowed; opacity: .35; }
-.preview-canvas { position: relative; min-height: 0; flex: 1; overflow: auto; background: radial-gradient(circle at 50% 15%, rgba(29,74,101,.11), transparent 35%), #06090d; }
-.document-preview, .browser-frame { width: 100%; height: 100%; display: block; border: 0; background: #fff; }
-.text-file-preview { min-height: 100%; margin: 0; padding: 24px; overflow: auto; color: #c7d3dd; font: 12px/1.65 ui-monospace, SFMono-Regular, Menlo, monospace; white-space: pre-wrap; overflow-wrap: anywhere; }
-.preview-error { color: #dca2a2; }
-.preview-error a { color: #66d7f6; }
-.browser-controls { min-width: 0; flex: 1; display: flex; align-items: center; gap: 5px; }
-.browser-controls form { min-width: 120px; height: 30px; display: flex; flex: 1; align-items: center; gap: 7px; padding-left: 9px; border: 1px solid #354553; border-radius: 8px; background: #090e13; color: #74899d; }
-.browser-controls input { min-width: 0; flex: 1; border: 0; outline: 0; background: transparent; color: #dce6ee; font: 11px ui-monospace, SFMono-Regular, Menlo, monospace; }
-.browser-controls form button { align-self: stretch; padding: 0 10px; border-left: 1px solid #354553; background: #152330; color: #8bdcf4; font-size: 10px; }
-.browser-error { position: absolute; z-index: 3; top: 10px; left: 50%; transform: translateX(-50%); padding: 7px 10px; border: 1px solid rgba(231,105,105,.4); border-radius: 7px; background: rgba(57,21,25,.95); color: #f2b1b1; font-size: 11px; }
-.browser-frame-note { position: absolute; right: 10px; bottom: 8px; padding: 5px 8px; border: 1px solid rgba(63,80,96,.6); border-radius: 6px; background: rgba(9,14,19,.86); color: #718396; font-size: 9px; pointer-events: none; }
-.sheet-preview { min-width: 0; height: 100%; display: flex; flex-direction: column; }
-.sheet-caption { min-height: 40px; display: flex; align-items: center; gap: 10px; padding: 0 12px; border-bottom: 1px solid #283440; background: #10161d; }
-.sheet-caption strong { color: #e4ecf3; font-size: 11px; }
-.sheet-caption span { color: #75889a; font-size: 10px; }
-.sheet-scroll { flex: 1; overflow: auto; }
-.sheet-scroll table { border-collapse: collapse; min-width: 100%; background: #0a0e13; color: #c2cdd7; font: 11px ui-monospace, SFMono-Regular, Menlo, monospace; }
-.sheet-scroll th, .sheet-scroll td { min-width: 92px; max-width: 280px; height: 27px; overflow: hidden; padding: 4px 7px; border: 1px solid #27323d; text-align: left; text-overflow: ellipsis; white-space: nowrap; }
-.sheet-scroll th { position: sticky; left: 0; z-index: 2; min-width: 42px; width: 42px; background: #151d25; color: #6f8396; text-align: right; }
-.sheet-scroll tr:first-child td { background: #121b23; color: #e5edf4; font-weight: 600; }
 
-@media (max-width: 899px) {
-  .workspace-readonly-badge { display: none; }
-  .preview-file-meta span { display: none; }
-}
-@media (max-width: 620px) {
-  .preview-toolbar { align-items: stretch; flex-direction: column; gap: 5px; }
-  .preview-surface-switch { align-self: flex-start; }
-  .preview-file-meta { width: 100%; margin-left: 0; }
-  .browser-controls { width: 100%; }
-  .browser-frame-note { display: none; }
-}
+/* Modern Obsidian Preview Styles */
+.sheet-preview { min-width: 0; height: 100%; display: flex; flex-direction: column; background: #08090E; }
+.sheet-caption { min-height: 38px; display: flex; align-items: center; gap: 10px; padding: 0 14px; border-bottom: 1px solid rgba(255,255,255,0.06); background: #0e1017; }
+.sheet-caption strong { color: #e2e8f0; font-size: 11px; }
+.sheet-caption span { color: #64748b; font-size: 10px; font-family: ui-monospace, monospace; }
+.sheet-scroll { flex: 1; overflow: auto; }
+.sheet-scroll table { border-collapse: collapse; min-width: 100%; background: #08090E; color: #cbd5e1; font: 11px ui-monospace, monospace; }
+.sheet-scroll th, .sheet-scroll td { min-width: 92px; max-width: 280px; height: 28px; overflow: hidden; padding: 4px 10px; border: 1px solid rgba(255,255,255,0.06); text-align: left; text-overflow: ellipsis; white-space: nowrap; }
+.sheet-scroll th { position: sticky; left: 0; z-index: 2; min-width: 42px; width: 42px; background: #141724; color: #64748b; text-align: right; }
+.sheet-scroll tr:first-child td { background: #0f131f; color: #38bdf8; font-weight: 600; }
+
 
 /* ==========================================================================
    AUTHENTIC VS CODE DARK+ DESIGN SYSTEM
