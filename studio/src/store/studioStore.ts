@@ -4,6 +4,15 @@ import { ModelProfileId, ModelProfile, SpecialistSkill, EditorTab, FileItem, Cha
 import { purgeOllamaMemory } from "../services/aiService";
 import { findTabByFileIdentity } from "./tabIdentity";
 
+export interface ChatSession {
+  id: string;
+  title: string;
+  workspace: string;
+  timestamp: string;
+  messages: ChatMessage[];
+}
+
+
 export const PROFILES_LIST: ModelProfile[] = [
   {
     id: "flash",
@@ -145,6 +154,9 @@ interface StudioState {
   updateTabContent: (tabId: string, content: string) => void;
   syncFileContent: (file: { path: string; content: string; modified?: string; size?: number; mimeType?: string }) => void;
   
+  chatSessions: ChatSession[];
+  activeSessionId: string;
+  switchSession: (sessionId: string) => void;
   frontierMessages: ChatMessage[];
   antigravityMessages: ChatMessage[];
   claudeMessages: ChatMessage[];
@@ -475,6 +487,39 @@ return (
         });
       },
       
+      chatSessions: [
+        {
+          id: "session-1",
+          title: "Project analysis & Landing page",
+          workspace: "teminali",
+          timestamp: "Just now",
+          messages: [],
+        },
+        {
+          id: "session-2",
+          title: "Coffee shop website build",
+          workspace: "teminali",
+          timestamp: "2h ago",
+          messages: [],
+        },
+        {
+          id: "session-3",
+          title: "General architecture & UI exploration",
+          workspace: "Home",
+          timestamp: "1d ago",
+          messages: [],
+        }
+      ],
+      activeSessionId: "session-1",
+      switchSession: (sessionId) => {
+        const state = get();
+        const session = state.chatSessions.find((s) => s.id === sessionId);
+        if (session && session.messages && session.messages.length > 0) {
+          set({ activeSessionId: sessionId, frontierMessages: session.messages });
+        } else {
+          set({ activeSessionId: sessionId });
+        }
+      },
       frontierMessages: [
         {
           id: "front-1",
@@ -608,6 +653,8 @@ return (
       name: "teminali-studio-sessions-cache-v3",
       storage: createJSONStorage(() => localStorage),
       partialize: (state) => ({
+        chatSessions: state.chatSessions,
+        activeSessionId: state.activeSessionId,
         frontierMessages: state.frontierMessages,
         antigravityMessages: state.antigravityMessages,
         claudeMessages: state.claudeMessages,

@@ -197,7 +197,7 @@ export default function App() {
       <SkillsModal />
       <DiffInspectorModal />
       <NearbyMeshModal isOpen={isNearbyMeshOpen} onClose={() => setNearbyMeshOpen(false)} />
-      <CommandPaletteModal isOpen={isCommandPaletteOpen} onClose={() => setCommandPaletteOpen(false)} />
+      <CommandPaletteModal isOpen={isCommandPaletteOpen} onClose={() => setCommandPaletteOpen(false)} onOpenSettings={() => setSettingsOpen(true)} />
     </main>
   );
 }
