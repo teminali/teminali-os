@@ -59,6 +59,10 @@ export default function App() {
         e.preventDefault();
         setCommandPaletteOpen((prev) => !prev);
       }
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "l") {
+        e.preventDefault();
+        setActiveView("agent");
+      }
       if ((e.metaKey || e.ctrlKey) && e.key === ",") {
         e.preventDefault();
         setSettingsOpen((prev) => !prev);
@@ -129,7 +133,7 @@ export default function App() {
   };
 
   return (
-    <main ref={stageRef} className="h-screen w-screen bg-[#141414] overflow-hidden flex flex-col font-sans select-none text-gray-200">
+    <main ref={stageRef} className="h-screen w-screen bg-[#090b10] overflow-hidden flex flex-col font-sans select-none text-gray-200">
       <CopilotLiveEditController />
 
       {/* Main Workspace Container */}

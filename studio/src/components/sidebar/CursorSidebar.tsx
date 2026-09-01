@@ -1,24 +1,27 @@
 import React, { useState } from "react";
 import {
   Search,
-  SlidersHorizontal,
   Folder,
   FolderPlus,
+  FilePlus,
   ChevronRight,
   ChevronDown,
   Settings,
   Sparkles,
-  ArrowLeft,
-  ArrowRight,
-  Filter,
-  Bot,
   Zap,
-  UserPlus,
   Terminal,
-  BookOpen,
-  Keyboard,
-  Sliders,
-  LogOut,
+  Layers,
+  Globe,
+  GitBranch,
+  Bot,
+  MessageSquare,
+  Blocks,
+  RefreshCw,
+  X,
+  FileCode,
+  Check,
+  Laptop,
+  Maximize2,
   PanelLeftClose,
   PanelLeftOpen,
 } from "lucide-react";
@@ -44,7 +47,7 @@ export const CursorSidebar: React.FC<{
   onNewAgent,
   onOpenSettings,
   onOpenFile,
-  width = 256,
+  width = 260,
   onResizeWidth,
   onResetWidth,
   isCollapsed = false,
@@ -53,14 +56,19 @@ export const CursorSidebar: React.FC<{
   const {
     setSkillsModalOpen,
     setBenchmarkModalOpen,
-    frontierMessages,
     files,
     openFile,
+    tabs,
+    activeTabId,
+    setActiveTab,
+    closeTab,
+    addUntitledTab,
   } = useStudioStore();
 
-  const [isFrontierOpen, setIsFrontierOpen] = useState(true);
-  const [isHomeOpen, setIsHomeOpen] = useState(false);
-  const [isProfileMenuOpen, setIsProfileMenuOpen] = useState(false);
+  const [activeRailTab, setActiveRailTab] = useState<"chat" | "explorer" | "search" | "git" | "skills">("chat");
+  const [searchQuery, setSearchQuery] = useState("");
+  const [isWorkspaceOpen, setIsWorkspaceOpen] = useState(true);
+  const [isOpenEditorsOpen, setIsOpenEditorsOpen] = useState(true);
 
   const handleOpenFileClick = async (path: string, name: string) => {
     try {
@@ -72,365 +80,339 @@ export const CursorSidebar: React.FC<{
         name,
         path,
         content: `// Workspace file: ${name}\n`,
-        language: name.endsWith(".ts") || name.endsWith(".tsx") ? "typescript" : "javascript",
+        language: name.endsWith(".ts") || name.endsWith(".tsx") ? "typescript" : name.endsWith(".html") ? "html" : "javascript",
       });
       onOpenFile?.("editor");
     }
   };
 
-  // Render Mini Collapsed Rail (48px)
-  if (isCollapsed) {
-    return (
-      <aside className="w-12 bg-[#141414] border-r border-white/5 flex flex-col justify-between items-center py-2 select-none text-[#9ca3af] h-full flex-shrink-0 z-30 transition-all duration-200">
-        <div className="flex flex-col items-center gap-3 w-full">
-          {/* macOS dots */}
-          <div className="flex flex-col items-center gap-1.5 py-1">
-            <span className="w-2.5 h-2.5 rounded-full bg-[#ff5f56] inline-block" />
-            <span className="w-2.5 h-2.5 rounded-full bg-[#ffbd2e] inline-block" />
-            <span className="w-2.5 h-2.5 rounded-full bg-[#27c93f] inline-block" />
+  // Filtered files for search
+  const filteredFiles = files.filter((f) =>
+    f.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+    f.path.toLowerCase().includes(searchQuery.toLowerCase())
+  );
+
+  return (
+    <div className="relative flex h-full z-30 flex-shrink-0 select-none font-sans">
+      {/* ── Left Slim Activity Rail (48px) ─────────────────────────────── */}
+      <nav className="w-12 bg-[#090b10] border-r border-white/5 flex flex-col justify-between items-center py-2 flex-shrink-0 z-40">
+        {/* Top: App Traffic Dots + View Switchers */}
+        <div className="flex flex-col items-center gap-1 w-full">
+          {/* macOS Traffic Light Dots */}
+          <div className="flex items-center gap-1.5 py-1.5 mb-2">
+            <span className="w-2.5 h-2.5 rounded-full bg-[#ff5f56] inline-block shadow-sm" />
+            <span className="w-2.5 h-2.5 rounded-full bg-[#ffbd2e] inline-block shadow-sm" />
+            <span className="w-2.5 h-2.5 rounded-full bg-[#27c93f] inline-block shadow-sm" />
           </div>
 
-          <div className="w-6 border-t border-white/5 my-0.5" />
+          <div className="w-6 border-t border-white/5 mb-1" />
 
-          {/* Expand Sidebar Toggle Button */}
+          {/* Chat / Composer Tab */}
           <button
-            onClick={onToggleCollapse}
-            className="p-2 rounded-lg text-gray-400 hover:text-white hover:bg-white/5 transition-colors"
-            title="Expand Sidebar (⌘B)"
-          >
-            <PanelLeftOpen size={16} />
-          </button>
-
-          {/* Quick Action Icons */}
-          <button
-            onClick={onNewAgent}
-            className={`p-2 rounded-lg transition-colors ${
-              activeView === "agent" ? "bg-[#252525] text-[#38bdf8]" : "text-gray-400 hover:text-white hover:bg-white/5"
+            onClick={() => {
+              setActiveRailTab("chat");
+              setActiveView("agent");
+              if (isCollapsed && onToggleCollapse) onToggleCollapse();
+            }}
+            className={`relative w-9 h-9 rounded-lg flex items-center justify-center transition-all ${
+              activeRailTab === "chat"
+                ? "bg-[#141724] text-[#38bdf8] shadow-sm"
+                : "text-gray-400 hover:text-white hover:bg-white/5"
             }`}
-            title="New Agent"
+            title="Chat & Composer (⌘L)"
           >
-            <Bot size={16} />
+            {activeRailTab === "chat" && (
+              <span className="absolute left-0 top-1.5 bottom-1.5 w-0.5 bg-[#38bdf8] rounded-r" />
+            )}
+            <MessageSquare size={16} />
           </button>
 
+          {/* Explorer / Files Tab */}
           <button
-            onClick={() => setActiveView("search")}
-            className="p-2 rounded-lg text-gray-400 hover:text-white hover:bg-white/5 transition-colors"
-            title="Search (⌘P)"
+            onClick={() => {
+              setActiveRailTab("explorer");
+              if (isCollapsed && onToggleCollapse) onToggleCollapse();
+            }}
+            className={`relative w-9 h-9 rounded-lg flex items-center justify-center transition-all ${
+              activeRailTab === "explorer"
+                ? "bg-[#141724] text-[#38bdf8] shadow-sm"
+                : "text-gray-400 hover:text-white hover:bg-white/5"
+            }`}
+            title="Explorer / Files (⌘E)"
           >
-            <Search size={15} />
+            {activeRailTab === "explorer" && (
+              <span className="absolute left-0 top-1.5 bottom-1.5 w-0.5 bg-[#38bdf8] rounded-r" />
+            )}
+            <Folder size={16} />
           </button>
 
+          {/* Search Tab */}
+          <button
+            onClick={() => {
+              setActiveRailTab("search");
+              if (isCollapsed && onToggleCollapse) onToggleCollapse();
+            }}
+            className={`relative w-9 h-9 rounded-lg flex items-center justify-center transition-all ${
+              activeRailTab === "search"
+                ? "bg-[#141724] text-[#38bdf8] shadow-sm"
+                : "text-gray-400 hover:text-white hover:bg-white/5"
+            }`}
+            title="Search Workspace (⌘P / ⌘F)"
+          >
+            {activeRailTab === "search" && (
+              <span className="absolute left-0 top-1.5 bottom-1.5 w-0.5 bg-[#38bdf8] rounded-r" />
+            )}
+            <Search size={16} />
+          </button>
+
+          {/* Skills & Automations Tab */}
           <button
             onClick={() => setSkillsModalOpen(true)}
-            className="p-2 rounded-lg text-gray-400 hover:text-white hover:bg-white/5 transition-colors"
-            title="Skills & Automations"
+            className="relative w-9 h-9 rounded-lg flex items-center justify-center text-gray-400 hover:text-amber-300 hover:bg-white/5 transition-all"
+            title="Specialist Skills & Automations"
           >
-            <Zap size={15} className="text-[#eab308]" />
-          </button>
-
-          <button
-            onClick={() => onOpenFile?.("editor")}
-            className="p-2 rounded-lg text-gray-400 hover:text-white hover:bg-white/5 transition-colors"
-            title="Open Files"
-          >
-            <Folder size={15} className="text-[#38bdf8]" />
+            <Zap size={16} className="text-amber-400/90" />
           </button>
         </div>
 
-        {/* Bottom User & Settings */}
-        <div className="flex flex-col items-center gap-2 w-full">
+        {/* Bottom: Pro Benchmarks + Settings + Profile */}
+        <div className="flex flex-col items-center gap-1.5 w-full">
           <button
             onClick={() => setBenchmarkModalOpen(true)}
-            className="p-2 text-[#38bdf8] hover:bg-white/5 rounded-lg transition-colors"
-            title="Frontier Pro & Benchmarks"
+            className="w-9 h-9 rounded-lg flex items-center justify-center text-[#38bdf8] hover:bg-white/5 transition-colors"
+            title="Teminali Intelligence & Benchmarks"
           >
-            <Sparkles size={15} />
+            <Sparkles size={16} />
           </button>
 
           <button
             onClick={onOpenSettings}
-            className="p-2 text-gray-400 hover:text-white hover:bg-white/5 rounded-lg transition-colors"
+            className="w-9 h-9 rounded-lg flex items-center justify-center text-gray-400 hover:text-white hover:bg-white/5 transition-colors"
             title="Settings (⌘,)"
           >
-            <Settings size={15} />
+            <Settings size={16} />
           </button>
 
           <div
             onClick={onOpenSettings}
-            className="w-6 h-6 rounded-full bg-gradient-to-br from-[#0284c7] to-[#0369a1] text-white font-bold flex items-center justify-center text-3xs border border-white/10 cursor-pointer hover:opacity-90"
-            title="Frontier Developer (Pro)"
+            className="w-7 h-7 rounded-full bg-gradient-to-tr from-[#0284c7] to-[#38bdf8] text-white font-bold flex items-center justify-center text-3xs border border-white/10 cursor-pointer shadow-md hover:scale-105 transition-transform"
+            title="Teminali Developer (Active Pro)"
           >
-            F
+            T
           </div>
         </div>
-      </aside>
-    );
-  }
+      </nav>
 
-  // Render Full Resizable Sidebar
-  return (
-    <div className="relative flex h-full z-30 flex-shrink-0">
-      <aside
-        style={{ width: `${width}px` }}
-        className="bg-[#141414] border-r border-white/5 flex flex-col justify-between select-none text-[#9ca3af] font-sans text-xs h-full relative"
-      >
-        {/* Top Header & Actions */}
-        <div className="flex flex-col">
-          {/* macOS Traffic Lights + Navigation + Collapse Toggle */}
-          <div className="h-10 px-3 flex items-center justify-between border-b border-transparent">
-            <div className="flex items-center gap-2">
-              <span className="w-3 h-3 rounded-full bg-[#ff5f56] inline-block shadow-sm cursor-pointer" />
-              <span className="w-3 h-3 rounded-full bg-[#ffbd2e] inline-block shadow-sm cursor-pointer" />
-              <span className="w-3 h-3 rounded-full bg-[#27c93f] inline-block shadow-sm cursor-pointer" />
-            </div>
-            <div className="flex items-center gap-1 text-[#6b7280]">
-              <button className="p-1 hover:text-white rounded hover:bg-white/5 transition-colors">
-                <ArrowLeft size={14} />
-              </button>
-              <button className="p-1 hover:text-white rounded hover:bg-white/5 transition-colors">
-                <ArrowRight size={14} />
-              </button>
-              <button
-                onClick={onToggleCollapse}
-                className="p-1 text-gray-500 hover:text-white rounded hover:bg-white/5 transition-colors ml-1"
-                title="Collapse Sidebar (⌘B)"
-              >
-                <PanelLeftClose size={14} />
-              </button>
-            </div>
-          </div>
+      {/* ── Collapsible Primary Sidebar (Tree & Details) ───────────────── */}
+      {!isCollapsed && (
+        <aside
+          style={{ width: `${width}px` }}
+          className="bg-[#0e1017] border-r border-white/5 flex flex-col justify-between text-gray-300 text-xs h-full relative"
+        >
+          {/* Header Bar */}
+          <header className="h-10 px-3 flex items-center justify-between border-b border-white/5 bg-[#0e1017] flex-shrink-0">
+            <span className="font-semibold text-xs text-gray-200 tracking-tight uppercase text-3xs text-gray-400">
+              {activeRailTab === "chat" && "Teminali Agent"}
+              {activeRailTab === "explorer" && "Explorer"}
+              {activeRailTab === "search" && "Search Files"}
+            </span>
 
-          {/* Action Buttons */}
-          <div className="px-2 pt-2 pb-3 space-y-1">
-            <button
-              onClick={onNewAgent}
-              className={`w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-sm font-medium transition-all ${
-                activeView === "agent"
-                  ? "bg-[#252525] text-white shadow-sm"
-                  : "text-[#d1d5db] hover:bg-white/5 hover:text-white"
-              }`}
-            >
-              <Bot size={16} className="text-[#38bdf8]" />
-              <span>New Teminali Agent</span>
-            </button>
-
-            <button
-              onClick={() => setActiveView("search")}
-              className={`w-full flex items-center gap-2.5 px-3 py-1.5 rounded-lg text-xs transition-colors ${
-                activeView === "search"
-                  ? "bg-[#252525] text-white"
-                  : "text-[#9ca3af] hover:bg-white/5 hover:text-white"
-              }`}
-            >
-              <Search size={15} />
-              <span>Search</span>
-            </button>
-
-            <button
-              onClick={() => setSkillsModalOpen(true)}
-              className={`w-full flex items-center gap-2.5 px-3 py-1.5 rounded-lg text-xs transition-colors ${
-                activeView === "automations"
-                  ? "bg-[#252525] text-white"
-                  : "text-[#9ca3af] hover:bg-white/5 hover:text-white"
-              }`}
-            >
-              <Zap size={15} className="text-[#eab308]" />
-              <span>Skills & Automations</span>
-            </button>
-
-            <button
-              onClick={onOpenSettings}
-              className="w-full flex items-center gap-2.5 px-3 py-1.5 rounded-lg text-xs text-[#9ca3af] hover:bg-white/5 hover:text-white transition-colors"
-            >
-              <SlidersHorizontal size={15} />
-              <span>Settings</span>
-            </button>
-          </div>
-
-          {/* Repositories Section Header */}
-          <div className="px-3 pt-2 pb-1 flex items-center justify-between text-2xs font-semibold text-[#6b7280] uppercase tracking-wider">
-            <span>Repositories</span>
             <div className="flex items-center gap-1">
-              <button className="p-0.5 hover:text-white rounded hover:bg-white/5" title="Filter repos">
-                <Filter size={12} />
-              </button>
-              <button className="p-0.5 hover:text-white rounded hover:bg-white/5" title="New Folder">
-                <FolderPlus size={12} />
-              </button>
+              {activeRailTab === "explorer" && (
+                <>
+                  <button
+                    onClick={addUntitledTab}
+                    className="p-1 rounded text-gray-400 hover:text-white hover:bg-white/5"
+                    title="New File"
+                  >
+                    <FilePlus size={13} />
+                  </button>
+                  <button
+                    onClick={() => {}}
+                    className="p-1 rounded text-gray-400 hover:text-white hover:bg-white/5"
+                    title="Refresh Explorer"
+                  >
+                    <RefreshCw size={13} />
+                  </button>
+                </>
+              )}
+
+              {onToggleCollapse && (
+                <button
+                  onClick={onToggleCollapse}
+                  className="p-1 rounded text-gray-400 hover:text-white hover:bg-white/5"
+                  title="Collapse Sidebar (⌘B)"
+                >
+                  <PanelLeftClose size={14} />
+                </button>
+              )}
             </div>
-          </div>
+          </header>
 
-          {/* Repositories List */}
-          <div className="px-2 py-1 space-y-0.5 overflow-y-auto max-h-[calc(100vh-280px)]">
-            {/* teminali repo */}
-            <div>
-              <button
-                onClick={() => setIsFrontierOpen((prev) => !prev)}
-                className="w-full flex items-center gap-2 px-2 py-1.5 rounded hover:bg-white/5 text-xs text-[#d1d5db] transition-colors"
-              >
-                {isFrontierOpen ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
-                <Folder size={14} className="text-[#38bdf8]" />
-                <span className="font-medium truncate">teminali</span>
-              </button>
+          {/* View Contents */}
+          <div className="flex-1 overflow-y-auto overflow-x-hidden p-2 space-y-4 text-xs font-sans">
+            {/* 1. Chat Tab Content */}
+            {activeRailTab === "chat" && (
+              <div className="space-y-3">
+                <button
+                  onClick={onNewAgent}
+                  className="w-full flex items-center justify-center gap-2 py-2 px-3 rounded-lg bg-[#38bdf8] text-black font-semibold text-xs hover:bg-sky-400 transition-colors shadow-sm"
+                >
+                  <Bot size={14} />
+                  <span>New Teminali Chat</span>
+                </button>
 
-              {isFrontierOpen && (
-                <div className="pl-5 pr-1 py-0.5 space-y-0.5">
-                  {/* Active chat session pill */}
-                  {frontierMessages && frontierMessages.length > 1 && (
-                    <button 
-                      onClick={() => setActiveView("agent")}
-                      className="w-full flex items-center justify-between px-2 py-1 rounded bg-[#202020] text-white text-xs mb-1"
-                    >
-                      <span className="truncate">Project analysis</span>
-                      <span className="text-3xs text-[#6b7280] font-mono">1m</span>
+                <div className="pt-2">
+                  <div className="px-2 py-1 text-3xs font-semibold text-gray-500 uppercase tracking-wider">
+                    Recent Sessions
+                  </div>
+                  <div className="space-y-0.5 mt-1">
+                    <button className="w-full flex items-center gap-2 px-2.5 py-1.5 rounded-lg bg-white/5 text-white font-medium text-left">
+                      <MessageSquare size={13} className="text-[#38bdf8]" />
+                      <span className="truncate">Active Workspace Chat</span>
                     </button>
+                  </div>
+                </div>
+
+                <div className="pt-2 border-t border-white/5">
+                  <div className="px-2 py-1 text-3xs font-semibold text-gray-500 uppercase tracking-wider">
+                    Quick Workspaces
+                  </div>
+                  <div className="space-y-0.5 mt-1">
+                    <div className="flex items-center gap-2 px-2.5 py-1.5 rounded-lg text-gray-400 hover:text-white hover:bg-white/5 cursor-pointer">
+                      <Folder size={13} className="text-[#38bdf8]" />
+                      <span className="truncate">~/Documents/my_projects/teminali</span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* 2. Explorer Tab Content */}
+            {activeRailTab === "explorer" && (
+              <div className="space-y-3">
+                {/* Open Editors Section */}
+                <div>
+                  <button
+                    onClick={() => setIsOpenEditorsOpen(!isOpenEditorsOpen)}
+                    className="w-full flex items-center gap-1.5 px-1 py-1 text-3xs font-semibold text-gray-400 uppercase tracking-wider hover:text-gray-200"
+                  >
+                    {isOpenEditorsOpen ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
+                    <span>Open Editors ({tabs.length})</span>
+                  </button>
+
+                  {isOpenEditorsOpen && (
+                    <div className="mt-1 space-y-0.5 pl-2">
+                      {tabs.map((tab) => (
+                        <div
+                          key={tab.id}
+                          onClick={() => {
+                            setActiveTab(tab.id);
+                            onOpenFile?.("editor");
+                          }}
+                          className={`group flex items-center justify-between px-2 py-1 rounded-md text-xs cursor-pointer transition-colors ${
+                            tab.id === activeTabId
+                              ? "bg-[#1f2438] text-white font-medium shadow-sm"
+                              : "text-gray-400 hover:text-gray-200 hover:bg-white/5"
+                          }`}
+                        >
+                          <div className="flex items-center gap-1.5 truncate">
+                            <FileIcon name={tab.name} />
+                            <span className="truncate">{tab.name}</span>
+                            {tab.isDirty && <span className="w-1.5 h-1.5 rounded-full bg-[#38bdf8]" />}
+                          </div>
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              closeTab(tab.id);
+                            }}
+                            className="p-0.5 rounded text-gray-500 hover:text-white opacity-0 group-hover:opacity-100"
+                          >
+                            <X size={11} />
+                          </button>
+                        </div>
+                      ))}
+                    </div>
                   )}
+                </div>
 
-                  {/* Real workspace files */}
-                  {(files || []).slice(0, 10).map((file) => (
-                    <button
-                      key={file.id}
-                      onClick={() => void handleOpenFileClick(file.path, file.name)}
-                      className="w-full flex items-center gap-2 px-2 py-1 rounded hover:bg-white/5 text-xs text-gray-300 hover:text-white transition-colors text-left truncate"
+                {/* Workspace Files Tree */}
+                <div>
+                  <button
+                    onClick={() => setIsWorkspaceOpen(!isWorkspaceOpen)}
+                    className="w-full flex items-center gap-1.5 px-1 py-1 text-3xs font-semibold text-gray-400 uppercase tracking-wider hover:text-gray-200"
+                  >
+                    {isWorkspaceOpen ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
+                    <span>Teminali Workspace</span>
+                  </button>
+
+                  {isWorkspaceOpen && (
+                    <div className="mt-1 space-y-0.5 pl-2">
+                      {files.map((file) => (
+                        <div
+                          key={file.id || file.path}
+                          onClick={() => handleOpenFileClick(file.path, file.name)}
+                          className="flex items-center gap-1.5 px-2 py-1 rounded-md text-xs text-gray-400 hover:text-white hover:bg-white/5 cursor-pointer transition-colors"
+                        >
+                          <FileIcon name={file.name} />
+                          <span className="truncate">{file.name}</span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {/* 3. Search Tab Content */}
+            {activeRailTab === "search" && (
+              <div className="space-y-3">
+                <div className="relative">
+                  <Search size={13} className="absolute left-2.5 top-2.5 text-gray-500" />
+                  <input
+                    value={searchQuery}
+                    onChange={(e) => setSearchQuery(e.target.value)}
+                    placeholder="Search files by name..."
+                    className="w-full h-8 pl-8 pr-2 bg-[#141724] border border-white/10 rounded-lg text-xs text-white focus:outline-none focus:border-[#38bdf8]/40"
+                    autoFocus
+                  />
+                </div>
+
+                <div className="space-y-1">
+                  <span className="text-3xs font-semibold text-gray-500 uppercase tracking-wider px-1">
+                    {filteredFiles.length} files found
+                  </span>
+                  {filteredFiles.map((file) => (
+                    <div
+                      key={file.id || file.path}
+                      onClick={() => handleOpenFileClick(file.path, file.name)}
+                      className="flex items-center gap-1.5 px-2 py-1.5 rounded-lg text-xs text-gray-400 hover:text-white hover:bg-white/5 cursor-pointer transition-colors"
                     >
-                      <FileIcon name={file.name} isDirectory={file.type === "directory"} />
-                      <span className="truncate">{file.name}</span>
-                    </button>
+                      <FileIcon name={file.name} />
+                      <div className="flex flex-col truncate">
+                        <span className="text-gray-200 font-medium truncate">{file.name}</span>
+                        <span className="text-3xs text-gray-500 truncate">{file.path}</span>
+                      </div>
+                    </div>
                   ))}
                 </div>
-              )}
-            </div>
-
-            {/* Home repo */}
-            <div>
-              <button
-                onClick={() => setIsHomeOpen((prev) => !prev)}
-                className="w-full flex items-center gap-2 px-2 py-1.5 rounded hover:bg-white/5 text-xs text-[#9ca3af] transition-colors"
-              >
-                {isHomeOpen ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
-                <Folder size={14} className="text-[#9ca3af]" />
-                <span className="truncate">Home</span>
-              </button>
-
-              {isHomeOpen && (
-                <div className="pl-6 pr-1 py-0.5 space-y-0.5">
-                  <div className="px-2 py-1 text-2xs text-[#6b7280]">No active sessions</div>
-                </div>
-              )}
-            </div>
-          </div>
-        </div>
-
-        {/* Profile Menu Popup */}
-        {isProfileMenuOpen && (
-          <div className="absolute bottom-20 left-3 w-56 bg-[#1c1c1c] border border-white/10 rounded-xl shadow-2xl z-50 p-1.5 text-xs space-y-0.5">
-            <button
-              onClick={() => {
-                onOpenSettings();
-                setIsProfileMenuOpen(false);
-              }}
-              className="w-full flex items-center gap-2.5 px-2.5 py-1.5 rounded-lg hover:bg-white/5 text-gray-300 text-left transition-colors"
-            >
-              <UserPlus size={14} className="text-gray-400" />
-              <span>Teminali Profile</span>
-            </button>
-            <button
-              onClick={() => {
-                onOpenFile?.("terminal");
-                setIsProfileMenuOpen(false);
-              }}
-              className="w-full flex items-center gap-2.5 px-2.5 py-1.5 rounded-lg hover:bg-white/5 text-gray-300 text-left transition-colors"
-            >
-              <Terminal size={14} className="text-[#38bdf8]" />
-              <span>Teminali CLI Terminal</span>
-            </button>
-            <button
-              onClick={() => {
-                window.open("https://github.com", "_blank");
-                setIsProfileMenuOpen(false);
-              }}
-              className="w-full flex items-center gap-2.5 px-2.5 py-1.5 rounded-lg hover:bg-white/5 text-gray-300 text-left transition-colors"
-            >
-              <BookOpen size={14} className="text-gray-400" />
-              <span>Documentation</span>
-            </button>
-            <button
-              onClick={() => {
-                onOpenSettings();
-                setIsProfileMenuOpen(false);
-              }}
-              className="w-full flex items-center gap-2.5 px-2.5 py-1.5 rounded-lg hover:bg-white/5 text-gray-300 text-left transition-colors"
-            >
-              <Keyboard size={14} className="text-gray-400" />
-              <span>Keyboard Shortcuts</span>
-            </button>
-            <button
-              onClick={() => {
-                setSkillsModalOpen(true);
-                setIsProfileMenuOpen(false);
-              }}
-              className="w-full flex items-center gap-2.5 px-2.5 py-1.5 rounded-lg hover:bg-white/5 text-gray-300 text-left transition-colors"
-            >
-              <Sliders size={14} className="text-gray-400" />
-              <span>Skills & Packs</span>
-            </button>
-            <div className="my-1 border-t border-white/5" />
-            <button
-              onClick={() => setIsProfileMenuOpen(false)}
-              className="w-full flex items-center gap-2.5 px-2.5 py-1.5 rounded-lg hover:bg-white/5 text-gray-300 text-left transition-colors"
-            >
-              <LogOut size={14} className="text-gray-400" />
-              <span>Log Out</span>
-            </button>
-          </div>
-        )}
-
-        {/* Bottom User Card / Upgrade Pill */}
-        <div className="p-3 border-t border-white/5 space-y-2.5">
-          {/* Pro Account Button */}
-          <button
-            onClick={() => setBenchmarkModalOpen(true)}
-            className="w-full flex items-center gap-2 px-3 py-2 rounded-lg bg-[#1c1c1c] hover:bg-[#252525] border border-white/5 text-xs text-[#d1d5db] font-medium transition-all group"
-          >
-            <Sparkles size={14} className="text-[#38bdf8] group-hover:rotate-12 transition-transform" />
-            <span>Teminali Pro</span>
-          </button>
-
-          {/* User Info Bar */}
-          <div className="flex items-center justify-between pt-1">
-            <div
-              onClick={() => setIsProfileMenuOpen((prev) => !prev)}
-              className="flex items-center gap-2.5 cursor-pointer hover:opacity-90 transition-opacity"
-            >
-              <div className="w-7 h-7 rounded-lg bg-gradient-to-br from-[#38bdf8] via-[#0284c7] to-[#0369a1] text-white font-extrabold flex items-center justify-center text-[10px] border border-white/20 shadow-md">
-                TC
               </div>
-              <div className="flex flex-col truncate">
-                <span className="text-xs font-semibold text-white leading-tight truncate">Teminali Developer</span>
-                <span className="text-3xs text-[#38bdf8]">Local Flagship</span>
-              </div>
-            </div>
-
-            <div className="flex items-center gap-1.5 flex-shrink-0">
-              <button
-                onClick={() => setBenchmarkModalOpen(true)}
-                className="px-2 py-0.5 rounded-full bg-[#38bdf8] hover:bg-[#0284c7] text-black font-semibold text-2xs transition-colors shadow-sm"
-              >
-                Pro
-              </button>
-              <button
-                onClick={onOpenSettings}
-                className="p-1 text-[#6b7280] hover:text-white rounded hover:bg-white/5 transition-colors"
-              >
-                <Settings size={14} />
-              </button>
-            </div>
+            )}
           </div>
-        </div>
-      </aside>
 
-      {/* Resizable drag divider handle */}
-      {onResizeWidth && (
+          {/* Sidebar Footer */}
+          <footer className="p-2 border-t border-white/5 bg-[#0b0d13] flex items-center justify-between text-3xs text-gray-500 font-mono">
+            <span className="flex items-center gap-1">
+              <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
+              <span>Local Gateway 4310</span>
+            </span>
+            <span>v1.0.0</span>
+          </footer>
+        </aside>
+      )}
+
+      {/* Sidebar Resize Handle */}
+      {!isCollapsed && onResizeWidth && (
         <ResizeHandle
           orientation="vertical"
           onResize={onResizeWidth}

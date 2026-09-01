@@ -7,11 +7,11 @@ import {
   Minimize2,
   Plus,
   X,
-  Minus,
-  MessageSquare,
-  Sparkles,
   Columns2,
   Rows2,
+  ChevronDown,
+  Layers,
+  FileCode,
 } from "lucide-react";
 import { EditorPane } from "./EditorPane";
 import { TerminalPanel } from "./TerminalPanel";
@@ -32,20 +32,21 @@ export const CursorRightPanel: React.FC<{
 }> = ({
   onClose,
   onPreview,
-  initialTab = "terminal",
-  width = 600,
+  initialTab = "browser",
+  width = 620,
   onResizeWidth,
   onResetWidth,
   isMaximized = false,
   onToggleMaximize,
   onMinimizeToRail,
 }) => {
-  const { tabs, activeTabId, splitTab, setSplitTab } = useStudioStore();
+  const { tabs, activeTabId, splitTab, setSplitTab, addUntitledTab } = useStudioStore();
   const activeTab = splitTab || initialTab;
   const setActiveTab = (tab: "terminal" | "editor" | "browser") => setSplitTab(tab);
+
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const [isInternalSplit, setIsInternalSplit] = useState(false);
-  const [internalSplitRatio, setInternalSplitRatio] = useState(50);
+  const [internalSplitRatio, setInternalSplitRatio] = useState(55);
 
   const currentFile = tabs.find((t) => t.id === activeTabId) || null;
 
@@ -55,7 +56,7 @@ export const CursorRightPanel: React.FC<{
 
   return (
     <div className="relative flex h-full z-20 flex-shrink-0">
-      {/* Left resize handle (inverts delta because dragging left increases width) */}
+      {/* Left resize handle */}
       {!isMaximized && onResizeWidth && (
         <ResizeHandle
           orientation="vertical"
@@ -66,81 +67,75 @@ export const CursorRightPanel: React.FC<{
 
       <div
         style={{ width: isMaximized ? "100%" : `${width}px` }}
-        className={`bg-[#121212] border-l border-white/5 flex flex-col h-full font-sans transition-all duration-75 relative select-none ${
-          isMaximized ? "fixed inset-0 z-50 bg-[#121212]" : ""
+        className={`bg-[#0c0e14] border-l border-white/5 flex flex-col h-full font-sans transition-all duration-75 relative select-none ${
+          isMaximized ? "fixed inset-0 z-50 bg-[#0c0e14]" : ""
         }`}
       >
-        {/* Top Tab Bar */}
-        <header className="h-10 px-3 flex items-center justify-between border-b border-white/5 bg-[#141414] select-none flex-shrink-0">
-          {/* Left Tabs & Plus Button */}
+        {/* ── Top Tab Bar ─────────────────────────────────────────────── */}
+        <header className="h-10 px-3 flex items-center justify-between border-b border-white/5 bg-[#090b10] select-none flex-shrink-0 gap-2">
+          {/* Left Tabs */}
           <div className="flex items-center gap-1">
+            {/* Live Browser Tab */}
+            <button
+              onClick={() => setActiveTab("browser")}
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${
+                activeTab === "browser"
+                  ? "bg-[#1f2438] text-[#38bdf8] border border-[#38bdf8]/30 shadow-sm"
+                  : "text-gray-400 hover:text-white hover:bg-white/5 border border-transparent"
+              }`}
+            >
+              <Globe size={13} className="text-[#38bdf8]" />
+              <span>Live Browser</span>
+            </button>
+
+            {/* Editor Tab */}
+            <button
+              onClick={() => setActiveTab("editor")}
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${
+                activeTab === "editor"
+                  ? "bg-[#1f2438] text-white border border-white/10 shadow-sm"
+                  : "text-gray-400 hover:text-white hover:bg-white/5 border border-transparent"
+              }`}
+            >
+              <FileCode size={13} className="text-emerald-400" />
+              <span className="truncate max-w-[120px]">{currentFile ? currentFile.name : "Editor"}</span>
+            </button>
+
             {/* Terminal Tab */}
             <button
               onClick={() => setActiveTab("terminal")}
-              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ${
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${
                 activeTab === "terminal"
-                  ? "bg-[#222222] text-white"
-                  : "text-gray-400 hover:text-white hover:bg-white/5"
+                  ? "bg-[#1f2438] text-white border border-white/10 shadow-sm"
+                  : "text-gray-400 hover:text-white hover:bg-white/5 border border-transparent"
               }`}
             >
-              <Terminal size={13} className="text-[#38bdf8]" />
-              <span>zsh</span>
+              <Terminal size={13} className="text-amber-400" />
+              <span>Terminal (zsh)</span>
             </button>
 
-            {/* Editor / File Tab */}
-            {currentFile && (
-              <button
-                onClick={() => setActiveTab("editor")}
-                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ${
-                  activeTab === "editor"
-                    ? "bg-[#222222] text-white"
-                    : "text-gray-400 hover:text-white hover:bg-white/5"
-                }`}
-              >
-                <FileText size={13} className="text-[#38bdf8]" />
-                <span className="truncate max-w-[120px]">{currentFile.name}</span>
-              </button>
-            )}
-
-            {/* Browser Preview Tab */}
-            <button
-              onClick={() => setActiveTab("browser")}
-              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ${
-                activeTab === "browser"
-                  ? "bg-[#222222] text-white"
-                  : "text-gray-400 hover:text-white hover:bg-white/5"
-              }`}
-            >
-              <Globe size={13} className="text-[#10b981]" />
-              <span>Browser</span>
-            </button>
-
-            {/* Plus Dropdown Menu Button */}
+            {/* Plus New Tab Menu */}
             <div className="relative">
               <button
-                onClick={() => setIsMenuOpen((prev) => !prev)}
-                className="p-1 text-gray-400 hover:text-white rounded hover:bg-white/5 transition-colors"
-                title="Open new tab or view"
+                onClick={() => setIsMenuOpen((p) => !p)}
+                className="p-1.5 rounded-lg text-gray-400 hover:text-white hover:bg-white/5 transition-colors"
+                title="Add panel or split"
               >
-                <Plus size={15} />
+                <Plus size={13} />
               </button>
 
-              {/* Dropdown Menu */}
               {isMenuOpen && (
-                <div className="absolute top-8 left-0 w-56 bg-[#1f1f1f] border border-white/10 rounded-xl shadow-2xl z-50 p-1.5 text-xs space-y-0.5">
-                  <div className="px-2 py-1 text-3xs text-gray-500 font-mono">Open any view...</div>
+                <div className="absolute top-8 left-0 w-48 bg-[#181b26] border border-white/10 rounded-xl shadow-2xl z-50 p-1 text-xs space-y-0.5">
                   <button
                     onClick={() => {
+                      addUntitledTab();
                       setActiveTab("editor");
                       setIsMenuOpen(false);
                     }}
-                    className="w-full flex items-center justify-between px-2.5 py-1.5 rounded-lg hover:bg-white/5 text-gray-200 text-left"
+                    className="w-full flex items-center gap-2 px-2.5 py-1.5 rounded-lg hover:bg-white/5 text-gray-300 hover:text-white text-left"
                   >
-                    <div className="flex items-center gap-2">
-                      <FileText size={13} />
-                      <span>Editor</span>
-                    </div>
-                    <span className="text-3xs text-gray-500 font-mono">⌘G</span>
+                    <FileText size={13} className="text-emerald-400" />
+                    <span>New File</span>
                   </button>
 
                   <button
@@ -148,109 +143,70 @@ export const CursorRightPanel: React.FC<{
                       setActiveTab("terminal");
                       setIsMenuOpen(false);
                     }}
-                    className="w-full flex items-center justify-between px-2.5 py-1.5 rounded-lg hover:bg-white/5 text-gray-200 text-left"
+                    className="w-full flex items-center gap-2 px-2.5 py-1.5 rounded-lg hover:bg-white/5 text-gray-300 hover:text-white text-left"
                   >
-                    <div className="flex items-center gap-2">
-                      <Terminal size={13} />
-                      <span>Terminal</span>
-                    </div>
-                    <span className="text-3xs text-gray-500 font-mono">⌘J</span>
+                    <Terminal size={13} className="text-amber-400" />
+                    <span>New Terminal</span>
                   </button>
 
-                  <button
-                    onClick={() => {
-                      setActiveTab("browser");
-                      setIsMenuOpen(false);
-                    }}
-                    className="w-full flex items-center justify-between px-2.5 py-1.5 rounded-lg hover:bg-white/5 text-gray-200 text-left"
-                  >
-                    <div className="flex items-center gap-2">
-                      <Globe size={13} />
-                      <span>Browser</span>
-                    </div>
-                    <span className="text-3xs text-gray-500 font-mono">⇧⌘B</span>
-                  </button>
+                  <div className="border-t border-white/5 my-1" />
 
                   <button
                     onClick={() => {
                       setIsInternalSplit((p) => !p);
                       setIsMenuOpen(false);
                     }}
-                    className="w-full flex items-center justify-between px-2.5 py-1.5 rounded-lg hover:bg-white/5 text-gray-200 text-left"
+                    className="w-full flex items-center gap-2 px-2.5 py-1.5 rounded-lg hover:bg-white/5 text-gray-300 hover:text-white text-left"
                   >
-                    <div className="flex items-center gap-2">
-                      <Rows2 size={13} />
-                      <span>Toggle Editor + Terminal Split</span>
-                    </div>
+                    <Rows2 size={13} className="text-[#38bdf8]" />
+                    <span>{isInternalSplit ? "Single Pane" : "Split Top / Bottom"}</span>
                   </button>
                 </div>
               )}
             </div>
           </div>
 
-          {/* Right Layout & Window Controls */}
+          {/* Right Control Actions */}
           <div className="flex items-center gap-1 text-gray-400">
-            {/* Split Top/Bottom Toggle */}
+            {/* Split Top/Bottom Toggle Button */}
             <button
               onClick={() => setIsInternalSplit((p) => !p)}
-              className={`p-1 rounded hover:bg-white/5 transition-colors ${
+              className={`p-1.5 rounded hover:bg-white/5 transition-colors ${
                 isInternalSplit ? "text-[#38bdf8] bg-white/5" : "hover:text-white"
               }`}
-              title={isInternalSplit ? "Single view" : "Split view (Editor + Terminal)"}
+              title={isInternalSplit ? "Close Bottom Split" : "Split Editor & Terminal (Top/Bottom)"}
             >
-              <Rows2 size={13} />
+              <Rows2 size={14} />
             </button>
 
-            {/* Snap 50/50 Balance Button */}
-            {!isMaximized && onResetWidth && (
-              <button
-                onClick={onResetWidth}
-                className="p-1 hover:text-white rounded hover:bg-white/5 transition-colors"
-                title="Balance split (50/50)"
-              >
-                <Columns2 size={13} />
-              </button>
-            )}
-
-            {/* Maximize / Restore Toggle */}
+            {/* Maximize Toggle */}
             {onToggleMaximize && (
               <button
                 onClick={onToggleMaximize}
-                className="p-1 hover:text-white rounded hover:bg-white/5 transition-colors"
-                title={isMaximized ? "Restore split view" : "Maximize IDE (⌘⇧M)"}
+                className="p-1.5 hover:text-white rounded hover:bg-white/5 transition-colors"
+                title={isMaximized ? "Restore view" : "Maximize view"}
               >
-                {isMaximized ? <Minimize2 size={13} /> : <Maximize2 size={13} />}
+                {isMaximized ? <Minimize2 size={14} /> : <Maximize2 size={14} />}
               </button>
             )}
 
-            {/* Minimize to Rail */}
-            {onMinimizeToRail && (
-              <button
-                onClick={onMinimizeToRail}
-                className="p-1 hover:text-white rounded hover:bg-white/5 transition-colors"
-                title="Minimize pane"
-              >
-                <Minus size={13} />
-              </button>
-            )}
-
-            {/* Close Pane */}
+            {/* Close Right Panel */}
             <button
               onClick={onClose}
-              className="p-1 hover:text-white rounded hover:bg-white/5 transition-colors"
-              title="Close pane (⌘J)"
+              className="p-1.5 hover:text-white rounded hover:bg-white/5 transition-colors"
+              title="Close panel (⌘J)"
             >
               <X size={14} />
             </button>
           </div>
         </header>
 
-        {/* Body Content */}
-        <div className="flex-1 flex flex-col overflow-hidden relative">
+        {/* ── Panel Body Content ──────────────────────────────────────── */}
+        <div className="flex-1 flex flex-col overflow-hidden relative bg-[#0c0e14]">
           {isInternalSplit ? (
             /* Split Mode: Top Editor/Browser + Bottom Terminal */
             <>
-              <div style={{ height: `${internalSplitRatio}%` }} className="w-full overflow-hidden">
+              <div style={{ height: `${internalSplitRatio}%` }} className="w-full overflow-hidden bg-[#0c0e14]">
                 {activeTab === "browser" ? (
                   <WebsitePreviewPane activeTab={currentFile} />
                 ) : (
@@ -265,20 +221,20 @@ export const CursorRightPanel: React.FC<{
                 onDoubleClick={() => setInternalSplitRatio(50)}
               />
 
-              <div style={{ height: `${100 - internalSplitRatio}%` }} className="w-full bg-[#0c0d10] p-1 overflow-hidden">
+              <div style={{ height: `${100 - internalSplitRatio}%` }} className="w-full bg-[#08090E] p-1 overflow-hidden">
                 <TerminalPanel
                   isOpen={true}
-                  height={300}
+                  height={500}
                   onClose={() => setIsInternalSplit(false)}
                   onResizeStart={() => {}}
                 />
               </div>
             </>
           ) : (
-            /* Single Tab View */
+            /* Single Pane Mode */
             <>
               {activeTab === "terminal" && (
-                <div className="h-full w-full bg-[#0c0d10] p-2">
+                <div className="h-full w-full bg-[#08090E]">
                   <TerminalPanel
                     isOpen={true}
                     height={500}
@@ -289,13 +245,13 @@ export const CursorRightPanel: React.FC<{
               )}
 
               {activeTab === "editor" && (
-                <div className="h-full w-full">
+                <div className="h-full w-full bg-[#0c0e14]">
                   <EditorPane onPreview={onPreview} />
                 </div>
               )}
 
               {activeTab === "browser" && (
-                <div className="h-full w-full">
+                <div className="h-full w-full bg-[#08090E]">
                   <WebsitePreviewPane activeTab={currentFile} />
                 </div>
               )}
