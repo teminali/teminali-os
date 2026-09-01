@@ -218,7 +218,7 @@ export const CursorSettingsModal: React.FC<{
     { id: "profile", label: "Profile", icon: User },
     { id: "appearance", label: "Appearance & Tokens", icon: SunMoon },
     { id: "plan", label: "Plan & Usage", icon: CreditCard },
-    { id: "agents", label: "Teminali Agents", icon: Bot },
+    { id: "agents", label: "Teminali Code", icon: Bot },
     { id: "cloud-agents", label: "Cloud Agents", icon: Cloud, isExternal: true },
     { id: "git", label: "Git & PRs", icon: GitBranch },
     { id: "worktrees", label: "Worktrees", icon: GitFork },

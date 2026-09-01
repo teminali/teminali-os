@@ -212,7 +212,7 @@ export const CursorSidebar: React.FC<{
           {/* Header Bar */}
           <header className="h-10 px-3 flex items-center justify-between border-b border-white/5 bg-[#0e1017] flex-shrink-0">
             <span className="font-semibold text-xs text-gray-200 tracking-tight uppercase text-3xs text-gray-400">
-              {activeRailTab === "chat" && "Teminali Agent"}
+              {activeRailTab === "chat" && "Teminali Code"}
               {activeRailTab === "explorer" && "Explorer"}
               {activeRailTab === "search" && "Search Files"}
             </span>
@@ -259,7 +259,7 @@ export const CursorSidebar: React.FC<{
                   className="w-full flex items-center justify-center gap-2 py-2 px-3 rounded-lg bg-[#38bdf8] text-black font-semibold text-xs hover:bg-sky-400 transition-colors shadow-sm"
                 >
                   <Bot size={14} />
-                  <span>New Teminali Chat</span>
+                  <span>New Teminali Code Chat</span>
                 </button>
 
                 <div className="pt-2">
