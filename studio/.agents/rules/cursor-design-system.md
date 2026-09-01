@@ -59,3 +59,15 @@ All UI components MUST be imported from `src/components/ui/` rather than creatin
 > 1. Check if a canonical component exists in `src/components/ui/`.
 > 2. If styling or behavior needs improvement, **update the shared component in `src/components/ui/`** so the improvement propagates everywhere consistently.
 > 3. NEVER create duplicate one-off styled buttons, modals, or tab switchers in individual page components.
+
+
+## 4. Official Models (Engineered Wrappers)
+
+In Teminali Studio, models are not raw weights we train; they are **engineered wrapper architectures** designed to dynamically route, format, and orchestrate prompts against the best-fit underlying engines and local providers:
+
+1. **Frontier Auto** (Flagship):
+   - Official adaptive router and orchestration wrapper.
+   - Dynamically manages multi-file code modifications, tool executions, and step-by-step verification loops.
+2. **Frontier Auto Flash** (Fast Path):
+   - Official lightweight, high-throughput execution wrapper.
+   - Optimized for instant local edits, zero-cost token streaming, and automatic VRAM memory release on Apple Silicon.

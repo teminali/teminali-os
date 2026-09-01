@@ -600,8 +600,8 @@ export const CursorChatCanvas: React.FC<{
                       }`}
                     >
                       <div className="flex flex-col">
-                        <span className="font-semibold text-xs text-white">Teminali Auto</span>
-                        <span className="text-3xs text-gray-400">Adaptive local routing</span>
+                        <span className="font-semibold text-xs text-white">Frontier Auto</span>
+                        <span className="text-3xs text-gray-400">Official adaptive router wrapper</span>
                       </div>
                       {currentProfile === "auto" && <Check size={12} className="text-[#FF6C37]" />}
                     </button>
@@ -616,8 +616,8 @@ export const CursorChatCanvas: React.FC<{
                       }`}
                     >
                       <div className="flex flex-col">
-                        <span className="font-semibold text-xs text-white">Teminali Flash</span>
-                        <span className="text-3xs text-gray-400">Fast local generation</span>
+                        <span className="font-semibold text-xs text-white">Frontier Auto Flash</span>
+                        <span className="text-3xs text-gray-400">Fast lightweight local wrapper</span>
                       </div>
                       {currentProfile === "flash" && <Check size={12} className="text-[#FF6C37]" />}
                     </button>
