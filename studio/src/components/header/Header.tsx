@@ -43,7 +43,7 @@ export const Header: React.FC<{ mode: "code" | "preview"; setMode: (mode: "code"
     <header className="topbar">
       {/* Compact TC logo mark and Teminali Code wordmark. */}
       <div className="brand flex items-center gap-2">
-        <div className="w-6 h-6 rounded-lg bg-gradient-to-br from-[#38bdf8] via-[#0284c7] to-[#0369a1] text-white font-extrabold flex items-center justify-center text-xs border border-white/20 shadow-md">
+        <div className="w-6 h-6 rounded-lg bg-[#18181b] text-[#FF6C37] text-white font-extrabold flex items-center justify-center text-xs border border-white/20 shadow-md">
           TC
         </div>
         <strong className="text-white font-bold tracking-tight">Teminali Studio</strong>

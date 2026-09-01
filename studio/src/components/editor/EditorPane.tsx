@@ -17,7 +17,7 @@ export const EditorPane: React.FC<{ onPreview: () => void }> = ({ onPreview }) =
   const editorRef = useRef<any>(null);
   const liveDecorationsRef = useRef<string[]>([]);
   const liveEdit = useSyncExternalStore(LiveEditService.subscribe, LiveEditService.getSnapshot, LiveEditService.getSnapshot);
-  const { tabs, activeTabId, setActiveTab, closeTab, updateTabContent, addUntitledTab } = useStudioStore();
+  const { tabs, activeTabId, setActiveTab, closeTab, updateTabContent, addUntitledTab, targetEditorScroll } = useStudioStore();
   const activeTab = useMemo(() => tabs.find((tab) => tab.id === activeTabId) || null, [tabs, activeTabId]);
   const isBinary = activeTab?.encoding === "base64";
   const isLiveActive = liveEdit.following && liveEdit.path === activeTab?.path && ["streaming", "committing"].includes(liveEdit.phase);
@@ -37,6 +37,50 @@ export const EditorPane: React.FC<{ onPreview: () => void }> = ({ onPreview }) =
       options: { isWholeLine: true, className: "copilot-live-edit-line" },
     }]);
   }, [liveEdit.revision, isLiveActive]);
+
+  
+  // Smooth scroll and line highlight when jumping from chat code snippet
+  useEffect(() => {
+    if (!targetEditorScroll || !editorRef.current) return;
+    const editor = editorRef.current;
+    const model = editor.getModel();
+    if (!model) return;
+
+    const line = Math.min(Math.max(1, targetEditorScroll.lineNumber), model.getLineCount());
+    const endLine = Math.min(Math.max(line, targetEditorScroll.endLineNumber || line), model.getLineCount());
+
+    editor.revealLineInCenter(line, 0);
+    editor.setPosition({ lineNumber: line, column: 1 });
+    editor.setSelection({
+      startLineNumber: line,
+      startColumn: 1,
+      endLineNumber: endLine,
+      endColumn: model.getLineMaxColumn(endLine),
+    });
+
+    const highlightDecorations = editor.deltaDecorations([], [
+      {
+        range: {
+          startLineNumber: line,
+          startColumn: 1,
+          endLineNumber: endLine,
+          endColumn: model.getLineMaxColumn(endLine),
+        },
+        options: {
+          isWholeLine: true,
+          className: "bg-[#FF6C37]/20 border-l-2 border-[#FF6C37]",
+        },
+      },
+    ]);
+
+    const timer = setTimeout(() => {
+      if (editorRef.current) {
+        editorRef.current.deltaDecorations(highlightDecorations, []);
+      }
+    }, 2800);
+
+    return () => clearTimeout(timer);
+  }, [targetEditorScroll, activeTabId]);
 
   const copyActiveFile = async () => {
     if (!activeTab || isBinary) return;

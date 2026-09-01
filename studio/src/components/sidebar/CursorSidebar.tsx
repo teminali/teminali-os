@@ -195,7 +195,7 @@ export const CursorSidebar: React.FC<{
 
           <div
             onClick={onOpenSettings}
-            className="w-7 h-7 rounded-full bg-gradient-to-tr from-[#0284c7] to-[#FF6C37] text-white font-bold flex items-center justify-center text-3xs border border-white/10 cursor-pointer shadow-md hover:scale-105 transition-transform"
+            className="w-7 h-7 rounded-full bg-[#18181b] hover:bg-[#27272a] text-gray-300 hover:text-white font-semibold flex items-center justify-center text-3xs border border-white/10 cursor-pointer shadow-sm hover:scale-105 transition-all"
             title="Teminali Developer (Active Pro)"
           >
             T

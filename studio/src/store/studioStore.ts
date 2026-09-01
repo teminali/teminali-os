@@ -147,6 +147,9 @@ interface StudioState {
   
   tabs: EditorTab[];
   activeTabId: string | null;
+  targetEditorScroll: { path: string; lineNumber: number; endLineNumber?: number; timestamp: number } | null;
+  setTargetEditorScroll: (target: { path: string; lineNumber: number; endLineNumber?: number; timestamp: number } | null) => void;
+  openFileAtSnippet: (filePath: string, snippetCode: string) => Promise<void>;
   openFile: (file: { path: string; name: string; content?: string; language?: string; encoding?: "utf8" | "base64"; mimeType?: string; size?: number; modified?: string }) => void;
   addUntitledTab: () => void;
   closeTab: (tabId: string) => void;
@@ -470,6 +473,74 @@ return (
       },
       
       setActiveTab: (tabId) => set({ activeTabId: tabId }),
+
+      targetEditorScroll: null,
+      setTargetEditorScroll: (target) => set({ targetEditorScroll: target }),
+      openFileAtSnippet: async (filePath, snippetCode) => {
+        const { tabs, openFile, setActiveTab, setSplitTab, setSplitOpen } = get();
+        let existing = findTabByFileIdentity(tabs, filePath);
+        let fileContent = existing?.content;
+        let tabId = existing?.id;
+
+        if (!existing) {
+          try {
+            const { WorkspaceService } = await import("../services/workspaceService");
+            const loaded = await WorkspaceService.readFile(filePath);
+            openFile(loaded);
+            fileContent = loaded.content;
+            const state = get();
+            existing = findTabByFileIdentity(state.tabs, filePath);
+            tabId = existing?.id;
+          } catch {
+            openFile({
+              name: filePath.split("/").pop() || filePath,
+              path: filePath,
+              content: snippetCode,
+              language: filePath.endsWith(".tsx") || filePath.endsWith(".ts") ? "typescript" : filePath.endsWith(".css") ? "css" : filePath.endsWith(".html") ? "html" : "javascript"
+            });
+            fileContent = snippetCode;
+            const state = get();
+            existing = findTabByFileIdentity(state.tabs, filePath);
+            tabId = existing?.id;
+          }
+        }
+
+        if (tabId) {
+          setActiveTab(tabId);
+        }
+        setSplitTab("editor");
+        setSplitOpen(true);
+
+        let targetLine = 1;
+        let targetEndLine = 1;
+
+        if (fileContent && snippetCode) {
+          const cleanSnippet = snippetCode.trim();
+          const snippetLines = cleanSnippet.split("\n").map((l) => l.trim()).filter((l) => l.length > 2);
+          const fileLines = fileContent.split("\n");
+
+          if (snippetLines.length > 0) {
+            const firstLine = snippetLines[0];
+            for (let i = 0; i < fileLines.length; i++) {
+              if (fileLines[i].includes(firstLine)) {
+                targetLine = i + 1;
+                targetEndLine = Math.min(fileLines.length, targetLine + snippetLines.length - 1);
+                break;
+              }
+            }
+          }
+        }
+
+        set({
+          targetEditorScroll: {
+            path: existing?.path || filePath,
+            lineNumber: targetLine,
+            endLineNumber: targetEndLine,
+            timestamp: Date.now(),
+          },
+        });
+      },
+
       
       updateTabContent: (tabId, content) => {
         const { tabs } = get();

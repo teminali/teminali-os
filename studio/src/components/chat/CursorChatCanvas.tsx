@@ -371,7 +371,7 @@ export const CursorChatCanvas: React.FC<{
           {isEmpty ? (
             /* Empty State */
             <div className="h-full flex flex-col items-center justify-center max-w-xl mx-auto px-2 pb-8 text-center">
-              <div className="w-12 h-12 rounded-2xl bg-gradient-to-b from-[#FF6C37]/20 to-transparent border border-[#FF6C37]/30 flex items-center justify-center mb-4 text-[#FF6C37] shadow-lg shadow-[#FF6C37]/10">
+              <div className="w-12 h-12 rounded-2xl bg-[#18181b] border border-white/10 flex items-center justify-center mb-4 text-[#FF6C37] shadow-lg">
                 <Sparkles size={24} />
               </div>
               <h2 className="text-base font-semibold text-white mb-1 tracking-tight">Teminali Autonomous Studio</h2>

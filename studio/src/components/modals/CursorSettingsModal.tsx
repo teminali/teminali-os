@@ -303,7 +303,7 @@ export const CursorSettingsModal: React.FC<{
           {/* User Profile Pill at Bottom */}
           <div className="pt-2 border-t border-white/5 flex items-center justify-between">
             <div className="flex items-center gap-2">
-              <div className="w-6 h-6 rounded-full bg-blue-600 text-white font-bold flex items-center justify-center text-2xs border border-white/10 shadow-sm">
+              <div className="w-6 h-6 rounded-full bg-[#18181b] text-gray-200 font-bold flex items-center justify-center text-2xs border border-white/10 shadow-sm">
                 T
               </div>
               <div className="flex flex-col">
