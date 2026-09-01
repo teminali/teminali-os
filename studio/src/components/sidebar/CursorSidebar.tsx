@@ -116,13 +116,13 @@ export const CursorSidebar: React.FC<{
             }}
             className={`relative w-9 h-9 rounded-lg flex items-center justify-center transition-all ${
               activeRailTab === "chat"
-                ? "bg-[#141724] text-[#38bdf8] shadow-sm"
+                ? "bg-[#141724] text-[#FF6C37] shadow-sm"
                 : "text-gray-400 hover:text-white hover:bg-white/5"
             }`}
             title="Chat & Composer (⌘L)"
           >
             {activeRailTab === "chat" && (
-              <span className="absolute left-0 top-1.5 bottom-1.5 w-0.5 bg-[#38bdf8] rounded-r" />
+              <span className="absolute left-0 top-1.5 bottom-1.5 w-0.5 bg-[#FF6C37] rounded-r" />
             )}
             <MessageSquare size={16} />
           </button>
@@ -135,13 +135,13 @@ export const CursorSidebar: React.FC<{
             }}
             className={`relative w-9 h-9 rounded-lg flex items-center justify-center transition-all ${
               activeRailTab === "explorer"
-                ? "bg-[#141724] text-[#38bdf8] shadow-sm"
+                ? "bg-[#141724] text-[#FF6C37] shadow-sm"
                 : "text-gray-400 hover:text-white hover:bg-white/5"
             }`}
             title="Explorer / Files (⌘E)"
           >
             {activeRailTab === "explorer" && (
-              <span className="absolute left-0 top-1.5 bottom-1.5 w-0.5 bg-[#38bdf8] rounded-r" />
+              <span className="absolute left-0 top-1.5 bottom-1.5 w-0.5 bg-[#FF6C37] rounded-r" />
             )}
             <Folder size={16} />
           </button>
@@ -154,13 +154,13 @@ export const CursorSidebar: React.FC<{
             }}
             className={`relative w-9 h-9 rounded-lg flex items-center justify-center transition-all ${
               activeRailTab === "search"
-                ? "bg-[#141724] text-[#38bdf8] shadow-sm"
+                ? "bg-[#141724] text-[#FF6C37] shadow-sm"
                 : "text-gray-400 hover:text-white hover:bg-white/5"
             }`}
             title="Search Workspace (⌘P / ⌘F)"
           >
             {activeRailTab === "search" && (
-              <span className="absolute left-0 top-1.5 bottom-1.5 w-0.5 bg-[#38bdf8] rounded-r" />
+              <span className="absolute left-0 top-1.5 bottom-1.5 w-0.5 bg-[#FF6C37] rounded-r" />
             )}
             <Search size={16} />
           </button>
@@ -179,7 +179,7 @@ export const CursorSidebar: React.FC<{
         <div className="flex flex-col items-center gap-1.5 w-full">
           <button
             onClick={() => setBenchmarkModalOpen(true)}
-            className="w-9 h-9 rounded-lg flex items-center justify-center text-[#38bdf8] hover:bg-white/5 transition-colors"
+            className="w-9 h-9 rounded-lg flex items-center justify-center text-[#FF6C37] hover:bg-white/5 transition-colors"
             title="Teminali Intelligence & Benchmarks"
           >
             <Sparkles size={16} />
@@ -195,7 +195,7 @@ export const CursorSidebar: React.FC<{
 
           <div
             onClick={onOpenSettings}
-            className="w-7 h-7 rounded-full bg-gradient-to-tr from-[#0284c7] to-[#38bdf8] text-white font-bold flex items-center justify-center text-3xs border border-white/10 cursor-pointer shadow-md hover:scale-105 transition-transform"
+            className="w-7 h-7 rounded-full bg-gradient-to-tr from-[#0284c7] to-[#FF6C37] text-white font-bold flex items-center justify-center text-3xs border border-white/10 cursor-pointer shadow-md hover:scale-105 transition-transform"
             title="Teminali Developer (Active Pro)"
           >
             T
@@ -256,7 +256,7 @@ export const CursorSidebar: React.FC<{
               <div className="space-y-3">
                 <button
                   onClick={onNewAgent}
-                  className="w-full flex items-center justify-center gap-2 py-2 px-3 rounded-lg bg-[#38bdf8] text-black font-semibold text-xs hover:bg-sky-400 transition-colors shadow-sm"
+                  className="w-full flex items-center justify-center gap-2 py-2 px-3 rounded-lg bg-[#FF6C37] text-black font-semibold text-xs hover:bg-[#ff7d4d] transition-colors shadow-sm"
                 >
                   <Bot size={14} />
                   <span>New Teminali Code Chat</span>
@@ -268,7 +268,7 @@ export const CursorSidebar: React.FC<{
                   </div>
                   <div className="space-y-0.5 mt-1">
                     <button className="w-full flex items-center gap-2 px-2.5 py-1.5 rounded-lg bg-white/5 text-white font-medium text-left">
-                      <MessageSquare size={13} className="text-[#38bdf8]" />
+                      <MessageSquare size={13} className="text-[#FF6C37]" />
                       <span className="truncate">Active Workspace Chat</span>
                     </button>
                   </div>
@@ -280,7 +280,7 @@ export const CursorSidebar: React.FC<{
                   </div>
                   <div className="space-y-0.5 mt-1">
                     <div className="flex items-center gap-2 px-2.5 py-1.5 rounded-lg text-gray-400 hover:text-white hover:bg-white/5 cursor-pointer">
-                      <Folder size={13} className="text-[#38bdf8]" />
+                      <Folder size={13} className="text-[#FF6C37]" />
                       <span className="truncate">~/Documents/my_projects/teminali</span>
                     </div>
                   </div>
@@ -319,7 +319,7 @@ export const CursorSidebar: React.FC<{
                           <div className="flex items-center gap-1.5 truncate">
                             <FileIcon name={tab.name} />
                             <span className="truncate">{tab.name}</span>
-                            {tab.isDirty && <span className="w-1.5 h-1.5 rounded-full bg-[#38bdf8]" />}
+                            {tab.isDirty && <span className="w-1.5 h-1.5 rounded-full bg-[#FF6C37]" />}
                           </div>
                           <button
                             onClick={(e) => {
@@ -373,7 +373,7 @@ export const CursorSidebar: React.FC<{
                     value={searchQuery}
                     onChange={(e) => setSearchQuery(e.target.value)}
                     placeholder="Search files by name..."
-                    className="w-full h-8 pl-8 pr-2 bg-[#141724] border border-white/10 rounded-lg text-xs text-white focus:outline-none focus:border-[#38bdf8]/40"
+                    className="w-full h-8 pl-8 pr-2 bg-[#141724] border border-white/10 rounded-lg text-xs text-white focus:outline-none focus:border-[#FF6C37]/40"
                     autoFocus
                   />
                 </div>

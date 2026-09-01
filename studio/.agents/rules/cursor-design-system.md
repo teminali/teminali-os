@@ -17,7 +17,7 @@
    - Hairline 1px borders with top-edge reflection: `border-white/10` or `border-t border-white/15 border-x border-white/5 border-b border-white/5`.
 
 3. **Signature Accent Colors**:
-   - **Electric Sky**: `#38bdf8` (Primary brand, active tabs, focused states, send buttons).
+   - **Postman Orange**: `#FF6C37` (Primary brand accent, active tabs, focused rings, send actions, interactive code toggles).
    - **Emerald Glow**: `#10b981` / `#22c55e` (Live status, completed actions, positive telemetry).
    - **Amber / Gold**: `#f59e0b` / `#eab308` (Warnings, specialist skills, qualification notes).
    - **Violet / Purple**: `#818cf8` / `#a855f7` (AI reasoning, plan mode, smart orchestration).

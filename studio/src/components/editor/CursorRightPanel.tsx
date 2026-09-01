@@ -80,11 +80,11 @@ export const CursorRightPanel: React.FC<{
               onClick={() => setActiveTab("browser")}
               className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${
                 activeTab === "browser"
-                  ? "bg-[#1f2438] text-[#38bdf8] border border-[#38bdf8]/30 shadow-sm"
+                  ? "bg-[#1f2438] text-[#FF6C37] border border-[#FF6C37]/30 shadow-sm"
                   : "text-gray-400 hover:text-white hover:bg-white/5 border border-transparent"
               }`}
             >
-              <Globe size={13} className="text-[#38bdf8]" />
+              <Globe size={13} className="text-[#FF6C37]" />
               <span>Live Browser</span>
             </button>
 
@@ -158,7 +158,7 @@ export const CursorRightPanel: React.FC<{
                     }}
                     className="w-full flex items-center gap-2 px-2.5 py-1.5 rounded-lg hover:bg-white/5 text-gray-300 hover:text-white text-left"
                   >
-                    <Rows2 size={13} className="text-[#38bdf8]" />
+                    <Rows2 size={13} className="text-[#FF6C37]" />
                     <span>{isInternalSplit ? "Single Pane" : "Split Top / Bottom"}</span>
                   </button>
                 </div>
@@ -172,7 +172,7 @@ export const CursorRightPanel: React.FC<{
             <button
               onClick={() => setIsInternalSplit((p) => !p)}
               className={`p-1.5 rounded hover:bg-white/5 transition-colors ${
-                isInternalSplit ? "text-[#38bdf8] bg-white/5" : "hover:text-white"
+                isInternalSplit ? "text-[#FF6C37] bg-white/5" : "hover:text-white"
               }`}
               title={isInternalSplit ? "Close Bottom Split" : "Split Editor & Terminal (Top/Bottom)"}
             >

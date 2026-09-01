@@ -1,28 +1,32 @@
 import React, { useState } from "react";
 import {
-  Copy,
-  Check,
   Maximize2,
   Minimize2,
-  ExternalLink,
-  Code2,
-  Terminal,
 } from "lucide-react";
+import { CodeSnippet } from "../ui/CodeSnippet";
 
-export const CursorMarkdownRenderer: React.FC<{ content: string }> = ({ content }) => {
-  const [copiedCodeIdx, setCopiedCodeIdx] = useState<number | null>(null);
+export interface CursorMarkdownRendererProps {
+  content: string;
+  isStreaming?: boolean;
+}
+
+export const CursorMarkdownRenderer: React.FC<CursorMarkdownRendererProps> = ({
+  content,
+  isStreaming = false,
+}) => {
   const [expandedDiagram, setExpandedDiagram] = useState(false);
 
-  const copyCode = (idx: number, code: string) => {
-    navigator.clipboard.writeText(code);
-    setCopiedCodeIdx(idx);
-    setTimeout(() => setCopiedCodeIdx(null), 1500);
-  };
-
-  // Helper to parse blocks
+  // Helper to parse markdown blocks
   const parseBlocks = (raw: string) => {
     const lines = raw.split("\n");
-    const blocks: { type: string; content: string; lang?: string; headers?: string[]; rows?: string[][] }[] = [];
+    const blocks: {
+      type: "code" | "table" | "text";
+      content: string;
+      lang?: string;
+      headers?: string[];
+      rows?: string[][];
+    }[] = [];
+
     let currentText: string[] = [];
     let inCode = false;
     let codeLang = "";
@@ -57,31 +61,33 @@ export const CursorMarkdownRenderer: React.FC<{ content: string }> = ({ content 
         continue;
       }
 
-      // Markdown Tables
+      // Tables
       if (line.trim().startsWith("|") && line.trim().endsWith("|")) {
-        const cells = line
-          .split("|")
-          .slice(1, -1)
-          .map((c) => c.trim());
-
-        if (cells.every((c) => c.match(/^:?-+:?$/))) {
-          // Separator row, skip
-          continue;
-        }
-
         if (!inTable) {
           if (currentText.length > 0) {
             blocks.push({ type: "text", content: currentText.join("\n") });
             currentText = [];
           }
           inTable = true;
-          tableHeaders = cells;
-          tableRows = [];
+          tableHeaders = line
+            .split("|")
+            .slice(1, -1)
+            .map((h) => h.trim());
+          continue;
         } else {
-          tableRows.push(cells);
+          // Table separator row
+          if (line.includes("---")) continue;
+
+          const rowCells = line
+            .split("|")
+            .slice(1, -1)
+            .map((c) => c.trim());
+          tableRows.push(rowCells);
+          continue;
         }
-        continue;
-      } else if (inTable) {
+      }
+
+      if (inTable && (!line.trim().startsWith("|") || !line.trim().endsWith("|"))) {
         blocks.push({ type: "table", content: "", headers: tableHeaders, rows: tableRows });
         inTable = false;
         tableHeaders = [];
@@ -113,7 +119,7 @@ export const CursorMarkdownRenderer: React.FC<{ content: string }> = ({ content 
         return (
           <code
             key={idx}
-            className="px-1.5 py-0.5 rounded bg-white/5 text-[#38bdf8] font-mono text-xs border border-white/5"
+            className="px-1.5 py-0.5 rounded bg-white/5 text-[#FF6C37] font-mono text-xs border border-white/5"
           >
             {codeText}
           </code>
@@ -134,28 +140,32 @@ export const CursorMarkdownRenderer: React.FC<{ content: string }> = ({ content 
   const blocks = parseBlocks(content);
 
   return (
-    <div className="space-y-4 font-sans text-sm text-gray-200 leading-relaxed">
+    <div className="space-y-3 font-sans text-sm text-gray-200 leading-relaxed">
       {blocks.map((block, idx) => {
         if (block.type === "code") {
-          const isDiagram = block.lang === "diagram" || block.lang === "architecture" || block.content.includes("├──") || block.content.includes("┌──");
+          const isDiagram =
+            block.lang === "diagram" ||
+            block.lang === "architecture" ||
+            block.content.includes("├──") ||
+            block.content.includes("┌──");
 
           if (isDiagram) {
             return (
               <div
                 key={idx}
-                className="my-4 bg-[#1b1b1b] border border-white/5 rounded-2xl p-5 shadow-xl relative group font-mono text-xs"
+                className="my-3 bg-[#10131c] border border-white/10 rounded-xl p-4 shadow-xl relative group font-mono text-xs"
               >
-                <div className="flex items-center justify-between pb-3 mb-3 border-b border-white/5 text-gray-400 text-2xs">
-                  <span className="font-medium tracking-wide text-gray-300">Architecture Diagram</span>
-                  <div className="flex items-center gap-1.5">
-                    <button
-                      onClick={() => setExpandedDiagram((p) => !p)}
-                      className="p-1 hover:text-white rounded hover:bg-white/5 transition-colors"
-                      title="Expand diagram"
-                    >
-                      <Maximize2 size={13} />
-                    </button>
-                  </div>
+                <div className="flex items-center justify-between pb-2 mb-2 border-b border-white/5 text-gray-400 text-2xs">
+                  <span className="font-medium tracking-wide text-gray-300">
+                    Architecture Diagram
+                  </span>
+                  <button
+                    onClick={() => setExpandedDiagram((p) => !p)}
+                    className="p-1 hover:text-white rounded hover:bg-white/5 transition-colors"
+                    title="Expand diagram"
+                  >
+                    {expandedDiagram ? <Minimize2 size={13} /> : <Maximize2 size={13} />}
+                  </button>
                 </div>
                 <pre className="text-gray-300 overflow-x-auto whitespace-pre leading-relaxed">
                   {block.content}
@@ -164,63 +174,28 @@ export const CursorMarkdownRenderer: React.FC<{ content: string }> = ({ content 
             );
           }
 
+          // Modular, Minimizable Code Snippet
           return (
-            <div
+            <CodeSnippet
               key={idx}
-              className="my-3 bg-[#191919] border border-white/5 rounded-xl overflow-hidden group shadow-lg font-mono text-xs"
-            >
-              <div className="flex items-center justify-between px-3.5 py-2 bg-[#1f1f1f] border-b border-white/5 text-2xs text-gray-400">
-                <span className="font-semibold">{block.lang || "bash"}</span>
-                <button
-                  onClick={() => copyCode(idx, block.content)}
-                  className="flex items-center gap-1 px-2 py-0.5 rounded hover:bg-white/5 hover:text-white transition-colors"
-                >
-                  {copiedCodeIdx === idx ? (
-                    <>
-                      <Check size={12} className="text-[#22c55e]" />
-                      <span className="text-[#22c55e]">Copied</span>
-                    </>
-                  ) : (
-                    <>
-                      <Copy size={12} />
-                      <span>Copy</span>
-                    </>
-                  )}
-                </button>
-              </div>
-              <div className="p-4 overflow-x-auto text-gray-300 leading-relaxed">
-                {block.content.split("\n").map((line, lIdx) => {
-                  if (line.trim().startsWith("#")) {
-                    return (
-                      <div key={lIdx} className="text-gray-500 italic">
-                        {line}
-                      </div>
-                    );
-                  }
-                  if (line.includes("#")) {
-                    const [cmd, comment] = line.split("#");
-                    return (
-                      <div key={lIdx}>
-                        <span className="text-[#f43f5e]">{cmd}</span>
-                        <span className="text-gray-500 italic">#{comment}</span>
-                      </div>
-                    );
-                  }
-                  return <div key={lIdx}>{line}</div>;
-                })}
-              </div>
-            </div>
+              content={block.content}
+              lang={block.lang}
+              isStreaming={isStreaming}
+            />
           );
         }
 
         if (block.type === "table") {
           return (
-            <div key={idx} className="my-4 border border-white/5 rounded-xl overflow-hidden shadow-lg bg-[#191919]">
+            <div
+              key={idx}
+              className="my-3 border border-white/10 rounded-xl overflow-hidden shadow-lg bg-[#0e1017]"
+            >
               <table className="w-full text-left text-xs border-collapse">
                 <thead>
-                  <tr className="bg-[#1e1e1e] border-b border-white/5 text-gray-400 font-semibold text-2xs uppercase tracking-wider">
+                  <tr className="bg-[#141724] border-b border-white/10 text-gray-400 font-semibold text-2xs uppercase tracking-wider">
                     {block.headers?.map((h, hIdx) => (
-                      <th key={hIdx} className="px-4 py-2.5">
+                      <th key={hIdx} className="px-3.5 py-2">
                         {h}
                       </th>
                     ))}
@@ -230,7 +205,7 @@ export const CursorMarkdownRenderer: React.FC<{ content: string }> = ({ content 
                   {block.rows?.map((row, rIdx) => (
                     <tr key={rIdx} className="hover:bg-white/[0.02] transition-colors">
                       {row.map((cell, cIdx) => (
-                        <td key={cIdx} className="px-4 py-2.5 text-gray-300">
+                        <td key={cIdx} className="px-3.5 py-2 text-gray-300">
                           {renderInline(cell)}
                         </td>
                       ))}
@@ -244,35 +219,44 @@ export const CursorMarkdownRenderer: React.FC<{ content: string }> = ({ content 
 
         // Standard Text Block
         return (
-          <div key={idx} className="space-y-2">
+          <div key={idx} className="space-y-1.5">
             {block.content.split("\n").map((paragraph, pIdx) => {
               const trimmed = paragraph.trim();
               if (!trimmed) return null;
 
               if (trimmed.startsWith("### ")) {
                 return (
-                  <h3 key={pIdx} className="text-sm font-semibold text-white mt-4 mb-1">
+                  <h3 key={pIdx} className="text-xs font-semibold text-white mt-3 mb-1">
                     {renderInline(trimmed.slice(4))}
                   </h3>
                 );
               }
               if (trimmed.startsWith("## ")) {
                 return (
-                  <h2 key={pIdx} className="text-base font-semibold text-white tracking-tight mt-5 mb-2">
+                  <h2
+                    key={pIdx}
+                    className="text-sm font-semibold text-white tracking-tight mt-4 mb-1.5"
+                  >
                     {renderInline(trimmed.slice(3))}
                   </h2>
                 );
               }
               if (trimmed.startsWith("# ")) {
                 return (
-                  <h1 key={pIdx} className="text-lg font-bold text-white tracking-tight mt-6 mb-2">
+                  <h1
+                    key={pIdx}
+                    className="text-base font-bold text-white tracking-tight mt-5 mb-2"
+                  >
                     {renderInline(trimmed.slice(2))}
                   </h1>
                 );
               }
               if (trimmed.startsWith("- ") || trimmed.startsWith("* ")) {
                 return (
-                  <li key={pIdx} className="ml-4 list-disc list-outside text-gray-300 leading-relaxed my-0.5">
+                  <li
+                    key={pIdx}
+                    className="ml-4 list-disc list-outside text-gray-300 leading-relaxed my-0.5"
+                  >
                     {renderInline(trimmed.slice(2))}
                   </li>
                 );
@@ -289,7 +273,7 @@ export const CursorMarkdownRenderer: React.FC<{ content: string }> = ({ content 
               }
 
               return (
-                <p key={pIdx} className="leading-relaxed text-gray-300">
+                <p key={pIdx} className="leading-relaxed text-gray-300 text-xs">
                   {renderInline(paragraph)}
                 </p>
               );

@@ -1,6 +1,7 @@
 import React from "react";
 
 export type BadgeVariant =
+  | "orange"
   | "sky"
   | "emerald"
   | "amber"
@@ -20,6 +21,7 @@ export interface BadgeProps extends React.HTMLAttributes<HTMLSpanElement> {
 }
 
 const variantStyles: Record<BadgeVariant, string> = {
+  orange: "bg-[#FF6C37]/15 text-[#FF6C37] border border-[#FF6C37]/30",
   sky: "bg-[#38bdf8]/10 text-[#38bdf8] border border-[#38bdf8]/25",
   emerald: "bg-emerald-500/10 text-emerald-400 border border-emerald-500/25",
   amber: "bg-amber-500/10 text-amber-300 border border-amber-500/25",
@@ -31,6 +33,7 @@ const variantStyles: Record<BadgeVariant, string> = {
 };
 
 const dotColors: Record<BadgeVariant, string> = {
+  orange: "bg-[#FF6C37]",
   sky: "bg-[#38bdf8]",
   emerald: "bg-emerald-400",
   amber: "bg-amber-400",
@@ -38,7 +41,7 @@ const dotColors: Record<BadgeVariant, string> = {
   rose: "bg-rose-400",
   neutral: "bg-gray-400",
   shortcut: "bg-gray-500",
-  model: "bg-[#38bdf8]",
+  model: "bg-[#FF6C37]",
 };
 
 const sizeStyles: Record<BadgeSize, string> = {
@@ -49,7 +52,7 @@ const sizeStyles: Record<BadgeSize, string> = {
 
 export const Badge: React.FC<BadgeProps> = ({
   children,
-  variant = "neutral",
+  variant = "orange",
   size = "sm",
   icon,
   dot = false,

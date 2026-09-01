@@ -97,7 +97,7 @@ export const CommandPaletteModal: React.FC<{
         title: session.title,
         subtitle: session.workspace,
         badge: `${session.workspace} · ${session.timestamp}`,
-        icon: <Bot className="w-4 h-4 text-[#38bdf8]" />,
+        icon: <Bot className="w-4 h-4 text-[#FF6C37]" />,
         action: () => {
           switchSession(session.id);
           onClose();
@@ -137,7 +137,7 @@ export const CommandPaletteModal: React.FC<{
         type: "actions",
         title: "New Agent",
         shortcut: "⌘ L",
-        icon: <Bot className="w-4 h-4 text-[#38bdf8]" />,
+        icon: <Bot className="w-4 h-4 text-[#FF6C37]" />,
         action: () => {
           clearEngineSession("frontier");
           onClose();
@@ -170,7 +170,7 @@ export const CommandPaletteModal: React.FC<{
         type: "actions",
         title: "Open Live Browser Preview",
         shortcut: "⌘ J",
-        icon: <Globe className="w-4 h-4 text-[#38bdf8]" />,
+        icon: <Globe className="w-4 h-4 text-[#FF6C37]" />,
         action: () => {
           openBrowserPreview();
           onClose();
@@ -211,7 +211,7 @@ export const CommandPaletteModal: React.FC<{
         title: "Agent Mode (Teminali Auto)",
         subtitle: "Autonomous local multi-file coding and tool execution",
         badge: currentProfile === "auto" ? "Active" : undefined,
-        icon: <Zap className="w-4 h-4 text-[#38bdf8]" />,
+        icon: <Zap className="w-4 h-4 text-[#FF6C37]" />,
         action: () => {
           setProfile("auto");
           onClose();
@@ -416,7 +416,7 @@ export const CommandPaletteModal: React.FC<{
       <div className="w-full max-w-xl bg-[#141720] border border-white/10 rounded-2xl shadow-[0_30px_90px_rgba(0,0,0,0.9)] overflow-hidden flex flex-col">
         {/* ── Top Search Input Header ─────────────────────────────────────── */}
         <div className="flex items-center px-4 py-3 bg-[#0d1017] border-b border-white/5 gap-3">
-          <Search className="w-4 h-4 text-[#38bdf8] flex-shrink-0" />
+          <Search className="w-4 h-4 text-[#FF6C37] flex-shrink-0" />
           <input
             ref={inputRef}
             type="text"
@@ -511,7 +511,7 @@ export const CommandPaletteModal: React.FC<{
                           </span>
                         )}
                         {isSelected && !item.shortcut && !item.badge && (
-                          <CornerDownLeft className="w-3.5 h-3.5 text-[#38bdf8]" />
+                          <CornerDownLeft className="w-3.5 h-3.5 text-[#FF6C37]" />
                         )}
                       </div>
                     </div>

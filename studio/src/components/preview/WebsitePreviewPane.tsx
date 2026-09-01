@@ -266,7 +266,7 @@ export const WebsitePreviewPane: React.FC<{ activeTab: EditorTab | null }> = ({ 
     if (!activeTab) {
       return (
         <div className="flex-1 flex flex-col items-center justify-center p-8 text-center bg-[#08090E] text-gray-400 select-none">
-          <div className="w-12 h-12 rounded-2xl bg-white/5 border border-white/10 flex items-center justify-center mb-4 text-[#38bdf8] shadow-inner">
+          <div className="w-12 h-12 rounded-2xl bg-white/5 border border-white/10 flex items-center justify-center mb-4 text-[#FF6C37] shadow-inner">
             <Globe2 size={24} />
           </div>
           <h3 className="text-sm font-semibold text-white mb-1">No Active Preview File</h3>
@@ -279,9 +279,9 @@ export const WebsitePreviewPane: React.FC<{ activeTab: EditorTab | null }> = ({ 
                 <button
                   key={t.id}
                   onClick={() => setActiveTab(t.id)}
-                  className="px-3 py-1.5 rounded-lg text-xs font-mono bg-[#141724] border border-white/10 hover:border-[#38bdf8]/40 hover:text-white text-gray-300 transition-all flex items-center gap-1.5 shadow-sm"
+                  className="px-3 py-1.5 rounded-lg text-xs font-mono bg-[#141724] border border-white/10 hover:border-[#FF6C37]/40 hover:text-white text-gray-300 transition-all flex items-center gap-1.5 shadow-sm"
                 >
-                  <FileCode size={13} className="text-[#38bdf8]" />
+                  <FileCode size={13} className="text-[#FF6C37]" />
                   <span>{t.name}</span>
                 </button>
               ))}
@@ -295,7 +295,7 @@ export const WebsitePreviewPane: React.FC<{ activeTab: EditorTab | null }> = ({ 
       if (sheet.status === "loading") {
         return (
           <div className="flex-1 flex flex-col items-center justify-center p-8 text-gray-400">
-            <LoaderCircle size={28} className="animate-spin text-[#38bdf8] mb-2" />
+            <LoaderCircle size={28} className="animate-spin text-[#FF6C37] mb-2" />
             <strong className="text-sm text-white">Reading spreadsheet…</strong>
           </div>
         );
@@ -317,7 +317,7 @@ export const WebsitePreviewPane: React.FC<{ activeTab: EditorTab | null }> = ({ 
         <object className="w-full h-full border-0" data={objectUrl} type="application/pdf">
           <div className="flex-1 flex flex-col items-center justify-center p-8 text-gray-400">
             <strong className="text-sm text-white">PDF viewer unavailable</strong>
-            <a href={objectUrl} target="_blank" rel="noreferrer" className="text-xs text-[#38bdf8] underline mt-1">
+            <a href={objectUrl} target="_blank" rel="noreferrer" className="text-xs text-[#FF6C37] underline mt-1">
               Open PDF in a new tab
             </a>
           </div>
@@ -427,11 +427,11 @@ export const WebsitePreviewPane: React.FC<{ activeTab: EditorTab | null }> = ({ 
               onClick={() => setSurface("browser")}
               className={`flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-medium transition-all ${
                 surface === "browser"
-                  ? "bg-[#38bdf8]/15 text-[#38bdf8] border border-[#38bdf8]/30 shadow-sm font-semibold"
+                  ? "bg-[#FF6C37]/15 text-[#FF6C37] border border-[#FF6C37]/30 shadow-sm font-semibold"
                   : "text-gray-400 hover:text-white"
               }`}
             >
-              <Globe2 size={13} className={surface === "browser" ? "text-[#38bdf8]" : ""} />
+              <Globe2 size={13} className={surface === "browser" ? "text-[#FF6C37]" : ""} />
               <span>Live Browser</span>
             </button>
 
@@ -456,7 +456,7 @@ export const WebsitePreviewPane: React.FC<{ activeTab: EditorTab | null }> = ({ 
               onClick={() => setIsComparingReference(!isComparingReference)}
               className={`flex items-center gap-1 px-2 py-1 rounded-lg text-3xs font-medium border transition-colors ${
                 isComparingReference
-                  ? "bg-[#38bdf8]/20 text-[#38bdf8] border-[#38bdf8]/40 shadow-sm"
+                  ? "bg-[#FF6C37]/20 text-[#FF6C37] border-[#FF6C37]/40 shadow-sm"
                   : "bg-white/5 text-gray-400 border-white/10 hover:text-white hover:bg-white/10"
               }`}
               title="Toggle Reference Screenshot Mockup Comparison"
@@ -503,7 +503,7 @@ export const WebsitePreviewPane: React.FC<{ activeTab: EditorTab | null }> = ({ 
                 e.preventDefault();
                 navigate();
               }}
-              className="flex-1 flex items-center gap-1.5 h-7 px-2.5 bg-[#090b10] border border-white/10 focus-within:border-[#38bdf8]/50 rounded-lg text-xs font-mono transition-colors shadow-inner"
+              className="flex-1 flex items-center gap-1.5 h-7 px-2.5 bg-[#090b10] border border-white/10 focus-within:border-[#FF6C37]/50 rounded-lg text-xs font-mono transition-colors shadow-inner"
             >
               <Lock size={11} className="text-emerald-400 flex-shrink-0 opacity-70" />
               <input
@@ -515,7 +515,7 @@ export const WebsitePreviewPane: React.FC<{ activeTab: EditorTab | null }> = ({ 
               />
               <button
                 type="submit"
-                className="text-3xs uppercase font-bold text-[#38bdf8] hover:text-sky-300 px-1 py-0.5 rounded hover:bg-white/5"
+                className="text-3xs uppercase font-bold text-[#FF6C37] hover:text-sky-300 px-1 py-0.5 rounded hover:bg-white/5"
               >
                 Go
               </button>
@@ -559,7 +559,7 @@ export const WebsitePreviewPane: React.FC<{ activeTab: EditorTab | null }> = ({ 
             type="button"
             onClick={() => setViewport("desktop")}
             className={`p-1.5 rounded-md transition-colors ${
-              viewport === "desktop" ? "bg-[#38bdf8]/20 text-[#38bdf8]" : "text-gray-400 hover:text-white"
+              viewport === "desktop" ? "bg-[#FF6C37]/20 text-[#FF6C37]" : "text-gray-400 hover:text-white"
             }`}
             title="Desktop Viewport (100%)"
           >
@@ -569,7 +569,7 @@ export const WebsitePreviewPane: React.FC<{ activeTab: EditorTab | null }> = ({ 
             type="button"
             onClick={() => setViewport("tablet")}
             className={`p-1.5 rounded-md transition-colors ${
-              viewport === "tablet" ? "bg-[#38bdf8]/20 text-[#38bdf8]" : "text-gray-400 hover:text-white"
+              viewport === "tablet" ? "bg-[#FF6C37]/20 text-[#FF6C37]" : "text-gray-400 hover:text-white"
             }`}
             title="Tablet Viewport (768px)"
           >
@@ -579,7 +579,7 @@ export const WebsitePreviewPane: React.FC<{ activeTab: EditorTab | null }> = ({ 
             type="button"
             onClick={() => setViewport("mobile")}
             className={`p-1.5 rounded-md transition-colors ${
-              viewport === "mobile" ? "bg-[#38bdf8]/20 text-[#38bdf8]" : "text-gray-400 hover:text-white"
+              viewport === "mobile" ? "bg-[#FF6C37]/20 text-[#FF6C37]" : "text-gray-400 hover:text-white"
             }`}
             title="Mobile Viewport (375px)"
           >
@@ -590,13 +590,13 @@ export const WebsitePreviewPane: React.FC<{ activeTab: EditorTab | null }> = ({ 
 
       {/* Floating Reference Screenshot Comparison Tool */}
       {isComparingReference && referenceScreenshotUrl && (
-        <div className="absolute top-14 right-4 z-30 bg-[#14171f]/95 border border-[#38bdf8]/40 p-2.5 rounded-xl shadow-2xl backdrop-blur-md flex items-center gap-3 text-xs text-white">
+        <div className="absolute top-14 right-4 z-30 bg-[#14171f]/95 border border-[#FF6C37]/40 p-2.5 rounded-xl shadow-2xl backdrop-blur-md flex items-center gap-3 text-xs text-white">
           <div className="flex items-center gap-1 border-r border-white/10 pr-2">
             <button
               type="button"
               onClick={() => setComparisonMode("overlay")}
               className={`px-1.5 py-0.5 rounded text-3xs font-mono transition-colors ${
-                comparisonMode === "overlay" ? "bg-[#38bdf8]/25 text-[#38bdf8] font-bold" : "text-gray-400 hover:text-white"
+                comparisonMode === "overlay" ? "bg-[#FF6C37]/25 text-[#FF6C37] font-bold" : "text-gray-400 hover:text-white"
               }`}
             >
               Overlay
@@ -605,7 +605,7 @@ export const WebsitePreviewPane: React.FC<{ activeTab: EditorTab | null }> = ({ 
               type="button"
               onClick={() => setComparisonMode("side-by-side")}
               className={`px-1.5 py-0.5 rounded text-3xs font-mono transition-colors ${
-                comparisonMode === "side-by-side" ? "bg-[#38bdf8]/25 text-[#38bdf8] font-bold" : "text-gray-400 hover:text-white"
+                comparisonMode === "side-by-side" ? "bg-[#FF6C37]/25 text-[#FF6C37] font-bold" : "text-gray-400 hover:text-white"
               }`}
             >
               Side-by-Side
@@ -614,7 +614,7 @@ export const WebsitePreviewPane: React.FC<{ activeTab: EditorTab | null }> = ({ 
 
           {comparisonMode === "overlay" && (
             <>
-              <div className="flex items-center gap-1.5 text-3xs font-medium text-[#38bdf8]">
+              <div className="flex items-center gap-1.5 text-3xs font-medium text-[#FF6C37]">
                 <Sliders size={12} />
                 <span>Opacity: {comparisonOpacity}%</span>
               </div>
@@ -624,7 +624,7 @@ export const WebsitePreviewPane: React.FC<{ activeTab: EditorTab | null }> = ({ 
                 max="100"
                 value={comparisonOpacity}
                 onChange={(e) => setComparisonOpacity(Number(e.target.value))}
-                className="w-20 accent-[#38bdf8] cursor-pointer"
+                className="w-20 accent-[#FF6C37] cursor-pointer"
               />
             </>
           )}
@@ -647,7 +647,7 @@ export const WebsitePreviewPane: React.FC<{ activeTab: EditorTab | null }> = ({ 
             <div className="grid grid-cols-2 h-full divide-x divide-white/10 bg-[#08090b]">
               {/* Left: Original Mockup */}
               <div className="flex flex-col h-full overflow-hidden">
-                <div className="px-3 py-1.5 bg-[#12141a] border-b border-white/5 text-3xs text-[#38bdf8] font-mono font-bold flex items-center justify-between">
+                <div className="px-3 py-1.5 bg-[#12141a] border-b border-white/5 text-3xs text-[#FF6C37] font-mono font-bold flex items-center justify-between">
                   <span>Reference Screenshot</span>
                   <span className="text-gray-500 font-normal">Original Mockup</span>
                 </div>
@@ -714,7 +714,7 @@ export const WebsitePreviewPane: React.FC<{ activeTab: EditorTab | null }> = ({ 
                   <img
                     src={referenceScreenshotUrl}
                     alt="Reference Mockup"
-                    className="max-w-full max-h-full object-contain border border-[#38bdf8]/50 shadow-2xl rounded"
+                    className="max-w-full max-h-full object-contain border border-[#FF6C37]/50 shadow-2xl rounded"
                   />
                 </div>
               )}

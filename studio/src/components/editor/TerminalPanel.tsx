@@ -153,7 +153,7 @@ export const TerminalPanel: React.FC<TerminalPanelProps> = ({
       {/* ── Title Strip ──────────────────────────────────────────────── */}
       <div className="h-8 border-b border-white/5 bg-[#0c0e14] flex items-center justify-between px-3 flex-shrink-0">
         <div className="flex items-center gap-2 text-3xs text-gray-200 font-bold">
-          <TerminalIcon size={12} className="text-[#38bdf8]" />
+          <TerminalIcon size={12} className="text-[#FF6C37]" />
           <span className="text-gray-300">zsh · local terminal</span>
           <span className="px-1.5 py-0.2 rounded bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 text-4xs font-mono">
             active
@@ -195,7 +195,7 @@ export const TerminalPanel: React.FC<TerminalPanelProps> = ({
             key={idx}
             className={
               log.includes("teminali@")
-                ? "text-[#38bdf8] font-bold"
+                ? "text-[#FF6C37] font-bold"
                 : log.includes("Error") || log.includes("denied")
                 ? "text-rose-400"
                 : log.includes("ready") || log.includes("clean") || log.includes("Local:")
@@ -209,7 +209,7 @@ export const TerminalPanel: React.FC<TerminalPanelProps> = ({
 
         {/* Active Command Prompt Line */}
         <form onSubmit={handleCommand} className="flex items-center gap-2 pt-1">
-          <span className="text-[#38bdf8] font-bold flex-shrink-0">
+          <span className="text-[#FF6C37] font-bold flex-shrink-0">
             teminali@macbook-pro teminali %
           </span>
           <input
@@ -217,7 +217,7 @@ export const TerminalPanel: React.FC<TerminalPanelProps> = ({
             value={inputVal}
             onChange={(e) => setInputVal(e.target.value)}
             onKeyDown={handleKeyDown}
-            className="flex-1 bg-transparent border-0 outline-none text-white text-xs font-mono caret-[#38bdf8]"
+            className="flex-1 bg-transparent border-0 outline-none text-white text-xs font-mono caret-[#FF6C37]"
             autoFocus
             spellCheck={false}
           />

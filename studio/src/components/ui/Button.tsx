@@ -15,7 +15,7 @@ export interface ButtonProps extends React.ButtonHTMLAttributes<HTMLButtonElemen
 
 const variantStyles: Record<ButtonVariant, string> = {
   primary:
-    "bg-[#38bdf8] text-black font-semibold hover:bg-sky-400 border border-transparent shadow-sm active:scale-[0.98] disabled:opacity-40 disabled:bg-gray-800 disabled:text-gray-500",
+    "bg-[#FF6C37] text-white font-semibold hover:bg-[#ff7d4d] border border-transparent shadow-sm active:scale-[0.98] disabled:opacity-40 disabled:bg-gray-800 disabled:text-gray-500",
   secondary:
     "bg-[#141724] text-gray-200 hover:text-white hover:bg-[#1a1e30] border border-white/10 hover:border-white/20 shadow-sm active:scale-[0.98] disabled:opacity-40",
   ghost:
@@ -29,10 +29,10 @@ const variantStyles: Record<ButtonVariant, string> = {
 };
 
 const activeStyles: Partial<Record<ButtonVariant, string>> = {
-  tab: "bg-[#1f2438] text-[#38bdf8] border border-[#38bdf8]/30 shadow-sm font-semibold",
-  secondary: "bg-[#1f2438] text-[#38bdf8] border-[#38bdf8]/40 shadow-sm font-semibold",
+  tab: "bg-[#FF6C37]/15 text-[#FF6C37] border border-[#FF6C37]/30 shadow-sm font-semibold",
+  secondary: "bg-[#FF6C37]/15 text-[#FF6C37] border-[#FF6C37]/40 shadow-sm font-semibold",
   ghost: "bg-white/10 text-white font-medium",
-  pill: "bg-[#38bdf8]/20 text-[#38bdf8] border-[#38bdf8]/40 font-bold",
+  pill: "bg-[#FF6C37]/20 text-[#FF6C37] border-[#FF6C37]/40 font-bold",
 };
 
 const sizeStyles: Record<ButtonSize, string> = {

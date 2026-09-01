@@ -343,7 +343,7 @@ export const CursorChatCanvas: React.FC<{
             {currentProfile === "max" ? (
               <Lock size={10} className="text-amber-400" />
             ) : (
-              <Zap size={10} className="text-[#38bdf8]" />
+              <Zap size={10} className="text-[#FF6C37]" />
             )}
             <span>{modelLabel}</span>
           </span>
@@ -354,7 +354,7 @@ export const CursorChatCanvas: React.FC<{
             onClick={() => onOpenSplit()}
             className={`flex items-center gap-1 px-2.5 py-1 rounded-md text-xs font-medium border transition-colors ${
               isSplitOpen
-                ? "bg-[#1f2438] text-[#38bdf8] border-[#38bdf8]/30 shadow-sm"
+                ? "bg-[#1f2438] text-[#FF6C37] border-[#FF6C37]/30 shadow-sm"
                 : "bg-transparent text-gray-400 border-transparent hover:bg-white/5 hover:text-white"
             }`}
             title="Toggle Split View (Browser, Terminal, Editor)"
@@ -371,7 +371,7 @@ export const CursorChatCanvas: React.FC<{
           {isEmpty ? (
             /* Empty State */
             <div className="h-full flex flex-col items-center justify-center max-w-xl mx-auto px-2 pb-8 text-center">
-              <div className="w-12 h-12 rounded-2xl bg-gradient-to-b from-[#38bdf8]/20 to-transparent border border-[#38bdf8]/30 flex items-center justify-center mb-4 text-[#38bdf8] shadow-lg shadow-[#38bdf8]/10">
+              <div className="w-12 h-12 rounded-2xl bg-gradient-to-b from-[#FF6C37]/20 to-transparent border border-[#FF6C37]/30 flex items-center justify-center mb-4 text-[#FF6C37] shadow-lg shadow-[#FF6C37]/10">
                 <Sparkles size={24} />
               </div>
               <h2 className="text-base font-semibold text-white mb-1 tracking-tight">Teminali Autonomous Studio</h2>
@@ -383,10 +383,10 @@ export const CursorChatCanvas: React.FC<{
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 w-full max-w-md text-left">
                 <button
                   onClick={() => void handleSend("Build a modern landing page with dark glassmorphism and an order button")}
-                  className="p-3 rounded-xl bg-[#141724] border border-white/10 hover:border-[#38bdf8]/40 hover:bg-[#1a1e30] transition-all text-xs group"
+                  className="p-3 rounded-xl bg-[#141724] border border-white/10 hover:border-[#FF6C37]/40 hover:bg-[#1a1e30] transition-all text-xs group"
                 >
                   <div className="font-semibold text-gray-200 group-hover:text-white flex items-center gap-1.5">
-                    <Globe size={13} className="text-[#38bdf8]" />
+                    <Globe size={13} className="text-[#FF6C37]" />
                     <span>Build Web App</span>
                   </div>
                   <div className="text-3xs text-gray-400 mt-1">Generate modern HTML/CSS/JS with live browser preview</div>
@@ -394,7 +394,7 @@ export const CursorChatCanvas: React.FC<{
 
                 <button
                   onClick={() => void handleSend("Analyze project structure and suggest improvements")}
-                  className="p-3 rounded-xl bg-[#141724] border border-white/10 hover:border-[#38bdf8]/40 hover:bg-[#1a1e30] transition-all text-xs group"
+                  className="p-3 rounded-xl bg-[#141724] border border-white/10 hover:border-[#FF6C37]/40 hover:bg-[#1a1e30] transition-all text-xs group"
                 >
                   <div className="font-semibold text-gray-200 group-hover:text-white flex items-center gap-1.5">
                     <Zap size={13} className="text-emerald-400" />
@@ -462,12 +462,12 @@ export const CursorChatCanvas: React.FC<{
                           /* Rich Markdown & Code */
                           msg.content ? (
                             <div className="text-gray-200 text-xs">
-                              <CursorMarkdownRenderer content={msg.content} />
+                              <CursorMarkdownRenderer content={msg.content} isStreaming={isStreaming && index === activeMessages.length - 1} />
                             </div>
                           ) : (
                             isStreaming && (
                               <div className="flex items-center gap-2 text-xs text-gray-400 py-1.5 font-mono">
-                                <Loader2 size={13} className="animate-spin text-[#38bdf8]" />
+                                <Loader2 size={13} className="animate-spin text-[#FF6C37]" />
                                 <span>Generating response…</span>
                               </div>
                             )
@@ -479,7 +479,7 @@ export const CursorChatCanvas: React.FC<{
                           <div className="flex items-center justify-between pt-2 text-3xs text-gray-500 border-t border-white/5 select-none font-mono flex-wrap gap-1">
                             <div className="flex items-center gap-2 flex-wrap">
                               <span>{msg.timestamp || "just now"}</span>
-                              <span className="px-1.5 py-0.5 rounded bg-[#38bdf8]/10 text-[#38bdf8] border border-[#38bdf8]/20 flex items-center gap-1 font-semibold">
+                              <span className="px-1.5 py-0.5 rounded bg-[#FF6C37]/10 text-[#FF6C37] border border-[#FF6C37]/20 flex items-center gap-1 font-semibold">
                                 <Zap size={9} />
                                 <span>{msg.tokensCount ? `${msg.tokensCount.toLocaleString()} tokens` : ""}</span>
                               </span>
@@ -514,7 +514,7 @@ export const CursorChatCanvas: React.FC<{
 
       {/* ── Bottom Composer (Always Responsive) ─────────────────────────── */}
       <div className="p-2 sm:p-3 border-t border-white/5 bg-[#0a0c13]/95 backdrop-blur-md flex-shrink-0 z-20">
-        <div className="max-w-2xl mx-auto bg-[#141724] border border-white/10 focus-within:border-[#38bdf8]/40 rounded-xl p-2 shadow-xl transition-all space-y-1.5">
+        <div className="max-w-2xl mx-auto bg-[#141724] border border-white/10 focus-within:border-[#FF6C37]/40 rounded-xl p-2 shadow-xl transition-all space-y-1.5">
           {/* Hidden File Input */}
           <input
             ref={fileInputRef}
@@ -531,7 +531,7 @@ export const CursorChatCanvas: React.FC<{
               {attachedImages.map((img, idx) => (
                 <div
                   key={idx}
-                  className="relative group w-12 h-12 rounded-lg overflow-hidden border border-[#38bdf8]/40 flex-shrink-0 bg-black/40 shadow"
+                  className="relative group w-12 h-12 rounded-lg overflow-hidden border border-[#FF6C37]/40 flex-shrink-0 bg-black/40 shadow"
                 >
                   <img src={img} alt={`Screenshot ${idx + 1}`} className="w-full h-full object-cover" />
                   <button
@@ -571,7 +571,7 @@ export const CursorChatCanvas: React.FC<{
             <div className="flex items-center gap-1 flex-wrap">
               <button
                 onClick={() => fileInputRef.current?.click()}
-                className="p-1 text-gray-400 hover:text-[#38bdf8] rounded hover:bg-white/5 transition-colors"
+                className="p-1 text-gray-400 hover:text-[#FF6C37] rounded hover:bg-white/5 transition-colors"
                 title="Attach Screenshot (PNG, JPG, WebP)"
               >
                 <Paperclip size={13} />
@@ -583,7 +583,7 @@ export const CursorChatCanvas: React.FC<{
                   onClick={() => setIsModelMenuOpen((p) => !p)}
                   className="flex items-center gap-1 text-3xs text-gray-300 font-medium hover:text-white px-2 py-0.5 rounded-md bg-white/5 hover:bg-white/10 transition-colors"
                 >
-                  <Zap size={10} className="text-[#38bdf8]" />
+                  <Zap size={10} className="text-[#FF6C37]" />
                   <span>{modelLabel}</span>
                   <ChevronDown size={9} className="text-gray-500" />
                 </button>
@@ -596,14 +596,14 @@ export const CursorChatCanvas: React.FC<{
                         setIsModelMenuOpen(false);
                       }}
                       className={`w-full flex items-center justify-between px-2 py-1.5 rounded-lg text-left transition-colors ${
-                        currentProfile === "auto" ? "bg-[#38bdf8]/20 text-white" : "hover:bg-white/5 text-gray-300"
+                        currentProfile === "auto" ? "bg-[#FF6C37]/20 text-white" : "hover:bg-white/5 text-gray-300"
                       }`}
                     >
                       <div className="flex flex-col">
                         <span className="font-semibold text-xs text-white">Teminali Auto</span>
                         <span className="text-3xs text-gray-400">Adaptive local routing</span>
                       </div>
-                      {currentProfile === "auto" && <Check size={12} className="text-[#38bdf8]" />}
+                      {currentProfile === "auto" && <Check size={12} className="text-[#FF6C37]" />}
                     </button>
 
                     <button
@@ -612,14 +612,14 @@ export const CursorChatCanvas: React.FC<{
                         setIsModelMenuOpen(false);
                       }}
                       className={`w-full flex items-center justify-between px-2 py-1.5 rounded-lg text-left transition-colors ${
-                        currentProfile === "flash" ? "bg-[#38bdf8]/20 text-white" : "hover:bg-white/5 text-gray-300"
+                        currentProfile === "flash" ? "bg-[#FF6C37]/20 text-white" : "hover:bg-white/5 text-gray-300"
                       }`}
                     >
                       <div className="flex flex-col">
                         <span className="font-semibold text-xs text-white">Teminali Flash</span>
                         <span className="text-3xs text-gray-400">Fast local generation</span>
                       </div>
-                      {currentProfile === "flash" && <Check size={12} className="text-[#38bdf8]" />}
+                      {currentProfile === "flash" && <Check size={12} className="text-[#FF6C37]" />}
                     </button>
                   </div>
                 )}
@@ -641,7 +641,7 @@ export const CursorChatCanvas: React.FC<{
                 <button
                   onClick={() => void handleSend()}
                   disabled={!inputText.trim() && attachedImages.length === 0}
-                  className="p-1.5 rounded-lg bg-[#38bdf8] text-black font-semibold hover:bg-sky-400 disabled:opacity-30 disabled:bg-gray-800 disabled:text-gray-500 transition-all shadow-sm"
+                  className="p-1.5 rounded-lg bg-[#FF6C37] text-black font-semibold hover:bg-[#ff7d4d] disabled:opacity-30 disabled:bg-gray-800 disabled:text-gray-500 transition-all shadow-sm"
                   title="Send message"
                 >
                   <ArrowUp size={13} />
