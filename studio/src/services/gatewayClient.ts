@@ -1,3 +1,11 @@
+
+export function resolveGatewayUrl(path: string): string {
+  if (/^https?:\/\//i.test(path)) return path;
+  const isFileProtocol = typeof window !== "undefined" && window.location.protocol === "file:";
+  const base = isFileProtocol ? "http://127.0.0.1:4310" : "";
+  const cleanPath = path.startsWith("/") ? path : `/${path}`;
+  return `${base}${cleanPath}`;
+}
 import type { ModelModeId, RuntimeHealthReport, RuntimeState, ServiceHealth } from "../types";
 
 export interface FrontierModeStatus {
@@ -84,7 +92,7 @@ export class GatewayClient {
 
   private static async getToken(): Promise<string> {
     if (!this.tokenPromise) {
-      this.tokenPromise = fetch("/api/session", {
+      this.tokenPromise = fetch(resolveGatewayUrl("/api/session"), {
         method: "POST",
       })
         .then(async (response) => {
@@ -112,7 +120,7 @@ export class GatewayClient {
 
     let response: Response;
     try {
-      response = await fetch(path, { ...init, headers });
+      response = await fetch(resolveGatewayUrl(path), { ...init, headers });
     } catch (error) {
       if (init.signal?.aborted) throw error;
       throw new GatewayError("The local Frontier gateway is offline.", "GATEWAY_OFFLINE", 503);
@@ -121,7 +129,7 @@ export class GatewayClient {
     if (response.status === 401 && authenticated) {
       this.tokenPromise = null;
       headers.set("Authorization", `Bearer ${await this.getToken()}`);
-      response = await fetch(path, { ...init, headers });
+      response = await fetch(resolveGatewayUrl(path), { ...init, headers });
     }
     return response;
   }

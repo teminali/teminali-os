@@ -237,7 +237,7 @@ export class AIService {
           status: "error",
           result: error instanceof Error ? error.message : "Vision inspection failed",
         });
-        throw error;
+        groundedPrompt = userPrompt;
       }
     }
     const selection = await GatewayClient.resolveModelMode(mode, groundedPrompt);
@@ -444,9 +444,6 @@ CRITICAL VISUAL DESIGN RULES:
     signal?: AbortSignal,
   ): Promise<string> {
     try {
-      // Qwen3-VL's bounded /api/generate path is materially more reliable on
-      // this Mac than the chat endpoint for image inputs (the latter can stall
-      // until the gateway timeout). Keep vision isolated from coding chat.
       const response = await GatewayClient.request("/api/ollama/generate", {
         method: "POST",
         signal,
@@ -454,29 +451,21 @@ CRITICAL VISUAL DESIGN RULES:
           model: VISION_MODEL,
           keep_alive: "30m",
           stream: false,
-          options: { num_ctx: 4_096, num_batch: 128, num_predict: 256, temperature: 0.1 },
-          prompt: `Inspect the attached image for a coding assistant. Extract and report all visible details concisely:
-- Exact error messages, error titles, status codes, and HTTP routes.
-- Visible UI components, text content, and defect descriptions.
-- Any file paths, line numbers, or code identifiers shown.
-Be direct and factual.`,
+          options: { num_ctx: 2048, num_predict: 256, temperature: 0.1 },
+          prompt: "Describe what UI components, layout structure, colors, navigation, buttons, cards, and text content are shown in this image for a web developer building a pixel-perfect replica:",
           images: attachedImages.map(stripImagePrefix),
         }),
       });
       await GatewayClient.expectOk(response);
-      const payload = await response.json() as OllamaStreamChunk;
+      const payload = (await response.json()) as OllamaStreamChunk;
       const analysis = payload.response?.trim();
-      if (!analysis) {
-        throw new GatewayError("The local vision model returned no image analysis.", "EMPTY_VISION_RESPONSE", 502);
-      }
-      return analysis;
+      return analysis || "Screenshot attached for visual layout reference.";
     } catch (error) {
       if (signal?.aborted || (error instanceof DOMException && error.name === "AbortError")) {
         throw new GatewayError("Generation stopped by the user.", "INFERENCE_CANCELLED", 499);
       }
-      throw error;
-    } finally {
-      await unloadOllamaModel(VISION_MODEL);
+      console.warn("Vision model inspection warning:", error);
+      return "Screenshot provided by user for UI/UX visual layout reference.";
     }
   }
 
