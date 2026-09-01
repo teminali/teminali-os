@@ -47,6 +47,75 @@ import { CursorStreamingSteps } from "./CursorStreamingSteps";
 import { CursorMarkdownRenderer } from "./CursorMarkdownRenderer";
 import type { ChatMessage, ModelProfileId, SpecialistSkill } from "../../types";
 
+
+function detectAndOpenWebArtifacts(
+  fullText: string,
+  openFile: (file: any) => void,
+  openBrowserPreview: (urlOrPath?: string) => void
+) {
+  if (!fullText) return;
+
+  // 1. Detect localhost or preview URLs
+  const urlMatch = fullText.match(/\b(https?:\/\/(?:localhost|127\.0\.0\.1)(?::\d+)?(?:\/[^\s)\]"'`*]*)?|\/preview\/[^\s)\]"'`*]+\.html)/i);
+  if (urlMatch) {
+    const detectedUrl = urlMatch[1];
+    openBrowserPreview(detectedUrl);
+  }
+
+  // 2. Detect code blocks with path="..." or html/css/js blocks
+  const codeBlockRegex = /\`\`\`(?:([a-zA-Z0-9_-]+)(?:\s+path=["']?([^"'\s]+)["']?)?)?\n([\s\S]*?)\`\`\`/g;
+  let blockMatch: RegExpExecArray | null;
+  const parsedFiles: Array<{ name: string; path: string; content: string; language: string }> = [];
+
+  while ((blockMatch = codeBlockRegex.exec(fullText)) !== null) {
+    const lang = blockMatch[1]?.toLowerCase() || "";
+    const explicitPath = blockMatch[2] || "";
+    const content = blockMatch[3];
+
+    let path = explicitPath;
+    let name = explicitPath.split("/").pop() || explicitPath;
+
+    if (!path) {
+      if (lang === "html" || content.includes("<!DOCTYPE") || content.includes("<html")) {
+        path = "index.html";
+        name = "index.html";
+      } else if (lang === "css" || content.includes("@keyframes") || content.includes("body {")) {
+        path = "styles.css";
+        name = "styles.css";
+      } else if (lang === "javascript" || lang === "js") {
+        path = "scripts.js";
+        name = "scripts.js";
+      }
+    }
+
+    if (path && content.trim()) {
+      parsedFiles.push({
+        path,
+        name: name || path,
+        content,
+        language: lang === "js" ? "javascript" : lang || "plaintext",
+      });
+    }
+  }
+
+  // Open all generated files in the workspace
+  for (const f of parsedFiles) {
+    openFile({
+      path: f.path,
+      name: f.name,
+      content: f.content,
+      language: f.language,
+      encoding: "utf8",
+    });
+  }
+
+  // Automatically open the built-in browser if an HTML file was created
+  const htmlFile = parsedFiles.find((f) => f.path.endsWith(".html") || f.path.endsWith(".htm"));
+  if (htmlFile) {
+    openBrowserPreview(htmlFile.path);
+  }
+}
+
 export const CursorChatCanvas: React.FC<{
   onOpenSplit: (tab?: "terminal" | "editor" | "browser") => void;
   isSplitOpen: boolean;
@@ -65,6 +134,8 @@ export const CursorChatCanvas: React.FC<{
     setScreenshotToCodeStack,
     setReferenceScreenshotUrl,
     setDiffViewerOpen,
+    openFile,
+    openBrowserPreview,
   } = useStudioStore();
 
   const [inputText, setInputText] = useState("");
@@ -209,6 +280,7 @@ export const CursorChatCanvas: React.FC<{
               durationSec: data.durationSec,
               engineUsed: data.engineUsed,
             }));
+            detectAndOpenWebArtifacts(data.fullText, openFile, openBrowserPreview);
             setStreaming(false);
           },
           onError: (err: Error) => {

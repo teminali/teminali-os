@@ -155,6 +155,13 @@ interface StudioState {
   clearEngineSession: (engine: "frontier" | "antigravity" | "claude" | "codex") => void;
   setStreaming: (streaming: boolean) => void;
   
+  isSplitOpen: boolean;
+  setSplitOpen: (open: boolean) => void;
+  splitTab: "terminal" | "editor" | "browser";
+  setSplitTab: (tab: "terminal" | "editor" | "browser") => void;
+  browserPreviewUrl: string;
+  setBrowserPreviewUrl: (url: string) => void;
+  openBrowserPreview: (urlOrPath?: string) => void;
   isSkillsModalOpen: boolean;
   setSkillsModalOpen: (open: boolean) => void;
   isDiffViewerOpen: boolean;
@@ -561,6 +568,28 @@ return (
       },
       
       setStreaming: (isStreaming) => set({ isStreaming }),
+
+      isSplitOpen: false,
+      setSplitOpen: (open) => set({ isSplitOpen: open }),
+      splitTab: "browser",
+      setSplitTab: (tab) => set({ splitTab: tab }),
+      browserPreviewUrl: "/preview/frontier-hypercar.html",
+      setBrowserPreviewUrl: (url) => set({ browserPreviewUrl: url }),
+      openBrowserPreview: (urlOrPath) => {
+        const state = get();
+        let targetUrl = urlOrPath;
+        if (!targetUrl && state.activeTabId) {
+          const tab = state.tabs.find((t) => t.id === state.activeTabId);
+          if (tab && (tab.name.endsWith(".html") || tab.name.endsWith(".htm"))) {
+            targetUrl = tab.path;
+          }
+        }
+        set({
+          isSplitOpen: true,
+          splitTab: "browser",
+          ...(targetUrl ? { browserPreviewUrl: targetUrl } : {}),
+        });
+      },
       
       isSkillsModalOpen: false,
       setSkillsModalOpen: (open) => set({ isSkillsModalOpen: open }),

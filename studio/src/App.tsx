@@ -15,8 +15,7 @@ import { CopilotLiveEditController } from "./components/editor/CopilotLiveEditCo
 export default function App() {
   const stageRef = useRef<HTMLElement>(null);
   const [activeView, setActiveView] = useState("agent");
-  const [isSplitOpen, setSplitOpen] = useState(false);
-  const [splitTab, setSplitTab] = useState<"terminal" | "editor" | "browser">("terminal");
+  const { isSplitOpen, setSplitOpen, splitTab, setSplitTab } = useStudioStore();
   const [isSettingsOpen, setSettingsOpen] = useState(false);
   const [isCommandPaletteOpen, setCommandPaletteOpen] = useState(false);
 
@@ -71,7 +70,7 @@ export default function App() {
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "j") {
         e.preventDefault();
         setSplitTab("terminal");
-        setSplitOpen((prev) => !prev);
+        setSplitOpen(!isSplitOpen);
       }
       if ((e.metaKey || e.ctrlKey) && e.shiftKey && e.key.toLowerCase() === "m") {
         e.preventDefault();
@@ -93,7 +92,7 @@ export default function App() {
       setSplitTab(tab);
       setSplitOpen(true);
     } else {
-      setSplitOpen((prev) => !prev);
+      setSplitOpen(!isSplitOpen);
     }
   };
 

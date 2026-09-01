@@ -84,9 +84,51 @@ function SpreadsheetTable({ rows, title }: { rows: string[][]; title: string }) 
   return <div className="sheet-preview"><div className="sheet-caption"><strong>{title}</strong><span>{rows.length} rows · {columnCount} columns · capped safe view</span></div><div className="sheet-scroll"><table><tbody>{rows.map((row, rowIndex) => <tr key={rowIndex}><th>{rowIndex + 1}</th>{Array.from({ length: columnCount }, (_, columnIndexValue) => <td key={columnIndexValue}>{row[columnIndexValue] || ""}</td>)}</tr>)}</tbody></table></div></div>;
 }
 
+
+function bundleHtmlWithSiblings(html: string, tabs: EditorTab[]): string {
+  let bundled = html;
+  for (const tab of tabs) {
+    if (tab.name.endsWith(".css") && tab.content) {
+      const baseName = tab.name.split("/").pop() || tab.name;
+      const linkRegex = new RegExp(`<link[^>]*href=["\'](?:\\.\\/)?${baseName}["\'][^>]*>`, "gi");
+      if (linkRegex.test(bundled)) {
+        bundled = bundled.replace(linkRegex, `<style>/* Injected from ${baseName} */\n${tab.content}\n</style>`);
+      } else if (!bundled.includes(tab.content.slice(0, 30))) {
+        if (bundled.includes("</head>")) {
+          bundled = bundled.replace("</head>", `<style>/* Injected ${baseName} */\n${tab.content}\n</style></head>`);
+        } else {
+          bundled = `<style>/* Injected ${baseName} */\n${tab.content}\n</style>` + bundled;
+        }
+      }
+    }
+  }
+  for (const tab of tabs) {
+    if ((tab.name.endsWith(".js") || tab.name.endsWith(".mjs")) && tab.content) {
+      const baseName = tab.name.split("/").pop() || tab.name;
+      const scriptRegex = new RegExp(`<script[^>]*src=["\'](?:\\.\\/)?${baseName}["\'][^>]*>\\s*<\\/script>`, "gi");
+      if (scriptRegex.test(bundled)) {
+        bundled = bundled.replace(scriptRegex, `<script>/* Injected from ${baseName} */\n${tab.content}\n</script>`);
+      }
+    }
+  }
+  return bundled;
+}
+
 export const WebsitePreviewPane: React.FC<{ activeTab: EditorTab | null }> = ({ activeTab }) => {
   const liveEdit = useSyncExternalStore(LiveEditService.subscribe, LiveEditService.getSnapshot, LiveEditService.getSnapshot);
-  const { referenceScreenshotUrl, setReferenceScreenshotUrl } = useStudioStore();
+  const { referenceScreenshotUrl, setReferenceScreenshotUrl, browserPreviewUrl, setBrowserPreviewUrl, tabs } = useStudioStore();
+
+  useEffect(() => {
+    if (browserPreviewUrl) {
+      if (/^(?:https?:|\/)/i.test(browserPreviewUrl)) {
+        setSurface("browser");
+        setBrowserUrl(browserPreviewUrl);
+        setAddress(browserPreviewUrl);
+      } else {
+        setSurface("file");
+      }
+    }
+  }, [browserPreviewUrl]);
   const [surface, setSurface] = useState<PreviewSurface>("file");
   const [refreshKey, setRefreshKey] = useState(0);
   const [address, setAddress] = useState("/preview/frontier-hypercar.html");
@@ -152,7 +194,7 @@ export const WebsitePreviewPane: React.FC<{ activeTab: EditorTab | null }> = ({ 
       return <SpreadsheetTable rows={sheet.rows} title={sheet.sheetName} />;
     }
     if (extension === "pdf" && objectUrl) return <object className="document-preview" data={objectUrl} type="application/pdf"><div className="preview-empty preview-error"><strong>PDF viewer unavailable</strong><a href={objectUrl} target="_blank" rel="noreferrer">Open PDF in a new tab</a></div></object>;
-    if (["html", "htm"].includes(extension)) return <iframe key={`${activeTab.id}-${refreshKey}`} className="document-preview" srcDoc={activeTab.content} title={`${activeTab.name} preview`} sandbox="allow-scripts allow-forms allow-modals allow-popups" />;
+    if (["html", "htm"].includes(extension)) return <iframe key={`${activeTab.id}-${refreshKey}`} className="document-preview" srcDoc={bundleHtmlWithSiblings(activeTab.content, tabs)} title={`${activeTab.name} preview`} sandbox="allow-scripts allow-forms allow-modals allow-popups" />;
     if (extension === "svg") return <iframe key={`${activeTab.id}-${refreshKey}`} className="document-preview" srcDoc={activeTab.content} title={`${activeTab.name} SVG preview`} sandbox="" />;
     if (activeTab.encoding === "utf8") return <pre className="text-file-preview"><code>{activeTab.content}</code></pre>;
     return <div className="preview-empty preview-error"><FileSearch size={28} /><strong>Preview unavailable</strong><p>{activeTab.mimeType || "This binary file type"} is not rendered in the browser.</p></div>;

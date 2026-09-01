@@ -40,12 +40,13 @@ export const CursorRightPanel: React.FC<{
   onToggleMaximize,
   onMinimizeToRail,
 }) => {
-  const [activeTab, setActiveTab] = useState<"terminal" | "editor" | "browser">(initialTab);
+  const { tabs, activeTabId, splitTab, setSplitTab } = useStudioStore();
+  const activeTab = splitTab || initialTab;
+  const setActiveTab = (tab: "terminal" | "editor" | "browser") => setSplitTab(tab);
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const [isInternalSplit, setIsInternalSplit] = useState(false);
-  const [internalSplitRatio, setInternalSplitRatio] = useState(50); // 50% top / bottom
+  const [internalSplitRatio, setInternalSplitRatio] = useState(50);
 
-  const { tabs, activeTabId } = useStudioStore();
   const currentFile = tabs.find((t) => t.id === activeTabId) || null;
 
   const handleResizeInternal = (delta: number) => {

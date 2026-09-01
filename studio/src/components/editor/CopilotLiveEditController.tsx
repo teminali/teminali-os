@@ -13,7 +13,7 @@ function languageForPath(path: string) {
 
 export const CopilotLiveEditController: React.FC = () => {
   const snapshot = useSyncExternalStore(LiveEditService.subscribe, LiveEditService.getSnapshot, LiveEditService.getSnapshot);
-  const { frontierMessages, tabs, activeTabId, openFile, syncFileContent } = useStudioStore();
+  const { frontierMessages, tabs, activeTabId, openFile, syncFileContent, openBrowserPreview } = useStudioStore();
   const liveResponseIds = useRef(new Set<string>());
   const latestAssistant = [...frontierMessages].reverse().find((message) => message.role === "assistant");
   const assistantIndex = latestAssistant ? frontierMessages.findIndex((message) => message.id === latestAssistant.id) : -1;
@@ -60,6 +60,9 @@ export const CopilotLiveEditController: React.FC = () => {
         size: file?.size,
         modified: file?.modified,
       });
+      if (name.endsWith(".html") || name.endsWith(".htm")) {
+        openBrowserPreview(snapshot.path);
+      }
     } else {
       syncFileContent({
         path: snapshot.path,
