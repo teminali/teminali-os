@@ -5,6 +5,8 @@ directories:
   output: release
   buildResources: build
 
+afterPack: build/afterPack.cjs
+
 files:
   - dist/**/*
   - electron/**/*
@@ -32,6 +34,8 @@ mac:
   artifactName: ${productName}-${version}-macOS-${arch}.${ext}
   darkModeSupport: true
   gatekeeperAssess: false
+  entitlements: build/entitlements.mac.plist
+  entitlementsInherit: build/entitlements.mac.plist
 
 dmg:
   artifactName: ${productName}-${version}-macOS-${arch}.${ext}
