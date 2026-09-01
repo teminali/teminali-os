@@ -1,0 +1,20 @@
+{
+  "benchmarkId": "frontier-auto-vs-codex-006",
+  "frozenAtUtc": "2026-08-31T15:17:19.969Z",
+  "manifestSha256": "9f318aa3148dc5ac0a53a5f99d612683e42ad5d981ece64baa733a807dbe53cf",
+  "fileCount": 26,
+  "immutableScopes": [
+    "seed/",
+    "reference/",
+    ".control/",
+    "TASK.md",
+    "RUBRIC.md",
+    "PREREGISTRATION.json",
+    "VALIDATION.json"
+  ],
+  "mutableScopes": [
+    "runs/",
+    "state/",
+    "results/"
+  ]
+}

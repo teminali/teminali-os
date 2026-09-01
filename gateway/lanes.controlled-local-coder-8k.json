@@ -1,0 +1,19 @@
+[
+  {
+    "alias": "ollama-local-coder",
+    "provider": "ollama",
+    "quotaGroup": "local-coder",
+    "providerModel": "frontier-qwen2.5-coder-14b-8k",
+    "priority": 1,
+    "limits": {
+      "rpm": 60,
+      "rpd": 10000,
+      "tpm": 100000,
+      "tpd": 10000000
+    },
+    "pricing": {
+      "inputUsdPerMillion": "0",
+      "outputUsdPerMillion": "0"
+    }
+  }
+]

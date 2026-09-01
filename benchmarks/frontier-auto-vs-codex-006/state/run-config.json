@@ -1,0 +1,26 @@
+{
+  "benchmarkId": "frontier-auto-vs-codex-006",
+  "frontier": {
+    "contestant": "frontier-auto-1",
+    "mode": "Frontier Auto",
+    "maxLocked": true,
+    "expectedRoute": "Frontier Flash",
+    "shippedRevision": "git HEAD 2d1d578a7359cfdcf122c285001a59b1c0fa9b56; dirty product checkpoint; frontier-runner.js sha256 5ff31f007a9cd6cde0c70320ee9dd4c6a394eb25073f47f682f51f343001c1d9; local-structured-agent.js sha256 c07463a68c5f2982a0650b57963b668fd737ea7bca32b9f3e6bd8558df7f081a; bin/frontier.js sha256 6c81f12da73d0d5e7e400fdbf3265ef2cebde5d56b5552cc19f55465212570b1",
+    "permissions": "Assigned workspace only; src/**/*.js write allowlist; no network, package installation, controller/oracle access, or other-contestant access; loopback Ollama inference only",
+    "tools": "Bounded source snapshot, strict write_file whole-file tool, product-owned npm test verification, scope/change enforcement, cancellation and unload"
+  },
+  "codex": {
+    "contestant": "codex-1",
+    "visibleModelBuild": "Codex desktop task; codex-cli 0.149.1; underlying model/build not exposed by the current UI",
+    "reasoningEffort": "not exposed by the current UI",
+    "serviceTier": "not exposed by the current UI",
+    "permissions": "Assigned workspace only; src/**/*.js changes only; no network, package installation, controller/oracle access, other-contestant access, or cross-agent assistance",
+    "tools": "Repository read/search, apply_patch editing, and local shell/test execution; web and subagents forbidden for the contestant run"
+  },
+  "runtime": {
+    "node": "v26.4.0",
+    "platform": "darwin",
+    "arch": "arm64",
+    "hostname": "Yohanas-MacBook-Pro.local"
+  }
+}

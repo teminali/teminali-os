@@ -1,0 +1,14 @@
+✖ rejects fractional quantities without coercion
+AssertionError: expected ValidationError
+✖ uses canonical stock-key normalization
+AssertionError: expected normalized lookup
+✖ prevents aggregate capacity overdraw
+AssertionError: expected InsufficientStockError
+✖ repeated reserve command is idempotent and charged once
+AssertionError: duplicate request changed availability
+✖ request identifier reuse with a different payload raises ConflictError
+✖ duplicate release is idempotent and restored once
+✖ incomplete final append-log tail recovery
+SyntaxError: Expected ',' or '}' after property value in JSON at position 18
+✖ null input validation
+TypeError: Cannot read properties of null (reading 'requestId')

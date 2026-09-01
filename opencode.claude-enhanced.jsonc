@@ -1,21 +1,27 @@
 {
   "$schema": "https://opencode.ai/config.json",
   "model": "frontier-gateway/frontier-code",
+  "enabled_providers": ["frontier-gateway"],
+  "agent": {
+    "title": { "disable": true }
+  },
+  "tools": {
+    "glob": false
+  },
   "provider": {
     "frontier-gateway": {
       "npm": "@ai-sdk/openai-compatible",
       "name": "Frontier Gateway",
       "options": {
         "baseURL": "http://127.0.0.1:8787/v1",
-        "apiKey": "{env:GATEWAY_ACCESS_TOKEN}"
+        "apiKey": "{env:GATEWAY_ACCESS_TOKEN}",
+        "timeout": 660000,
+        "chunkTimeout": 600000
       },
       "models": {
         "frontier-code": {
           "name": "Frontier · Auto (Devstral + Claude)",
-          "limit": { "context": 1000000, "output": 4096 },
-          "variants": {
-            "medium": { "reasoningEffort": "medium" }
-          }
+          "limit": { "context": 32768, "output": 3072 }
         }
       }
     }

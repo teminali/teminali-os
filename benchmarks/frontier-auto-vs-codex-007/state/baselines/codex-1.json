@@ -1,0 +1,11 @@
+{
+  "createdAt": "2026-08-31T16:49:01.336Z",
+  "hashes": {
+    "package.json": "fa027ca2297623c112304f69278ccf4867c983f637387d27adf28afc2400da2e",
+    "src/circuit-breaker.js": "8167fbe5a2f03f1ee0e90bef6f876c33e083fb6acdeccb7a1f16af196b6a7267",
+    "src/gatekeeper.js": "49318f253b9fa207ac700dcf75075761ccb57a87e4b88a4fa97f3aad916deb9c",
+    "src/token-bucket.js": "ce675937582d31328521dfb80bc1167b83af90ad4c88839a3952d3f8029936f3",
+    "TASK.md": "6747f01de980b1d1145bd46c6019aee1f0cb0af2fcf46b1c6d655b88970652a7",
+    "test/visible.test.js": "7b8b296ba24d95a2f9c67ec304e15fa16c9a99f5caae4d96563ad954cc4e21fe"
+  }
+}

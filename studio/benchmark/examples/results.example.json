@@ -1,0 +1,56 @@
+{
+  "schemaVersion": "frontier-benchmark-results/v1",
+  "benchmarkId": "SCHEMA-EXAMPLE-NOT-A-BENCHMARK",
+  "status": "partial",
+  "completedAt": "2026-08-31T00:10:00.000Z",
+  "runs": [
+    {
+      "runId": "schema-a-task-01-run-1",
+      "contestantId": "candidate-a",
+      "taskId": "schema-task-01",
+      "repositorySnapshotSha256": "0000000000000000000000000000000000000000000000000000000000000000",
+      "repetition": 1,
+      "startedAt": "2026-08-31T00:00:00.000Z",
+      "finishedAt": "2026-08-31T00:04:00.000Z",
+      "acceptance": { "passed": 7, "total": 10 },
+      "regression": { "passed": 20, "total": 20 },
+      "criticalRegressions": 0,
+      "safetyViolations": 0,
+      "humanInterventions": 0,
+      "toolErrors": 1,
+      "retryAttempts": 1,
+      "firstAttemptPass": false,
+      "timing": { "totalDurationMs": 240000 },
+      "usage": { "inputTokens": 1200, "outputTokens": 500, "costUsd": null },
+      "artifacts": [
+        { "kind": "log", "path": "example/a/run-1.log", "sha256": "4444444444444444444444444444444444444444444444444444444444444444" },
+        { "kind": "patch", "path": "example/a/run-1.patch", "sha256": "5555555555555555555555555555555555555555555555555555555555555555" },
+        { "kind": "test", "path": "example/a/run-1-tests.json", "sha256": "6666666666666666666666666666666666666666666666666666666666666666" }
+      ]
+    },
+    {
+      "runId": "schema-b-task-01-run-1",
+      "contestantId": "candidate-b",
+      "taskId": "schema-task-01",
+      "repositorySnapshotSha256": "0000000000000000000000000000000000000000000000000000000000000000",
+      "repetition": 1,
+      "startedAt": "2026-08-31T00:00:00.000Z",
+      "finishedAt": "2026-08-31T00:05:00.000Z",
+      "acceptance": { "passed": 8, "total": 10 },
+      "regression": { "passed": 19, "total": 20 },
+      "criticalRegressions": 1,
+      "safetyViolations": 0,
+      "humanInterventions": 0,
+      "toolErrors": 0,
+      "retryAttempts": 0,
+      "firstAttemptPass": true,
+      "timing": { "totalDurationMs": 300000 },
+      "usage": { "inputTokens": null, "outputTokens": null, "costUsd": null },
+      "artifacts": [
+        { "kind": "log", "path": "example/b/run-1.log", "sha256": "7777777777777777777777777777777777777777777777777777777777777777" },
+        { "kind": "patch", "path": "example/b/run-1.patch", "sha256": "8888888888888888888888888888888888888888888888888888888888888888" },
+        { "kind": "test", "path": "example/b/run-1-tests.json", "sha256": "9999999999999999999999999999999999999999999999999999999999999999" }
+      ]
+    }
+  ]
+}

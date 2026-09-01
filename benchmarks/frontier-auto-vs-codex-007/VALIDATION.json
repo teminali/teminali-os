@@ -1,0 +1,27 @@
+{
+  "schemaVersion": 1,
+  "validatedAtUtc": "2026-08-31T22:04:39.416Z",
+  "node": "v26.4.0",
+  "fixtureIntegrity": {
+    "unchangedByVisibleTests": true,
+    "files": 6
+  },
+  "baseline": {
+    "visibleExit": 1,
+    "visiblePassCount": "1",
+    "visibleFailCount": "2",
+    "privateScore": 0,
+    "privateMax": 100
+  },
+  "reference": {
+    "visibleExit": 0,
+    "privateScore": 100,
+    "privateMax": 100
+  },
+  "discrimination": {
+    "baselineBelowPerfect": true,
+    "referencePerfect": true,
+    "scoreGap": 100
+  },
+  "green": true
+}

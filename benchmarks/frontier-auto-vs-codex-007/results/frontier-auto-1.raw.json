@@ -1,0 +1,80 @@
+{
+  "schemaVersion": 1,
+  "benchmarkId": "frontier-auto-vs-codex-007",
+  "contestant": "frontier-auto-1",
+  "eligible": true,
+  "scoredAtUtc": "2026-09-01T08:50:29.245Z",
+  "score": 85,
+  "maxScore": 100,
+  "timing": {
+    "contestantElapsedNs": "418482325875",
+    "visibleElapsedNs": "80790792",
+    "hiddenElapsedNs": "3258583"
+  },
+  "runtime": {
+    "node": "v26.4.0",
+    "platform": "darwin",
+    "arch": "arm64"
+  },
+  "integrity": {
+    "ok": true,
+    "forbiddenChanges": [],
+    "symlinks": []
+  },
+  "visible": {
+    "passed": true,
+    "exitCode": 0,
+    "signal": null,
+    "stdout": "✔ strict input validation: invalid capacity throws ValidationError (0.613875ms)\n✔ canonical key normalization: tenant lookup normalizes case and trims whitespace (0.206ms)\n✔ token bucket basic rate limiting (0.072709ms)\nℹ tests 3\nℹ suites 0\nℹ pass 3\nℹ fail 0\nℹ cancelled 0\nℹ skipped 0\nℹ todo 0\nℹ duration_ms 48.273042\n",
+    "stderr": ""
+  },
+  "privateEvaluation": {
+    "score": 85,
+    "maxScore": 100,
+    "checks": [
+      {
+        "id": "validation-errors",
+        "points": 15,
+        "earned": 0,
+        "passed": false,
+        "error": "Error: expected ValidationError"
+      },
+      {
+        "id": "canonical-normalization",
+        "points": 15,
+        "earned": 15,
+        "passed": true
+      },
+      {
+        "id": "token-bucket-replenish",
+        "points": 15,
+        "earned": 15,
+        "passed": true
+      },
+      {
+        "id": "circuit-breaker-transitions",
+        "points": 15,
+        "earned": 15,
+        "passed": true
+      },
+      {
+        "id": "idempotent-replay",
+        "points": 15,
+        "earned": 15,
+        "passed": true
+      },
+      {
+        "id": "intent-conflict",
+        "points": 15,
+        "earned": 15,
+        "passed": true
+      },
+      {
+        "id": "signature-verification",
+        "points": 10,
+        "earned": 10,
+        "passed": true
+      }
+    ]
+  }
+}

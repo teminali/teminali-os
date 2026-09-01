@@ -11,9 +11,11 @@ if (( ${#GEMINI_API_KEY} < 8 )); then
   exit 1
 fi
 
-curl --silent --show-error --max-time 120 \
-  -H "Authorization: Bearer $GEMINI_API_KEY" \
-  -H "Content-Type: application/json" \
+{
+  print -r -- "Authorization: Bearer $GEMINI_API_KEY"
+  print -r -- "Content-Type: application/json"
+} | curl --silent --show-error --max-time 120 \
+  -H @- \
   -d '{"model":"gemini-3.7-flash","messages":[{"role":"user","content":"Reply exactly: GEMINI DIRECT READY"}],"max_tokens":64,"stream":false}' \
   -w '\nHTTP_STATUS=%{http_code}\n' \
   "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions"

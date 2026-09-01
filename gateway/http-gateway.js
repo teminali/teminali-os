@@ -505,6 +505,17 @@ export function createGateway({
 
       let upstreamResponse;
       const timeoutSignal = AbortSignal.timeout(upstreamTimeoutMs);
+      const clientAbortController = new AbortController();
+      const abortOnClientClose = () => {
+        if (!res.writableEnded) {
+          clientAbortController.abort(new Error("downstream client disconnected"));
+        }
+      };
+      res.once("close", abortOnClientClose);
+      const upstreamSignal = AbortSignal.any([
+        timeoutSignal,
+        clientAbortController.signal,
+      ]);
       try {
         upstreamResponse = await fetchImpl(upstream.endpoint, {
           method: "POST",
@@ -514,11 +525,20 @@ export function createGateway({
             ...secretHeaders,
           },
           body: JSON.stringify(upstreamBody),
-          signal: timeoutSignal,
+          signal: upstreamSignal,
         });
       } catch {
+        res.removeListener("close", abortOnClientClose);
         lease.cancel();
         budgetLease?.releaseUsage();
+        if (clientAbortController.signal.aborted) {
+          emit("upstream_cancelled", {
+            lane: lease.alias,
+            provider: lease.provider,
+            attempt,
+          });
+          return;
+        }
         if (timeoutSignal.aborted) {
           metrics.upstreamTimeouts += 1;
           emit("upstream_timeout", {
@@ -539,6 +559,7 @@ export function createGateway({
       }
 
       if (upstreamResponse.status === 429) {
+        res.removeListener("close", abortOnClientClose);
         lastRetryAfterMs = parseRetryAfter(upstreamResponse.headers.get("retry-after"));
         lease.rateLimited(lastRetryAfterMs);
         budgetLease?.releaseUsage();
@@ -599,6 +620,7 @@ export function createGateway({
       } catch {
         if (!res.destroyed) res.destroy();
       } finally {
+        res.removeListener("close", abortOnClientClose);
         const usage = usageCapture.usage();
         if (usage === null) {
           budgetLease?.commit();

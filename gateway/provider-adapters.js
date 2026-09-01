@@ -157,6 +157,8 @@ export function createOllamaUpstream({
   alias,
   modelMap = { "frontier-code": "devstral-small-2:24b-instruct-2512-q4_K_M" },
   endpoint = OLLAMA_CHAT_COMPLETIONS,
+  temperature = 0,
+  seed = 42,
 }) {
   if (typeof alias !== "string" || alias.length === 0) {
     throw new TypeError("alias must be a non-empty string");
@@ -168,6 +170,12 @@ export function createOllamaUpstream({
   }
 
   const models = normalizeModelMap(modelMap);
+  if (typeof temperature !== "number" || !Number.isFinite(temperature)) {
+    throw new TypeError("Ollama temperature must be a finite number");
+  }
+  if (!Number.isSafeInteger(seed)) {
+    throw new TypeError("Ollama seed must be a safe integer");
+  }
 
   return Object.freeze({
     alias,
@@ -180,7 +188,12 @@ export function createOllamaUpstream({
       if (providerModel === undefined) {
         throw new TypeError(`model is not mapped for upstream: ${alias}`);
       }
-      return requestStreamUsage({ ...body, model: providerModel });
+      return requestStreamUsage({
+        ...body,
+        model: providerModel,
+        temperature,
+        seed,
+      });
     },
   });
 }

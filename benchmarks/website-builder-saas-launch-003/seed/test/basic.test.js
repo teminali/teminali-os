@@ -8,6 +8,11 @@ test("site-data contains required verified metrics and pricing tiers", () => {
   assert.equal(siteData.brand.verifiedMetrics.length, 3);
   assert.equal(siteData.pricing.monthly.length, 3);
   assert.equal(siteData.pricing.annual.length, 3);
+  assert.deepEqual(siteData.pricing.monthly.map((tier) => tier.name), [
+    "Starter",
+    "Team",
+    "Enterprise",
+  ]);
 });
 
 test("renderPricing correctly formats monthly and annual tiers", () => {

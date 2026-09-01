@@ -1,0 +1,10 @@
+{
+  "name": "benchmark-004-state-refactor",
+  "version": "1.0.0",
+  "scripts": {
+    "test": "node test.js"
+  },
+  "dependencies": {
+    "zustand": "^4.5.0"
+  }
+}

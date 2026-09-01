@@ -1,0 +1,12 @@
+{
+  "createdAt": "2026-08-31T15:17:01.019Z",
+  "hashes": {
+    "package.json": "399349e656335e5dbcbe249c8a7a484693da14e187a2c097089875f40999934d",
+    "src/errors.js": "9088ed7470f641474d99d1454db8cbb01b8f508a416f5281bae4a69f7f0507cb",
+    "src/index.js": "e904766217c27ac149852f1babbe95f6a380bb115e18a76c05e624a6fc6976fb",
+    "src/ledgerRepository.js": "77aa506e2a0163e7aad61a8d195a6d52276b296bcd543b653f2245d7d74f2d50",
+    "src/normalize.js": "b18c482b2135ed594563977e70f4f7b65bec5117a6f3f0c5ce42f8469bb77c1b",
+    "src/reservationService.js": "0071a8e30ecba6c8ef235476cde7892553cafaf0afe4961f60edb4f3fb1110a3",
+    "test/reservation.test.js": "7ba9b7b2299a5b82292689ce11c3ca9b3c9adfc4ccbea49f17965753c9eb7b97"
+  }
+}

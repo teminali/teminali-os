@@ -1,0 +1,30 @@
+{
+  "schemaVersion": 1,
+  "benchmarkId": "frontier-auto-vs-codex-006",
+  "title": "Durable reservation ledger repair",
+  "seed": "deterministic checked-in fixture; no generated randomness",
+  "contestants": [
+    {
+      "id": "frontier-auto-1",
+      "productMode": "Frontier Auto",
+      "maxLocked": true,
+      "expectedProductRoute": "Frontier Flash",
+      "requiredBeforeStart": ["shippedRevision", "permissions", "tools"]
+    },
+    {
+      "id": "codex-1",
+      "product": "Codex current production configuration",
+      "requiredBeforeStart": ["visibleModelBuild", "reasoningEffort", "serviceTier", "permissions", "tools"],
+      "identityRule": "Record the exact visible values before start; never infer an undisclosed model identity."
+    }
+  ],
+  "isolation": {
+    "workspaces": ["runs/frontier-auto-1", "runs/codex-1"],
+    "allowedChanges": ["src/**/*.js"],
+    "forbidden": ["network", "provider credentials", "package installation", "cross-contestant assistance", "reading controller or other contestant files"]
+  },
+  "timing": { "clock": "process.hrtime.bigint monotonic", "limitSeconds": 2700, "startStopPerContestant": true },
+  "scoring": { "eligibilityBeforeScore": true, "privateMax": 100, "rawResultSchemaVersion": 1 },
+  "evidence": { "resourceSnapshots": ["before", "after"], "modelResidencySlotsRequired": true, "routeEvidenceSlotsRequired": true },
+  "freeze": { "manifest": "MANIFEST.sha256", "marker": "FROZEN.json" }
+}

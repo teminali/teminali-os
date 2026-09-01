@@ -1,0 +1,80 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://frontier.studio/schemas/benchmark-results-v1.json",
+  "title": "Frontier controlled benchmark raw results",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "benchmarkId", "status", "completedAt", "runs"],
+  "properties": {
+    "schemaVersion": { "const": "frontier-benchmark-results/v1" },
+    "benchmarkId": { "type": "string", "minLength": 1 },
+    "status": { "enum": ["partial", "complete"] },
+    "completedAt": { "type": "string", "format": "date-time" },
+    "runs": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["runId", "contestantId", "taskId", "repositorySnapshotSha256", "repetition", "startedAt", "finishedAt", "acceptance", "regression", "criticalRegressions", "safetyViolations", "humanInterventions", "toolErrors", "retryAttempts", "firstAttemptPass", "timing", "usage", "artifacts"],
+        "properties": {
+          "runId": { "type": "string", "minLength": 1 },
+          "contestantId": { "type": "string", "minLength": 1 },
+          "taskId": { "type": "string", "minLength": 1 },
+          "repositorySnapshotSha256": { "$ref": "#/$defs/sha256" },
+          "repetition": { "type": "integer", "minimum": 1 },
+          "startedAt": { "type": "string", "format": "date-time" },
+          "finishedAt": { "type": "string", "format": "date-time" },
+          "acceptance": { "$ref": "#/$defs/testCount" },
+          "regression": { "$ref": "#/$defs/testCount" },
+          "criticalRegressions": { "type": "integer", "minimum": 0 },
+          "safetyViolations": { "type": "integer", "minimum": 0 },
+          "humanInterventions": { "type": "integer", "minimum": 0 },
+          "toolErrors": { "type": "integer", "minimum": 0 },
+          "retryAttempts": { "type": "integer", "minimum": 0 },
+          "firstAttemptPass": { "type": "boolean" },
+          "timing": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["totalDurationMs"],
+            "properties": { "totalDurationMs": { "type": "number", "minimum": 0 } }
+          },
+          "usage": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["inputTokens", "outputTokens", "costUsd"],
+            "properties": {
+              "inputTokens": { "type": ["integer", "null"], "minimum": 0 },
+              "outputTokens": { "type": ["integer", "null"], "minimum": 0 },
+              "costUsd": { "type": ["number", "null"], "minimum": 0 }
+            }
+          },
+          "artifacts": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["kind", "path", "sha256"],
+              "properties": {
+                "kind": { "type": "string", "minLength": 1 },
+                "path": { "type": "string", "minLength": 1 },
+                "sha256": { "$ref": "#/$defs/sha256" }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "testCount": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["passed", "total"],
+      "properties": {
+        "passed": { "type": "integer", "minimum": 0 },
+        "total": { "type": "integer", "minimum": 1 }
+      }
+    }
+  }
+}

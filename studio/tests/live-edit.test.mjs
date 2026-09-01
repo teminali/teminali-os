@@ -1,0 +1,42 @@
+import assert from "node:assert/strict";
+import test from "node:test";
+import { parseWorkspaceEdits } from "../src/services/liveEditProtocol.ts";
+
+test("live edit parses explicit streamed and complete workspace file blocks", () => {
+  const streamed = parseWorkspaceEdits('Working…\n```frontier-file path="src/App.tsx"\nexport const ready = tr');
+  assert.deepEqual(streamed, [{ path: "src/App.tsx", content: "export const ready = tr", complete: false }]);
+
+  const complete = parseWorkspaceEdits('```tsx path="src/App.tsx"\nexport const ready = true;\n```');
+  assert.deepEqual(complete, [{ path: "src/App.tsx", content: "export const ready = true;\n", complete: true }]);
+});
+
+test("live edit supports a conventional file header and strips it from committed content", () => {
+  const edits = parseWorkspaceEdits("```css\n/* no path */\n```\n```ts\n// file: src/state.ts\nexport const value = 1;\n```");
+  assert.deepEqual(edits, [{ path: "src/state.ts", content: "export const value = 1;\n", complete: true }]);
+});
+
+test("live edit recognizes conventional markdown filename headings", () => {
+  assert.deepEqual(
+    parseWorkspaceEdits("### `src/components/Card.tsx`\n\n```tsx\nexport const Card = () => <article />;\n```"),
+    [{ path: "src/components/Card.tsx", content: "export const Card = () => <article />;\n", complete: true }],
+  );
+});
+
+test("a single code block may target the active file only for a real edit request", () => {
+  assert.deepEqual(
+    parseWorkspaceEdits("```tsx\nexport default function App() { return null; }\n```", { activePath: "src/App.tsx", userPrompt: "Fix and update the current component" }),
+    [{ path: "src/App.tsx", content: "export default function App() { return null; }\n", complete: true }],
+  );
+  assert.deepEqual(
+    parseWorkspaceEdits("```tsx\nexport default function App() { return null; }\n```", { activePath: "src/App.tsx", userPrompt: "Explain this code" }),
+    [],
+  );
+});
+
+test("live edit rejects unsafe and ambiguous inferred paths", () => {
+  assert.deepEqual(parseWorkspaceEdits("```ts path=../outside.ts\nunsafe\n```"), []);
+  assert.deepEqual(
+    parseWorkspaceEdits("```ts\none\n```\n```ts\ntwo\n```", { activePath: "src/App.tsx", userPrompt: "update it" }),
+    [],
+  );
+});

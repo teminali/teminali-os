@@ -45,7 +45,7 @@ async function requestBody(req) {
   return JSON.parse(Buffer.concat(chunks).toString("utf8"));
 }
 
-function chatRequest(baseUrl, body, accessToken = ACCESS_TOKEN) {
+function chatRequest(baseUrl, body, accessToken = ACCESS_TOKEN, signal) {
   return fetch(`${baseUrl}/v1/chat/completions`, {
     method: "POST",
     headers: {
@@ -53,6 +53,7 @@ function chatRequest(baseUrl, body, accessToken = ACCESS_TOKEN) {
       "content-type": "application/json",
     },
     body: JSON.stringify(body),
+    signal,
   });
 }
 
@@ -723,6 +724,59 @@ test("aborts a slow upstream at the configured deadline", async (t) => {
   });
   const metrics = await metricsResponse.json();
   assert.equal(metrics.upstreamTimeouts, 1);
+});
+
+test("aborts an in-flight upstream when the client disconnects", async (t) => {
+  let observedAbort = false;
+  let resolveStarted;
+  let resolveObservedAbort;
+  const started = new Promise((resolve) => {
+    resolveStarted = resolve;
+  });
+  const upstreamAborted = new Promise((resolve) => {
+    resolveObservedAbort = resolve;
+  });
+  const gateway = createGateway({
+    accessToken: ACCESS_TOKEN,
+    quotaLanes: [quotaLane("groq-a")],
+    upstreams: [
+      createGroqUpstream({
+        alias: "groq-a",
+        getApiKey: () => "groq-secret-value",
+      }),
+    ],
+    allowedModels: ["frontier-code"],
+    upstreamTimeoutMs: 60_000,
+    fetchImpl: (_url, options) =>
+      new Promise((_resolve, reject) => {
+        resolveStarted();
+        options.signal.addEventListener(
+          "abort",
+          () => {
+            observedAbort = true;
+            resolveObservedAbort();
+            reject(options.signal.reason);
+          },
+          { once: true },
+        );
+      }),
+  });
+  t.after(() => gateway.close());
+  const url = await gateway.listen();
+  const controller = new AbortController();
+  const request = chatRequest(url, {
+    model: "frontier-code",
+    messages: [{ role: "user", content: "cancel" }],
+    max_tokens: 128,
+  }, ACCESS_TOKEN, controller.signal);
+  await started;
+  controller.abort();
+  await assert.rejects(request);
+  await Promise.race([
+    upstreamAborted,
+    new Promise((resolve) => setTimeout(resolve, 1_000)),
+  ]);
+  assert.equal(observedAbort, true);
 });
 
 test("local-first Ollama lane routes requests locally and falls over to cloud upon 429", async (t) => {

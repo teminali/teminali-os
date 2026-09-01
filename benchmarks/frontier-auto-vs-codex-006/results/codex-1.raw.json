@@ -1,0 +1,121 @@
+{
+  "schemaVersion": 1,
+  "benchmarkId": "frontier-auto-vs-codex-006",
+  "contestant": "codex-1",
+  "eligible": true,
+  "scoredAtUtc": "2026-08-31T15:27:34.348Z",
+  "score": 100,
+  "maxScore": 100,
+  "timing": {
+    "contestantElapsedNs": "206250284916",
+    "visibleElapsedNs": "78229833",
+    "hiddenElapsedNs": "5186250"
+  },
+  "runtime": {
+    "node": "v26.4.0",
+    "platform": "darwin",
+    "arch": "arm64"
+  },
+  "integrity": {
+    "ok": true,
+    "forbiddenChanges": [],
+    "symlinks": []
+  },
+  "visible": {
+    "passed": true,
+    "exitCode": 0,
+    "signal": null,
+    "stdout": "✔ exports typed domain errors (0.353708ms)\n✔ normalizes SKU keys consistently (0.069583ms)\n✔ creates a basic reservation (1.446875ms)\n✔ prevents aggregate overselling (0.431292ms)\n✔ same reserve request is idempotent (0.358042ms)\n✔ release restores availability (0.928083ms)\n✔ state survives service reconstruction (0.391333ms)\nℹ tests 7\nℹ suites 0\nℹ pass 7\nℹ fail 0\nℹ cancelled 0\nℹ skipped 0\nℹ todo 0\nℹ duration_ms 46.204708\n",
+    "stderr": ""
+  },
+  "privateEvaluation": {
+    "score": 100,
+    "maxScore": 100,
+    "checks": [
+      {
+        "id": "normalization",
+        "points": 10,
+        "earned": 10,
+        "passed": true
+      },
+      {
+        "id": "strict-units",
+        "points": 10,
+        "earned": 10,
+        "passed": true
+      },
+      {
+        "id": "stock-key-normalization",
+        "points": 5,
+        "earned": 5,
+        "passed": true
+      },
+      {
+        "id": "aggregate-capacity",
+        "points": 10,
+        "earned": 10,
+        "passed": true
+      },
+      {
+        "id": "reserve-idempotency",
+        "points": 10,
+        "earned": 10,
+        "passed": true
+      },
+      {
+        "id": "intent-conflict",
+        "points": 8,
+        "earned": 8,
+        "passed": true
+      },
+      {
+        "id": "release-idempotency",
+        "points": 8,
+        "earned": 8,
+        "passed": true
+      },
+      {
+        "id": "reload",
+        "points": 5,
+        "earned": 5,
+        "passed": true
+      },
+      {
+        "id": "partial-tail-recovery",
+        "points": 8,
+        "earned": 8,
+        "passed": true
+      },
+      {
+        "id": "interior-corruption-rejected",
+        "points": 7,
+        "earned": 7,
+        "passed": true
+      },
+      {
+        "id": "snapshot-isolation",
+        "points": 5,
+        "earned": 5,
+        "passed": true
+      },
+      {
+        "id": "unknown-release",
+        "points": 5,
+        "earned": 5,
+        "passed": true
+      },
+      {
+        "id": "input-validation",
+        "points": 4,
+        "earned": 4,
+        "passed": true
+      },
+      {
+        "id": "unknown-sku-capacity",
+        "points": 5,
+        "earned": 5,
+        "passed": true
+      }
+    ]
+  }
+}

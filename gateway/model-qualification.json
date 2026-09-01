@@ -1,0 +1,6 @@
+{
+  "qwen38Iq3m": {
+    "qualified": false,
+    "reason": "Pending isolated model comparison and FrontierCode safety canary"
+  }
+}

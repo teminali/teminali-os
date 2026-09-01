@@ -1,0 +1,54 @@
+{
+  "before": {
+    "wallUtc": "2026-09-01T08:43:30.568Z",
+    "monotonicNs": "103875856695875",
+    "host": {
+      "platform": "darwin",
+      "arch": "arm64",
+      "node": "v26.4.0",
+      "totalMemoryBytes": 25769803776,
+      "freeMemoryBytes": 4654186496,
+      "loadAverage": [
+        11.45556640625,
+        11.50439453125,
+        10.09716796875
+      ]
+    },
+    "modelResidency": {
+      "status": null,
+      "evidenceSource": null,
+      "note": "Operator must record local model residency or explicit none."
+    },
+    "routeEvidence": {
+      "selectedMode": null,
+      "observedRoute": null,
+      "note": "Record visible product tier only; do not place credentials here."
+    }
+  },
+  "after": {
+    "wallUtc": "2026-09-01T08:50:29.115Z",
+    "monotonicNs": "104294405997500",
+    "host": {
+      "platform": "darwin",
+      "arch": "arm64",
+      "node": "v26.4.0",
+      "totalMemoryBytes": 25769803776,
+      "freeMemoryBytes": 490700800,
+      "loadAverage": [
+        6.0859375,
+        7.31298828125,
+        8.5146484375
+      ]
+    },
+    "modelResidency": {
+      "status": null,
+      "evidenceSource": null,
+      "note": "Operator must record local model residency or explicit none."
+    },
+    "routeEvidence": {
+      "selectedMode": null,
+      "observedRoute": null,
+      "note": "Record visible product tier only; do not place credentials here."
+    }
+  }
+}

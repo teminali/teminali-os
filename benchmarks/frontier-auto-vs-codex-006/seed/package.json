@@ -1,0 +1,10 @@
+{
+  "name": "frontier-ledger-repair-benchmark",
+  "version": "1.0.0",
+  "private": true,
+  "type": "commonjs",
+  "engines": { "node": ">=20" },
+  "scripts": {
+    "test": "node --test test/*.test.js"
+  }
+}

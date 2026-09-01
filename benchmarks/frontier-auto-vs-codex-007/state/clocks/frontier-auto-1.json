@@ -1,0 +1,11 @@
+{
+  "contestant": "frontier-auto-1",
+  "startWallUtc": "2026-09-01T08:43:30.600Z",
+  "startMonotonicNs": "103875888197666",
+  "limitNs": "2700000000000",
+  "stopWallUtc": "2026-09-01T08:50:29.081Z",
+  "stopMonotonicNs": "104294370523541",
+  "elapsedNs": "418482325875",
+  "elapsedSeconds": 418.482325875,
+  "exceededLimit": false
+}

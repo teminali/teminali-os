@@ -27,7 +27,7 @@
       },
       {
         "id": "pro",
-        "name": "Pro",
+        "name": "Team",
         "price": 49,
         "events": "50M events/mo"
       },
@@ -47,7 +47,7 @@
       },
       {
         "id": "pro",
-        "name": "Pro",
+        "name": "Team",
         "price": 39,
         "events": "50M events/mo"
       },

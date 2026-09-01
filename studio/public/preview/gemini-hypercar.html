@@ -1,0 +1,121 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Aether Mach 1 - The Future of Hypercars</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;800&display=swap" rel="stylesheet">
+    <style>
+        body { font-family: 'Inter', sans-serif; background-color: #0f172a; color: white; overflow-x: hidden; }
+        .glass { background: rgba(255, 255, 255, 0.05); backdrop-filter: blur(10px); border-bottom: 1px solid rgba(255,255,255,0.1); }
+        .hero-car { transition: transform 0.5s ease-out; }
+        .fade-in-section { opacity: 0; transform: translateY(50px); transition: opacity 1s ease-out, transform 1s ease-out; }
+        .fade-in-section.is-visible { opacity: 1; transform: none; }
+        
+        /* 3D Rotation Mock */
+        .car-container { perspective: 1000px; }
+        .car-model { transform-style: preserve-3d; transition: transform 0.5s; width: 100%; height: 400px; background-color: #334155; border-radius: 20px; display: flex; align-items: center; justify-content: center; font-size: 2rem; color: #94a3b8; }
+        .car-model.crimson { background: linear-gradient(135deg, #7f1d1d, #450a0a); }
+        .car-model.obsidian { background: linear-gradient(135deg, #1e293b, #020617); }
+        .car-model.ghost { background: linear-gradient(135deg, #f8fafc, #cbd5e1); color: #1e293b; }
+    </style>
+</head>
+<body>
+
+    <!-- Nav -->
+    <nav class="fixed w-full z-50 glass px-8 py-4 flex justify-between items-center">
+        <div class="font-bold tracking-widest text-xl">AETHER</div>
+        <div class="space-x-8 text-sm text-slate-300">
+            <a href="#" class="hover:text-white transition-colors">Design</a>
+            <a href="#" class="hover:text-white transition-colors">Performance</a>
+            <a href="#" class="hover:text-white transition-colors">Order</a>
+        </div>
+    </nav>
+
+    <!-- Hero -->
+    <section class="h-screen flex flex-col items-center justify-center relative px-4">
+        <h1 class="text-7xl font-bold mb-4 tracking-tighter text-center">MACH 1</h1>
+        <p class="text-xl text-slate-400 mb-12 text-center max-w-2xl">Pure electric adrenaline. Forged in the future.</p>
+        
+        <div class="car-container w-full max-w-4xl cursor-ew-resize" id="heroCarContainer">
+            <div class="car-model obsidian shadow-2xl shadow-blue-500/20" id="heroCar">
+                [ 3D Render Placeholder ]
+            </div>
+        </div>
+        <p class="text-sm text-slate-500 mt-4">Drag to rotate</p>
+    </section>
+
+    <!-- Scroll Animations -->
+    <section class="min-h-screen py-32 px-8 fade-in-section">
+        <div class="max-w-5xl mx-auto grid grid-cols-1 md:grid-cols-2 gap-16 items-center">
+            <div>
+                <h2 class="text-5xl font-bold mb-6">Zero to 60 in 1.8s.</h2>
+                <p class="text-slate-400 text-lg">Powered by quad-quantum motors delivering 1,500 horsepower instantly to all four wheels.</p>
+            </div>
+            <div class="h-64 bg-slate-800 rounded-2xl flex items-center justify-center">
+                [ Performance Graphic ]
+            </div>
+        </div>
+    </section>
+
+    <!-- Configurator -->
+    <section class="min-h-screen py-32 px-8 bg-slate-900 fade-in-section">
+        <div class="max-w-5xl mx-auto text-center">
+            <h2 class="text-5xl font-bold mb-12">Make it yours.</h2>
+            
+            <div class="car-container w-full max-w-3xl mx-auto mb-12">
+                <div class="car-model obsidian transition-all duration-700" id="configCar">
+                    MACH 1
+                </div>
+            </div>
+
+            <div class="flex justify-center gap-8">
+                <button onclick="changeColor('obsidian')" class="w-16 h-16 rounded-full bg-slate-900 border-2 border-slate-600 focus:outline-none focus:border-white transition-all shadow-lg"></button>
+                <button onclick="changeColor('crimson')" class="w-16 h-16 rounded-full bg-red-800 border-2 border-red-600 focus:outline-none focus:border-white transition-all shadow-lg"></button>
+                <button onclick="changeColor('ghost')" class="w-16 h-16 rounded-full bg-slate-200 border-2 border-slate-400 focus:outline-none focus:border-white transition-all shadow-lg"></button>
+            </div>
+        </div>
+    </section>
+
+    <script>
+        // Scroll Animation
+        const observer = new IntersectionObserver((entries) => {
+            entries.forEach(entry => {
+                if (entry.isIntersecting) {
+                    entry.target.classList.add('is-visible');
+                }
+            });
+        });
+        document.querySelectorAll('.fade-in-section').forEach((el) => observer.observe(el));
+
+        // Configurator
+        function changeColor(color) {
+            const car = document.getElementById('configCar');
+            car.className = 'car-model ' + color + ' transition-all duration-700';
+            const heroCar = document.getElementById('heroCar');
+            heroCar.className = 'car-model ' + color + ' shadow-2xl shadow-blue-500/20';
+        }
+
+        // Fake 3D Rotation Interaction
+        const heroContainer = document.getElementById('heroCarContainer');
+        const heroCar = document.getElementById('heroCar');
+        let isDown = false;
+        let startX;
+        let rotation = 0;
+
+        heroContainer.addEventListener('mousedown', (e) => {
+            isDown = true;
+            startX = e.pageX;
+        });
+        heroContainer.addEventListener('mouseleave', () => { isDown = false; });
+        heroContainer.addEventListener('mouseup', () => { isDown = false; });
+        heroContainer.addEventListener('mousemove', (e) => {
+            if (!isDown) return;
+            const x = e.pageX;
+            const walk = (x - startX) * 0.5;
+            heroCar.style.transform = 'rotateY(' + (rotation + walk) + 'deg)';
+        });
+    </script>
+</body>
+</html>

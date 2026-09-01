@@ -11,10 +11,12 @@ if [[ -z "${ANTHROPIC_WORKSPACE_ID:-}" ]]; then
   export ANTHROPIC_WORKSPACE_ID
 fi
 
-curl --silent --show-error --max-time 120 \
-  -H "Authorization: Bearer $ANTHROPIC_API_KEY" \
-  -H "anthropic-workspace-id: $ANTHROPIC_WORKSPACE_ID" \
-  -H "Content-Type: application/json" \
+{
+  print -r -- "Authorization: Bearer $ANTHROPIC_API_KEY"
+  print -r -- "anthropic-workspace-id: $ANTHROPIC_WORKSPACE_ID"
+  print -r -- "Content-Type: application/json"
+} | curl --silent --show-error --max-time 120 \
+  -H @- \
   -d '{"model":"claude-sonnet-5","messages":[{"role":"user","content":"Reply exactly: CLAUDE SONNET DIRECT READY"}],"max_tokens":64,"stream":false,"output_config":{"effort":"low"}}' \
   -w '\nHTTP_STATUS=%{http_code}\n' \
   "https://api.anthropic.com/v1/chat/completions"

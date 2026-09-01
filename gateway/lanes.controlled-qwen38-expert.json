@@ -1,0 +1,19 @@
+[
+  {
+    "alias": "ollama-qwen38-expert",
+    "provider": "ollama",
+    "quotaGroup": "local-qwen38-expert",
+    "providerModel": "frontier-qwen3.8-27b-iq3m-8k",
+    "priority": 1,
+    "limits": {
+      "rpm": 30,
+      "rpd": 1000,
+      "tpm": 100000,
+      "tpd": 5000000
+    },
+    "pricing": {
+      "inputUsdPerMillion": "0",
+      "outputUsdPerMillion": "0"
+    }
+  }
+]

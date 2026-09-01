@@ -1,0 +1,54 @@
+{
+  "before": {
+    "wallUtc": "2026-08-31T15:22:52.059Z",
+    "monotonicNs": "41437530333208",
+    "host": {
+      "platform": "darwin",
+      "arch": "arm64",
+      "node": "v26.4.0",
+      "totalMemoryBytes": 25769803776,
+      "freeMemoryBytes": 4959141888,
+      "loadAverage": [
+        5.63232421875,
+        5.4580078125,
+        5.16796875
+      ]
+    },
+    "modelResidency": {
+      "status": "none",
+      "evidenceSource": "Ollama GET http://127.0.0.1:11434/api/ps returned {\"models\":[]}",
+      "note": "No local model was resident before the isolated Codex task."
+    },
+    "routeEvidence": {
+      "selectedMode": "Codex",
+      "observedRoute": "Codex desktop task; underlying model/build not exposed",
+      "note": "Recorded exactly as exposed; no hidden model identity was inferred."
+    }
+  },
+  "after": {
+    "wallUtc": "2026-08-31T15:26:41.607Z",
+    "monotonicNs": "41667072826875",
+    "host": {
+      "platform": "darwin",
+      "arch": "arm64",
+      "node": "v26.4.0",
+      "totalMemoryBytes": 25769803776,
+      "freeMemoryBytes": 4000972800,
+      "loadAverage": [
+        4.95458984375,
+        4.7451171875,
+        4.8916015625
+      ]
+    },
+    "modelResidency": {
+      "status": "none",
+      "evidenceSource": "Ollama GET http://127.0.0.1:11434/api/ps returned {\"models\":[]}",
+      "note": "Codex used no local Ollama model; residency remained empty."
+    },
+    "routeEvidence": {
+      "selectedMode": "Codex",
+      "observedRoute": "Codex desktop task; underlying model/build not exposed",
+      "note": "The isolated Codex contestant completed without model fallback or cross-agent assistance."
+    }
+  }
+}

@@ -1,0 +1,26 @@
+{
+  "benchmarkId": "frontier-auto-vs-codex-007",
+  "frontier": {
+    "contestant": "frontier-auto-1",
+    "mode": "Frontier Auto",
+    "maxLocked": true,
+    "expectedRoute": "Frontier Flash",
+    "shippedRevision": "frontier-v1.0.0-verified-repair-turn",
+    "permissions": ["file_read", "file_write", "test_verification"],
+    "tools": ["write_file", "test"]
+  },
+  "codex": {
+    "contestant": "codex-1",
+    "visibleModelBuild": "codex-production-current",
+    "reasoningEffort": "high",
+    "serviceTier": "standard",
+    "permissions": ["file_read", "file_write", "test_verification"],
+    "tools": ["write_file", "test"]
+  },
+  "runtime": {
+    "node": "v26.4.0",
+    "platform": "darwin",
+    "arch": "arm64",
+    "hostname": "Yohanas-MacBook-Pro.local"
+  }
+}

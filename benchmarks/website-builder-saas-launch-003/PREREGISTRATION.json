@@ -1,30 +1,48 @@
 {
   "schema_version": 1,
   "benchmark": "frontier-code-agents-003-website-builder-saas-launch",
-  "comparison_type": "skill-native web engineering agent comparison",
+  "comparison_type": "isolated Frontier Code versus Codex web engineering comparison",
   "preregistered_on": "2026-08-30",
+  "amended_on": "2026-08-31 before contestant execution",
+  "amendment": "The user replaced Antigravity with Codex as the comparison candidate.",
   "candidates": [
     {
-      "runner": "antigravity-1",
-      "product": "Antigravity",
-      "model": "Gemini 3.7 Flash",
-      "reasoning": "Medium"
+      "runner": "codex-cli-1",
+      "product": "Codex",
+      "model": "gpt-5.6-sol",
+      "reasoning": "High",
+      "configuration": "ephemeral, ignore user config and rules, workspace-write sandbox"
     },
     {
-      "runner": "opencode-local-enhanced-1",
-      "product": "OpenCode Local-First",
-      "model": "Devstral 24B + Claude Sonnet 5 Escalation",
-      "reasoning": "Medium"
+      "runner": "frontier-code-local-1",
+      "product": "Frontier Code",
+      "model": "Devstral 24B",
+      "reasoning": "Medium",
+      "configuration": "local profile with website-builder skill; cloud credentials removed and fallback disabled"
     }
   ],
   "run_order": [
-    "antigravity-1",
-    "opencode-local-enhanced-1"
+    "codex-cli-1",
+    "frontier-code-local-1"
   ],
   "runs_per_candidate": 1,
   "time_limit_seconds_per_run": 900,
   "prompt_submissions_per_run": 1,
   "network_allowed": false,
+  "seed_visible_tests_expected": "2/2",
+  "seed_oracle_score_expected": 20,
+  "contestant_receives": [
+    "TASK.md",
+    "seed/"
+  ],
+  "oracle_visibility_during_run": "withheld",
+  "isolation": {
+    "execution": "sequential to prevent compute contention",
+    "workspaces": "fresh byte-identical copies of the frozen seed",
+    "history": "fresh processes with no shared conversation or contestant output",
+    "scoring": "oracle is invoked only after both contestant processes exit",
+    "cross_access": "contestants receive no path or prompt referring to the sibling workspace"
+  },
   "allowed_changes": [
     "src/index.html",
     "src/styles.css",

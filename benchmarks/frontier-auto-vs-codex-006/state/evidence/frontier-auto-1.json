@@ -1,0 +1,54 @@
+{
+  "before": {
+    "wallUtc": "2026-08-31T15:18:20.268Z",
+    "monotonicNs": "41165777431291",
+    "host": {
+      "platform": "darwin",
+      "arch": "arm64",
+      "node": "v26.4.0",
+      "totalMemoryBytes": 25769803776,
+      "freeMemoryBytes": 4095393792,
+      "loadAverage": [
+        4.888671875,
+        4.9306640625,
+        4.9462890625
+      ]
+    },
+    "modelResidency": {
+      "status": "none",
+      "evidenceSource": "Ollama GET http://127.0.0.1:11434/api/ps returned {\"models\":[]}",
+      "note": "No local model was resident immediately before the clock started."
+    },
+    "routeEvidence": {
+      "selectedMode": "Frontier Auto",
+      "observedRoute": "not started",
+      "note": "Auto was preregistered; the observed product route will be recorded after completion."
+    }
+  },
+  "after": {
+    "wallUtc": "2026-08-31T15:21:47.360Z",
+    "monotonicNs": "41372868404125",
+    "host": {
+      "platform": "darwin",
+      "arch": "arm64",
+      "node": "v26.4.0",
+      "totalMemoryBytes": 25769803776,
+      "freeMemoryBytes": 5427118080,
+      "loadAverage": [
+        8.30224609375,
+        5.759765625,
+        5.2451171875
+      ]
+    },
+    "modelResidency": {
+      "status": "none",
+      "evidenceSource": "Ollama GET http://127.0.0.1:11434/api/ps returned {\"models\":[]}",
+      "note": "Frontier cleanup completed and no local model remained resident."
+    },
+    "routeEvidence": {
+      "selectedMode": "Frontier Auto",
+      "observedRoute": "Frontier Flash",
+      "note": "The run log reported the resource-safe local profile selected by Auto; Max remained locked."
+    }
+  }
+}

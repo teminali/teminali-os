@@ -1,0 +1,40 @@
+{
+  "schemaVersion": "frontier-quality-config/v1",
+  "projectRoot": ".",
+  "artifactDirectory": "benchmark-results/quality",
+  "defaultTimeoutMs": 600000,
+  "maxCapturedBytes": 10485760,
+  "maxReportBytes": 524288,
+  "suites": [
+    {
+      "id": "typescript",
+      "type": "typecheck",
+      "command": {
+        "executable": "npm",
+        "args": ["run", "typecheck"]
+      }
+    },
+    {
+      "id": "unit-contracts",
+      "type": "unit",
+      "command": {
+        "executable": "node",
+        "args": ["--test", "agent-runtime/runtime.test.js", "tests/benchmark-scorer.test.mjs", "tests/verification-contracts.test.mjs", "tests/phase3-swarm.test.mjs", "performance-runtime/metrics.test.js", "mcp-runtime/mcp-runtime.test.mjs", "visual-runtime/tests/visual-runtime.test.mjs", "quality-runtime/tests/orchestrator.test.mjs"]
+      }
+    },
+    {
+      "id": "gateway-integration",
+      "type": "integration",
+      "command": {
+        "executable": "node",
+        "args": ["--test", "server/gateway.test.js"]
+      }
+    },
+    {
+      "id": "browser-e2e",
+      "type": "browser",
+      "command": null,
+      "evidenceFiles": []
+    }
+  ]
+}

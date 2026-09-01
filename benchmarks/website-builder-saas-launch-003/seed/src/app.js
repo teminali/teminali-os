@@ -27,24 +27,8 @@ export function setupLeadForm(form) {
   if (!form) return;
   form.addEventListener("submit", (e) => {
     e.preventDefault();
-    const emailInput = form.querySelector("#lead-email");
-    const hpInput = form.querySelector("#lead-hp");
-    const errorMsg = form.querySelector("#email-error");
     const statusMsg = form.querySelector("#form-status");
-
-    // Honeypot check
-    if (hpInput && hpInput.value.length > 0) {
-      return; // Silent fail on bot spam
-    }
-
-    const email = emailInput?.value?.trim() ?? "";
-    if (!email || !email.includes("@") || !email.includes(".")) {
-      if (errorMsg) errorMsg.textContent = "Please enter a valid work email address.";
-      return;
-    }
-
-    if (errorMsg) errorMsg.textContent = "";
-    if (statusMsg) statusMsg.textContent = "Thank you! We will reach out shortly.";
+    if (statusMsg) statusMsg.textContent = "Thanks — request received.";
     form.reset();
   });
 }
@@ -53,11 +37,7 @@ if (typeof document !== "undefined") {
   document.addEventListener("DOMContentLoaded", () => {
     renderMetrics(document.getElementById("metrics-container"));
     const pricingContainer = document.getElementById("pricing-container");
-    const billingSwitch = document.getElementById("billing-switch");
-    renderPricing(pricingContainer, billingSwitch?.checked ?? false);
-    billingSwitch?.addEventListener("change", (e) => {
-      renderPricing(pricingContainer, e.target.checked);
-    });
+    renderPricing(pricingContainer, false);
     setupLeadForm(document.getElementById("lead-form"));
   });
 }

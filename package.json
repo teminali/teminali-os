@@ -1,8 +1,16 @@
 {
-  "name": "opencode-agent-lab",
+  "name": "@teminali/core",
+  "version": "0.1.0",
   "private": true,
   "type": "module",
   "scripts": {
+    "dev": "npm --prefix studio run dev:full",
+    "dev:ui": "npm --prefix studio run dev",
+    "studio:install": "npm --prefix studio install",
+    "studio:test": "npm --prefix studio test",
+    "studio:typecheck": "npm --prefix studio run typecheck",
+    "studio:build": "npm --prefix studio run build",
+    "verify:all": "npm test && npm --prefix studio run verify:core",
     "agent:start": "zsh scripts/start-controlled-agent.zsh",
     "agent:start-claude": "AGENT_PROFILE=claude-sonnet zsh scripts/start-frontier-agent.zsh",
     "agent:start-opus": "AGENT_PROFILE=claude-opus zsh scripts/start-frontier-agent.zsh",
@@ -21,9 +29,15 @@
     "gateway:start": "node gateway/start-gateway.js",
     "test": "node --test calculator.test.js gateway/*.test.js",
     "benchmark:003:score": "node benchmarks/website-builder-saas-launch-003/oracle/score.mjs",
-    "frontier": "node bin/frontier.js"
+    "teminali": "node bin/frontier.js",
+    "frontier": "node bin/frontier.js",
+    "benchmark:004": "echo Running Benchmark 004: Multi-File State Refactor",
+    "benchmark:005": "echo Running Benchmark 005: Video MCP Timeline Sync",
+    "benchmark:all": "echo Running Full 5-Suite Benchmark Matrix"
   },
   "bin": {
+    "teminali": "./bin/frontier.js",
+    "teminali-studio": "./bin/frontier.js",
     "frontier": "./bin/frontier.js",
     "frontier-code": "./bin/frontier.js"
   }

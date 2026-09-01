@@ -1,0 +1,11 @@
+{
+  "contestant": "codex-1",
+  "startWallUtc": "2026-08-31T15:23:15.321Z",
+  "startMonotonicNs": "41460788330125",
+  "limitNs": "2700000000000",
+  "stopWallUtc": "2026-08-31T15:26:41.574Z",
+  "stopMonotonicNs": "41667038615041",
+  "elapsedNs": "206250284916",
+  "elapsedSeconds": 206.250284916,
+  "exceededLimit": false
+}

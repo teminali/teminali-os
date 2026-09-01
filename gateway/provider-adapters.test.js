@@ -155,6 +155,8 @@ test("Ollama adapter maps model, enforces loopback endpoint, and needs no key", 
       model: "devstral-small-2:24b-instruct-2512-q4_K_M",
       messages: [{ role: "user", content: "test" }],
       stream: true,
+      temperature: 0,
+      seed: 42,
       stream_options: { include_usage: true },
     },
   );
@@ -166,5 +168,9 @@ test("Ollama adapter maps model, enforces loopback endpoint, and needs no key", 
         endpoint: "https://remote-server.com/v1/chat/completions",
       }),
     /Ollama endpoint must be a loopback address/,
+  );
+  assert.throws(
+    () => createOllamaUpstream({ alias: "ollama-invalid", seed: 1.5 }),
+    /seed must be a safe integer/,
   );
 });

@@ -1,0 +1,509 @@
+{
+  "schemaVersion": 1,
+  "benchmarkId": "2c88aa41-3cea-4222-8512-2186b6b21ccf",
+  "createdAt": "2026-08-31T05:05:33.144Z",
+  "status": "measured",
+  "gateway": "http://127.0.0.1:4310",
+  "model": "devstral-small-2:24b-instruct-2512-q4_K_M",
+  "prompt": {
+    "sha256": "2a06c063f1d32d2a51694fcfba35901f6cf4979287a54f142a8420188ad8ab9f",
+    "bytes": 149
+  },
+  "configuration": {
+    "runCount": 5,
+    "includeColdObservation": true,
+    "coldThresholdMs": 500,
+    "warmupPerformed": false,
+    "numPredict": 32,
+    "seed": 42,
+    "requestTimeoutMs": 180000,
+    "cancellationProbe": true
+  },
+  "environment": {
+    "node": "v26.4.0",
+    "platform": "darwin",
+    "architecture": "arm64"
+  },
+  "warmup": null,
+  "rawSamples": [
+    {
+      "index": 1,
+      "requestedMode": "cold_observation",
+      "classification": "cold",
+      "startedAt": "2026-08-31T05:04:53.272Z",
+      "correlationId": "14d4ac26-d2ef-4b02-a241-c96150a5f8f5",
+      "providerCompleted": true,
+      "complete": true,
+      "stream": {
+        "bytes": 7618,
+        "objectCount": 33
+      },
+      "metrics": {
+        "ttftMs": 15674.812875,
+        "totalLatencyMs": 20472.183792,
+        "promptTokens": 583,
+        "outputTokens": 32,
+        "promptTokensPerSecond": 67.6480206598234,
+        "outputTokensPerSecond": 6.753055480624191,
+        "ollamaTotalDurationMs": 20458.316666,
+        "loadDurationMs": 6872.958541,
+        "promptEvalDurationMs": 8618.138333,
+        "evalDurationMs": 4738.59575,
+        "raw": {
+          "promptEvalCount": 583,
+          "evalCount": 32,
+          "promptEvalDurationNs": 8618138333,
+          "evalDurationNs": 4738595750,
+          "loadDurationNs": 6872958541,
+          "totalDurationNs": 20458316666
+        }
+      }
+    },
+    {
+      "index": 2,
+      "requestedMode": "warm",
+      "classification": "warm",
+      "startedAt": "2026-08-31T05:05:13.747Z",
+      "correlationId": "ab9df999-47cc-44d2-be34-fb07acb172cd",
+      "providerCompleted": true,
+      "complete": true,
+      "stream": {
+        "bytes": 7614,
+        "objectCount": 33
+      },
+      "metrics": {
+        "ttftMs": 278.1929999999993,
+        "totalLatencyMs": 4384.250040999999,
+        "promptTokens": 583,
+        "outputTokens": 32,
+        "promptTokensPerSecond": 4410.285117746292,
+        "outputTokensPerSecond": 7.812577256012983,
+        "ollamaTotalDurationMs": 4371.443875,
+        "loadDurationMs": 128.656792,
+        "promptEvalDurationMs": 132.191,
+        "evalDurationMs": 4095.959496,
+        "raw": {
+          "promptEvalCount": 583,
+          "evalCount": 32,
+          "promptEvalDurationNs": 132191000,
+          "evalDurationNs": 4095959496,
+          "loadDurationNs": 128656792,
+          "totalDurationNs": 4371443875
+        }
+      }
+    },
+    {
+      "index": 3,
+      "requestedMode": "warm",
+      "classification": "warm",
+      "startedAt": "2026-08-31T05:05:18.132Z",
+      "correlationId": "97eadc76-3575-451c-8d0a-d6e5135c8188",
+      "providerCompleted": true,
+      "complete": true,
+      "stream": {
+        "bytes": 7616,
+        "objectCount": 33
+      },
+      "metrics": {
+        "ttftMs": 269.5554169999996,
+        "totalLatencyMs": 4328.903666999999,
+        "promptTokens": 583,
+        "outputTokens": 32,
+        "promptTokensPerSecond": 4247.759250528564,
+        "outputTokensPerSecond": 7.899315656389743,
+        "ollamaTotalDurationMs": 4319.629291,
+        "loadDurationMs": 117.651208,
+        "promptEvalDurationMs": 137.248833,
+        "evalDurationMs": 4050.983831,
+        "raw": {
+          "promptEvalCount": 583,
+          "evalCount": 32,
+          "promptEvalDurationNs": 137248833,
+          "evalDurationNs": 4050983831,
+          "loadDurationNs": 117651208,
+          "totalDurationNs": 4319629291
+        }
+      }
+    },
+    {
+      "index": 4,
+      "requestedMode": "warm",
+      "classification": "warm",
+      "startedAt": "2026-08-31T05:05:22.461Z",
+      "correlationId": "dcadc1b4-a7c7-40da-8fc6-66cc9af930a1",
+      "providerCompleted": true,
+      "complete": true,
+      "stream": {
+        "bytes": 7616,
+        "objectCount": 33
+      },
+      "metrics": {
+        "ttftMs": 283.2034590000003,
+        "totalLatencyMs": 4100.421249999999,
+        "promptTokens": 583,
+        "outputTokens": 32,
+        "promptTokensPerSecond": 3617.5996383740676,
+        "outputTokensPerSecond": 8.405256462791385,
+        "ollamaTotalDurationMs": 4093.79,
+        "loadDurationMs": 109.613917,
+        "promptEvalDurationMs": 161.156584,
+        "evalDurationMs": 3807.141417,
+        "raw": {
+          "promptEvalCount": 583,
+          "evalCount": 32,
+          "promptEvalDurationNs": 161156584,
+          "evalDurationNs": 3807141417,
+          "loadDurationNs": 109613917,
+          "totalDurationNs": 4093790000
+        }
+      }
+    },
+    {
+      "index": 5,
+      "requestedMode": "warm",
+      "classification": "warm",
+      "startedAt": "2026-08-31T05:05:26.561Z",
+      "correlationId": "3f0be2ed-5d1a-4bfd-bae4-04754fb9d1c8",
+      "providerCompleted": true,
+      "complete": true,
+      "stream": {
+        "bytes": 7618,
+        "objectCount": 33
+      },
+      "metrics": {
+        "ttftMs": 268.2067919999972,
+        "totalLatencyMs": 5622.9183339999945,
+        "promptTokens": 583,
+        "outputTokens": 32,
+        "promptTokensPerSecond": 4220.039214515343,
+        "outputTokensPerSecond": 6.5422286514593155,
+        "ollamaTotalDurationMs": 5565.531375,
+        "loadDurationMs": 119.070625,
+        "promptEvalDurationMs": 138.150375,
+        "evalDurationMs": 4891.299541,
+        "raw": {
+          "promptEvalCount": 583,
+          "evalCount": 32,
+          "promptEvalDurationNs": 138150375,
+          "evalDurationNs": 4891299541,
+          "loadDurationNs": 119070625,
+          "totalDurationNs": 5565531375
+        }
+      }
+    }
+  ],
+  "aggregate": {
+    "all": {
+      "runCount": 5,
+      "completeRunCount": 5,
+      "metrics": {
+        "ttftMs": {
+          "measuredCount": 5,
+          "median": 278.1929999999993,
+          "p95": 15674.812875,
+          "min": 268.2067919999972,
+          "max": 15674.812875
+        },
+        "totalLatencyMs": {
+          "measuredCount": 5,
+          "median": 4384.250040999999,
+          "p95": 20472.183792,
+          "min": 4100.421249999999,
+          "max": 20472.183792
+        },
+        "promptTokensPerSecond": {
+          "measuredCount": 5,
+          "median": 4220.039214515343,
+          "p95": 4410.285117746292,
+          "min": 67.6480206598234,
+          "max": 4410.285117746292
+        },
+        "outputTokensPerSecond": {
+          "measuredCount": 5,
+          "median": 7.812577256012983,
+          "p95": 8.405256462791385,
+          "min": 6.5422286514593155,
+          "max": 8.405256462791385
+        },
+        "ollamaTotalDurationMs": {
+          "measuredCount": 5,
+          "median": 4371.443875,
+          "p95": 20458.316666,
+          "min": 4093.79,
+          "max": 20458.316666
+        },
+        "loadDurationMs": {
+          "measuredCount": 5,
+          "median": 119.070625,
+          "p95": 6872.958541,
+          "min": 109.613917,
+          "max": 6872.958541
+        },
+        "promptEvalDurationMs": {
+          "measuredCount": 5,
+          "median": 138.150375,
+          "p95": 8618.138333,
+          "min": 132.191,
+          "max": 8618.138333
+        },
+        "evalDurationMs": {
+          "measuredCount": 5,
+          "median": 4095.959496,
+          "p95": 4891.299541,
+          "min": 3807.141417,
+          "max": 4891.299541
+        },
+        "promptTokens": {
+          "measuredCount": 5,
+          "median": 583,
+          "p95": 583,
+          "min": 583,
+          "max": 583
+        },
+        "outputTokens": {
+          "measuredCount": 5,
+          "median": 32,
+          "p95": 32,
+          "min": 32,
+          "max": 32
+        }
+      }
+    },
+    "cold": {
+      "runCount": 1,
+      "completeRunCount": 1,
+      "metrics": {
+        "ttftMs": {
+          "measuredCount": 1,
+          "median": 15674.812875,
+          "p95": 15674.812875,
+          "min": 15674.812875,
+          "max": 15674.812875
+        },
+        "totalLatencyMs": {
+          "measuredCount": 1,
+          "median": 20472.183792,
+          "p95": 20472.183792,
+          "min": 20472.183792,
+          "max": 20472.183792
+        },
+        "promptTokensPerSecond": {
+          "measuredCount": 1,
+          "median": 67.6480206598234,
+          "p95": 67.6480206598234,
+          "min": 67.6480206598234,
+          "max": 67.6480206598234
+        },
+        "outputTokensPerSecond": {
+          "measuredCount": 1,
+          "median": 6.753055480624191,
+          "p95": 6.753055480624191,
+          "min": 6.753055480624191,
+          "max": 6.753055480624191
+        },
+        "ollamaTotalDurationMs": {
+          "measuredCount": 1,
+          "median": 20458.316666,
+          "p95": 20458.316666,
+          "min": 20458.316666,
+          "max": 20458.316666
+        },
+        "loadDurationMs": {
+          "measuredCount": 1,
+          "median": 6872.958541,
+          "p95": 6872.958541,
+          "min": 6872.958541,
+          "max": 6872.958541
+        },
+        "promptEvalDurationMs": {
+          "measuredCount": 1,
+          "median": 8618.138333,
+          "p95": 8618.138333,
+          "min": 8618.138333,
+          "max": 8618.138333
+        },
+        "evalDurationMs": {
+          "measuredCount": 1,
+          "median": 4738.59575,
+          "p95": 4738.59575,
+          "min": 4738.59575,
+          "max": 4738.59575
+        },
+        "promptTokens": {
+          "measuredCount": 1,
+          "median": 583,
+          "p95": 583,
+          "min": 583,
+          "max": 583
+        },
+        "outputTokens": {
+          "measuredCount": 1,
+          "median": 32,
+          "p95": 32,
+          "min": 32,
+          "max": 32
+        }
+      }
+    },
+    "warm": {
+      "runCount": 4,
+      "completeRunCount": 4,
+      "metrics": {
+        "ttftMs": {
+          "measuredCount": 4,
+          "median": 273.87420849999944,
+          "p95": 283.2034590000003,
+          "min": 268.2067919999972,
+          "max": 283.2034590000003
+        },
+        "totalLatencyMs": {
+          "measuredCount": 4,
+          "median": 4356.576853999999,
+          "p95": 5622.9183339999945,
+          "min": 4100.421249999999,
+          "max": 5622.9183339999945
+        },
+        "promptTokensPerSecond": {
+          "measuredCount": 4,
+          "median": 4233.899232521953,
+          "p95": 4410.285117746292,
+          "min": 3617.5996383740676,
+          "max": 4410.285117746292
+        },
+        "outputTokensPerSecond": {
+          "measuredCount": 4,
+          "median": 7.855946456201363,
+          "p95": 8.405256462791385,
+          "min": 6.5422286514593155,
+          "max": 8.405256462791385
+        },
+        "ollamaTotalDurationMs": {
+          "measuredCount": 4,
+          "median": 4345.536583,
+          "p95": 5565.531375,
+          "min": 4093.79,
+          "max": 5565.531375
+        },
+        "loadDurationMs": {
+          "measuredCount": 4,
+          "median": 118.3609165,
+          "p95": 128.656792,
+          "min": 109.613917,
+          "max": 128.656792
+        },
+        "promptEvalDurationMs": {
+          "measuredCount": 4,
+          "median": 137.699604,
+          "p95": 161.156584,
+          "min": 132.191,
+          "max": 161.156584
+        },
+        "evalDurationMs": {
+          "measuredCount": 4,
+          "median": 4073.4716635,
+          "p95": 4891.299541,
+          "min": 3807.141417,
+          "max": 4891.299541
+        },
+        "promptTokens": {
+          "measuredCount": 4,
+          "median": 583,
+          "p95": 583,
+          "min": 583,
+          "max": 583
+        },
+        "outputTokens": {
+          "measuredCount": 4,
+          "median": 32,
+          "p95": 32,
+          "min": 32,
+          "max": 32
+        }
+      }
+    },
+    "unknown": {
+      "runCount": 0,
+      "completeRunCount": 0,
+      "metrics": {
+        "ttftMs": {
+          "measuredCount": 0,
+          "median": null,
+          "p95": null,
+          "min": null,
+          "max": null
+        },
+        "totalLatencyMs": {
+          "measuredCount": 0,
+          "median": null,
+          "p95": null,
+          "min": null,
+          "max": null
+        },
+        "promptTokensPerSecond": {
+          "measuredCount": 0,
+          "median": null,
+          "p95": null,
+          "min": null,
+          "max": null
+        },
+        "outputTokensPerSecond": {
+          "measuredCount": 0,
+          "median": null,
+          "p95": null,
+          "min": null,
+          "max": null
+        },
+        "ollamaTotalDurationMs": {
+          "measuredCount": 0,
+          "median": null,
+          "p95": null,
+          "min": null,
+          "max": null
+        },
+        "loadDurationMs": {
+          "measuredCount": 0,
+          "median": null,
+          "p95": null,
+          "min": null,
+          "max": null
+        },
+        "promptEvalDurationMs": {
+          "measuredCount": 0,
+          "median": null,
+          "p95": null,
+          "min": null,
+          "max": null
+        },
+        "evalDurationMs": {
+          "measuredCount": 0,
+          "median": null,
+          "p95": null,
+          "min": null,
+          "max": null
+        },
+        "promptTokens": {
+          "measuredCount": 0,
+          "median": null,
+          "p95": null,
+          "min": null,
+          "max": null
+        },
+        "outputTokens": {
+          "measuredCount": 0,
+          "median": null,
+          "p95": null,
+          "min": null,
+          "max": null
+        }
+      }
+    }
+  },
+  "cancellation": {
+    "correlationId": "44057d5a-56cd-4fba-9292-9b424a667a3c",
+    "trigger": "first_token",
+    "outcome": "aborted",
+    "cancellationLatencyMs": 10.177708000002895,
+    "measured": true
+  },
+  "warnings": []
+}

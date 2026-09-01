@@ -41,9 +41,11 @@ GATEWAY_PID=$!
 
 for _ in {1..50}; do
   if curl --fail --silent http://127.0.0.1:8787/health >/dev/null 2>&1; then
-    curl --silent --show-error \
-      -H "Authorization: Bearer $GATEWAY_ACCESS_TOKEN" \
-      -H "Content-Type: application/json" \
+    {
+      print -r -- "Authorization: Bearer $GATEWAY_ACCESS_TOKEN"
+      print -r -- "Content-Type: application/json"
+    } | curl --silent --show-error \
+      -H @- \
       -d '{"model":"frontier-code","messages":[{"role":"user","content":"Reply exactly: GEMINI DIAGNOSTIC READY"}],"max_tokens":64}' \
       http://127.0.0.1:8787/v1/chat/completions
     print

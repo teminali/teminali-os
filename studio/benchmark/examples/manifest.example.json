@@ -1,0 +1,65 @@
+{
+  "schemaVersion": "frontier-benchmark-manifest/v1",
+  "benchmarkId": "SCHEMA-EXAMPLE-NOT-A-BENCHMARK",
+  "title": "Schema example — never cite as a result",
+  "exampleOnly": true,
+  "status": "draft",
+  "createdAt": "2026-08-31T00:00:00.000Z",
+  "sealedAt": null,
+  "environment": {
+    "hardware": "Example hardware description",
+    "operatingSystem": "Example operating system description",
+    "repositorySnapshotSha256": "0000000000000000000000000000000000000000000000000000000000000000",
+    "networkPolicy": "Example fixed network policy"
+  },
+  "contestants": [
+    {
+      "id": "candidate-a",
+      "displayName": "Schema Candidate A",
+      "model": "Example model A",
+      "configuration": "Example frozen configuration A",
+      "configurationArtifact": {
+        "path": "sealed/configurations/candidate-a.json",
+        "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      }
+    },
+    {
+      "id": "candidate-b",
+      "displayName": "Schema Candidate B",
+      "model": "Example model B",
+      "configuration": "Example frozen configuration B",
+      "configurationArtifact": {
+        "path": "sealed/configurations/candidate-b.json",
+        "sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+      }
+    }
+  ],
+  "controls": {
+    "requiredTaskCount": 10,
+    "runsPerTask": 3,
+    "timeLimitMs": 1800000,
+    "retryLimit": 2,
+    "maxHumanInterventions": 0,
+    "minimumWinnerMarginPoints": 0.1
+  },
+  "tasks": [
+    {
+      "id": "schema-task-01",
+      "category": "bug-repair",
+      "weight": 1,
+      "promptArtifact": {
+        "path": "sealed/prompts/schema-task-01.txt.age",
+        "sha256": "1111111111111111111111111111111111111111111111111111111111111111"
+      },
+      "fixtureArtifact": {
+        "path": "sealed/fixtures/schema-task-01.tar.zst",
+        "sha256": "2222222222222222222222222222222222222222222222222222222222222222"
+      },
+      "evaluatorArtifact": {
+        "path": "sealed/evaluators/schema-task-01.tar.zst.age",
+        "sha256": "3333333333333333333333333333333333333333333333333333333333333333"
+      },
+      "requiredArtifacts": ["log", "patch", "test"]
+    }
+  ]
+}

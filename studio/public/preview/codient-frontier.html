@@ -1,0 +1,184 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Codient AI IDE - Frontier Auto Edition</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <style>
+    body { font-family: 'Plus Jakarta Sans', sans-serif; }
+    .font-mono { font-family: 'JetBrains Mono', monospace; }
+  </style>
+</head>
+<body class="h-screen w-screen bg-[radial-gradient(ellipse_at_center,_#0b3326_0%,_#051812_45%,_#020605_100%)] p-4 lg:p-8 flex items-center justify-center overflow-hidden text-slate-300 select-none">
+  <!-- Floating Codient IDE Container -->
+  <div class="w-full h-full bg-[#0e1117] rounded-[24px] border border-white/[0.12] shadow-[0_30px_90px_rgba(0,0,0,0.85)] flex flex-col overflow-hidden">
+    <!-- Header -->
+    <header class="h-14 bg-[#0e1117] border-b border-white/[0.08] flex items-center justify-between px-4 flex-shrink-0">
+      <div class="flex items-center gap-3">
+        <div class="flex items-center gap-2">
+          <div class="w-8 h-8 rounded-full bg-gradient-to-tr from-cyan-500 via-teal-400 to-emerald-400 p-0.5 flex items-center justify-center shadow-[0_0_15px_rgba(6,182,212,0.4)]">
+            <div class="w-full h-full bg-[#0e1117] rounded-full flex items-center justify-center">
+              <span class="text-cyan-400 text-sm">✹</span>
+            </div>
+          </div>
+          <span class="font-bold text-white text-base tracking-tight">Codient</span>
+        </div>
+        <div class="px-3 py-1 bg-[#161a23] border border-white/[0.08] rounded-full text-xs text-slate-300 font-medium flex items-center gap-1.5 cursor-pointer">
+          <span>Untitled</span>
+          <span class="text-[10px] text-slate-500">▼</span>
+        </div>
+      </div>
+
+      <!-- Segmented Capsule -->
+      <div class="flex items-center bg-[#07090d] border border-white/[0.08] p-1 rounded-xl shadow-inner text-xs font-medium">
+        <button class="px-4 py-1.5 rounded-lg text-slate-400 hover:text-white">Preview</button>
+        <button class="px-4 py-1.5 rounded-lg text-slate-400 hover:text-white">Design</button>
+        <button class="px-4 py-1.5 rounded-lg bg-[#06b6d4] text-black font-bold shadow-[0_0_12px_rgba(6,182,212,0.4)]">Code</button>
+      </div>
+
+      <!-- Right User Stack & Invite -->
+      <div class="flex items-center gap-3">
+        <div class="flex items-center -space-x-2">
+          <div class="w-7 h-7 rounded-full bg-cyan-500 border-2 border-[#0e1117] flex items-center justify-center text-black font-bold text-[10px]">AU</div>
+          <div class="w-7 h-7 rounded-full bg-emerald-500 border-2 border-[#0e1117] flex items-center justify-center text-black font-bold text-[10px]">TT</div>
+          <div class="w-7 h-7 rounded-full bg-amber-500 border-2 border-[#0e1117] flex items-center justify-center text-black font-bold text-[10px]">MA</div>
+        </div>
+        <button class="px-4 py-1.5 bg-[#386df8] hover:bg-[#2557eb] text-white text-xs font-semibold rounded-xl shadow-[0_4px_14px_rgba(56,109,248,0.35)] transition-all">
+          Invite
+        </button>
+      </div>
+    </header>
+
+    <!-- Main Workspace -->
+    <div class="flex-1 flex overflow-hidden">
+      <!-- Activity Bar -->
+      <div class="w-14 bg-[#0e1117] border-r border-white/[0.08] flex flex-col justify-between items-center py-4 flex-shrink-0">
+        <div class="flex flex-col items-center space-y-3">
+          <div class="w-9 h-9 rounded-xl bg-[#1c2230] text-white border border-white/[0.10] flex items-center justify-center shadow-md cursor-pointer">📁</div>
+          <div class="w-9 h-9 rounded-xl text-slate-500 hover:text-white flex items-center justify-center cursor-pointer">🧩</div>
+          <div class="w-9 h-9 rounded-xl text-slate-500 hover:text-white flex items-center justify-center cursor-pointer">⎇</div>
+        </div>
+        <div class="flex flex-col items-center space-y-3">
+          <div class="w-9 h-9 rounded-xl text-amber-400 flex items-center justify-center cursor-pointer">👑</div>
+          <div class="w-9 h-9 rounded-xl text-slate-500 hover:text-white flex items-center justify-center cursor-pointer">⚙️</div>
+        </div>
+      </div>
+
+      <!-- Explorer Sidebar -->
+      <div class="w-60 bg-[#0e1117] border-r border-white/[0.08] flex flex-col text-xs font-mono p-3 space-y-1 overflow-y-auto">
+        <div class="text-white font-semibold text-xs mb-2">Explorer</div>
+        <div class="text-slate-500 pl-2">▶ node_modules</div>
+        <div class="text-slate-500 pl-2">▶ public</div>
+        <div class="text-slate-200 font-semibold pl-2">▼ src</div>
+        <div class="text-slate-400 pl-6">▶ assets</div>
+        <div class="text-slate-400 pl-6">▼ styles</div>
+        <div class="text-slate-400 pl-10 text-red-400"># global.css</div>
+        <div class="text-slate-400 pl-6">▼ components</div>
+        <div class="text-slate-300 pl-10 text-cyan-400">⚛ header.tsx</div>
+        <div class="bg-[#1e2330] text-white border border-white/[0.08] rounded-lg px-2 py-1 font-semibold text-cyan-300">⚛ banner.tsx</div>
+        <div class="text-slate-300 pl-10 text-cyan-400">⚛ codeeditor.tsx</div>
+        <div class="text-slate-300 pl-10 text-cyan-400">⚛ footer.tsx</div>
+      </div>
+
+      <!-- Monaco Code Editor Canvas with Collab Cursors -->
+      <div class="flex-1 flex flex-col bg-[#0e1117] relative overflow-hidden">
+        <!-- Tab Bar -->
+        <div class="h-12 border-b border-white/[0.08] bg-[#090b10] flex items-center justify-between px-3">
+          <div class="flex items-center gap-1.5">
+            <div class="h-8 flex items-center gap-2 px-3 bg-[#181c26] text-white border border-white/[0.12] rounded-xl text-xs font-mono font-medium shadow-sm">
+              <span class="text-cyan-400">⚛</span> banner.tsx <span class="text-slate-500 text-[10px] cursor-pointer">×</span>
+            </div>
+            <div class="h-8 flex items-center gap-2 px-3 text-slate-400 hover:text-white text-xs font-mono">
+              <span class="text-yellow-400">JS</span> product.js
+            </div>
+            <div class="h-8 flex items-center gap-2 px-3 text-slate-400 hover:text-white text-xs font-mono">
+              <span class="text-blue-400">{}</span> package.js
+            </div>
+            <div class="h-8 flex items-center gap-2 px-3 text-slate-400 hover:text-white text-xs font-mono">
+              <span class="text-green-400">&lt;/&gt;</span> index.html
+            </div>
+          </div>
+          <div class="px-2.5 py-1 bg-[#161a23] border border-white/[0.08] rounded-lg text-xs font-mono text-slate-300">88% ▼</div>
+        </div>
+
+        <!-- Code Body with Collab Flags -->
+        <div class="flex-1 p-6 font-mono text-xs text-slate-300 leading-relaxed overflow-auto relative">
+          <!-- Collab Flag 1 -->
+          <div class="absolute top-12 left-96 z-10 flex flex-col items-start animate-pulse">
+            <span class="bg-[#f97316] text-black text-[10px] font-bold px-2 py-0.5 rounded-t rounded-br shadow">Aslam</span>
+            <div class="w-0.5 h-6 bg-[#f97316]"></div>
+          </div>
+
+          <!-- Collab Flag 2 -->
+          <div class="absolute top-48 left-72 z-10 flex flex-col items-start animate-pulse">
+            <span class="bg-[#10b981] text-black text-[10px] font-bold px-2 py-0.5 rounded-t rounded-br shadow">Tahsin</span>
+            <div class="w-0.5 h-6 bg-[#10b981]"></div>
+          </div>
+
+          <pre><span class="text-purple-400">import</span> React <span class="text-purple-400">from</span> <span class="text-orange-300">"react"</span>;
+<span class="text-purple-400">import</span> { useState, useEffect } <span class="text-purple-400">from</span> <span class="text-orange-300">"react"</span>;
+<span class="text-purple-400">import</span> { Button } <span class="text-purple-400">from</span> <span class="text-orange-300">"@/components/ui/button"</span>;
+<span class="text-purple-400">import</span> { ChevronLeft, ChevronRight, ArrowRight } <span class="text-purple-400">from</span> <span class="text-orange-300">"lucide-react"</span>;
+<span class="text-cyan-400">import</span> bannerImg <span class="text-purple-400">from</span> <span class="text-orange-300">"../assets/savanna-hero-banner-image.png"</span>;
+
+<span class="text-purple-400">const</span> slides = [
+  {
+    id: 1,
+    image: bannerImg,
+    title: <span class="text-orange-300">"AT TAXFARM. WE TURN YOUR CRYPTO TAXES INTO ACTUAL FARMLAND"</span>,
+    subtitle: <span class="text-orange-300">"EVERY $FARM TOKEN YOU HOLD BUYS REAL LAND, GROWS REAL FOOD."</span>,
+    buttonText: <span class="text-orange-300">"Shop now"</span>
+  }
+];
+
+<span class="text-purple-400">return</span> (
+  &lt;<span class="text-cyan-400">div</span> <span class="text-emerald-400">className</span>=<span class="text-orange-300">"relative h-[480px] w-full rounded-2xl overflow-hidden shadow-2xl"</span>&gt;
+    {slides.map((slide, index) =&gt; (
+      &lt;<span class="text-cyan-400">div</span> <span class="text-emerald-400">key</span>={index} <span class="text-emerald-400">className</span>=<span class="text-orange-300">"w-full h-full"</span>&gt;
+        {/* Banner content */}
+      &lt;/<span class="text-cyan-400">div</span>&gt;
+    ))}
+  &lt;/<span class="text-cyan-400">div</span>&gt;
+);</pre>
+        </div>
+      </div>
+
+      <!-- Right AI Panel -->
+      <div class="w-96 bg-[#0c0f14] border-l border-white/[0.08] flex flex-col p-4 justify-between">
+        <div class="space-y-4">
+          <div class="flex items-center justify-between border-b border-white/[0.08] pb-3">
+            <span class="font-semibold text-white text-sm">AI Assistance</span>
+            <span class="px-2.5 py-0.5 bg-white/[0.06] border border-white/[0.08] text-white text-xs rounded-full cursor-pointer">💬 Chat</span>
+          </div>
+
+          <div class="bg-[#11141b] border border-white/[0.06] rounded-xl p-3 text-xs space-y-1.5">
+            <div class="font-semibold text-slate-300 flex items-center justify-between">
+              <span>✨ Reasoning</span> <span>▼</span>
+            </div>
+            <p class="text-[11px] text-slate-400">I'll completely redesign the hero section with vibrant green farmland aesthetic, 3D sprout with Bitcoin honeybee, and high-conversion CTA.</p>
+          </div>
+
+          <div class="flex items-center gap-2 justify-end text-[11px]">
+            <span class="px-3 py-1 rounded-lg border border-emerald-500/30 bg-emerald-500/10 text-emerald-400 cursor-pointer">Error Fixing</span>
+            <span class="px-3 py-1 rounded-lg border border-cyan-500/30 bg-cyan-500/10 text-cyan-400 cursor-pointer">Find logic bugs</span>
+          </div>
+        </div>
+
+        <!-- Composer with Image Attachment -->
+        <div class="bg-[#11141b] border border-white/[0.10] rounded-2xl p-3 shadow-2xl space-y-2">
+          <div class="text-xs text-slate-400">Ask a follow-up...</div>
+          <div class="flex items-center justify-between pt-2 border-t border-white/[0.04]">
+            <div class="flex items-center gap-2 text-xs">
+              <span class="w-6 h-6 rounded-lg bg-white/[0.06] flex items-center justify-center text-slate-300 cursor-pointer" title="Image / Screenshot Attachment">+</span>
+              <span class="w-6 h-6 rounded-lg bg-white/[0.06] flex items-center justify-center text-cyan-400 cursor-pointer">✨</span>
+              <span class="px-2 py-0.5 rounded-full bg-white/[0.04] border border-white/[0.08] text-[10px] text-slate-300">🪄 Builder</span>
+            </div>
+            <button class="w-7 h-7 rounded-xl bg-white text-black font-bold flex items-center justify-center">↑</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</body>
+</html>

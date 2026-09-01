@@ -1,0 +1,129 @@
+{
+  "schemaVersion": 1,
+  "benchmarkId": "frontier-auto-vs-codex-006",
+  "contestant": "frontier-auto-1",
+  "eligible": true,
+  "scoredAtUtc": "2026-08-31T15:22:22.950Z",
+  "score": 37,
+  "maxScore": 100,
+  "timing": {
+    "contestantElapsedNs": "207029381042",
+    "visibleElapsedNs": "77470000",
+    "hiddenElapsedNs": "4000625"
+  },
+  "runtime": {
+    "node": "v26.4.0",
+    "platform": "darwin",
+    "arch": "arm64"
+  },
+  "integrity": {
+    "ok": true,
+    "forbiddenChanges": [],
+    "symlinks": []
+  },
+  "visible": {
+    "passed": false,
+    "exitCode": 1,
+    "signal": null,
+    "stdout": "✔ exports typed domain errors (0.419916ms)\n✔ normalizes SKU keys consistently (0.089625ms)\n✔ creates a basic reservation (1.084833ms)\n✖ prevents aggregate overselling (0.5645ms)\n✔ same reserve request is idempotent (0.35725ms)\n✔ release restores availability (0.322916ms)\n✔ state survives service reconstruction (0.220292ms)\nℹ tests 7\nℹ suites 0\nℹ pass 6\nℹ fail 1\nℹ cancelled 0\nℹ skipped 0\nℹ todo 0\nℹ duration_ms 45.884125\n\n✖ failing tests:\n\ntest at test/reservation.test.js:37:1\n✖ prevents aggregate overselling (0.5645ms)\n  AssertionError [ERR_ASSERTION]: Missing expected exception (InsufficientStockError).\n      at TestContext.<anonymous> (/Users/teminali/Documents/my_projects/frontier/benchmarks/frontier-auto-vs-codex-006/runs/frontier-auto-1/test/reservation.test.js:40:10)\n      at Test.runInAsyncScope (node:async_hooks:226:14)\n      at Test.run (node:internal/test_runner/test:1382:25)\n      at Test.processPendingSubtests (node:internal/test_runner/test:960:18)\n      at Test.postRun (node:internal/test_runner/test:1522:19)\n      at Test.run (node:internal/test_runner/test:1447:12)\n      at async Test.processPendingSubtests (node:internal/test_runner/test:960:7) {\n    generatedMessage: false,\n    code: 'ERR_ASSERTION',\n    actual: undefined,\n    operator: 'throws',\n    diff: 'simple'\n  }\n",
+    "stderr": ""
+  },
+  "privateEvaluation": {
+    "score": 37,
+    "maxScore": 100,
+    "checks": [
+      {
+        "id": "normalization",
+        "points": 10,
+        "earned": 10,
+        "passed": true
+      },
+      {
+        "id": "strict-units",
+        "points": 10,
+        "earned": 0,
+        "passed": false,
+        "error": "Error: expected ValidationError"
+      },
+      {
+        "id": "stock-key-normalization",
+        "points": 5,
+        "earned": 0,
+        "passed": false,
+        "error": "InsufficientStockError: insufficient stock"
+      },
+      {
+        "id": "aggregate-capacity",
+        "points": 10,
+        "earned": 0,
+        "passed": false,
+        "error": "Error: expected InsufficientStockError"
+      },
+      {
+        "id": "reserve-idempotency",
+        "points": 10,
+        "earned": 0,
+        "passed": false,
+        "error": "Error: charged once"
+      },
+      {
+        "id": "intent-conflict",
+        "points": 8,
+        "earned": 0,
+        "passed": false,
+        "error": "Error: expected ConflictError"
+      },
+      {
+        "id": "release-idempotency",
+        "points": 8,
+        "earned": 0,
+        "passed": false,
+        "error": "Error: restored once"
+      },
+      {
+        "id": "reload",
+        "points": 5,
+        "earned": 5,
+        "passed": true
+      },
+      {
+        "id": "partial-tail-recovery",
+        "points": 8,
+        "earned": 0,
+        "passed": false,
+        "error": "SyntaxError: Expected ',' or '}' after property value in JSON at position 18 (line 1 column 19)"
+      },
+      {
+        "id": "interior-corruption-rejected",
+        "points": 7,
+        "earned": 7,
+        "passed": true
+      },
+      {
+        "id": "snapshot-isolation",
+        "points": 5,
+        "earned": 5,
+        "passed": true
+      },
+      {
+        "id": "unknown-release",
+        "points": 5,
+        "earned": 5,
+        "passed": true
+      },
+      {
+        "id": "input-validation",
+        "points": 4,
+        "earned": 0,
+        "passed": false,
+        "error": "TypeError: Cannot read properties of null (reading 'requestId')"
+      },
+      {
+        "id": "unknown-sku-capacity",
+        "points": 5,
+        "earned": 5,
+        "passed": true
+      }
+    ]
+  }
+}

@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Codient AI IDE - Antigravity (Gemini 3.7 Flash) Edition</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="h-screen w-screen bg-[#1e1e1e] p-4 flex items-center justify-center text-gray-300 font-sans">
+  <!-- Basic Antigravity Static Shell -->
+  <div class="w-full h-full bg-[#252526] rounded-lg border border-[#3e3e42] flex flex-col overflow-hidden">
+    <!-- Header -->
+    <div class="h-10 bg-[#323233] border-b border-[#3e3e42] flex items-center justify-between px-4 text-xs">
+      <div class="flex items-center gap-2 font-bold text-white">
+        <span>Codient IDE</span>
+        <span class="text-gray-400 font-normal">-- Untitled Workspace</span>
+      </div>
+      <div class="flex gap-2">
+        <button class="px-3 py-1 bg-blue-600 text-white rounded">Preview</button>
+        <button class="px-3 py-1 bg-gray-700 text-white rounded">Code</button>
+      </div>
+      <div>
+        <button class="px-3 py-1 bg-blue-500 text-white text-xs rounded">Invite Team</button>
+      </div>
+    </div>
+
+    <!-- Body -->
+    <div class="flex-1 flex">
+      <!-- Sidebar -->
+      <div class="w-48 bg-[#252526] border-r border-[#3e3e42] p-3 text-xs space-y-2">
+        <div class="font-bold text-white uppercase text-[10px]">Explorer</div>
+        <div class="text-gray-400">src/components/banner.tsx</div>
+        <div class="text-gray-400">src/product.js</div>
+        <div class="text-gray-400">package.json</div>
+        <!-- [TODO: Implement full collapsible nested tree structure] -->
+      </div>
+
+      <!-- Editor Canvas -->
+      <div class="flex-1 bg-[#1e1e1e] p-4 font-mono text-xs text-gray-300">
+        <div class="text-gray-500 mb-2">// banner.tsx</div>
+        <pre>import React from "react";
+// [TODO: Insert slides state array]
+export default function Banner() {
+  return &lt;div className="banner"&gt;Farmland Hero&lt;/div&gt;;
+}</pre>
+        <!-- [TODO: Multi-user live cursor collaborative overlay] -->
+      </div>
+
+      <!-- Right Chat -->
+      <div class="w-80 bg-[#252526] border-l border-[#3e3e42] p-3 flex flex-col justify-between">
+        <div>
+          <div class="font-bold text-white text-xs border-b border-[#3e3e42] pb-2">AI Assistance</div>
+          <div class="mt-2 text-xs text-gray-400">
+            I can help you build this component. Ask me anything.
+          </div>
+        </div>
+        <div class="border border-[#3e3e42] p-2 rounded bg-[#1e1e1e]">
+          <input type="text" placeholder="Type prompt..." class="bg-transparent text-xs text-white w-full outline-none" />
+          <!-- [TODO: Image attachment upload engine] -->
+        </div>
+      </div>
+    </div>
+  </div>
+</body>
+</html>
