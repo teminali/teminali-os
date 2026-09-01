@@ -29,7 +29,7 @@ const variantStyles: Record<BadgeVariant, string> = {
   rose: "bg-rose-500/10 text-rose-300 border border-rose-500/25",
   neutral: "bg-white/5 text-gray-300 border border-white/10",
   shortcut: "bg-white/5 text-gray-400 border border-white/10 font-mono text-4xs shadow-inner",
-  model: "bg-[#141724] text-gray-200 border border-white/10 font-mono",
+  model: "bg-[#16161a] text-gray-200 border border-white/10 font-mono",
 };
 
 const dotColors: Record<BadgeVariant, string> = {

@@ -133,7 +133,7 @@ export default function App() {
   };
 
   return (
-    <main ref={stageRef} className="h-screen w-screen bg-[#090b10] overflow-hidden flex flex-col font-sans select-none text-gray-200">
+    <main ref={stageRef} className="h-screen w-screen bg-[#0a0a0d] overflow-hidden flex flex-col font-sans select-none text-gray-200">
       <CopilotLiveEditController />
 
       {/* Main Workspace Container */}

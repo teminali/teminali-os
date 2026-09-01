@@ -58,11 +58,11 @@ export const Modal: React.FC<ModalProps> = ({
       }}
     >
       <div
-        className={`w-full ${sizeStyles[size]} bg-[#141720] border border-white/10 rounded-2xl shadow-[0_30px_90px_rgba(0,0,0,0.9)] overflow-hidden flex flex-col animate-in zoom-in-95 duration-100 ${className}`}
+        className={`w-full ${sizeStyles[size]} bg-[#131317] border border-white/10 rounded-2xl shadow-[0_30px_90px_rgba(0,0,0,0.9)] overflow-hidden flex flex-col animate-in zoom-in-95 duration-100 ${className}`}
       >
         {/* Modal Header */}
         {(title || showCloseButton) && (
-          <header className="px-4 py-3 bg-[#0d1017] border-b border-white/5 flex items-center justify-between gap-3 flex-shrink-0">
+          <header className="px-4 py-3 bg-[#0e0e12] border-b border-white/5 flex items-center justify-between gap-3 flex-shrink-0">
             <div className="flex items-center gap-2.5 truncate">
               {icon && <span className="flex-shrink-0">{icon}</span>}
               <div className="flex flex-col truncate">
@@ -95,7 +95,7 @@ export const Modal: React.FC<ModalProps> = ({
 
         {/* Modal Footer */}
         {footer && (
-          <footer className="px-4 py-2.5 bg-[#0a0c12] border-t border-white/5 flex items-center justify-between text-xs flex-shrink-0">
+          <footer className="px-4 py-2.5 bg-[#0a0a0d] border-t border-white/5 flex items-center justify-between text-xs flex-shrink-0">
             {footer}
           </footer>
         )}

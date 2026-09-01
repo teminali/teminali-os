@@ -148,10 +148,10 @@ export const TerminalPanel: React.FC<TerminalPanelProps> = ({
   return (
     <div 
       style={{ height: `${height}px`, minHeight: 140, maxHeight: "calc(100% - 100px)" }} 
-      className="border-t border-white/5 bg-[#08090E] flex flex-col select-none z-20 text-gray-300 font-mono relative flex-shrink-0"
+      className="border-t border-white/5 bg-[#09090c] flex flex-col select-none z-20 text-gray-300 font-mono relative flex-shrink-0"
     >
       {/* ── Title Strip ──────────────────────────────────────────────── */}
-      <div className="h-8 border-b border-white/5 bg-[#0c0e14] flex items-center justify-between px-3 flex-shrink-0">
+      <div className="h-8 border-b border-white/5 bg-[#0c0c10] flex items-center justify-between px-3 flex-shrink-0">
         <div className="flex items-center gap-2 text-3xs text-gray-200 font-bold">
           <TerminalIcon size={12} className="text-[#FF6C37]" />
           <span className="text-gray-300">zsh · local terminal</span>
@@ -188,7 +188,7 @@ export const TerminalPanel: React.FC<TerminalPanelProps> = ({
       {/* ── Terminal Output Stream ────────────────────────────────────── */}
       <div
         onClick={() => inputRef.current?.focus()}
-        className="flex-1 p-3 text-xs text-gray-300 overflow-y-auto space-y-1 select-text leading-relaxed bg-[#08090E] cursor-text"
+        className="flex-1 p-3 text-xs text-gray-300 overflow-y-auto space-y-1 select-text leading-relaxed bg-[#09090c] cursor-text"
       >
         {logs.map((log, idx) => (
           <div

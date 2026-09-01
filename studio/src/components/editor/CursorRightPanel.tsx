@@ -67,12 +67,12 @@ export const CursorRightPanel: React.FC<{
 
       <div
         style={{ width: isMaximized ? "100%" : `${width}px` }}
-        className={`bg-[#0c0e14] border-l border-white/5 flex flex-col h-full font-sans transition-all duration-75 relative select-none ${
-          isMaximized ? "fixed inset-0 z-50 bg-[#0c0e14]" : ""
+        className={`bg-[#0c0c10] border-l border-white/5 flex flex-col h-full font-sans transition-all duration-75 relative select-none ${
+          isMaximized ? "fixed inset-0 z-50 bg-[#0c0c10]" : ""
         }`}
       >
         {/* ── Top Tab Bar ─────────────────────────────────────────────── */}
-        <header className="h-10 px-3 flex items-center justify-between border-b border-white/5 bg-[#090b10] select-none flex-shrink-0 gap-2">
+        <header className="h-10 px-3 flex items-center justify-between border-b border-white/5 bg-[#0a0a0d] select-none flex-shrink-0 gap-2">
           {/* Left Tabs */}
           <div className="flex items-center gap-1">
             {/* Live Browser Tab */}
@@ -80,7 +80,7 @@ export const CursorRightPanel: React.FC<{
               onClick={() => setActiveTab("browser")}
               className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${
                 activeTab === "browser"
-                  ? "bg-[#1f2438] text-[#FF6C37] border border-[#FF6C37]/30 shadow-sm"
+                  ? "bg-[#222228] text-[#FF6C37] border border-[#FF6C37]/30 shadow-sm"
                   : "text-gray-400 hover:text-white hover:bg-white/5 border border-transparent"
               }`}
             >
@@ -93,7 +93,7 @@ export const CursorRightPanel: React.FC<{
               onClick={() => setActiveTab("editor")}
               className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${
                 activeTab === "editor"
-                  ? "bg-[#1f2438] text-white border border-white/10 shadow-sm"
+                  ? "bg-[#222228] text-white border border-white/10 shadow-sm"
                   : "text-gray-400 hover:text-white hover:bg-white/5 border border-transparent"
               }`}
             >
@@ -106,7 +106,7 @@ export const CursorRightPanel: React.FC<{
               onClick={() => setActiveTab("terminal")}
               className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${
                 activeTab === "terminal"
-                  ? "bg-[#1f2438] text-white border border-white/10 shadow-sm"
+                  ? "bg-[#222228] text-white border border-white/10 shadow-sm"
                   : "text-gray-400 hover:text-white hover:bg-white/5 border border-transparent"
               }`}
             >
@@ -125,7 +125,7 @@ export const CursorRightPanel: React.FC<{
               </button>
 
               {isMenuOpen && (
-                <div className="absolute top-8 left-0 w-48 bg-[#181b26] border border-white/10 rounded-xl shadow-2xl z-50 p-1 text-xs space-y-0.5">
+                <div className="absolute top-8 left-0 w-48 bg-[#19191e] border border-white/10 rounded-xl shadow-2xl z-50 p-1 text-xs space-y-0.5">
                   <button
                     onClick={() => {
                       addUntitledTab();
@@ -202,11 +202,11 @@ export const CursorRightPanel: React.FC<{
         </header>
 
         {/* ── Panel Body Content ──────────────────────────────────────── */}
-        <div className="flex-1 flex flex-col overflow-hidden relative bg-[#0c0e14]">
+        <div className="flex-1 flex flex-col overflow-hidden relative bg-[#0c0c10]">
           {isInternalSplit ? (
             /* Split Mode: Top Editor/Browser + Bottom Terminal */
             <>
-              <div style={{ height: `${internalSplitRatio}%` }} className="w-full overflow-hidden bg-[#0c0e14]">
+              <div style={{ height: `${internalSplitRatio}%` }} className="w-full overflow-hidden bg-[#0c0c10]">
                 {activeTab === "browser" ? (
                   <WebsitePreviewPane activeTab={currentFile} />
                 ) : (
@@ -221,7 +221,7 @@ export const CursorRightPanel: React.FC<{
                 onDoubleClick={() => setInternalSplitRatio(50)}
               />
 
-              <div style={{ height: `${100 - internalSplitRatio}%` }} className="w-full bg-[#08090E] p-1 overflow-hidden">
+              <div style={{ height: `${100 - internalSplitRatio}%` }} className="w-full bg-[#09090c] p-1 overflow-hidden">
                 <TerminalPanel
                   isOpen={true}
                   height={500}
@@ -234,7 +234,7 @@ export const CursorRightPanel: React.FC<{
             /* Single Pane Mode */
             <>
               {activeTab === "terminal" && (
-                <div className="h-full w-full bg-[#08090E]">
+                <div className="h-full w-full bg-[#09090c]">
                   <TerminalPanel
                     isOpen={true}
                     height={500}
@@ -245,13 +245,13 @@ export const CursorRightPanel: React.FC<{
               )}
 
               {activeTab === "editor" && (
-                <div className="h-full w-full bg-[#0c0e14]">
+                <div className="h-full w-full bg-[#0c0c10]">
                   <EditorPane onPreview={onPreview} />
                 </div>
               )}
 
               {activeTab === "browser" && (
-                <div className="h-full w-full bg-[#08090E]">
+                <div className="h-full w-full bg-[#09090c]">
                   <WebsitePreviewPane activeTab={currentFile} />
                 </div>
               )}

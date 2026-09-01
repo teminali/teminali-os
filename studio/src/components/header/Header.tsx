@@ -62,7 +62,7 @@ export const Header: React.FC<{ mode: "code" | "preview"; setMode: (mode: "code"
         </button>
 
         {isWorkspaceOpen && (
-          <div className="absolute left-0 top-full mt-2 w-56 bg-[#141720] border border-white/[0.10] rounded-xl shadow-2xl p-1.5 z-50 animate-in fade-in duration-100 font-sans">
+          <div className="absolute left-0 top-full mt-2 w-56 bg-[#131317] border border-white/[0.10] rounded-xl shadow-2xl p-1.5 z-50 animate-in fade-in duration-100 font-sans">
             <div className="px-2 py-1 text-[10px] font-semibold uppercase tracking-wider text-slate-500">
               Workspace
             </div>

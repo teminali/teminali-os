@@ -91,12 +91,12 @@ export const CodeSnippet: React.FC<CodeSnippetProps> = ({
 
   return (
     <div
-      className={`my-3 bg-[#0d0f17] border border-white/10 rounded-xl overflow-hidden shadow-lg font-mono text-xs transition-all duration-150 ${className}`}
+      className={`my-3 bg-[#0e0e12] border border-white/10 rounded-xl overflow-hidden shadow-lg font-mono text-xs transition-all duration-150 ${className}`}
     >
       {/* ── Header Strip (Clickable to Expand/Collapse) ────────────────── */}
       <header
         onClick={handleToggle}
-        className={`px-3 py-2 bg-[#121520] border-b border-white/5 flex items-center justify-between gap-2 cursor-pointer hover:bg-[#161a28] transition-colors select-none ${
+        className={`px-3 py-2 bg-[#141418] border-b border-white/5 flex items-center justify-between gap-2 cursor-pointer hover:bg-[#1c1c22] transition-colors select-none ${
           !isExpanded ? "border-b-0" : ""
         }`}
       >

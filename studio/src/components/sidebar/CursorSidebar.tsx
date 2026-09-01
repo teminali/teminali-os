@@ -95,7 +95,7 @@ export const CursorSidebar: React.FC<{
   return (
     <div className="relative flex h-full z-30 flex-shrink-0 select-none font-sans">
       {/* ── Left Slim Activity Rail (48px) ─────────────────────────────── */}
-      <nav className="w-12 bg-[#090b10] border-r border-white/5 flex flex-col justify-between items-center py-2 flex-shrink-0 z-40">
+      <nav className="w-12 bg-[#0a0a0d] border-r border-white/5 flex flex-col justify-between items-center py-2 flex-shrink-0 z-40">
         {/* Top: App Traffic Dots + View Switchers */}
         <div className="flex flex-col items-center gap-1 w-full">
           {/* macOS Traffic Light Dots */}
@@ -116,7 +116,7 @@ export const CursorSidebar: React.FC<{
             }}
             className={`relative w-9 h-9 rounded-lg flex items-center justify-center transition-all ${
               activeRailTab === "chat"
-                ? "bg-[#141724] text-[#FF6C37] shadow-sm"
+                ? "bg-[#16161a] text-[#FF6C37] shadow-sm"
                 : "text-gray-400 hover:text-white hover:bg-white/5"
             }`}
             title="Chat & Composer (⌘L)"
@@ -135,7 +135,7 @@ export const CursorSidebar: React.FC<{
             }}
             className={`relative w-9 h-9 rounded-lg flex items-center justify-center transition-all ${
               activeRailTab === "explorer"
-                ? "bg-[#141724] text-[#FF6C37] shadow-sm"
+                ? "bg-[#16161a] text-[#FF6C37] shadow-sm"
                 : "text-gray-400 hover:text-white hover:bg-white/5"
             }`}
             title="Explorer / Files (⌘E)"
@@ -154,7 +154,7 @@ export const CursorSidebar: React.FC<{
             }}
             className={`relative w-9 h-9 rounded-lg flex items-center justify-center transition-all ${
               activeRailTab === "search"
-                ? "bg-[#141724] text-[#FF6C37] shadow-sm"
+                ? "bg-[#16161a] text-[#FF6C37] shadow-sm"
                 : "text-gray-400 hover:text-white hover:bg-white/5"
             }`}
             title="Search Workspace (⌘P / ⌘F)"
@@ -207,10 +207,10 @@ export const CursorSidebar: React.FC<{
       {!isCollapsed && (
         <aside
           style={{ width: `${width}px` }}
-          className="bg-[#0e1017] border-r border-white/5 flex flex-col justify-between text-gray-300 text-xs h-full relative"
+          className="bg-[#0f0f13] border-r border-white/5 flex flex-col justify-between text-gray-300 text-xs h-full relative"
         >
           {/* Header Bar */}
-          <header className="h-10 px-3 flex items-center justify-between border-b border-white/5 bg-[#0e1017] flex-shrink-0">
+          <header className="h-10 px-3 flex items-center justify-between border-b border-white/5 bg-[#0f0f13] flex-shrink-0">
             <span className="font-semibold text-xs text-gray-200 tracking-tight uppercase text-3xs text-gray-400">
               {activeRailTab === "chat" && "Teminali Code"}
               {activeRailTab === "explorer" && "Explorer"}
@@ -312,7 +312,7 @@ export const CursorSidebar: React.FC<{
                           }}
                           className={`group flex items-center justify-between px-2 py-1 rounded-md text-xs cursor-pointer transition-colors ${
                             tab.id === activeTabId
-                              ? "bg-[#1f2438] text-white font-medium shadow-sm"
+                              ? "bg-[#222228] text-white font-medium shadow-sm"
                               : "text-gray-400 hover:text-gray-200 hover:bg-white/5"
                           }`}
                         >
@@ -373,7 +373,7 @@ export const CursorSidebar: React.FC<{
                     value={searchQuery}
                     onChange={(e) => setSearchQuery(e.target.value)}
                     placeholder="Search files by name..."
-                    className="w-full h-8 pl-8 pr-2 bg-[#141724] border border-white/10 rounded-lg text-xs text-white focus:outline-none focus:border-[#FF6C37]/40"
+                    className="w-full h-8 pl-8 pr-2 bg-[#16161a] border border-white/10 rounded-lg text-xs text-white focus:outline-none focus:border-[#FF6C37]/40"
                     autoFocus
                   />
                 </div>

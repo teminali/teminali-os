@@ -334,12 +334,12 @@ export const CursorChatCanvas: React.FC<{
   const lastUserMsg = [...activeMessages].reverse().find((m) => m.role === "user");
 
   return (
-    <div className="flex-1 bg-[#0d0f17] flex flex-col justify-between h-full relative overflow-hidden font-sans text-gray-200 select-none">
+    <div className="flex-1 bg-[#0e0e12] flex flex-col justify-between h-full relative overflow-hidden font-sans text-gray-200 select-none">
       {/* ── Top Header Bar ──────────────────────────────────────────────── */}
-      <header className="h-10 px-3.5 flex items-center justify-between border-b border-white/5 bg-[#0e1017] select-none z-20 flex-shrink-0">
+      <header className="h-10 px-3.5 flex items-center justify-between border-b border-white/5 bg-[#0f0f13] select-none z-20 flex-shrink-0">
         <div className="flex items-center gap-2">
           <span className="text-xs font-semibold text-gray-200">Chat</span>
-          <span className="text-3xs px-2 py-0.5 rounded-full bg-[#141724] border border-white/10 text-gray-300 font-mono flex items-center gap-1">
+          <span className="text-3xs px-2 py-0.5 rounded-full bg-[#16161a] border border-white/10 text-gray-300 font-mono flex items-center gap-1">
             {currentProfile === "max" ? (
               <Lock size={10} className="text-amber-400" />
             ) : (
@@ -354,7 +354,7 @@ export const CursorChatCanvas: React.FC<{
             onClick={() => onOpenSplit()}
             className={`flex items-center gap-1 px-2.5 py-1 rounded-md text-xs font-medium border transition-colors ${
               isSplitOpen
-                ? "bg-[#1f2438] text-[#FF6C37] border-[#FF6C37]/30 shadow-sm"
+                ? "bg-[#222228] text-[#FF6C37] border-[#FF6C37]/30 shadow-sm"
                 : "bg-transparent text-gray-400 border-transparent hover:bg-white/5 hover:text-white"
             }`}
             title="Toggle Split View (Browser, Terminal, Editor)"
@@ -383,7 +383,7 @@ export const CursorChatCanvas: React.FC<{
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 w-full max-w-md text-left">
                 <button
                   onClick={() => void handleSend("Build a modern landing page with dark glassmorphism and an order button")}
-                  className="p-3 rounded-xl bg-[#141724] border border-white/10 hover:border-[#FF6C37]/40 hover:bg-[#1a1e30] transition-all text-xs group"
+                  className="p-3 rounded-xl bg-[#16161a] border border-white/10 hover:border-[#FF6C37]/40 hover:bg-[#1f1f25] transition-all text-xs group"
                 >
                   <div className="font-semibold text-gray-200 group-hover:text-white flex items-center gap-1.5">
                     <Globe size={13} className="text-[#FF6C37]" />
@@ -394,7 +394,7 @@ export const CursorChatCanvas: React.FC<{
 
                 <button
                   onClick={() => void handleSend("Analyze project structure and suggest improvements")}
-                  className="p-3 rounded-xl bg-[#141724] border border-white/10 hover:border-[#FF6C37]/40 hover:bg-[#1a1e30] transition-all text-xs group"
+                  className="p-3 rounded-xl bg-[#16161a] border border-white/10 hover:border-[#FF6C37]/40 hover:bg-[#1f1f25] transition-all text-xs group"
                 >
                   <div className="font-semibold text-gray-200 group-hover:text-white flex items-center gap-1.5">
                     <Zap size={13} className="text-emerald-400" />
@@ -413,7 +413,7 @@ export const CursorChatCanvas: React.FC<{
                   <div key={msg.id} className="space-y-2">
                     {msg.role === "user" ? (
                       /* User Prompt Bubble */
-                      <div className="p-3 rounded-xl bg-[#141724] border border-white/10 text-gray-100 text-xs font-normal leading-relaxed shadow-sm">
+                      <div className="p-3 rounded-xl bg-[#16161a] border border-white/10 text-gray-100 text-xs font-normal leading-relaxed shadow-sm">
                         <div className="whitespace-pre-wrap">{msg.content}</div>
                         {msg.images && msg.images.length > 0 && (
                           <div className="flex gap-2 mt-2 pt-2 border-t border-white/5 overflow-x-auto">
@@ -514,7 +514,7 @@ export const CursorChatCanvas: React.FC<{
 
       {/* ── Bottom Composer (Always Responsive) ─────────────────────────── */}
       <div className="p-2 sm:p-3 border-t border-white/5 bg-[#0a0c13]/95 backdrop-blur-md flex-shrink-0 z-20">
-        <div className="max-w-2xl mx-auto bg-[#141724] border border-white/10 focus-within:border-[#FF6C37]/40 rounded-xl p-2 shadow-xl transition-all space-y-1.5">
+        <div className="max-w-2xl mx-auto bg-[#16161a] border border-white/10 focus-within:border-[#FF6C37]/40 rounded-xl p-2 shadow-xl transition-all space-y-1.5">
           {/* Hidden File Input */}
           <input
             ref={fileInputRef}
@@ -589,7 +589,7 @@ export const CursorChatCanvas: React.FC<{
                 </button>
 
                 {isModelMenuOpen && (
-                  <div className="absolute bottom-8 left-0 w-56 bg-[#181b26] border border-white/10 rounded-xl shadow-2xl z-50 p-1 text-xs space-y-1">
+                  <div className="absolute bottom-8 left-0 w-56 bg-[#19191e] border border-white/10 rounded-xl shadow-2xl z-50 p-1 text-xs space-y-1">
                     <button
                       onClick={() => {
                         setProfile("auto");

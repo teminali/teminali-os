@@ -17,7 +17,7 @@ const variantStyles: Record<ButtonVariant, string> = {
   primary:
     "bg-[#FF6C37] text-white font-semibold hover:bg-[#ff7d4d] border border-transparent shadow-sm active:scale-[0.98] disabled:opacity-40 disabled:bg-gray-800 disabled:text-gray-500",
   secondary:
-    "bg-[#141724] text-gray-200 hover:text-white hover:bg-[#1a1e30] border border-white/10 hover:border-white/20 shadow-sm active:scale-[0.98] disabled:opacity-40",
+    "bg-[#16161a] text-gray-200 hover:text-white hover:bg-[#1f1f25] border border-white/10 hover:border-white/20 shadow-sm active:scale-[0.98] disabled:opacity-40",
   ghost:
     "bg-transparent text-gray-400 hover:text-white hover:bg-white/5 border border-transparent disabled:opacity-30",
   danger:

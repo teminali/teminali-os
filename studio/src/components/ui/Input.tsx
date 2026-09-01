@@ -31,7 +31,7 @@ export const Input = React.forwardRef<HTMLInputElement, InputProps>(
         <input
           ref={ref}
           value={value}
-          className={`w-full h-8 bg-[#141724] border border-white/10 focus:border-[#38bdf8]/50 rounded-lg text-xs text-white placeholder:text-gray-500 outline-none transition-colors ${
+          className={`w-full h-8 bg-[#16161a] border border-white/10 focus:border-[#38bdf8]/50 rounded-lg text-xs text-white placeholder:text-gray-500 outline-none transition-colors ${
             icon ? "pl-8" : "pl-3"
           } ${clearable && value ? "pr-8" : "pr-3"} ${
             variant === "mono" ? "font-mono" : "font-sans"

@@ -153,7 +153,7 @@ export const CursorMarkdownRenderer: React.FC<CursorMarkdownRendererProps> = ({
             return (
               <div
                 key={idx}
-                className="my-3 bg-[#10131c] border border-white/10 rounded-xl p-4 shadow-xl relative group font-mono text-xs"
+                className="my-3 bg-[#0f0f13] border border-white/10 rounded-xl p-4 shadow-xl relative group font-mono text-xs"
               >
                 <div className="flex items-center justify-between pb-2 mb-2 border-b border-white/5 text-gray-400 text-2xs">
                   <span className="font-medium tracking-wide text-gray-300">
@@ -189,11 +189,11 @@ export const CursorMarkdownRenderer: React.FC<CursorMarkdownRendererProps> = ({
           return (
             <div
               key={idx}
-              className="my-3 border border-white/10 rounded-xl overflow-hidden shadow-lg bg-[#0e1017]"
+              className="my-3 border border-white/10 rounded-xl overflow-hidden shadow-lg bg-[#0f0f13]"
             >
               <table className="w-full text-left text-xs border-collapse">
                 <thead>
-                  <tr className="bg-[#141724] border-b border-white/10 text-gray-400 font-semibold text-2xs uppercase tracking-wider">
+                  <tr className="bg-[#16161a] border-b border-white/10 text-gray-400 font-semibold text-2xs uppercase tracking-wider">
                     {block.headers?.map((h, hIdx) => (
                       <th key={hIdx} className="px-3.5 py-2">
                         {h}

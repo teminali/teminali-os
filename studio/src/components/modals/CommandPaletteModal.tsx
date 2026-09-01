@@ -413,9 +413,9 @@ export const CommandPaletteModal: React.FC<{
 
   return (
     <div className="fixed inset-0 z-50 flex items-start justify-center pt-16 sm:pt-24 bg-black/75 backdrop-blur-md p-3 select-none font-sans animate-in fade-in duration-100">
-      <div className="w-full max-w-xl bg-[#141720] border border-white/10 rounded-2xl shadow-[0_30px_90px_rgba(0,0,0,0.9)] overflow-hidden flex flex-col">
+      <div className="w-full max-w-xl bg-[#131317] border border-white/10 rounded-2xl shadow-[0_30px_90px_rgba(0,0,0,0.9)] overflow-hidden flex flex-col">
         {/* ── Top Search Input Header ─────────────────────────────────────── */}
-        <div className="flex items-center px-4 py-3 bg-[#0d1017] border-b border-white/5 gap-3">
+        <div className="flex items-center px-4 py-3 bg-[#0e0e12] border-b border-white/5 gap-3">
           <Search className="w-4 h-4 text-[#FF6C37] flex-shrink-0" />
           <input
             ref={inputRef}
@@ -437,14 +437,14 @@ export const CommandPaletteModal: React.FC<{
         </div>
 
         {/* ── Category Filter Pills Row ──────────────────────────────────── */}
-        <div className="flex items-center gap-1.5 px-4 py-2 bg-[#10131c] border-b border-white/5 overflow-x-auto text-xs">
+        <div className="flex items-center gap-1.5 px-4 py-2 bg-[#0f0f13] border-b border-white/5 overflow-x-auto text-xs">
           {filterTabs.map((tab) => (
             <button
               key={tab.id}
               onClick={() => setActiveFilter(tab.id)}
               className={`px-3 py-1 rounded-lg font-medium transition-all ${
                 activeFilter === tab.id
-                  ? "bg-[#202738] text-white shadow-sm font-semibold border border-white/10"
+                  ? "bg-[#23232a] text-white shadow-sm font-semibold border border-white/10"
                   : "text-gray-400 hover:text-white hover:bg-white/5"
               }`}
             >
@@ -479,7 +479,7 @@ export const CommandPaletteModal: React.FC<{
                       onMouseEnter={() => setSelectedIndex(currentIndex)}
                       className={`flex items-center justify-between px-3 py-2 rounded-xl cursor-pointer transition-all ${
                         isSelected
-                          ? "bg-[#1f2438] border border-white/10 text-white shadow-sm"
+                          ? "bg-[#222228] border border-white/10 text-white shadow-sm"
                           : "text-gray-300 hover:bg-white/5 border border-transparent"
                       }`}
                     >
@@ -523,7 +523,7 @@ export const CommandPaletteModal: React.FC<{
         </div>
 
         {/* ── Footer Navigation Helper ──────────────────────────────────── */}
-        <footer className="px-4 py-2 bg-[#0a0c12] border-t border-white/5 flex items-center justify-between text-3xs text-gray-500 font-mono">
+        <footer className="px-4 py-2 bg-[#0a0a0d] border-t border-white/5 flex items-center justify-between text-3xs text-gray-500 font-mono">
           <div className="flex items-center gap-3">
             <span><strong className="text-gray-400">↑↓</strong> Select</span>
             <span><strong className="text-gray-400">↵</strong> Open</span>

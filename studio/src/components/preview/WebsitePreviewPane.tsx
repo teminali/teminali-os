@@ -265,7 +265,7 @@ export const WebsitePreviewPane: React.FC<{ activeTab: EditorTab | null }> = ({ 
   const renderFile = () => {
     if (!activeTab) {
       return (
-        <div className="flex-1 flex flex-col items-center justify-center p-8 text-center bg-[#08090E] text-gray-400 select-none">
+        <div className="flex-1 flex flex-col items-center justify-center p-8 text-center bg-[#09090c] text-gray-400 select-none">
           <div className="w-12 h-12 rounded-2xl bg-white/5 border border-white/10 flex items-center justify-center mb-4 text-[#FF6C37] shadow-inner">
             <Globe2 size={24} />
           </div>
@@ -279,7 +279,7 @@ export const WebsitePreviewPane: React.FC<{ activeTab: EditorTab | null }> = ({ 
                 <button
                   key={t.id}
                   onClick={() => setActiveTab(t.id)}
-                  className="px-3 py-1.5 rounded-lg text-xs font-mono bg-[#141724] border border-white/10 hover:border-[#FF6C37]/40 hover:text-white text-gray-300 transition-all flex items-center gap-1.5 shadow-sm"
+                  className="px-3 py-1.5 rounded-lg text-xs font-mono bg-[#16161a] border border-white/10 hover:border-[#FF6C37]/40 hover:text-white text-gray-300 transition-all flex items-center gap-1.5 shadow-sm"
                 >
                   <FileCode size={13} className="text-[#FF6C37]" />
                   <span>{t.name}</span>
@@ -394,15 +394,15 @@ export const WebsitePreviewPane: React.FC<{ activeTab: EditorTab | null }> = ({ 
 
   // Viewport dimensions
   const getViewportContainerStyle = () => {
-    if (viewport === "tablet") return "w-[768px] h-full max-h-[92%] my-auto shadow-2xl rounded-xl ring-1 ring-white/10 overflow-hidden bg-[#08090E]";
-    if (viewport === "mobile") return "w-[375px] h-full max-h-[88%] my-auto shadow-2xl rounded-2xl ring-1 ring-white/10 overflow-hidden bg-[#08090E]";
+    if (viewport === "tablet") return "w-[768px] h-full max-h-[92%] my-auto shadow-2xl rounded-xl ring-1 ring-white/10 overflow-hidden bg-[#09090c]";
+    if (viewport === "mobile") return "w-[375px] h-full max-h-[88%] my-auto shadow-2xl rounded-2xl ring-1 ring-white/10 overflow-hidden bg-[#09090c]";
     return "w-full h-full overflow-hidden";
   };
 
   return (
-    <div className="w-full h-full flex flex-col overflow-hidden bg-[#08090E] text-gray-200 select-none">
+    <div className="w-full h-full flex flex-col overflow-hidden bg-[#09090c] text-gray-200 select-none">
       {/* ── Top Header Toolbar ────────────────────────────────────────────── */}
-      <header className="h-11 px-3 flex items-center justify-between border-b border-white/5 bg-[#0e1017] flex-shrink-0 gap-2">
+      <header className="h-11 px-3 flex items-center justify-between border-b border-white/5 bg-[#0f0f13] flex-shrink-0 gap-2">
         {/* Left: Surface Switcher & Live indicator */}
         <div className="flex items-center gap-2">
           {isLiveActive && (
@@ -421,7 +421,7 @@ export const WebsitePreviewPane: React.FC<{ activeTab: EditorTab | null }> = ({ 
           )}
 
           {/* Mode Pill Toggle: File Preview vs Live Browser */}
-          <div className="flex items-center p-0.5 bg-[#141724] border border-white/10 rounded-lg shadow-inner">
+          <div className="flex items-center p-0.5 bg-[#16161a] border border-white/10 rounded-lg shadow-inner">
             <button
               type="button"
               onClick={() => setSurface("browser")}
@@ -503,7 +503,7 @@ export const WebsitePreviewPane: React.FC<{ activeTab: EditorTab | null }> = ({ 
                 e.preventDefault();
                 navigate();
               }}
-              className="flex-1 flex items-center gap-1.5 h-7 px-2.5 bg-[#090b10] border border-white/10 focus-within:border-[#FF6C37]/50 rounded-lg text-xs font-mono transition-colors shadow-inner"
+              className="flex-1 flex items-center gap-1.5 h-7 px-2.5 bg-[#0a0a0d] border border-white/10 focus-within:border-[#FF6C37]/50 rounded-lg text-xs font-mono transition-colors shadow-inner"
             >
               <Lock size={11} className="text-emerald-400 flex-shrink-0 opacity-70" />
               <input
@@ -554,7 +554,7 @@ export const WebsitePreviewPane: React.FC<{ activeTab: EditorTab | null }> = ({ 
         )}
 
         {/* Right: Viewport Device Switcher */}
-        <div className="flex items-center p-0.5 bg-[#141724] border border-white/10 rounded-lg">
+        <div className="flex items-center p-0.5 bg-[#16161a] border border-white/10 rounded-lg">
           <button
             type="button"
             onClick={() => setViewport("desktop")}
@@ -666,7 +666,7 @@ export const WebsitePreviewPane: React.FC<{ activeTab: EditorTab | null }> = ({ 
                   <span>Live Render</span>
                   <span className="text-gray-500 font-normal">Active Output</span>
                 </div>
-                <div className="flex-1 relative overflow-hidden bg-[#08090E]">
+                <div className="flex-1 relative overflow-hidden bg-[#09090c]">
                   {surface === "file" ? (
                     renderFile()
                   ) : (
@@ -683,7 +683,7 @@ export const WebsitePreviewPane: React.FC<{ activeTab: EditorTab | null }> = ({ 
               </div>
             </div>
           ) : (
-            <div className="relative w-full h-full flex flex-col bg-[#08090E] overflow-hidden">
+            <div className="relative w-full h-full flex flex-col bg-[#09090c] overflow-hidden">
               {surface === "file" ? (
                 renderFile()
               ) : (

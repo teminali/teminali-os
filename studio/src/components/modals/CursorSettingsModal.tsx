@@ -387,7 +387,7 @@ export const CursorSettingsModal: React.FC<{
               )}
 
               {/* Custom Model Download Bar */}
-              <div className="p-4 bg-[#141724] border border-white/5 rounded-xl space-y-2">
+              <div className="p-4 bg-[#16161a] border border-white/5 rounded-xl space-y-2">
                 <h3 className="text-xs font-semibold text-white flex items-center gap-1.5">
                   <Download size={14} className="text-blue-400" />
                   <span>Pull Any Custom Model</span>
@@ -445,7 +445,7 @@ export const CursorSettingsModal: React.FC<{
                         className={`p-3.5 rounded-xl border transition-all ${
                           isActive
                             ? "bg-[#161B2E] border-blue-500/40 shadow-lg shadow-blue-500/5"
-                            : "bg-[#141724] border-white/5 hover:border-white/10"
+                            : "bg-[#16161a] border-white/5 hover:border-white/10"
                         }`}
                       >
                         <div className="flex items-start justify-between gap-4">
@@ -524,11 +524,11 @@ export const CursorSettingsModal: React.FC<{
                 </h2>
 
                 {localModels.length === 0 ? (
-                  <div className="p-6 text-center rounded-xl bg-[#141724] border border-white/5 text-gray-400 text-xs">
+                  <div className="p-6 text-center rounded-xl bg-[#16161a] border border-white/5 text-gray-400 text-xs">
                     No models found on disk. Use the download buttons above to install your first local AI model.
                   </div>
                 ) : (
-                  <div className="bg-[#141724] border border-white/5 rounded-xl divide-y divide-white/5">
+                  <div className="bg-[#16161a] border border-white/5 rounded-xl divide-y divide-white/5">
                     {localModels.map((m) => {
                       const isActive = activeModelName === m.name;
                       return (
@@ -574,7 +574,7 @@ export const CursorSettingsModal: React.FC<{
               </div>
 
               {/* Section: Account & Gateway Card */}
-              <div className="bg-[#141724] border border-white/5 rounded-xl divide-y divide-white/5">
+              <div className="bg-[#16161a] border border-white/5 rounded-xl divide-y divide-white/5">
                 <div className="p-4 flex items-center justify-between">
                   <div>
                     <h3 className="text-xs font-semibold text-white">Teminali Local Gateway</h3>
@@ -605,7 +605,7 @@ export const CursorSettingsModal: React.FC<{
               {/* Section: Startup */}
               <div className="space-y-3">
                 <h2 className="text-xs font-semibold text-gray-400 uppercase tracking-wider">Startup & Windows</h2>
-                <div className="bg-[#141724] border border-white/5 rounded-xl divide-y divide-white/5">
+                <div className="bg-[#16161a] border border-white/5 rounded-xl divide-y divide-white/5">
                   <div className="p-4 flex items-center justify-between">
                     <div>
                       <h3 className="text-xs font-semibold text-white">Tips</h3>
@@ -643,7 +643,7 @@ export const CursorSettingsModal: React.FC<{
               {/* Section: Notifications */}
               <div className="space-y-3">
                 <h2 className="text-xs font-semibold text-gray-400 uppercase tracking-wider">Notifications</h2>
-                <div className="bg-[#141724] border border-white/5 rounded-xl divide-y divide-white/5">
+                <div className="bg-[#16161a] border border-white/5 rounded-xl divide-y divide-white/5">
                   <div className="p-4 flex items-center justify-between">
                     <div>
                       <h3 className="text-xs font-semibold text-white">System Notifications</h3>
@@ -691,7 +691,7 @@ export const CursorSettingsModal: React.FC<{
               {/* Section: Privacy */}
               <div className="space-y-3">
                 <h2 className="text-xs font-semibold text-gray-400 uppercase tracking-wider">Privacy & Security</h2>
-                <div className="bg-[#141724] border border-white/5 rounded-xl p-4 flex items-center justify-between">
+                <div className="bg-[#16161a] border border-white/5 rounded-xl p-4 flex items-center justify-between">
                   <div>
                     <div className="flex items-center gap-1.5 text-xs font-semibold text-white">
                       <ShieldCheck size={14} className="text-[#22c55e]" />

@@ -59,7 +59,7 @@ export function SegmentedTabs<T extends string = string>({
   const sizeStyles = size === "sm" ? "px-2.5 py-1 text-xs" : "px-3.5 py-1.5 text-xs";
 
   return (
-    <div className={`flex items-center gap-1 p-0.5 bg-[#10131c] border border-white/10 rounded-lg shadow-inner ${className}`}>
+    <div className={`flex items-center gap-1 p-0.5 bg-[#0f0f13] border border-white/10 rounded-lg shadow-inner ${className}`}>
       {tabs.map((tab) => {
         const isActive = tab.id === activeTab;
         return (
@@ -69,7 +69,7 @@ export function SegmentedTabs<T extends string = string>({
             onClick={() => onChange(tab.id)}
             className={`flex items-center gap-1.5 rounded-md font-medium transition-all select-none cursor-pointer ${sizeStyles} ${
               isActive
-                ? "bg-[#202738] text-white shadow-sm font-semibold border border-white/10"
+                ? "bg-[#23232a] text-white shadow-sm font-semibold border border-white/10"
                 : "text-gray-400 hover:text-white hover:bg-white/5 border border-transparent"
             }`}
           >

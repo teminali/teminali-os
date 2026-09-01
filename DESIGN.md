@@ -9,7 +9,7 @@
 ## 1. Zero-Slop Design Principles (Cursor Obsidian Dark)
 
 1. **Nuanced Dark Palette**:
-   - Deep Obsidian bases: `#08090E`, `#090b10`, `#0c0e14`, `#10131c`, `#141724`.
+   - Deep Obsidian & Warm Ember bases: `#09090c`, `#0a0a0d`, `#0c0c10`, `#0f0f13`, `#131317`, `#16161a`, `#222228`.
    - Never use raw `#000000` or washed out gray `#333333`.
    - Never allow pure `#ffffff` frames or unstyled white canvas flashes in iframes.
 

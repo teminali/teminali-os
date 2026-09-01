@@ -134,7 +134,7 @@ export const GlobalSearchView: React.FC = () => {
   return (
     <aside className="w-full bg-[#0e1117] border-r border-white/[0.08] flex flex-col select-none h-full text-slate-400 font-sans text-xs">
       {/* Header */}
-      <div className="h-12 px-4 border-b border-white/[0.08] flex items-center justify-between bg-[#090b10] flex-shrink-0">
+      <div className="h-12 px-4 border-b border-white/[0.08] flex items-center justify-between bg-[#0a0a0d] flex-shrink-0">
         <div className="flex items-center gap-2">
           <SearchIcon className="w-4 h-4 text-cyan-400" />
           <span className="font-semibold text-white text-sm tracking-tight">Search</span>
@@ -147,9 +147,9 @@ export const GlobalSearchView: React.FC = () => {
       </div>
 
       {/* Input Controls */}
-      <div className="p-3 border-b border-white/[0.08] space-y-2 bg-[#0a0d13] flex-shrink-0">
+      <div className="p-3 border-b border-white/[0.08] space-y-2 bg-[#0a0a0d] flex-shrink-0">
         {/* Search Input Box */}
-        <div className="relative flex items-center bg-[#141720] border border-white/[0.10] rounded-xl px-2.5 py-1.5 focus-within:border-cyan-500/50 transition-all">
+        <div className="relative flex items-center bg-[#131317] border border-white/[0.10] rounded-xl px-2.5 py-1.5 focus-within:border-cyan-500/50 transition-all">
           <SearchIcon className="w-3.5 h-3.5 text-slate-500 mr-2 flex-shrink-0" />
           <input
             type="text"
@@ -205,7 +205,7 @@ export const GlobalSearchView: React.FC = () => {
 
         {/* Replace Input Box */}
         {isReplaceOpen && (
-          <div className="relative flex items-center bg-[#141720] border border-white/[0.10] rounded-xl px-2.5 py-1.5 focus-within:border-cyan-500/50 transition-all animate-in fade-in duration-100">
+          <div className="relative flex items-center bg-[#131317] border border-white/[0.10] rounded-xl px-2.5 py-1.5 focus-within:border-cyan-500/50 transition-all animate-in fade-in duration-100">
             <Replace className="w-3.5 h-3.5 text-slate-500 mr-2 flex-shrink-0" />
             <input
               type="text"
