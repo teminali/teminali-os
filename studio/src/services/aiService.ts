@@ -72,7 +72,7 @@ async function unloadOllamaModel(model: string): Promise<boolean> {
   try {
     const response = await GatewayClient.request("/api/ollama/generate", {
       method: "POST",
-      body: JSON.stringify({ model, keep_alive: 0, prompt: "", stream: false }),
+      body: JSON.stringify({ model, keep_alive: "30m", prompt: "", stream: false }),
     });
     await GatewayClient.expectOk(response);
     return true;
@@ -349,7 +349,7 @@ CRITICAL VISUAL DESIGN RULES:
         signal: controller.signal,
         body: JSON.stringify({
           model: selection.model,
-          keep_alive: 0,
+          keep_alive: "30m",
           stream: true,
           options: { num_ctx: selection.contextTokens, num_batch: 128, temperature: 0.15 },
           messages,
@@ -452,7 +452,7 @@ CRITICAL VISUAL DESIGN RULES:
         signal,
         body: JSON.stringify({
           model: VISION_MODEL,
-          keep_alive: 0,
+          keep_alive: "30m",
           stream: false,
           options: { num_ctx: 4_096, num_batch: 128, num_predict: 256, temperature: 0.1 },
           prompt: `Inspect the attached image for a coding assistant. Extract and report all visible details concisely:
