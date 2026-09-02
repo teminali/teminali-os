@@ -6,9 +6,34 @@ const { contextBridge, ipcRenderer } = require("electron");
  * The renderer gets exactly the window verbs it needs — no generic send/invoke
  * passthrough, which would let any script in the page reach every IPC channel.
  */
+/**
+ * Where the packaged app gets its gateway session.
+ *
+ * A browser bootstraps one by POSTing /api/session, which the gateway answers
+ * only for an allowed browser origin. The packaged renderer is a file:// page
+ * and Chromium sends it with no Origin header at all, so that bootstrap can
+ * never succeed there — which is why chat failed in 1.1.0 and 1.1.1. The main
+ * process starts the gateway itself and therefore already holds the token, so
+ * it hands it over directly instead. Every other route accepts a header-less
+ * caller that presents a valid bearer token, so nothing about the gateway's
+ * origin rule has to be relaxed to make this work.
+ *
+ * Read once, at preload time: `sendSync` is what lets the renderer treat the
+ * address as a constant rather than something to await before its first call.
+ * In development this is null and the renderer falls back to the POST.
+ */
+let gatewaySession = null;
+try {
+  gatewaySession = ipcRenderer.sendSync("gateway:session-sync") ?? null;
+} catch {
+  gatewaySession = null;
+}
+
 contextBridge.exposeInMainWorld("teminali", {
   isElectron: true,
   platform: process.platform,
+  /** `{ url, token }` when the main process runs the gateway, else null. */
+  gateway: gatewaySession,
   window: {
     minimize: () => ipcRenderer.invoke("window:minimize"),
     toggleMaximize: () => ipcRenderer.invoke("window:toggle-maximize"),

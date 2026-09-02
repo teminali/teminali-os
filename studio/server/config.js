@@ -53,7 +53,7 @@ export function createConfig(environment = process.env, overrides = {}) {
     workspaceMaxFileBytes: positiveInteger(environment.FRONTIER_WORKSPACE_MAX_FILE_BYTES, 8 * 1024 * 1024),
     terminalTimeoutMs: positiveInteger(environment.FRONTIER_TERMINAL_TIMEOUT_MS, 120_000),
     terminalMaxOutputBytes: positiveInteger(environment.FRONTIER_TERMINAL_MAX_OUTPUT_BYTES, 1024 * 1024),
-    auditPath: resolve(process.cwd(), "benchmark-results", "gateway-audit.jsonl"),
+    auditPath: resolve(environment.FRONTIER_AUDIT_PATH || resolve(process.cwd(), "benchmark-results", "gateway-audit.jsonl")),
     projectsStorePath: resolve(environment.FRONTIER_PROJECTS_STORE || resolve(process.cwd(), "benchmark-results", "recent-projects.json")),
     // Hosted-provider API keys. Written 0600; never returned to the renderer.
     providerStorePath: resolve(environment.TEMINALI_PROVIDER_STORE || resolve(process.cwd(), "benchmark-results", "provider-keys.json")),

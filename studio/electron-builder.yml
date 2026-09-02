@@ -13,18 +13,19 @@ afterAllArtifactBuild: build/afterAllArtifactBuild.cjs
 files:
   - dist/**/*
   - electron/**/*
-  # The menu bar item reads telemetry from this module directly.
-  - server/guardian.js
-  # The assistant's menu bar item reads the pointer helper the same way, and
-  # these three are the module graph that reaches it.
-  - server/assistant.js
-  - server/pointer.js
-  - server/config.js
-  # The compiled Swift helper. It is built by `npm run build:pointer` rather
-  # than committed, so a packaged build must run that first — see the
-  # extraResources note below for why it is not asar-packed.
+  # The whole gateway, not a hand-picked handful of modules.
+  #
+  # `files` is an allowlist. It used to name four server modules — the ones the
+  # menu bar items import directly — which meant the packaged app shipped with
+  # no backend at all: nothing served /api, so every chat failed with "the local
+  # gateway session could not be created", and server/updates.js was absent so
+  # the app could not even check for the release that fixes it. The gateway is
+  # 30 files that import nothing but Node builtins and each other, so there is
+  # no reason to enumerate them.
+  - server/**/*
   - package.json
   - "!**/*.map"
+  - "!server/**/*.test.js"
 
 # (The pointer helper ships as a macOS extra resource — see `mac.extraResources`
 # below. It is scoped there rather than declared globally because the directory
@@ -32,6 +33,21 @@ files:
 # of those builds warn about a missing source on every run.)
 
 icon: build/icon.png
+
+# server/gateway.js imports "../../gateway/frontier-runner.js" — the one module
+# under server/ that reaches outside this package. From inside the archive that
+# path resolves to <Resources>/gateway/frontier-runner.js, so the directory is
+# copied there rather than into the asar. It cannot go in `files`: that only
+# collects paths under the app directory.
+extraResources:
+  - from: ../gateway
+    to: gateway
+    filter:
+      - "**/*.js"
+      - "**/*.json"
+      - "!**/*.test.js"
+      - "!fixtures/**"
+
 
 publish:
   provider: github
@@ -63,6 +79,16 @@ mac:
       to: pointer
       filter:
         - teminali-pointer
+    # Repeated from the top-level entry: a platform block replaces the array it
+    # overrides rather than extending it, so omitting this drops the gateway
+    # runner from macOS builds only.
+    - from: ../gateway
+      to: gateway
+      filter:
+        - "**/*.js"
+        - "**/*.json"
+        - "!**/*.test.js"
+        - "!fixtures/**"
   # macOS refuses the microphone outright, without a dialog, if the reason is
   # not declared. Screen Recording and Accessibility need no key — they are
   # granted only in System Settings, by hand, and cannot be prompted around.

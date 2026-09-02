@@ -19,6 +19,103 @@ log("App path:", app.getAppPath());
 log("UserData path:", app.getPath("userData"));
 log("IsPackaged:", app.isPackaged);
 
+/* ── The local gateway ────────────────────────────────────────────────────
+   `npm start` runs three processes: the gateway, Vite, and Electron. A packaged
+   app is one process, and nothing in it ever started the gateway — so 1.1.0 and
+   1.1.1 shipped a studio with no backend, and every chat ended at "the local
+   gateway session could not be created". This starts it in-process.
+
+   In-process rather than a spawned child: the gateway is ESM inside an asar
+   archive, which Node can import but cannot execute as a script, and a child
+   would need its own copy of the environment below anyway.
+
+   The token is not fetched, it is held. POST /api/session mints one only for an
+   allowed browser origin, and the packaged renderer is a file:// page whose
+   requests Chromium sends with no Origin header at all — so that bootstrap
+   cannot succeed here however the gateway is started. Every other route already
+   accepts a header-less local caller holding a valid bearer token, which is
+   exactly what this process is; preload.cjs hands the token to the renderer.
+   ───────────────────────────────────────────────────────────────────────── */
+
+let gateway = null;
+/** Published to the renderer by preload.cjs. Null until the gateway is up. */
+let gatewaySession = null;
+
+/**
+ * Everything under server/ that resolves a writable path does it against
+ * `process.cwd()`, which for an app launched from Finder is "/". Point them at
+ * userData before the config is read; each is only a default, so an operator
+ * who exports one of these still wins.
+ */
+function applyPackagedEnvironment() {
+  const userData = app.getPath("userData");
+  const store = (name) => path.join(userData, "gateway", name);
+  const defaults = {
+    FRONTIER_AUDIT_PATH: store("gateway-audit.jsonl"),
+    FRONTIER_PROJECTS_STORE: store("recent-projects.json"),
+    TEMINALI_PROVIDER_STORE: store("provider-keys.json"),
+    TEMINALI_GUARDIAN_STORE: store("guardian-settings.json"),
+    TEMINALI_AGENT_MODEL_STORE: store("agent-models.json"),
+    TEMINALI_ASSISTANT_FRAMES: store("assistant-frames"),
+    TEMINALI_USAGE_LEDGER: store("usage-ledger.jsonl"),
+    TEMINALI_ADMIN_STORE: store("admins.json"),
+    TEMINALI_ARENA_HISTORY: store("arena-runs.jsonl"),
+    // Left to itself this resolves inside the asar, where no project lives.
+    FRONTIER_WORKSPACE_ROOT: app.getPath("home"),
+  };
+  for (const [key, value] of Object.entries(defaults)) {
+    if (!process.env[key]) process.env[key] = value;
+  }
+  try {
+    fs.mkdirSync(path.join(userData, "gateway"), { recursive: true });
+  } catch (error) {
+    log("Could not create the gateway store directory:", error.message);
+  }
+}
+
+async function startGateway() {
+  applyPackagedEnvironment();
+  const gatewayUrl = require("url").pathToFileURL(
+    path.join(__dirname, "..", "server", "gateway.js")
+  ).href;
+  const { createGateway } = await import(gatewayUrl);
+
+  // 4310 is what the studio has always used, and is worth keeping so anything
+  // pointed at it by hand still works. It is not worth failing over: a second
+  // instance, or a development gateway already holding the port, would take the
+  // app down with EADDRINUSE. The renderer is told the port either way.
+  for (const port of [undefined, 0]) {
+    let instance;
+    try {
+      instance = await createGateway(port === undefined ? {} : { config: { port } });
+      const address = await instance.listen();
+      gateway = instance;
+      gatewaySession = {
+        url: `http://${address.address}:${address.port}`,
+        token: instance.sessionToken,
+      };
+      log(`Gateway listening on ${gatewaySession.url}`);
+      return;
+    } catch (error) {
+      // The instance that failed to bind still holds the audit log open, and
+      // the retry opens the same file: two writers would interleave lines.
+      await instance?.close().catch(() => {});
+      if (error?.code === "EADDRINUSE" && port === undefined) {
+        log("Gateway port is taken; falling back to an ephemeral port.");
+        continue;
+      }
+      throw error;
+    }
+  }
+}
+
+// Answered synchronously so the renderer can treat the gateway address as a
+// constant instead of something to await before its first request.
+ipcMain.on("gateway:session-sync", (event) => {
+  event.returnValue = gatewaySession;
+});
+
+
 let mainWindow = null;
 
 function createWindow() {
@@ -377,8 +474,21 @@ process.on("unhandledRejection", (reason) => {
   log("UNHANDLED REJECTION:", reason);
 });
 
-app.whenReady().then(() => {
+app.whenReady().then(async () => {
   log("app.whenReady resolved");
+
+  // Before the window: preload.cjs reads the session as the page loads, so the
+  // gateway has to be listening by then. A failure here is logged and survived
+  // rather than thrown — a studio that opens and reports the gateway offline is
+  // more use than one that never draws.
+  if (app.isPackaged) {
+    try {
+      await startGateway();
+    } catch (error) {
+      log("Gateway could not be started:", error?.stack || error?.message || error);
+    }
+  }
+
   buildMenu();
   createWindow();
 
@@ -435,6 +545,13 @@ app.on("will-quit", () => {
     log("Could not release global shortcuts:", error.message);
   }
   assistantOverlay?.destroy();
+  // Best effort, and deliberately not awaited: `will-quit` does not wait for a
+  // promise, and the listening socket dies with this process regardless.
+  try {
+    gateway?.close();
+  } catch (error) {
+    log("Could not close the gateway:", error.message);
+  }
 });
 
 app.on("window-all-closed", () => {

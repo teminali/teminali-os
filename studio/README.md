@@ -247,6 +247,47 @@ npm run package:linux
 because `artifactName` cannot branch on architecture. That is only safe because
 `dmg.publish: null` is set in `electron-builder.yml` — do not remove it.
 
+### What actually ships
+
+`files` in `electron-builder.yml` is an allowlist, and getting it wrong is how
+1.1.0 and 1.1.1 shipped a studio with no backend: it named only the four server
+modules the menu bar items import, so nothing served `/api` and every chat ended
+at "the local gateway session could not be created". It now takes `server/**/*`
+whole, minus tests.
+
+`server/gateway.js` imports `../../gateway/frontier-runner.js` — the one module
+under `server/` reaching outside the package — so `gateway/` is copied to
+`<Resources>/gateway` via `extraResources`. It cannot go in `files`, which only
+collects paths under the app directory. The macOS block repeats that entry
+verbatim: a platform block **replaces** the array it overrides rather than
+extending it, so omitting it drops the runner from macOS builds alone.
+
+### The gateway in a packaged app
+
+`npm start` runs three processes; a packaged app is one, and nothing in it used
+to start the gateway. `electron/main.cjs` now starts it in-process — the gateway
+is ESM inside an asar, which Node can import but cannot execute as a script.
+
+It prefers port 4310 and falls back to an ephemeral port rather than dying on
+`EADDRINUSE` when a development gateway already holds it; the renderer is told
+the address either way.
+
+The session token is **handed over, not fetched**. `POST /api/session` mints one
+only for an allowed browser origin, and the packaged renderer is a `file://`
+page whose requests Chromium sends with no `Origin` header at all — so that
+bootstrap cannot succeed there however the gateway starts. The main process
+already holds the token and passes it through `preload.cjs` to the renderer,
+which reads it once at preload via `sendSync`. Every other route already accepts
+a header-less local caller presenting a valid bearer, so the gateway's origin
+rule is not relaxed to make this work. In development the bridge is absent and
+the ordinary POST bootstrap runs against the Vite proxy.
+
+Everything under `server/` that resolves a writable path resolves it against
+`process.cwd()`, which for an app launched from Finder is `/`. The main process
+therefore points the store variables below at `userData/gateway/` before config
+is read, and `FRONTIER_WORKSPACE_ROOT` at the user's home. Each is only a
+default: an operator who exports one still wins.
+
 ## Configuration
 
 Everything is optional; every default is loopback.
@@ -261,6 +302,7 @@ Everything is optional; every default is loopback.
 | `FRONTIER_WORKSPACE_ROOT` | the repository root |
 | `TEMINALI_RELEASE_REPO` | `teminali/teminalicode` |
 | `TEMINALI_RUNTIME_MODE` | `local` (or `api`) |
+| `FRONTIER_AUDIT_PATH` | `benchmark-results/gateway-audit.jsonl`; `userData/gateway/` in a packaged app |
 
 Non-loopback values are rejected at startup rather than accepted and ignored.
 

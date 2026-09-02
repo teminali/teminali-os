@@ -1,9 +1,36 @@
 
+/**
+ * The gateway the main process started, when there is one.
+ *
+ * A packaged build runs the gateway inside Electron and publishes its address
+ * and session token over the preload bridge. That is the only way the packaged
+ * renderer can be authenticated: it is a file:// page, Chromium sends its
+ * requests with no Origin header, and /api/session refuses to mint a token
+ * without an allowed browser origin. In development the bridge is absent and
+ * the ordinary POST bootstrap runs against the Vite proxy.
+ */
+interface InjectedGateway {
+  url: string;
+  token: string;
+}
+
+function injectedGateway(): InjectedGateway | null {
+  if (typeof window === "undefined") return null;
+  const bridge = (window as { teminali?: { gateway?: Partial<InjectedGateway> | null } }).teminali;
+  const gateway = bridge?.gateway;
+  if (!gateway?.url || !gateway?.token) return null;
+  return { url: gateway.url, token: gateway.token };
+}
+
 export function resolveGatewayUrl(path: string): string {
   if (/^https?:\/\//i.test(path)) return path;
+  const cleanPath = path.startsWith("/") ? path : `/${path}`;
+  // The port is only known at runtime: 4310 is preferred but a second instance,
+  // or a development gateway already holding it, moves the app to another one.
+  const injected = injectedGateway();
+  if (injected) return `${injected.url}${cleanPath}`;
   const isFileProtocol = typeof window !== "undefined" && window.location.protocol === "file:";
   const base = isFileProtocol ? "http://127.0.0.1:4310" : "";
-  const cleanPath = path.startsWith("/") ? path : `/${path}`;
   return `${base}${cleanPath}`;
 }
 import type { ModelModeId, RuntimeHealthReport, RuntimeState, ServiceHealth } from "../types";
@@ -91,6 +118,9 @@ export class GatewayClient {
   private static tokenPromise: Promise<string> | null = null;
 
   private static async getToken(): Promise<string> {
+    // Handed over by the main process in a packaged build; nothing to fetch.
+    const injected = injectedGateway();
+    if (injected) return injected.token;
     if (!this.tokenPromise) {
       this.tokenPromise = fetch(resolveGatewayUrl("/api/session"), {
         method: "POST",
