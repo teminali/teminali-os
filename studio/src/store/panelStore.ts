@@ -2,8 +2,10 @@
  * Workspace panel model.
  *
  * The redesign replaces the old single-slot split view with a tab strip that
- * holds any number of panels of six kinds — terminal, browser, canvas, side
- * chat, file and guardian. This lives in its own store rather than inside
+ * holds any number of panels of eleven kinds — terminal, browser, canvas, side
+ * chat, file, guardian, the two agent CLIs, usage, benchmark and release (the
+ * last of which the tab strip hides for non-administrators). It lives in its
+ * own store rather than inside
  * studioStore because it is pure view state: which panels exist, which one is
  * showing, and how wide the strip is. None of it belongs in the chat/session
  * store, and keeping it separate means a panel change does not re-render every

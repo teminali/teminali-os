@@ -391,7 +391,9 @@ test("listAvailableSkills returns registered skills", () => {
 
 test("loadSkillContent retrieves skill text", () => {
   const content = loadSkillContent("website-builder");
-  assert.ok(typeof content === "string" && content.includes("Website Builder"));
+  // Assert on the skill's frontmatter identity, not on prose. The body is
+  // rewritten whenever the skill is; its title is not the contract, the name is.
+  assert.ok(typeof content === "string" && content.includes("name: website-builder"));
 });
 
 test("workspaceDigest changes with workspace content", () => {

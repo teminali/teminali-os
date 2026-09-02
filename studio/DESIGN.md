@@ -142,13 +142,13 @@ The pre-redesign code is swept onto tokens by role, not by hue:
 StudioTitleBar    traffic lights · sidebar toggle · title · panel tab strip
 ├── SidebarDock      one 260px panel, flush to the window edge (no icon rail)
 │   └── Sidebar        nav rows (always) · the selected view · SidebarFooter
-│       ├── PRIMARY_NAV    New Chat · Search · Automations · Customize
+│       ├── PRIMARY_NAV    New Chat · Search · Customize
 │       ├── WORKSPACE_NAV  Explorer · Skills
 │       └── view           StudioSidebar (chats) · Explorer · GlobalSearchView · Skills
 ├── StudioChat       empty state / transcript · Composer (voice lives here)
 │                    · AssistantHud
 └── WorkspacePanel   terminal · browser · canvas · side chat · file · guardian
-                     · Claude Code · Codex
+                     · Claude Code · Codex · usage · benchmark · release
 
 AssistantProvider    wraps the shell; one session, reachable from every composer
 AssistantBridge      renders nothing — keeps the tray, hotkey and overlay in step
@@ -161,15 +161,21 @@ seams where the reference has one, and no amount of recolouring would have made
 that read as Cursor. The nav rows are the view switch, and they stay on screen
 for every view so no view can strand you.
 
-`PRIMARY_NAV` is a fixed reproduction of Cursor's four rows, in Cursor's order —
-**do not extend it**. This studio's extra views live under `WORKSPACE_NAV` and
-its own section label, so the top of the sidebar still reads exactly like the
-reference and the extras arrive in the same visual grammar.
+`PRIMARY_NAV` reproduces Cursor's primary rows in Cursor's order, **minus the
+ones this studio has no feature behind** — Cursor's fourth row, "Automations",
+is absent because nothing here schedules recurring work, and a nav row that
+highlights itself and shows nothing teaches the operator that rows in this list
+might not do anything. Add it back the day there is an automations view. **Do
+not extend it for anything else**: this studio's extra views live under
+`WORKSPACE_NAV` and its own section label, so the top of the sidebar still reads
+exactly like the reference and the extras arrive in the same visual grammar.
 
 Panel state is its own store (`store/panelStore.ts`) because it is pure view
 state; chat and session state stay in `store/studioStore.ts`. Which sidebar view
 is selected lives in `App.tsx` beside the sidebar geometry, because the global
-shortcuts (⇧⌘E / ⇧⌘F / ⇧⌘X, ⌘B, ⌘L) drive it.
+shortcuts (⇧⌘E / ⇧⌘F, ⌘B, ⌘L) drive it. The panel shortcuts live beside them and
+mirror the add-panel menu exactly, so the menu doubles as the shortcut reference
+and the two cannot drift apart.
 
 ### Agent tabs (`server/agent-cli.js`, `panels/AgentPane.tsx`)
 
@@ -359,6 +365,14 @@ best-fit local engines — not raw weights we train.
    execution, step-by-step verification.
 2. **Frontier Flash** (fast path) — single-model execution; instant local edits,
    high-throughput streaming, VRAM release on Apple Silicon.
+3. **Teminali Max** (heavyweight) — the heavy local model for every request.
+   Presented in the picker and **locked**: it stays unselectable until its exact
+   artifact and product path pass the safety canary, which is recorded in
+   `gateway/model-qualification.json` and is currently `qualified: false`. The
+   badge says so rather than the option quietly failing.
+
+A locked option that explains itself is the point. `studioStore.ts` carries the
+badge copy beside the profile, so the reason travels with the thing it disables.
 
 ---
 
