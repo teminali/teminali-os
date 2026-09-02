@@ -61,6 +61,10 @@ npm run verify:all    # both, plus studio typecheck and production build
 
 Landmines worth knowing: `ELECTRON_RUN_AS_NODE=1` may be set in the shell — use
 `env -u ELECTRON_RUN_AS_NODE` for anything that spawns electron or imports
-server modules. A gateway is often already on `:4310`; use
+server modules — including `open -a`, which propagates the calling shell's
+environment, so the packaged app exits instantly as a bare Node process. To
+reproduce a Finder launch faithfully, also pin the launchd PATH:
+`env -u ELECTRON_RUN_AS_NODE PATH=/usr/bin:/bin:/usr/sbin:/sbin open -a ...`.
+A gateway is often already on `:4310`; use
 `FRONTIER_GATEWAY_PORT=4319` for tests. `npm run assistant:doctor` exits 1 until
 macOS Accessibility is granted — that is expected, not a regression.
