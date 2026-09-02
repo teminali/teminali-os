@@ -31,7 +31,11 @@ permissions:
 jobs:
   verify:
     name: Verify
-    runs-on: ubuntu-latest
+    # macOS, not the cheaper Linux runner. Parts of this suite exercise
+    # macOS-specific paths — the pointer helper's contract, screencapture,
+    # Guardian's telemetry — and running them somewhere they were never proven
+    # would either fail the release or pass while checking less than it looks.
+    runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -40,6 +44,8 @@ jobs:
           cache: npm
           cache-dependency-path: studio/package-lock.json
       - run: npm ci
+        working-directory: studio
+      - run: npm run build:pointer
         working-directory: studio
       - run: npm run typecheck
         working-directory: studio
