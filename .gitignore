@@ -18,3 +18,7 @@ benchmark-results/
 # The compiled pointer helper. Built by `npm run build:pointer` from the Swift
 # source beside it; an unsigned Mach-O in git is one nobody can audit.
 studio/native/macos/bin/
+
+# Session handover notes, written by the handover skill. Working notes about
+# the repository rather than part of it.
+.claude/

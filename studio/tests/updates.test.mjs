@@ -70,6 +70,57 @@ test("an aliased architecture is not mistaken for an unarchitected build", () =>
   assert.equal(assetForPlatform(armOnly, { platform: "linux", arch: "x64" }), null);
 });
 
+test("a macOS build named for the Mac it runs on resolves", () => {
+  // What build/afterAllArtifactBuild.cjs writes: the release page says which
+  // Mac each file is for instead of making the reader translate arm64 and x64.
+  const labelled = [
+    { name: "Teminali-Code-1.1.1-macOS-Apple-Silicon.dmg", size: 1, browser_download_url: "https://github.com/a/b/as.dmg" },
+    { name: "Teminali-Code-1.1.1-macOS-Intel.dmg", size: 1, browser_download_url: "https://github.com/a/b/i.dmg" },
+    { name: "Teminali-Code-1.1.1-macOS-arm64.zip", size: 1, browser_download_url: "https://github.com/a/b/as.zip" },
+    { name: "Teminali-Code-1.1.1-macOS-x64.zip", size: 1, browser_download_url: "https://github.com/a/b/i.zip" },
+  ];
+  assert.equal(assetForPlatform(labelled, { platform: "darwin", arch: "arm64" }).name, "Teminali-Code-1.1.1-macOS-Apple-Silicon.dmg");
+  assert.equal(assetForPlatform(labelled, { platform: "darwin", arch: "x64" }).name, "Teminali-Code-1.1.1-macOS-Intel.dmg");
+});
+
+test("the label is matched however it is capitalised or spaced", () => {
+  // The tokens are lower case and the names are not; nothing about the release
+  // page guarantees the hyphen either.
+  const squashed = [
+    { name: "App-1.0.0-macOS-AppleSilicon.dmg", size: 1, browser_download_url: "https://github.com/a/b/as.dmg" },
+    { name: "App-1.0.0-macOS-INTEL.dmg", size: 1, browser_download_url: "https://github.com/a/b/i.dmg" },
+  ];
+  assert.equal(assetForPlatform(squashed, { platform: "darwin", arch: "arm64" }).name, "App-1.0.0-macOS-AppleSilicon.dmg");
+  assert.equal(assetForPlatform(squashed, { platform: "darwin", arch: "x64" }).name, "App-1.0.0-macOS-INTEL.dmg");
+});
+
+test("a labelled build is not mistaken for an unarchitected build", () => {
+  // The `x86_64` bug again, in its new clothes: if ANY_ARCH does not know the
+  // word "Apple Silicon" then an arm64-only release stops looking architected,
+  // and the branch below hands the one file it finds to an Intel Mac.
+  const armOnly = [{ name: "App-1.0.0-macOS-Apple-Silicon.dmg", size: 1, browser_download_url: "https://github.com/a/b/c.dmg" }];
+  assert.equal(assetForPlatform(armOnly, { platform: "darwin", arch: "x64" }), null);
+
+  const intelOnly = [{ name: "App-1.0.0-macOS-Intel.dmg", size: 1, browser_download_url: "https://github.com/a/b/c.dmg" }];
+  assert.equal(assetForPlatform(intelOnly, { platform: "darwin", arch: "arm64" }), null);
+});
+
+test("v1.1.0's own names still resolve, because v1.1.0 is what is installed", () => {
+  // Every copy in the world looks for its successor through this function, and
+  // the release it was downloaded from spells the architectures the old way.
+  // Renaming the assets must not strand the machines already running them.
+  const shipped = [
+    { name: "Teminali-Code-1.1.0-macOS-arm64.dmg", size: 1, browser_download_url: "https://github.com/a/b/arm.dmg" },
+    { name: "Teminali-Code-1.1.0-macOS-x64.dmg", size: 1, browser_download_url: "https://github.com/a/b/x64.dmg" },
+    { name: "Teminali-Code-Setup-1.1.0-Windows-x64.exe", size: 1, browser_download_url: "https://github.com/a/b/w.exe" },
+    { name: "Teminali-Code-1.1.0-Linux-x86_64.AppImage", size: 1, browser_download_url: "https://github.com/a/b/l.AppImage" },
+  ];
+  assert.equal(assetForPlatform(shipped, { platform: "darwin", arch: "arm64" }).name, "Teminali-Code-1.1.0-macOS-arm64.dmg");
+  assert.equal(assetForPlatform(shipped, { platform: "darwin", arch: "x64" }).name, "Teminali-Code-1.1.0-macOS-x64.dmg");
+  assert.equal(assetForPlatform(shipped, { platform: "win32", arch: "x64" }).name, "Teminali-Code-Setup-1.1.0-Windows-x64.exe");
+  assert.equal(assetForPlatform(shipped, { platform: "linux", arch: "x64" }).name, "Teminali-Code-1.1.0-Linux-x86_64.AppImage");
+});
+
 test("no assets at all is an answer, not a crash", () => {
   assert.equal(assetForPlatform([], { platform: "darwin", arch: "arm64" }), null);
   assert.equal(assetForPlatform(undefined, { platform: "darwin", arch: "arm64" }), null);

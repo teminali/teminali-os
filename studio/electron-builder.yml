@@ -6,6 +6,9 @@ directories:
   buildResources: build
 
 afterPack: build/afterPack.cjs
+# Renames the macOS disk images so they say Apple Silicon and Intel. See the
+# hook, and the `publish: null` under `dmg` that makes it safe.
+afterAllArtifactBuild: build/afterAllArtifactBuild.cjs
 
 files:
   - dist/**/*
@@ -73,7 +76,27 @@ mac:
 
 dmg:
   artifactName: ${productName}-${version}-macOS-${arch}.${ext}
-  title: ${productName} ${version} ${arch}
+  # No ${arch}: it expanded to "-arm64", so mounting the Apple Silicon image
+  # opened a volume called "Teminali Code 1.1.0 -arm64" — contradicting the file
+  # the reader just chose, in the machine vocabulary the rename exists to avoid.
+  # It cannot say "Apple Silicon" instead: the volume name is baked in when the
+  # image is built and the template cannot branch on architecture either. It is
+  # dropped rather than translated because by the time a volume is mounted the
+  # architecture has already been chosen. The cost is that mounting both at once
+  # makes macOS append a "1" to the second.
+  title: ${productName} ${version}
+  # `${arch}` above still writes arm64 and x64; build/afterAllArtifactBuild.cjs
+  # rewrites those two to Apple-Silicon and Intel once every artifact is built.
+  #
+  # The rename can only be done after the fact, so the builder must not be the
+  # one uploading these: it schedules each upload as soon as the file appears
+  # and awaits them after the hook, which would race the rename. `publish: null`
+  # is electron-builder's documented "build it, do not publish it" — the hook
+  # returns the renamed paths and those are uploaded in their place. It also
+  # keeps the DMGs out of latest-mac.yml, which would otherwise list names that
+  # no longer exist. Nothing reads that file: this app updates through
+  # server/updates.js against the GitHub API, not electron-updater.
+  publish: null
 
 # ── Windows ────────────────────────────────────────────────────────
 win:

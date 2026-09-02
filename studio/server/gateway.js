@@ -1284,6 +1284,10 @@ export async function createGateway(options = {}) {
           appRoot: config.appRoot,
           version,
           notes: typeof body?.notes === "string" ? body.notes : "",
+          // A publish now tags and pushes, and CI builds from that tag. The
+          // repository is therefore part of the operation rather than something
+          // only the update check needed to know.
+          repo: config.releaseRepo,
           dryRun: body?.dryRun !== false,
           onEvent: send,
           signal: abort.signal,

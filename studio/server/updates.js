@@ -63,31 +63,53 @@ export const UPDATE_DIRECTORY = resolve(tmpdir(), "teminali-updates");
  * build and missed the Linux one — which then fell through to the
  * "names no architecture" branch and worked by accident, right up until a
  * release shipped two Linux builds.
+ *
+ * `intel` and `apple-silicon` are the same architectures under the names a
+ * person reads on the release page — build/afterAllArtifactBuild.cjs renames the
+ * macOS disk images to use them. The machine spellings stay because v1.1.0 was
+ * published as `-arm64.dmg` and `-x64.dmg`, and every copy of it in the world
+ * looks for its successor through this function.
+ *
+ * Compared against a lower-cased name, so `Apple-Silicon` matches
+ * `apple-silicon`. Every token here must therefore be lower case.
  */
 const ARCH_TOKENS = Object.freeze({
-  x64: ["x64", "x86_64", "amd64"],
-  arm64: ["arm64", "aarch64"],
+  x64: ["x64", "x86_64", "amd64", "intel"],
+  arm64: ["arm64", "aarch64", "apple-silicon", "applesilicon"],
 });
 
-const ANY_ARCH = /x64|x86_64|amd64|arm64|aarch64/;
+/**
+ * Derived rather than written out a second time. A token the matcher knows and
+ * this pattern does not is not a near miss — the asset stops looking
+ * architected, falls through to the branch below that offers a lone
+ * unarchitected build to everyone, and an Intel Mac is handed an arm64 build.
+ * That is the `x86_64` bug, and it is why these cannot be allowed to drift.
+ * (Every token is plain text, so none of them needs escaping.)
+ */
+const ANY_ARCH = new RegExp(Object.values(ARCH_TOKENS).flat().join("|"));
 
 export function assetForPlatform(assets, { platform, arch } = {}) {
   if (!Array.isArray(assets) || assets.length === 0) return null;
 
   const extension = platform === "darwin" ? ".dmg" : platform === "win32" ? ".exe" : ".AppImage";
-  const candidates = assets.filter((asset) => typeof asset?.name === "string" && asset.name.endsWith(extension));
+  // Lower-cased once here rather than at each comparison below, because the
+  // architecture tokens are matched case-insensitively and the extension is not:
+  // `.AppImage` is spelled the way the packager spells it.
+  const candidates = assets
+    .filter((asset) => typeof asset?.name === "string" && asset.name.endsWith(extension))
+    .map((asset) => ({ asset, name: asset.name.toLowerCase() }));
   if (candidates.length === 0) return null;
 
   // An Intel build running under Rosetta reports x64, and x64 is the build it
   // should be offered — so the reported architecture is taken at face value.
   const wanted = ARCH_TOKENS[arch === "arm64" ? "arm64" : "x64"];
-  const exact = candidates.find((asset) => wanted.some((token) => asset.name.includes(token)));
-  if (exact) return exact;
+  const exact = candidates.find((candidate) => wanted.some((token) => candidate.name.includes(token)));
+  if (exact) return exact.asset;
 
   // A build that names no architecture is for whatever this is — a universal
   // macOS binary, or Windows and Linux, which ship one each.
-  const withoutArch = candidates.filter((asset) => !ANY_ARCH.test(asset.name));
-  if (withoutArch.length === 1) return withoutArch[0];
+  const withoutArch = candidates.filter((candidate) => !ANY_ARCH.test(candidate.name));
+  if (withoutArch.length === 1) return withoutArch[0].asset;
 
   // Everything left names an architecture, and none of them names this one.
   // Falling back to "there is only one, take it" would hand an Intel Mac an

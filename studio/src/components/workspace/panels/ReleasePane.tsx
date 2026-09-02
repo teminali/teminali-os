@@ -20,7 +20,16 @@ import { EmptyState, IconButton } from "../../ui";
  *      a courtesy, not a control.
  */
 
-const STEP_ORDER = ["typecheck", "test", "build", "publish"] as const;
+/**
+ * Render order for the steps a run emits.
+ *
+ * A dry run stops after `publish` (a local macOS package that is never
+ * uploaded). A real publish never runs that step at all — it tags, pushes, and
+ * GitHub Actions builds all three platforms — so the two paths share the first
+ * three entries and diverge after them. Listing both and filtering to what
+ * actually reported keeps one list for two flows.
+ */
+const STEP_ORDER = ["typecheck", "test", "build", "publish", "preflight", "tag", "ci", "notes"] as const;
 
 export const ReleasePane: React.FC = () => {
   const [identity, setIdentity] = useState<Identity | null>(null);
@@ -171,13 +180,15 @@ export const ReleasePane: React.FC = () => {
             }`}
           >
             {running ? <LoaderCircle size={13} className="animate-spin" /> : <Upload size={13} />}
-            {running ? "Running…" : dryRun ? `Verify and build ${version || ""}` : `Publish ${version || ""} to GitHub`}
+            {running ? "Running…" : dryRun ? `Verify and build ${version || ""}` : `Release ${version || ""} from GitHub Actions`}
           </button>
 
           {!dryRun && (
             <p className="flex items-start gap-1.5 text-2xs text-warning">
               <ShieldAlert size={12} className="flex-shrink-0 mt-0.5" />
-              This uploads a build to github.com/teminali/teminalicode and every install will be offered it.
+              This commits the version bump, pushes a tag, and GitHub Actions builds macOS, Windows and Linux
+              from it. Every install will be offered the result. Your working tree must be clean — a release
+              ships what is committed.
             </p>
           )}
         </div>
