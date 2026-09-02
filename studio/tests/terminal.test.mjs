@@ -79,7 +79,8 @@ test("cancelling the request kills the command", async () => {
 test("provider credentials are not readable from a workspace command", async () => {
   const environment = childEnvironment({ PATH: "/usr/bin", ANTHROPIC_API_KEY: "secret", HOME: "/tmp" });
   assert.equal("ANTHROPIC_API_KEY" in environment, false);
-  assert.equal(environment.PATH, "/usr/bin");
+  assert.ok(environment.PATH.startsWith("/usr/bin"));
+  assert.ok(environment.PATH.split(":").includes("/opt/homebrew/bin"));
 
   const root = await workspace();
   const { chunks, onChunk } = collect();

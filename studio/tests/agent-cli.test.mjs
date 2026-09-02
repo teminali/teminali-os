@@ -76,7 +76,10 @@ test("the gateway's own session token never reaches an agent", () => {
   // The provider key is how the CLI authenticates; scrubbing it would break the
   // agent rather than protect anything.
   assert.equal(environment.ANTHROPIC_API_KEY, "key");
-  assert.equal(environment.PATH, "/usr/bin");
+  // PATH is widened, not replaced: what the caller had stays first, and the
+  // package-manager prefixes follow so a Finder launch can still find the CLI.
+  assert.ok(environment.PATH.startsWith("/usr/bin"));
+  assert.ok(environment.PATH.split(":").includes("/opt/homebrew/bin"));
 });
 
 test("only the two known engines are accepted", () => {

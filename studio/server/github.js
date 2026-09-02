@@ -15,6 +15,7 @@
  */
 
 import { execFile } from "node:child_process";
+import { withBinPaths } from "./bin-paths.js";
 import { promisify } from "node:util";
 import path from "node:path";
 import fs from "node:fs";
@@ -30,7 +31,7 @@ const GH_TIMEOUT_MS = 15_000;
 const CLONE_TIMEOUT_MS = 300_000;
 
 async function gh(args, { timeout = GH_TIMEOUT_MS, cwd } = {}) {
-  return run("gh", args, { timeout, cwd, encoding: "utf8", maxBuffer: 8 * 1024 * 1024 });
+  return run("gh", args, { timeout, cwd, encoding: "utf8", maxBuffer: 8 * 1024 * 1024, env: withBinPaths() });
 }
 
 /**

@@ -1,4 +1,5 @@
 import { spawn } from "node:child_process";
+import { withBinPaths } from "./bin-paths.js";
 import { resolve, sep } from "node:path";
 
 export const TERMINAL_LIMITS = Object.freeze({
@@ -28,7 +29,7 @@ export function resolveCommandCwd(root, requestedCwd = "") {
 }
 
 export function childEnvironment(source = process.env) {
-  const environment = { ...source };
+  const environment = withBinPaths(source);
   for (const key of SCRUBBED_ENV_KEYS) delete environment[key];
   return environment;
 }

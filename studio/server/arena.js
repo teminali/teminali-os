@@ -31,6 +31,7 @@ import { appendFile, cp, mkdir, readFile, rm, stat, symlink, writeFile } from "n
 import { existsSync } from "node:fs";
 import { dirname, join, relative, resolve, sep } from "node:path";
 import { promisify } from "node:util";
+import { withBinPaths } from "./bin-paths.js";
 
 const run = promisify(execFile);
 
@@ -93,7 +94,12 @@ function appendTail(current, chunk, max = 8_000) {
  */
 function runCheck(command, cwd, { timeoutMs, signal }) {
   return new Promise((resolve) => {
-    const child = spawn("/bin/sh", ["-c", command], { cwd, detached: true, stdio: ["ignore", "pipe", "pipe"] });
+    const child = spawn("/bin/sh", ["-c", command], {
+      cwd,
+      detached: true,
+      env: withBinPaths(),
+      stdio: ["ignore", "pipe", "pipe"],
+    });
     let stdout = "";
     let stderr = "";
     let halted = null;

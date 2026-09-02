@@ -29,6 +29,7 @@
  */
 
 import { spawn } from "node:child_process";
+import { withBinPaths } from "./bin-paths.js";
 import { resolve, sep } from "node:path";
 
 export const AGENT_LIMITS = Object.freeze({
@@ -82,7 +83,7 @@ export function resolveAgentCwd(root, requestedCwd = "") {
  * around and drive the gateway as us.
  */
 export function agentEnvironment(source = process.env) {
-  const environment = { ...source };
+  const environment = withBinPaths(source);
   delete environment.FRONTIER_SESSION_TOKEN;
   return environment;
 }
