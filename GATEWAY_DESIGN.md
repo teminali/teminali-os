@@ -1,10 +1,23 @@
-# Rate-Aware Model Gateway — MVP Contract
+# Rate-Aware Model Gateway — contract
+
+> **Status: shipped.** This began as an MVP contract and the code now meets it.
+> Everything below describes behaviour that exists in `gateway/`, not intent.
+> The implementation is [`gateway/http-gateway.js`](gateway/http-gateway.js)
+> (the HTTP surface), [`gateway/frontier-runner.js`](gateway/frontier-runner.js)
+> (modes and profiles), [`gateway/quota-pool.js`](gateway/quota-pool.js) and
+> [`gateway/run-budget.js`](gateway/run-budget.js) (the accounting this contract
+> is mostly about).
 
 ## Objective
 
-Build a local OpenAI-compatible gateway that lets OpenCode use explicitly
-authorized model-provider credentials through a single endpoint while respecting
-each credential's published limits.
+A local OpenAI-compatible gateway that lets a client use explicitly authorized
+model-provider credentials through a single endpoint while respecting each
+credential's published limits.
+
+Two clients exist. Teminali Code's studio is the primary one and reaches the
+gateway through its own local server; OpenCode is the original one and still
+works, via `opencode.gateway.jsonc`. Neither needed a workflow change to gain
+the pooling behaviour, which was the point.
 
 The gateway is a product prototype, not a mechanism for evading provider terms.
 
@@ -69,17 +82,57 @@ The gateway is a product prototype, not a mechanism for evading provider terms.
 - `GET /health`
 - `GET /metrics` with non-secret counters only
 
-## Provider profiles
+## Model modes
 
-- `gateway/lanes.controlled-claude-sonnet.json`: Sonnet 5 medium, pinned, no fallback.
-- `gateway/lanes.controlled-claude-opus.json`: Opus 5 high, pinned, no fallback.
-- `gateway/lanes.enhanced-claude-groq.example.json`: Sonnet 5 primary plus three
-  separately authorized Groq organization lanes.
-- Anthropic identity-linked keys require both `ANTHROPIC_API_KEY` and
-  `ANTHROPIC_WORKSPACE_ID`; both remain runtime-only and are never committed.
-- Claude Sonnet 5 is budgeted at $2/M input and $10/M output; Opus 5 at $5/M
-  input and $25/M output. The gateway reserves requested worst-case output before
-  dispatch and reconciles it to validated reported usage after response completion.
+The product surface is three modes, defined in `MODEL_MODES` in
+[`gateway/frontier-runner.js`](gateway/frontier-runner.js). They pick a profile;
+they are not themselves models.
+
+| Mode | Resolves to | Meaning |
+| --- | --- | --- |
+| `flash` | `local` | Lightweight local model for every task. |
+| `auto` | `local`, escalating | Hybrid routing between the lightweight and heavyweight local models. |
+| `max` | `local-expert` | Heavyweight local model for every task. |
+
+`max` is gated. `isExpertModelQualified()` reads
+[`gateway/model-qualification.json`](gateway/model-qualification.json), where
+`qwen38Iq3m.qualified` is currently **`false`** — "Pending isolated model
+comparison and FrontierCode safety canary". The mode is offered in the picker
+and refuses to resolve until that flips.
+
+## Profiles
+
+Six, from `PROFILES` in the same file. Every one names its own lane file, and
+the local profiles need no credentials at all.
+
+| Profile | Lane file | Requires |
+| --- | --- | --- |
+| `local` | `lanes.controlled-local-coder.json` | nothing — Qwen2.5-Coder 14B, 16 GB floor |
+| `local-expert` | `lanes.controlled-qwen38-expert.json` | nothing — Qwen3.8 27B IQ3_M, on demand |
+| `local-24b` | `lanes.controlled-devstral.json` | nothing — Devstral 24B, needs 32 GB |
+| `auto` | `lanes.enhanced-devstral-claude.example.json` | `ANTHROPIC_API_KEY`, `ANTHROPIC_WORKSPACE_ID` |
+| `claude-sonnet` | `lanes.controlled-claude-sonnet.json` | `ANTHROPIC_API_KEY`, `ANTHROPIC_WORKSPACE_ID` |
+| `claude-opus` | `lanes.controlled-claude-opus.json` | `ANTHROPIC_API_KEY`, `ANTHROPIC_WORKSPACE_ID` |
+
+The `local` profile carries a second, narrower configuration for structured
+turns — `lanes.controlled-local-coder-8k.json`, an 8k context window and a
+24 KiB snapshot cap — because a structured repair turn needs a tighter budget
+than a conversational one.
+
+## Lane files
+
+All of `gateway/lanes.*.json` are configuration only and contain no keys.
+Beyond the six above: `lanes.controlled-gemini.json` (the first-live-test
+profile), `lanes.controlled-devstral-structured.json`,
+`lanes.enhanced.example.json` (Gemini primary plus three independent Groq
+organizations) and `lanes.enhanced-claude-groq.example.json` (Sonnet 5 primary
+plus three separately authorized Groq organization lanes).
+
+Anthropic identity-linked keys require both `ANTHROPIC_API_KEY` and
+`ANTHROPIC_WORKSPACE_ID`; both remain runtime-only and are never committed.
+Claude Sonnet 5 is budgeted at $2/M input and $10/M output; Opus 5 at $5/M input
+and $25/M output. The gateway reserves requested worst-case output before
+dispatch and reconciles it to validated reported usage after completion.
 
 ## Runtime launcher
 
@@ -158,4 +211,3 @@ reads only the local gateway access token from the environment. The original
 - No browser dashboard.
 - No automatic account creation or credential acquisition.
 - No pooling of credentials without each owner's explicit authorization.
-- No modification of the `commercial-editor` repository.
