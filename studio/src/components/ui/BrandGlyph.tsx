@@ -16,10 +16,13 @@ import React from "react";
 export type Brand = "teminali" | "claude" | "codex";
 
 const SOURCES: Record<Brand, { src: string; label: string }> = {
-  // Served from public/, so these are absolute paths at runtime.
-  teminali: { src: "/teminali-logo-128.png", label: "Teminali" },
-  claude: { src: "/brand/claude-code-128.png", label: "Claude Code" },
-  codex: { src: "/brand/codex-128.png", label: "Codex" },
+  // Relative, not absolute. The packaged renderer is loaded over file://, where
+  // a leading slash resolves to the filesystem root instead of the app bundle,
+  // so "/brand/..." 404s and every engine row draws a broken image. Vite rewrites
+  // the hrefs it can see in index.html; it cannot rewrite a string literal.
+  teminali: { src: "teminali-logo-128.png", label: "Teminali" },
+  claude: { src: "brand/claude-code-128.png", label: "Claude Code" },
+  codex: { src: "brand/codex-128.png", label: "Codex" },
 };
 
 export const BrandGlyph: React.FC<{

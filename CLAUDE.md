@@ -1,7 +1,8 @@
 # Teminali Code — working agreement
 
 The product is **Teminali Code** (`@teminali/code`, published as `teminali/teminalicode`).
-The repository directory is still `frontier` and the root package is `@teminali/core`;
+The repository directory is `teminaliCode`, under `my_projects/teminali/` beside
+`landing` and `teminaliCut`, and the root package is `@teminali/core`;
 "Frontier" now names only the routing gateway and the local model wrapper
 (Frontier Flash / Auto / Max). Never reintroduce "Teminali Studio" or "Frontier Code".
 

@@ -92,17 +92,23 @@ export class VibeVoiceProvider implements VoiceProvider {
         return this.capabilities;
       }
       const status = (await response.json()) as VoiceStatusResponse;
+      // `available` means the sidecar answered, not that it can transcribe — the
+      // server sets it when *either* ASR or TTS is up. Gating the detail on it
+      // meant a sidecar with working `say` but no whisper reported no reason at
+      // all, so the engine's joined error fell back to the Chromium note: the one
+      // tier that can never work in the desktop shell.
+      const asrAvailable = Boolean(status.available && status.asr);
       this.capabilities = {
         ...this.capabilities,
         label: status.engine === "local" ? "Local (whisper.cpp)" : "VibeVoice (local)",
-        asr: Boolean(status.available && status.asr),
+        asr: asrAvailable,
         tts: Boolean(status.available && status.tts),
         languageDetection: Boolean(status.asr),
         streamingAsr: status.asr?.streaming ?? false,
         streamingTts: status.tts?.streaming ?? false,
         speakerEmbedding: status.asr?.embedding ?? false,
         languages: status.asr?.languages ?? [],
-        detail: status.available ? undefined : (status.detail ?? "The VibeVoice sidecar is not running."),
+        detail: asrAvailable ? undefined : (status.detail ?? "The VibeVoice sidecar is not running."),
       };
     } catch (error) {
       this.capabilities = {

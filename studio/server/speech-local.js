@@ -26,6 +26,14 @@ import path from "node:path";
 const run = promisify(execFile);
 
 const WHISPER_BINARIES = ["whisper-cli", "whisper-cpp", "main"];
+/**
+ * A GUI app launched from Finder inherits launchd's PATH — /usr/bin:/bin:
+ * /usr/sbin:/sbin — not the shell's. Homebrew puts whisper in /opt/homebrew/bin,
+ * which is therefore invisible to the packaged build even when it is plainly
+ * installed, and the status call then tells someone who has whisper that they
+ * do not. Search the usual prefixes explicitly rather than trusting PATH.
+ */
+const BIN_SEARCH_PATHS = ["/opt/homebrew/bin", "/usr/local/bin", "/opt/local/bin"];
 const MODEL_SEARCH_PATHS = [
   path.join(os.homedir(), ".cache/whisper"),
   path.join(os.homedir(), ".local/share/whisper"),
@@ -43,7 +51,14 @@ const SPEAK_TIMEOUT_MS = 60_000;
 
 async function which(binary) {
   try {
-    const { stdout } = await run("which", [binary], { timeout: 3000, encoding: "utf8" });
+    const { stdout } = await run("which", [binary], {
+      timeout: 3000,
+      encoding: "utf8",
+      env: {
+        ...process.env,
+        PATH: [process.env.PATH, ...BIN_SEARCH_PATHS].filter(Boolean).join(path.delimiter),
+      },
+    });
     const resolved = stdout.trim();
     return resolved || null;
   } catch {
