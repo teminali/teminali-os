@@ -1,4 +1,18 @@
 # Task State
+
+> **Superseded work log — historical.** This tracked the pre-rename harness
+> effort and stopped being updated before Teminali Code shipped. Its `Completed`
+> and `Evidence` entries are kept as a record of how the system got here, with
+> their original figures intact; do not read the counts in them as current.
+>
+> `Active` and `Next Action` below are **not live** — they describe a session
+> that ended. Nothing here is a to-do list.
+>
+> For current state: [`studio/README.md`](studio/README.md) for the application,
+> [`GATEWAY_DESIGN.md`](GATEWAY_DESIGN.md) for routing,
+> [`CLAUDE.md`](CLAUDE.md) for the working agreement. Measured today: 109/109
+> root, 501/501 studio, typecheck and production build clean.
+
 ## Objective
 Build a skill-native, local-first website creation agent, beginning with
 world-class landing and marketing sites, while retaining secure model routing,
@@ -176,7 +190,13 @@ hard budgets, repository recovery, and reproducible domain evaluations.
   up to 3,072 tokens for complete multi-file edits.
 - Added a non-oracle regression fixture and a two-turn repair integration. Focused
   runner/agent tests pass 44/44 and the full root/runtime suite passes 109/109.
-## Active
+## Active (as of the last update — superseded)
+
+The suite has grown substantially since: the combined checkpoint below read
+190/190, where the same two suites now measure 109/109 root and 501/501 studio.
+The line about preserving a live studio on port 3000 refers to a session long
+finished.
+
 - The stable combined checkpoint is 190/190 (109 root/runtime + 81 Studio), TypeScript
   and build green. Live Edit, exact-path workspace writes, Preview synchronization,
   image attachments, and the `</>` logo are implemented.
@@ -188,7 +208,14 @@ hard budgets, repository recovery, and reproducible domain evaluations.
   repair-turn transfer canary.
 - Preserve the current live Studio at `http://localhost:3000` until the user finishes
   inspecting the UI.
-## Blocked
+## Blocked (last recorded state)
+
+Two of these are still confirmable in code: Devstral 24B's 32 GB floor is in
+`PROFILES` in `gateway/frontier-runner.js`, and the Qwen3.8 27B disqualification
+is `qwen38Iq3m.qualified: false` in `gateway/model-qualification.json`. The
+Gemini credit state is an account fact and is not verifiable from this
+repository.
+
 - Direct Gemini API calls remain blocked by depleted project prepayment credits;
   Antigravity model access is unaffected.
 - Devstral 24B is not safe on this 24 GB Mac: its 18.8 GB resident footprint leaves
@@ -196,7 +223,7 @@ hard budgets, repository recovery, and reproducible domain evaluations.
 - The imported Qwen3.8 27B IQ3_M package is disqualified on the current Ollama
   runtime because direct loading returns HTTP 500. This does not block the benchmark:
   shipped Auto truthfully remains Flash-only and Max remains locked.
-## Next Action
+## Next Action (superseded — recorded, not pending)
 - Follow `outputs/ANTIGRAVITY_HANDOVER.md` in order: verify the final vision transport,
   pass the integrated image + Live Edit canary, pass the isolated repair-turn canary,
   then freeze a genuinely new-domain task and compare Frontier Auto with Codex under

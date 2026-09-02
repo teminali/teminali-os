@@ -1,5 +1,28 @@
 # Frontier Coding Agent Roadmap
 
+> **This is a roadmap: it states intent, not current state.** Written before the
+> rename, when the product was a harness rather than an application. Much of it
+> shipped; some of it was overtaken. The status table below is the reconciled
+> part — where a phase and the code disagree, the code wins. For what actually
+> exists today read [`studio/README.md`](studio/README.md) and
+> [`GATEWAY_DESIGN.md`](GATEWAY_DESIGN.md).
+
+## Status
+
+| Phase | State | Evidence |
+| --- | --- | --- |
+| 0 — proven foundation | shipped | Groq GPT-OSS-120B baseline in `opencode.jsonc`; isolated benchmark labs under `benchmarks/`. |
+| 1 — rate-aware gateway | shipped | `gateway/http-gateway.js`, `quota-pool.js`, `run-budget.js`, eleven lane files, `/metrics`. See `GATEWAY_DESIGN.md`. |
+| 2 — Claude single-agent baseline | shipped | `createAnthropicUpstream` in `gateway/provider-adapters.js`; `claude-sonnet` and `claude-opus` profiles. |
+| 3 — engineering reliability | shipped | `studio/agent-runtime/` runs inspect → plan → edit → verify → repair → review → report; `studio/quality-runtime/` is the fail-closed gate. |
+| 4 — UI and end-to-end verification | **partial** | `studio/visual-runtime/` does PNG comparison only. **Playwright was never added** — there is no Playwright dependency in the repository, and no browser-driven acceptance evidence. |
+| 5 — enhanced frontier orchestration | **not started** | No architect/verifier/reviewer roles exist as separate agents. The `auto` profile escalates between models, which is not the same thing. |
+| 6 — Antigravity comparison | partial | Five of seven benchmark suites under `benchmarks/` have recorded results; `video-mcp-timeline-sync-005` and `website-builder-saas-launch-003` have none. |
+
+Four provider adapters exist — Groq, Gemini, Anthropic and Ollama — against the
+three the roadmap anticipated; local Ollama models became the default engine,
+which the roadmap did not foresee at all.
+
 ## North star
 
 Build a provider-agnostic coding-agent system that can outperform Antigravity on
@@ -115,4 +138,3 @@ objective.
   configured.
 - No fallback is counted as a controlled-run success unless the benchmark policy
   explicitly allowed it before the run.
-- No changes are made to `commercial-editor` during harness development.
