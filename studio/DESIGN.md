@@ -424,18 +424,46 @@ three doors into one session. The mode decides what an utterance becomes:
 | `talk` | Ask about the screen; it answers aloud and draws a ring around what it means |
 | `agent` | The same, and it may click, type and scroll |
 
+**The default is `agent`.** It was `talk` until 2026-09-03, when the operator
+chose an assistant that does the thing rather than one that points at it. An
+assistant which answers "switch to agent mode and I could do that for you" has
+already failed the request it just understood.
+
 The session lives in `useAssistant` in the shell and reaches every composer
 through `AssistantContext`. It owns no microphone: the chat lends it the one
 `VoiceEngine` (`attachVoice`), which is what stops a second door from opening a
 second recorder.
 
-### Autonomy is a ladder, and never defaults to the top
+### The assistant never takes focus, because focus is the target
+
+Activating the assistant used to call `window.show()` then `window.focus()`,
+which made Teminali Code the frontmost application. The pointer helper reads the
+tree of `NSWorkspace.shared.frontmostApplication`, so the assistant would look
+at the screen and find **itself** — the operator asks about Spotify from inside
+Spotify, and the assistant inventories the Teminali Code window it just raised.
+Every door that starts a turn — the global shortcut, the tray's "Talk to the
+assistant", a tray double-click — now shows the window with `showInactive()`,
+and the frontmost application stays whatever the operator was using. Only "Open
+Teminali Code" still activates, because there the operator asked for the window
+rather than for an answer.
+
+`/api/assistant/observe` also accepts an optional `pid`. `observe()` always took
+one and the route dropped it, so every observation fell back to the frontmost
+application whether or not the caller knew better. Omitted still means "whoever
+is in front", which is the right answer nearly always.
+
+### Autonomy is a ladder, and the default sits at the top
 
 `guide` draws and touches nothing, not even the pointer · `confirm` asks before
-each acting step · `auto` runs the plan. **The default is `confirm`.** This is
-the same rule the agent CLIs follow: something that can click anything on your
-screen without asking is a choice the operator makes explicitly.
-`tests/assistant-plan.test.mjs` asserts the default is not the top rung.
+each acting step · `auto` runs the plan. **The default is `auto`, changed by the
+operator on 2026-09-03.** It was `confirm`, on the rule the agent CLIs follow:
+something that can click anything on your screen without asking is a choice the
+operator makes explicitly. That reasoning still holds — this is that choice,
+made once for the product instead of once per click, because an assistant that
+stops for approval on every step is not the hands-free assistant being built.
+The two safer rungs are one switch away and are what a cautious operator sets.
+`tests/assistant-plan.test.mjs` asserts the default is the top rung **and** that
+`guide` and `confirm` remain on the ladder, so the decision stays reversible.
 
 ### Any of the three engines
 
@@ -517,6 +545,13 @@ Three details cost a debugging session each:
 Two tiers: the browser engine (always available) and **VibeVoice** run locally
 through a sidecar (see `studio/docs/VOICE_SIDECAR.md`). Two modes:
 push-to-talk dictation, and hands-free conversation with barge-in.
+
+**The default is `conversation`, with `requireWakeWord` on** (2026-09-03). The
+assistant listens continuously and speaks every reply, and answers only when
+addressed by name — `teminali`, `frontier` or `studio`. The wake word is what
+makes always-on listening tolerable: without it the room's conversation is
+addressed to the assistant. `speakReply` is a no-op outside `conversation`
+mode, so this default is also what makes the assistant talk back at all.
 
 Non-negotiables:
 

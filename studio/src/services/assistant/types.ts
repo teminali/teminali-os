@@ -95,9 +95,13 @@ export const ASSISTANT_MODES: AssistantMode[] = ["dictate", "talk", "agent"];
  * `confirm` — each acting step is approved by the operator before it runs.
  * `auto`    — the plan runs to completion.
  *
- * The default is `confirm`, and it is never `auto`. This is the same rule the
- * agent CLIs follow (DESIGN.md §"Agent tabs"): a thing that can click anything
- * on your screen without asking is a choice the operator makes explicitly.
+ * The default is `auto`, changed by the operator on 2026-09-03. It was `confirm`
+ * on the reasoning that a thing which can click anything on your screen without
+ * asking is a choice made explicitly — and this is that choice, made once, for
+ * the product rather than per session. A hands-free assistant that stops for
+ * approval on every click is not hands-free, so the confirmation step moved out
+ * of the ladder's default and into the operator's hands: `guide` and `confirm`
+ * are still there, one switch away, for anyone who wants the older contract.
  */
 export type AssistantAutonomy = "guide" | "confirm" | "auto";
 
@@ -166,8 +170,8 @@ export interface AssistantSettings {
 }
 
 export const DEFAULT_ASSISTANT_SETTINGS: AssistantSettings = {
-  mode: "talk",
-  autonomy: "confirm",
+  mode: "agent",
+  autonomy: "auto",
   engine: "frontier",
   frontierMode: "auto",
   speak: true,

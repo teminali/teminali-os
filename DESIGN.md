@@ -56,9 +56,12 @@ most conservative code in its area:
 
 - **The governor** closes applications: graceful `quit` only, unsaved work is
   absolute, *unknown* counts as unsafe, and the protected list cannot be emptied.
-- **The screen assistant** clicks things: autonomy defaults to `confirm`, and
-  positions come from the accessibility tree because a vision model asked for a
-  coordinate returns one that is plausible and wrong.
+- **The screen assistant** clicks things: positions come from the accessibility
+  tree, because a vision model asked for a coordinate returns one that is
+  plausible and wrong. Autonomy defaulted to `confirm` until 2026-09-03 and now
+  defaults to `auto` — an operator decision, recorded in `studio/DESIGN.md` §5.
+  The tree-not-vision rule is the one that did not move, and it is the one that
+  makes acting without confirmation defensible.
 - **Release publishing** puts a binary in front of every install: administrator
   only, gated on typecheck → test → build → preflight, and it ships what is
   committed.

@@ -292,14 +292,14 @@ export interface VoiceSettings {
 
 export const DEFAULT_VOICE_SETTINGS: VoiceSettings = {
   enabled: true,
-  mode: "push-to-talk",
+  mode: "conversation",
   tier: "auto",
   language: "auto",
   speakReplies: true,
   confirmBeforeSend: true,
   autoSendAfterMs: 2500,
   requireSpeakerMatch: false,
-  requireWakeWord: false,
+  requireWakeWord: true,
   wakeWords: ["teminali", "frontier", "studio"],
   endpointSilenceMs: 900,
   allowBargeIn: true,

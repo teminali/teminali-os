@@ -211,8 +211,13 @@ function activateAssistant() {
   }
   if (!window || window.isDestroyed()) return;
   if (window.isMinimized()) window.restore();
-  window.show();
-  window.focus();
+  // Shown without being focused, deliberately. The assistant reads the
+  // accessibility tree of whichever application is frontmost, so taking focus
+  // here would point it at Teminali Code instead of the app the operator was
+  // actually looking at when they pressed the shortcut — the assistant would
+  // answer questions about its own window. The tray's "Open" item still brings
+  // the app forward for anyone who wants that.
+  window.showInactive();
   window.webContents.send("assistant:command", { activate: true });
 }
 

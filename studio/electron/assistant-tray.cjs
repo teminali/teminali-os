@@ -162,7 +162,16 @@ function attachAssistantTray({ getWindow, onCreateWindow, onCommand, getHotkeySt
 
   tray.setToolTip("Teminali Assistant");
 
-  function reveal(payload) {
+  /**
+   * Brings the window back, and decides whether to take focus doing it.
+   *
+   * Focus is not cosmetic here: the assistant reads the accessibility tree of
+   * the frontmost application, so raising Teminali Code in front of the app the
+   * operator is asking about makes it observe itself. Anything that starts an
+   * assistant turn shows the window without activating; only "Open Teminali
+   * Code", where the window *is* what was asked for, takes focus.
+   */
+  function reveal(payload, { focus = true } = {}) {
     let window = getWindow();
     if (!window || window.isDestroyed()) {
       onCreateWindow?.();
@@ -170,8 +179,12 @@ function attachAssistantTray({ getWindow, onCreateWindow, onCommand, getHotkeySt
     }
     if (!window || window.isDestroyed()) return null;
     if (window.isMinimized()) window.restore();
-    window.show();
-    window.focus();
+    if (focus) {
+      window.show();
+      window.focus();
+    } else {
+      window.showInactive();
+    }
     if (payload) window.webContents.send("assistant:command", payload);
     return window;
   }
@@ -249,7 +262,7 @@ function attachAssistantTray({ getWindow, onCreateWindow, onCommand, getHotkeySt
       {
         label: "Talk to the assistant",
         accelerator: hotkey.registered ? hotkey.accelerator : undefined,
-        click: () => reveal({ activate: true }),
+        click: () => reveal({ activate: true }, { focus: false }),
       },
     ];
 
@@ -401,7 +414,7 @@ function attachAssistantTray({ getWindow, onCreateWindow, onCommand, getHotkeySt
       applyMenu();
     });
 
-  tray.on("double-click", () => reveal({ activate: true }));
+  tray.on("double-click", () => reveal({ activate: true }, { focus: false }));
   applyTitle();
   applyMenu();
 

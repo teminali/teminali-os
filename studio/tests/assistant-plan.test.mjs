@@ -222,14 +222,18 @@ test("a step is described with the element's own label, not its id", () => {
 
 /* ── Defaults ─────────────────────────────────────────────────────────────── */
 
-test("the assistant never defaults to its most permissive rung", () => {
-  // The same rule the agent CLI panes follow: something that can click anything
-  // on screen without asking is a choice the operator makes explicitly.
+test("the assistant defaults to the top of the ladder, deliberately", () => {
+  // Changed by the operator on 2026-09-03: a hands-free assistant that stops for
+  // approval on every click is not hands-free. The confirmation step did not
+  // disappear — it moved out of the default and into the operator's hands, which
+  // is why the two safer rungs must stay on the ladder for this to be reversible.
   const mostPermissive = ASSISTANT_AUTONOMY_LADDER[ASSISTANT_AUTONOMY_LADDER.length - 1];
-  assert.notEqual(DEFAULT_ASSISTANT_SETTINGS.autonomy, mostPermissive);
-  assert.equal(DEFAULT_ASSISTANT_SETTINGS.autonomy, "confirm");
+  assert.equal(DEFAULT_ASSISTANT_SETTINGS.autonomy, mostPermissive);
+  assert.equal(DEFAULT_ASSISTANT_SETTINGS.autonomy, "auto");
+  assert.ok(ASSISTANT_AUTONOMY_LADDER.includes("guide"));
+  assert.ok(ASSISTANT_AUTONOMY_LADDER.includes("confirm"));
 });
 
-test("the assistant defaults to explaining rather than acting", () => {
-  assert.equal(DEFAULT_ASSISTANT_SETTINGS.mode, "talk");
+test("the assistant defaults to acting rather than explaining", () => {
+  assert.equal(DEFAULT_ASSISTANT_SETTINGS.mode, "agent");
 });

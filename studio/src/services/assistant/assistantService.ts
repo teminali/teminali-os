@@ -49,7 +49,7 @@ export class AssistantService {
 
   /** One look at the screen. */
   public static async observe(
-    options: { maxElements?: number; describe?: boolean } = {},
+    options: { maxElements?: number; describe?: boolean; pid?: number | null } = {},
     signal?: AbortSignal,
   ): Promise<ObservationResult> {
     const response = await GatewayClient.request("/api/assistant/observe", {
@@ -58,6 +58,10 @@ export class AssistantService {
       body: JSON.stringify({
         maxElements: options.maxElements ?? 120,
         describe: options.describe !== false,
+        // Omitted means "whichever application is in front", which is the right
+        // answer almost always. It is sent only when the caller knows the
+        // operator meant a different window than the one now in front.
+        ...(typeof options.pid === "number" && options.pid > 0 ? { pid: options.pid } : {}),
       }),
     });
     await GatewayClient.expectOk(response);

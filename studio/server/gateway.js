@@ -1123,8 +1123,13 @@ export async function createGateway(options = {}) {
       if (request.method === "POST" && route === "/api/assistant/observe") {
         const observeRequest = await readJson(request, config.maxJsonBytes);
         const maxElements = Number(observeRequest?.maxElements);
+        // `observe` has always taken a pid — the route dropped it, so every
+        // observation silently fell back to the frontmost application. That is
+        // usually right, and wrong exactly when the caller knows better.
+        const observePid = Number(observeRequest?.pid);
         try {
           const observation = await observe(config, {
+            pid: Number.isInteger(observePid) && observePid > 0 ? observePid : null,
             maxElements: Number.isFinite(maxElements) ? Math.max(10, Math.min(400, maxElements)) : 120,
             describe: observeRequest?.describe !== false,
             fetchImpl,
