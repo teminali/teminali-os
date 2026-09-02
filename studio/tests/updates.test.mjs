@@ -49,6 +49,27 @@ test("a single unarchitected build is offered to everyone", () => {
   assert.equal(assetForPlatform(universal, { platform: "darwin", arch: "x64" }).name, "App-1.0.0-mac.dmg");
 });
 
+test("the packagers' own spellings of an architecture all resolve", () => {
+  // Observed in CI, not imagined: electron-builder writes `x64` into the .dmg
+  // and `x86_64` into the .AppImage from the same template.
+  const mixed = [
+    { name: "Teminali Code-1.1.0-Linux-x86_64.AppImage", size: 1, browser_download_url: "https://github.com/a/b/l.AppImage" },
+    { name: "Teminali Code-1.1.0-Linux-arm64.AppImage", size: 1, browser_download_url: "https://github.com/a/b/la.AppImage" },
+  ];
+  assert.equal(assetForPlatform(mixed, { platform: "linux", arch: "x64" }).name, "Teminali Code-1.1.0-Linux-x86_64.AppImage");
+  assert.equal(assetForPlatform(mixed, { platform: "linux", arch: "arm64" }).name, "Teminali Code-1.1.0-Linux-arm64.AppImage");
+
+  const amd = [{ name: "App-1.0.0-amd64.AppImage", size: 1, browser_download_url: "https://github.com/a/b/c.AppImage" }];
+  assert.equal(assetForPlatform(amd, { platform: "linux", arch: "x64" }).name, "App-1.0.0-amd64.AppImage");
+});
+
+test("an aliased architecture is not mistaken for an unarchitected build", () => {
+  // The bug this guards: `x86_64` did not match `x64`, so it fell through to
+  // the "names no architecture" branch and was handed to every machine.
+  const armOnly = [{ name: "App-1.0.0-aarch64.AppImage", size: 1, browser_download_url: "https://github.com/a/b/c.AppImage" }];
+  assert.equal(assetForPlatform(armOnly, { platform: "linux", arch: "x64" }), null);
+});
+
 test("no assets at all is an answer, not a crash", () => {
   assert.equal(assetForPlatform([], { platform: "darwin", arch: "arm64" }), null);
   assert.equal(assetForPlatform(undefined, { platform: "darwin", arch: "arm64" }), null);

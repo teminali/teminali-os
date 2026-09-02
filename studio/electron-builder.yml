@@ -23,14 +23,10 @@ files:
   - package.json
   - "!**/*.map"
 
-# The helper is executed as a process, and macOS will not run a binary from
-# inside an asar archive. It ships beside the app instead, where the code that
-# looks for it can spawn it.
-extraResources:
-  - from: native/macos/bin
-    to: pointer
-    filter:
-      - teminali-pointer
+# (The pointer helper ships as a macOS extra resource — see `mac.extraResources`
+# below. It is scoped there rather than declared globally because the directory
+# does not exist on a Windows or Linux runner, and a top-level entry makes both
+# of those builds warn about a missing source on every run.)
 
 icon: build/icon.png
 
@@ -57,6 +53,13 @@ mac:
   gatekeeperAssess: false
   entitlements: build/entitlements.mac.plist
   entitlementsInherit: build/entitlements.mac.plist
+  # macOS will not execute a binary from inside an asar archive, so the pointer
+  # helper ships beside the app where server/pointer.js can spawn it.
+  extraResources:
+    - from: native/macos/bin
+      to: pointer
+      filter:
+        - teminali-pointer
   # macOS refuses the microphone outright, without a dialog, if the reason is
   # not declared. Screen Recording and Accessibility need no key — they are
   # granted only in System Settings, by hand, and cannot be prompted around.
@@ -96,3 +99,12 @@ linux:
         - x64
   category: Development
   artifactName: ${productName}-${version}-Linux-${arch}.${ext}
+  # Named explicitly. Left to itself electron-builder derives this from the
+  # package name, which is scoped — "@teminali/code" becomes "@teminalicode",
+  # and an "@" is not legal in a Linux executable path. The AppImage build fails
+  # outright rather than warning.
+  executableName: teminali-code
+  # Without it, desktop environments cannot associate a running window with the
+  # .desktop entry, so the app gets a generic icon in the dock.
+  desktopName: teminali-code.desktop
+  synopsis: Autonomous AI code studio with local models and a screen assistant

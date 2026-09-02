@@ -54,6 +54,23 @@ export const UPDATE_DIRECTORY = resolve(tmpdir(), "teminali-updates");
  * stop finding updates the day the product was renamed — which is exactly the
  * day this was written.
  */
+/**
+ * What each architecture is called in a file name.
+ *
+ * More than one spelling per architecture because the packagers disagree:
+ * electron-builder writes `x64` into a .dmg and `x86_64` into an .AppImage, from
+ * the same `${arch}` template. Matching only `x64` therefore found the macOS
+ * build and missed the Linux one — which then fell through to the
+ * "names no architecture" branch and worked by accident, right up until a
+ * release shipped two Linux builds.
+ */
+const ARCH_TOKENS = Object.freeze({
+  x64: ["x64", "x86_64", "amd64"],
+  arm64: ["arm64", "aarch64"],
+});
+
+const ANY_ARCH = /x64|x86_64|amd64|arm64|aarch64/;
+
 export function assetForPlatform(assets, { platform, arch } = {}) {
   if (!Array.isArray(assets) || assets.length === 0) return null;
 
@@ -63,13 +80,13 @@ export function assetForPlatform(assets, { platform, arch } = {}) {
 
   // An Intel build running under Rosetta reports x64, and x64 is the build it
   // should be offered — so the reported architecture is taken at face value.
-  const wanted = arch === "arm64" ? "arm64" : "x64";
-  const exact = candidates.find((asset) => asset.name.includes(wanted));
+  const wanted = ARCH_TOKENS[arch === "arm64" ? "arm64" : "x64"];
+  const exact = candidates.find((asset) => wanted.some((token) => asset.name.includes(token)));
   if (exact) return exact;
 
   // A build that names no architecture is for whatever this is — a universal
   // macOS binary, or Windows and Linux, which ship one each.
-  const withoutArch = candidates.filter((asset) => !/arm64|x64/.test(asset.name));
+  const withoutArch = candidates.filter((asset) => !ANY_ARCH.test(asset.name));
   if (withoutArch.length === 1) return withoutArch[0];
 
   // Everything left names an architecture, and none of them names this one.
