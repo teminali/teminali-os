@@ -42,6 +42,9 @@ import type { UseVoiceResult } from "./useVoice";
 
 const SETTINGS_KEY = "teminali_assistant_settings_v1";
 
+/** The one pane that can actually turn Accessibility on. */
+const ACCESSIBILITY_PANE = "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility";
+
 /** An observation is worth reusing for as long as the screen is probably the same. */
 const OBSERVATION_REUSE_MS = 20_000;
 
@@ -159,13 +162,35 @@ export function useAssistant(): UseAssistantResult {
     void refreshCapabilities();
   }, [refreshCapabilities]);
 
+  /**
+   * Ask for Accessibility, and make sure something visible happens.
+   *
+   * macOS raises its Accessibility dialog at most once per application, ever.
+   * It also keys the grant to the code signature, and this build is ad-hoc
+   * signed — the identity changes on every rebuild while the TCC entry made
+   * against the old one survives. Between those two rules the common case is
+   * that `AXIsProcessTrustedWithOptions(prompt:)` returns "not trusted" and
+   * puts nothing on screen at all, which reads to the operator as a dead
+   * button. The dialog's own affirmative button only opens System Settings
+   * anyway, so when the prompt does not come back trusted we go straight
+   * there. That is worth doing even when the dialog did appear: it returns
+   * false while the dialog is still up, and Settings opening behind it is a
+   * far smaller cost than a button that silently does nothing.
+   */
   const requestPermissions = useCallback(async () => {
+    let latest: AssistantCapabilities;
     try {
-      setCapabilities(await AssistantService.requestPermissions());
+      latest = await AssistantService.requestPermissions();
     } catch {
-      await refreshCapabilities();
+      latest = await AssistantService.capabilities();
     }
-  }, [refreshCapabilities]);
+    setCapabilities(latest);
+    if (latest.supported && latest.helperBuilt && !latest.accessibilityTrusted) {
+      // Not "_self": that would navigate the studio itself to an
+      // x-apple.systempreferences: URL and leave a blank window.
+      window.open(ACCESSIBILITY_PANE);
+    }
+  }, []);
 
   const attachVoice = useCallback((voice: UseVoiceResult | null) => {
     voiceRef.current = voice;

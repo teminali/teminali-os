@@ -259,8 +259,16 @@ export class VoiceEngine {
 
       const asr = this.providers?.asr;
       if (!asr) {
+        // Both tiers are out, and each is out for its own reason. Quoting only
+        // the built-in one buried the reason that actually mattered — the local
+        // sidecar is not running — under a note about Chromium, and left the
+        // operator reading that a local engine had taken over when nothing had.
+        const tiers = this.providers?.capabilities;
+        const reasons = [tiers?.builtin.detail, tiers?.vibevoice.detail].filter(
+          (line): line is string => Boolean(line),
+        );
         throw new VoiceError(
-          this.providers?.capabilities.builtin.detail ?? "No speech recogniser is available.",
+          ["No speech recogniser is available.", ...new Set(reasons)].join(" "),
           "NO_PROVIDER",
           false,
         );

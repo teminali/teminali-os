@@ -93,8 +93,12 @@ export class WebSpeechProvider implements VoiceProvider {
       ...this.capabilities,
       asr,
       tts,
+      // Says only what this provider knows. Whether anything takes over is the
+      // resolver's business, and claiming a fallback that did not happen is
+      // how an operator ends up staring at a dead microphone being told it
+      // works.
       detail: electron
-        ? "The browser recogniser needs Google's speech service, which the desktop shell cannot reach. The local engine is used instead."
+        ? "The browser recogniser needs Google's speech service, which the desktop shell cannot reach."
         : constructible
           ? undefined
           : "This browser has no SpeechRecognition implementation.",
