@@ -1,5 +1,5 @@
-appId: studio.teminali.app
-productName: Teminali Studio
+appId: code.teminali.app
+productName: Teminali Code
 
 directories:
   output: release
@@ -10,13 +10,34 @@ afterPack: build/afterPack.cjs
 files:
   - dist/**/*
   - electron/**/*
+  # The menu bar item reads telemetry from this module directly.
+  - server/guardian.js
+  # The assistant's menu bar item reads the pointer helper the same way, and
+  # these three are the module graph that reaches it.
+  - server/assistant.js
+  - server/pointer.js
+  - server/config.js
+  # The compiled Swift helper. It is built by `npm run build:pointer` rather
+  # than committed, so a packaged build must run that first — see the
+  # extraResources note below for why it is not asar-packed.
   - package.json
   - "!**/*.map"
+
+# The helper is executed as a process, and macOS will not run a binary from
+# inside an asar archive. It ships beside the app instead, where the code that
+# looks for it can spawn it.
+extraResources:
+  - from: native/macos/bin
+    to: pointer
+    filter:
+      - teminali-pointer
+
+icon: build/icon.png
 
 publish:
   provider: github
   owner: teminali
-  repo: teminali-studio
+  repo: teminalicode
   releaseType: release
 
 # ── macOS ──────────────────────────────────────────────────────────
@@ -36,6 +57,16 @@ mac:
   gatekeeperAssess: false
   entitlements: build/entitlements.mac.plist
   entitlementsInherit: build/entitlements.mac.plist
+  # macOS refuses the microphone outright, without a dialog, if the reason is
+  # not declared. Screen Recording and Accessibility need no key — they are
+  # granted only in System Settings, by hand, and cannot be prompted around.
+  extendInfo:
+    NSMicrophoneUsageDescription: >-
+      Teminali Code listens when you press its microphone or its shortcut, so
+      you can dictate and ask about what is on your screen.
+    NSAppleEventsUsageDescription: >-
+      Teminali Code reads the controls of the application in front so its
+      assistant can point at them by name rather than guessing where they are.
 
 dmg:
   artifactName: ${productName}-${version}-macOS-${arch}.${ext}
@@ -55,7 +86,7 @@ nsis:
   allowToChangeInstallationDirectory: true
   createDesktopShortcut: true
   createStartMenuShortcut: true
-  shortcutName: Teminali Studio
+  shortcutName: Teminali Code
 
 # ── Linux ──────────────────────────────────────────────────────────
 linux:

@@ -37,6 +37,11 @@ export function createConfig(environment = process.env, overrides = {}) {
     allowedOrigins: new Set(origins),
     ollamaUrl: loopbackUrl(environment.OLLAMA_BASE_URL, "http://127.0.0.1:11434", "OLLAMA_BASE_URL"),
     mcpUrl: loopbackUrl(environment.TEMINALI_CUT_MCP_URL || environment.KERF_MCP_URL, "http://127.0.0.1:3888", "TEMINALI_CUT_MCP_URL"),
+    // VibeVoice sidecar. Optional: absent means the studio falls back to the
+    // browser speech engine rather than losing voice altogether.
+    voiceUrl: loopbackUrl(environment.TEMINALI_VOICE_URL, "http://127.0.0.1:8321", "TEMINALI_VOICE_URL"),
+    voiceTimeoutMs: positiveInteger(environment.TEMINALI_VOICE_TIMEOUT_MS, 30_000),
+    voiceMaxAudioBytes: positiveInteger(environment.TEMINALI_VOICE_MAX_AUDIO_BYTES, 25 * 1024 * 1024),
     anthropicUrl: new URL("https://api.anthropic.com"),
     anthropicApiKey: environment.ANTHROPIC_API_KEY || "",
     requestTimeoutMs: positiveInteger(environment.FRONTIER_REQUEST_TIMEOUT_MS, 600_000),
@@ -46,7 +51,33 @@ export function createConfig(environment = process.env, overrides = {}) {
     maxStreamBytes: positiveInteger(environment.FRONTIER_MAX_STREAM_BYTES, 64 * 1024 * 1024),
     workspaceRoot: resolve(environment.FRONTIER_WORKSPACE_ROOT || DEFAULT_WORKSPACE_ROOT),
     workspaceMaxFileBytes: positiveInteger(environment.FRONTIER_WORKSPACE_MAX_FILE_BYTES, 8 * 1024 * 1024),
+    terminalTimeoutMs: positiveInteger(environment.FRONTIER_TERMINAL_TIMEOUT_MS, 120_000),
+    terminalMaxOutputBytes: positiveInteger(environment.FRONTIER_TERMINAL_MAX_OUTPUT_BYTES, 1024 * 1024),
     auditPath: resolve(process.cwd(), "benchmark-results", "gateway-audit.jsonl"),
+    projectsStorePath: resolve(environment.FRONTIER_PROJECTS_STORE || resolve(process.cwd(), "benchmark-results", "recent-projects.json")),
+    // Hosted-provider API keys. Written 0600; never returned to the renderer.
+    providerStorePath: resolve(environment.TEMINALI_PROVIDER_STORE || resolve(process.cwd(), "benchmark-results", "provider-keys.json")),
+    guardianStorePath: resolve(environment.TEMINALI_GUARDIAN_STORE || resolve(process.cwd(), "benchmark-results", "guardian-settings.json")),
+    // What each agent CLI actually resolved a model alias to, learned from the
+    // CLI's own init event and remembered so the picker can stop guessing.
+    agentModelStorePath: resolve(environment.TEMINALI_AGENT_MODEL_STORE || resolve(process.cwd(), "benchmark-results", "agent-models.json")),
+    // Where the screen assistant writes the frame it just looked at. Pruned to
+    // the last handful: it is a photograph of the operator's screen and has no
+    // reason to accumulate.
+    assistantFramePath: resolve(environment.TEMINALI_ASSISTANT_FRAMES || resolve(process.cwd(), "benchmark-results", "assistant-frames")),
+    // Append-only record of what every turn cost, read back by the usage panel.
+    usageLedgerPath: resolve(environment.TEMINALI_USAGE_LEDGER || resolve(process.cwd(), "benchmark-results", "usage-ledger.jsonl")),
+    // Who may run privileged tools. TEMINALI_ADMINS additionally pins logins
+    // that no API call can remove.
+    adminStorePath: resolve(environment.TEMINALI_ADMIN_STORE || resolve(process.cwd(), "benchmark-results", "admins.json")),
+    // The studio ships itself: `appRoot` is this package (the thing that gets
+    // built), `releaseRepo` is where its releases live.
+    appRoot: resolve(environment.TEMINALI_APP_ROOT || process.cwd()),
+    releaseRepo: environment.TEMINALI_RELEASE_REPO || "teminali/teminalicode",
+    // Every benchmark that has been run. Diffs are not kept; see arena.js.
+    arenaHistoryPath: resolve(environment.TEMINALI_ARENA_HISTORY || resolve(process.cwd(), "benchmark-results", "arena-runs.jsonl")),
+    // "local" runs Ollama models; "api" routes to a hosted provider.
+    defaultRuntimeMode: environment.TEMINALI_RUNTIME_MODE === "api" ? "api" : "local",
     auditMaxBytes: positiveInteger(environment.FRONTIER_AUDIT_MAX_BYTES, 2 * 1024 * 1024),
     auditMaxFiles: positiveInteger(environment.FRONTIER_AUDIT_MAX_FILES, 3),
     ...overrides,

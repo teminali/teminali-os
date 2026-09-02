@@ -54,21 +54,41 @@ read_groq_credentials() {
   done
 }
 
-read_anthropic_credentials
 case "$AGENT_PROFILE" in
+  local-coder)
+    # Sized for a 24 GB machine already running Studio: 9 GB of weights at an
+    # 8K context, rather than a 24B model whose weights alone exceed the GPU
+    # budget and push the whole machine into swap. No credentials: it never
+    # leaves the loopback interface.
+    export GATEWAY_LANES_FILE="$LAB_DIR/gateway/lanes.controlled-local-coder-8k.json"
+    export GATEWAY_PINNED_ALIAS="ollama-local-coder"
+    export OPENCODE_CONFIG="$LAB_DIR/opencode.local-coder.jsonc"
+    # Backstops for an Ollama started from this shell. The desktop app reads its
+    # environment from launchctl instead, so scripts/tune-ollama-memory.zsh sets
+    # the same two values there.
+    export OLLAMA_MAX_LOADED_MODELS=1
+    export OLLAMA_KEEP_ALIVE=2m
+    # The 12-request cap exists to bound spend on a metered provider. Local
+    # inference costs nothing, so the cap here is only a runaway-loop guard.
+    AGENT_MAX_REQUESTS=${AGENT_MAX_REQUESTS:-200}
+    PROFILE_LABEL="Qwen2.5 Coder 14B 8K local, no network"
+    ;;
   claude-sonnet)
+    read_anthropic_credentials
     export GATEWAY_LANES_FILE="$LAB_DIR/gateway/lanes.controlled-claude-sonnet.json"
     export GATEWAY_PINNED_ALIAS="anthropic-sonnet-primary"
     export OPENCODE_CONFIG="$LAB_DIR/opencode.claude-gateway.jsonc"
     PROFILE_LABEL="Claude Sonnet 5 controlled"
     ;;
   claude-opus)
+    read_anthropic_credentials
     export GATEWAY_LANES_FILE="$LAB_DIR/gateway/lanes.controlled-claude-opus.json"
     export GATEWAY_PINNED_ALIAS="anthropic-opus-escalation"
     export OPENCODE_CONFIG="$LAB_DIR/opencode.claude-opus.jsonc"
     PROFILE_LABEL="Claude Opus 5 escalation"
     ;;
   claude-groq-enhanced)
+    read_anthropic_credentials
     read_groq_credentials
     export GATEWAY_LANES_FILE="$LAB_DIR/gateway/lanes.enhanced-claude-groq.example.json"
     unset GATEWAY_PINNED_ALIAS || true

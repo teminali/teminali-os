@@ -5,6 +5,15 @@ export interface ParsedWorkspaceEdit {
 }
 
 const EDIT_INTENT = /\b(add|build|change|create|edit|fix|implement|modify|refactor|remove|replace|restyle|update|wire)\b/i;
+// Conventional single-file homes for a static web scaffold. Deliberately narrow:
+// these three are real conventions, so inferring them is not a guess.
+const SCAFFOLD_FILENAMES: Record<string, string> = {
+  html: "index.html",
+  css: "styles.css",
+  js: "script.js",
+  javascript: "script.js",
+};
+
 const CODE_LANGUAGES = new Set(["css", "csv", "go", "html", "java", "javascript", "js", "json", "jsx", "markdown", "md", "mjs", "py", "python", "rb", "rs", "sql", "svg", "toml", "ts", "tsx", "typescript", "xml", "yaml", "yml"]);
 
 function safeRelativePath(value?: string): string | null {
@@ -44,6 +53,22 @@ export function parseWorkspaceEdits(text: string, options: { activePath?: string
   if (activePath && editable.length === 1 && EDIT_INTENT.test(options.userPrompt || "")) {
     const [{ content, complete }] = editable;
     return [{ path: activePath, content, complete }];
+  }
+
+  // A scaffold request ("build a landing page") is normally answered with one
+  // html/css/js block per file and no path header at all. Without this, every
+  // such answer parsed to zero edits and nothing reached disk — the model looked
+  // like it had written files when it had only printed them.
+  if (EDIT_INTENT.test(options.userPrompt || "") && editable.length > 0) {
+    const inferred = editable.map((candidate) => ({
+      path: SCAFFOLD_FILENAMES[candidate.language] || "",
+      content: candidate.content,
+      complete: candidate.complete,
+    }));
+    // Only commit when every block has a conventional home and no two blocks
+    // claim the same one; a repeated language is genuinely ambiguous.
+    const paths = inferred.map((edit) => edit.path);
+    if (paths.every(Boolean) && new Set(paths).size === paths.length) return inferred;
   }
   return [];
 }

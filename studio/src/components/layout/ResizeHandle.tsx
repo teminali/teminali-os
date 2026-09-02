@@ -87,10 +87,10 @@ export const ResizeHandle: React.FC<ResizeHandleProps> = ({
       <div
         className={`w-full h-full transition-all duration-150 ${
           isDragging
-            ? "bg-[#38bdf8] shadow-[0_0_8px_#38bdf8]"
+            ? "bg-accent shadow-[0_0_8px_var(--accent)]"
             : isHovered
-            ? "bg-[#38bdf8]/50"
-            : "bg-transparent group-hover:bg-white/10"
+            ? "bg-accent/50"
+            : "bg-transparent group-hover:bg-surface-hover"
         }`}
       />
     </div>

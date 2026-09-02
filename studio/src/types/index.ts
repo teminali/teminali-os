@@ -21,25 +21,6 @@ export interface SpecialistSkill {
   starterPrompts: string[];
 }
 
-export interface ExtensionItem {
-  id: string;
-  name: string;
-  displayName: string;
-  publisher: string;
-  version: string;
-  downloads: string;
-  rating: number;
-  ratingCount: number;
-  description: string;
-  category: "Formatters" | "Linters" | "Languages" | "Themes" | "AI & MCP" | "Tools";
-  iconBg: string;
-  iconText: string;
-  installed: boolean;
-  enabled: boolean;
-  readme: string;
-  settings?: Record<string, { type: string; default: any; description: string }>;
-}
-
 export interface FileItem {
   id: string;
   name: string;
@@ -63,8 +44,6 @@ export interface EditorTab {
   mimeType?: string;
   size?: number;
   modified?: string;
-  isExtensionDetail?: boolean;
-  extensionData?: ExtensionItem;
 }
 
 export interface ToolCall {
@@ -130,5 +109,5 @@ export interface InferenceTelemetry {
   outputTokens: number;
   promptTokensPerSec: number | null;
   outputTokensPerSec: number | null;
-  source: "ollama" | "anthropic" | "mcp" | "ui-command";
+  source: "ollama" | "anthropic" | "mcp" | "ui-command" | "agent-cli";
 }

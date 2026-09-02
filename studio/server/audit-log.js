@@ -15,6 +15,16 @@ const SAFE_FIELDS = new Set([
   "errorCode",
   "retryable",
   "cancelled",
+  /* Guardian. All non-secret scalars: a local model name, the rule that fired,
+     and byte counts. Without them an auto-unload line records that something
+     was evicted but not what or why, which is not an audit trail. */
+  "model",
+  "rule",
+  "vramBytes",
+  "freedBytes",
+  /* Settings changes already passed these two and had them silently dropped. */
+  "enabled",
+  "maxApps",
 ]);
 
 function sanitize(entry) {

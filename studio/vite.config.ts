@@ -22,6 +22,9 @@ export default defineConfig({
       "/api": {
         target: "http://127.0.0.1:4310",
         changeOrigin: true,
+        headers: {
+          origin: "http://127.0.0.1:3000",
+        },
       },
     },
   },

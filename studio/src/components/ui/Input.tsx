@@ -24,25 +24,21 @@ export const Input = React.forwardRef<HTMLInputElement, InputProps>(
     return (
       <div className="relative flex items-center w-full">
         {icon && (
-          <span className="absolute left-3 text-gray-500 flex items-center pointer-events-none">
+          <span className="absolute left-3 text-ink-placeholder flex items-center pointer-events-none">
             {icon}
           </span>
         )}
         <input
           ref={ref}
           value={value}
-          className={`w-full h-8 bg-[#16161a] border border-white/10 focus:border-[#38bdf8]/50 rounded-lg text-xs text-white placeholder:text-gray-500 outline-none transition-colors ${
-            icon ? "pl-8" : "pl-3"
-          } ${clearable && value ? "pr-8" : "pr-3"} ${
-            variant === "mono" ? "font-mono" : "font-sans"
-          } ${className}`}
+          className={`lit lit-inner w-full h-8 bg-surface rounded-lg text-xs text-ink-high placeholder:text-ink-placeholder outline-none transition-colors ${ icon ? "pl-8" : "pl-3" } ${clearable && value ? "pr-8" : "pr-3"} ${ variant === "mono" ? "font-mono" : "font-sans" } ${className}`}
           {...props}
         />
         {clearable && value && (
           <button
             type="button"
             onClick={onClear}
-            className="absolute right-2.5 p-0.5 rounded text-gray-500 hover:text-white hover:bg-white/10"
+            className="absolute right-2.5 p-0.5 rounded text-ink-placeholder hover:text-ink-high hover:bg-surface-hover"
             title="Clear input"
           >
             <X size={12} />

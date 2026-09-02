@@ -1,99 +1,91 @@
 import React from "react";
-import { X, Boxes, Check, Layout, Film, ShieldCheck, Camera, ScanEye } from "lucide-react";
-import { useStudioStore, SKILLS_LIST } from "../../store/studioStore";
+import { Boxes, Camera, Check, Film, Layout, ScanEye, ShieldCheck } from "lucide-react";
+import { Modal } from "../ui";
+import { SKILLS_LIST, useStudioStore } from "../../store/studioStore";
+
+/**
+ * Skill packs, as a list you pick from.
+ *
+ * This used to draw its own dialog — its own backdrop, its own header, its own
+ * close button (two of them, in fact) — in uppercase mono on square-cornered
+ * boxes. It now goes through the `Modal` primitive like every other dialog in
+ * the studio, which is what DESIGN.md §2 asks for and what keeps a change to
+ * dialog chrome from having to be made twice.
+ *
+ * The rows are deliberately the same object as a sidebar row: muted label,
+ * muted glyph, hover fill, and a selected state that is a fill rather than a
+ * coloured border. Cursor has one vocabulary for "a list of things you choose
+ * between" and this is a list of things you choose between.
+ */
+
+const GLYPHS: Record<string, React.ElementType> = {
+  "website-builder": Layout,
+  "teminali-cut-copilot": Film,
+  "frontiercut-copilot": Film,
+  "qa-verifier": ShieldCheck,
+  "screenshot-to-code": Camera,
+  "pixel-precision-cloner": Camera,
+  "visual-verification-tester": ScanEye,
+};
 
 export const SkillsModal: React.FC = () => {
   const { isSkillsModalOpen, setSkillsModalOpen, activeSkill, setSkill } = useStudioStore();
 
-  if (!isSkillsModalOpen) return null;
-
-  const getIcon = (id: string) => {
-    switch (id) {
-      case "website-builder":
-        return <Layout className="w-4 h-4 text-sky-400" />;
-      case "teminali-cut-copilot":
-      case "frontiercut-copilot":
-        return <Film className="w-4 h-4 text-purple-400" />;
-      case "qa-verifier":
-        return <ShieldCheck className="w-4 h-4 text-emerald-400" />;
-      case "screenshot-to-code":
-      case "pixel-precision-cloner":
-        return <Camera className="w-4 h-4 text-cyan-400" />;
-      case "visual-verification-tester":
-        return <ScanEye className="w-4 h-4 text-amber-400" />;
-      default:
-        return <Boxes className="w-4 h-4 text-brand" />;
-    }
-  };
-
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-xs p-4 animate-in fade-in duration-100 font-mono">
-      <div className="w-full max-w-2xl bg-[#0e1015] border border-[#232833] p-6 shadow-2xl flex flex-col gap-4">
-        {/* Modal Header */}
-        <div className="flex items-center justify-between border-b border-[#232833] pb-3">
-          <div className="flex items-center gap-3">
-            <div className="w-8 h-8 bg-[#8b5cf6]/15 text-[#c4b5fd] flex items-center justify-center border border-[#8b5cf6]/40">
-              <Boxes className="w-4 h-4" />
-            </div>
-            <div>
-              <h2 className="text-sm font-bold text-white tracking-wide uppercase">Specialist Skill Packs</h2>
-              <p className="text-2xs text-[#5c6370]">Inject domain-specific rules and tool behaviors into Teminali</p>
-            </div>
-          </div>
+    <Modal
+      isOpen={isSkillsModalOpen}
+      onClose={() => setSkillsModalOpen(false)}
+      title="Skills"
+      subtitle="Domain rules and tool behaviour, mounted into the next turn"
+      size="md"
+    >
+      <div className="flex flex-col gap-0.5">
+        {SKILLS_LIST.map((skill) => {
+          const isActive = activeSkill?.id === skill.id;
+          const Glyph = GLYPHS[skill.id] ?? Boxes;
+          return (
+            <button
+              key={skill.id}
+              type="button"
+              aria-pressed={isActive}
+              onClick={() => {
+                // Clicking the mounted one unmounts it: in a list with no other
+                // way out, "mount" that cannot be undone is a trap.
+                setSkill(isActive ? null : skill);
+                if (!isActive) setSkillsModalOpen(false);
+              }}
+              className={`w-full text-left rounded-lg px-3 py-2.5 flex items-start gap-3 transition-colors duration-ds ease-ds ${
+                isActive ? "bg-surface-active" : "hover:bg-surface-hover"
+              }`}
+            >
+              <Glyph
+                size={16}
+                strokeWidth={1.7}
+                className={`mt-0.5 flex-shrink-0 ${isActive ? "text-ink-high" : "text-ink-muted"}`}
+              />
 
-          <button
-            onClick={() => setSkillsModalOpen(false)}
-            className="w-7 h-7 flex items-center justify-center hover:bg-[#1f2430] text-[#5c6370] hover:text-white"
-          >
-            <X className="w-4 h-4" />
-          </button>
-        </div>
+              <span className="flex-1 min-w-0">
+                <span className="flex items-center gap-2">
+                  <span className={`text-sm truncate ${isActive ? "text-ink-strong" : "text-ink-body"}`}>
+                    {skill.name}
+                  </span>
+                  <span className="text-2xs text-ink-soft truncate">{skill.tagline}</span>
+                </span>
+                <span className="block text-2xs text-ink-muted leading-relaxed mt-1">
+                  {skill.description}
+                </span>
+              </span>
 
-        {/* Skill Card Grid */}
-        <div className="grid grid-cols-1 gap-2 max-h-[60vh] overflow-y-auto pr-1">
-          {SKILLS_LIST.map((skill) => {
-            const isActive = activeSkill?.id === skill.id;
-            return (
-              <div
-                key={skill.id}
-                onClick={() => {
-                  setSkill(skill);
-                  setSkillsModalOpen(false);
-                }}
-                className={`p-3.5 border transition-all cursor-pointer flex flex-col gap-2 \${
-                  isActive
-                    ? "bg-[#8b5cf6]/10 border-[#8b5cf6] shadow-inner"
-                    : "bg-[#14171f] border-[#232833] hover:border-[#3e4451] hover:bg-[#181b22]"
-                }`}
-              >
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-3">
-                    <div className="p-2 bg-[#090a0d] border border-[#232833]">
-                      {getIcon(skill.id)}
-                    </div>
-                    <div>
-                      <span className="font-bold text-xs text-white">{skill.name}</span>
-                      <p className="text-3xs text-[#828997]">{skill.tagline}</p>
-                    </div>
-                  </div>
-
-                  {isActive ? (
-                    <span className="flex items-center gap-1 text-3xs font-bold px-2 py-0.5 bg-[#8b5cf6]/20 text-[#c4b5fd] border border-[#8b5cf6]/50">
-                      <Check className="w-3 h-3" /> ACTIVE
-                    </span>
-                  ) : (
-                    <button className="text-3xs font-bold px-2 py-1 bg-[#090a0d] border border-[#232833] text-[#5c6370] hover:text-white">
-                      MOUNT SKILL
-                    </button>
-                  )}
-                </div>
-
-                <p className="text-2xs text-[#abb2bf] leading-relaxed">{skill.description}</p>
-              </div>
-            );
-          })}
-        </div>
+              {isActive && (
+                <span className="flex items-center gap-1 text-2xs text-ink-muted flex-shrink-0 mt-0.5">
+                  <Check size={12} />
+                  Mounted
+                </span>
+              )}
+            </button>
+          );
+        })}
       </div>
-    </div>
+    </Modal>
   );
 };

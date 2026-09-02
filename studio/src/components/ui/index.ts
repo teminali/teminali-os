@@ -6,3 +6,6 @@ export * from "./Input";
 export * from "./Card";
 export * from "./CodeSnippet";
 export * from "./Icons";
+export * from "./Menu";
+export * from "./Primitives";
+export * from "./BrandGlyph";

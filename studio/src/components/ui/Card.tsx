@@ -6,12 +6,12 @@ export interface CardProps extends React.HTMLAttributes<HTMLDivElement> {
 }
 
 const variantStyles: Record<string, string> = {
-  default: "bg-[#16161a] border border-white/10 text-gray-200 shadow-sm",
+  default: "bg-surface border border-edge text-ink-prose shadow-sm",
   glass:
-    "bg-[#0f0f13]/90 backdrop-blur-md border-t border-white/15 border-x border-white/5 border-b border-white/5 text-gray-200 shadow-xl",
+    "bg-frame-mid/90 backdrop-blur-md border-t border-edge-strong border-x border-edge-chrome border-b border-edge-chrome text-ink-prose shadow-xl",
   interactive:
-    "bg-[#16161a] border border-white/10 hover:border-[#38bdf8]/40 hover:bg-[#1f1f25] text-gray-200 hover:text-white cursor-pointer transition-all active:scale-[0.99] shadow-sm",
-  bubble: "bg-[#1a1d28] border border-white/10 text-gray-100 shadow-md",
+    "bg-surface border border-edge hover:border-accent/40 hover:bg-surface-hover text-ink-prose hover:text-ink-high cursor-pointer transition-all active:scale-[0.99] shadow-sm",
+  bubble: "bg-surface-active border border-edge text-ink-high shadow-md",
 };
 
 const paddingStyles: Record<string, string> = {

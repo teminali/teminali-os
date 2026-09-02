@@ -21,27 +21,27 @@ export interface BadgeProps extends React.HTMLAttributes<HTMLSpanElement> {
 }
 
 const variantStyles: Record<BadgeVariant, string> = {
-  orange: "bg-[#FF6C37]/15 text-[#FF6C37] border border-[#FF6C37]/30",
-  sky: "bg-[#38bdf8]/10 text-[#38bdf8] border border-[#38bdf8]/25",
-  emerald: "bg-emerald-500/10 text-emerald-400 border border-emerald-500/25",
-  amber: "bg-amber-500/10 text-amber-300 border border-amber-500/25",
-  purple: "bg-purple-500/10 text-purple-300 border border-purple-500/25",
-  rose: "bg-rose-500/10 text-rose-300 border border-rose-500/25",
-  neutral: "bg-white/5 text-gray-300 border border-white/10",
-  shortcut: "bg-white/5 text-gray-400 border border-white/10 font-mono text-4xs shadow-inner",
-  model: "bg-[#16161a] text-gray-200 border border-white/10 font-mono",
+  orange: "bg-accent/15 text-accent border border-accent/30",
+  sky: "bg-accent/10 text-accent border border-accent/25",
+  emerald: "bg-success/10 text-success border border-success/25",
+  amber: "bg-warning/10 text-warning border border-warning/25",
+  purple: "bg-reason/10 text-reason border border-reason/25",
+  rose: "bg-danger/10 text-danger border border-danger/25",
+  neutral: "bg-surface-chip text-ink-dim border border-edge",
+  shortcut: "bg-surface-chip text-ink-muted border border-edge font-mono text-4xs shadow-inner",
+  model: "bg-surface text-ink-prose border border-edge font-mono",
 };
 
 const dotColors: Record<BadgeVariant, string> = {
-  orange: "bg-[#FF6C37]",
-  sky: "bg-[#38bdf8]",
-  emerald: "bg-emerald-400",
-  amber: "bg-amber-400",
-  purple: "bg-purple-400",
-  rose: "bg-rose-400",
-  neutral: "bg-gray-400",
-  shortcut: "bg-gray-500",
-  model: "bg-[#FF6C37]",
+  orange: "bg-accent",
+  sky: "bg-accent",
+  emerald: "bg-success",
+  amber: "bg-warning",
+  purple: "bg-reason",
+  rose: "bg-danger",
+  neutral: "bg-surface-chip",
+  shortcut: "bg-surface-chip",
+  model: "bg-accent",
 };
 
 const sizeStyles: Record<BadgeSize, string> = {

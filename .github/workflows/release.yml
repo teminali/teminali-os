@@ -1,0 +1,119 @@
+# Builds Teminali Code for macOS, Windows and Linux and publishes one release.
+#
+# Each platform is built on its own runner because they do not cross-compile
+# honestly: packaging an NSIS installer from macOS needs wine, and a Linux
+# AppImage built on a Mac is unreliable in ways that only show up on someone
+# else's machine. Three runners is the boring answer and the one that works.
+#
+# There is no code signing. The app is ad-hoc signed by build/afterPack.cjs, so
+# macOS Gatekeeper will warn on first launch and the in-app updater replaces the
+# whole .dmg rather than patching in place — see server/updates.js for why that
+# is a constraint rather than a choice. Adding an Apple Developer ID later means
+# setting CSC_LINK, CSC_KEY_PASSWORD and the notarization variables here; the
+# rest of this file does not change.
+
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+  # So a build can be rehearsed without cutting a tag.
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Build without publishing"
+        type: boolean
+        default: true
+
+permissions:
+  contents: write
+
+jobs:
+  verify:
+    name: Verify
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: studio/package-lock.json
+      - run: npm ci
+        working-directory: studio
+      - run: npm run typecheck
+        working-directory: studio
+      - run: npm test
+        working-directory: studio
+
+  build:
+    name: ${{ matrix.name }}
+    # Nothing is published unless the same checks an operator would run by hand
+    # have passed. A release whose tests did not run is the thing a release
+    # process exists to prevent.
+    needs: verify
+    runs-on: ${{ matrix.os }}
+    strategy:
+      # One platform failing must not cancel the two that are already building.
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-latest
+            name: macOS
+            args: --mac --arm64 --x64
+          - os: windows-latest
+            name: Windows
+            args: --win --x64
+          - os: ubuntu-latest
+            name: Linux
+            args: --linux --x64
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: studio/package-lock.json
+
+      - name: Install
+        run: npm ci
+        working-directory: studio
+
+      # The screen assistant's pointer helper is Swift and macOS-only. It is
+      # compiled here rather than committed: an unsigned Mach-O in git is one
+      # nobody can audit. The other two platforms ship without it, and the app
+      # reports that honestly instead of failing.
+      - name: Build the pointer helper
+        if: matrix.os == 'macos-latest'
+        run: npm run build:pointer
+        working-directory: studio
+
+      - name: Build web assets
+        run: npm run build
+        working-directory: studio
+
+      - name: Package and publish
+        working-directory: studio
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: >-
+          npx electron-builder ${{ matrix.args }}
+          --publish ${{ (github.event_name == 'push' && 'always') || 'never' }}
+
+      # On a rehearsal there is no release to attach to, so the artifacts are
+      # kept on the run itself — otherwise a dry run produces nothing to look at.
+      - name: Keep the artifacts
+        if: github.event_name != 'push'
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.name }}
+          retention-days: 7
+          if-no-files-found: error
+          path: |
+            studio/release/*.dmg
+            studio/release/*.zip
+            studio/release/*.exe
+            studio/release/*.AppImage

@@ -1,5 +1,5 @@
 export const IMAGE_ATTACHMENTS_AVAILABLE = true;
-export const VISION_MODEL = "moondream";
+export const VISION_MODEL = "qwen3-vl:2b";
 export const MAX_IMAGE_ATTACHMENTS = 4;
 export const MAX_SOURCE_IMAGE_BYTES = 12 * 1024 * 1024;
 export const MAX_TOTAL_ATTACHMENT_BYTES = 5 * 1024 * 1024;

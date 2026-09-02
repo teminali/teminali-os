@@ -115,7 +115,16 @@ export class GatewayClient {
 
   public static async request(path: string, init: RequestInit = {}, authenticated = true): Promise<Response> {
     const headers = new Headers(init.headers);
-    if (!headers.has("Content-Type") && init.body) headers.set("Content-Type", "application/json");
+    // FormData and Blob bodies carry their own content type — a multipart
+    // upload needs the boundary the browser generates, and overwriting it with
+    // application/json makes the body unparseable at the other end.
+    const bodyIsSelfDescribing =
+      typeof FormData !== "undefined" && init.body instanceof FormData
+        ? true
+        : typeof Blob !== "undefined" && init.body instanceof Blob;
+    if (!headers.has("Content-Type") && init.body && !bodyIsSelfDescribing) {
+      headers.set("Content-Type", "application/json");
+    }
     if (authenticated) headers.set("Authorization", `Bearer ${await this.getToken()}`);
 
     let response: Response;

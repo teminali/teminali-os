@@ -1,0 +1,38 @@
+{
+  // Local coding lane, sized for a 24 GB machine that is also running Studio.
+  //
+  // The context limit here must match the model's own `num_ctx` (8192 in
+  // frontier-qwen2.5-coder-14b-8k). Declaring more would let OpenCode build a
+  // prompt Ollama then silently truncates, and the KV cache for the extra
+  // tokens is exactly the memory this profile exists to protect.
+  "$schema": "https://opencode.ai/config.json",
+  "model": "frontier-gateway/frontier-code",
+  "enabled_providers": ["frontier-gateway"],
+  "agent": {
+    "title": { "disable": true }
+  },
+  "tools": {
+    "glob": false
+  },
+  "provider": {
+    "frontier-gateway": {
+      "npm": "@ai-sdk/openai-compatible",
+      "name": "Frontier Gateway",
+      "options": {
+        "baseURL": "http://127.0.0.1:8787/v1",
+        "apiKey": "{env:GATEWAY_ACCESS_TOKEN}",
+        "timeout": 660000,
+        "chunkTimeout": 600000
+      },
+      "models": {
+        "frontier-code": {
+          "name": "Frontier · Qwen2.5 Coder 14B 8K ($0.00)",
+          "limit": {
+            "context": 8192,
+            "output": 2048
+          }
+        }
+      }
+    }
+  }
+}

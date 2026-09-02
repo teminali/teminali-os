@@ -1,5 +1,5 @@
+import { MacCloseButton } from "./Primitives";
 import React, { useEffect } from "react";
-import { X } from "lucide-react";
 
 export type ModalSize = "sm" | "md" | "lg" | "xl" | "full";
 
@@ -52,40 +52,33 @@ export const Modal: React.FC<ModalProps> = ({
     <div
       role="dialog"
       aria-modal="true"
-      className="fixed inset-0 z-50 flex items-start justify-center pt-16 sm:pt-20 bg-black/80 backdrop-blur-md p-3 select-none font-sans animate-in fade-in duration-100"
+      className="fixed inset-0 z-50 flex items-start justify-center pt-16 sm:pt-20 bg-black/70 backdrop-blur-md p-3 select-none font-sans animate-in fade-in duration-100"
       onClick={(e) => {
         if (e.target === e.currentTarget) onClose();
       }}
     >
       <div
-        className={`w-full ${sizeStyles[size]} bg-[#131317] border border-white/10 rounded-2xl shadow-[0_30px_90px_rgba(0,0,0,0.9)] overflow-hidden flex flex-col animate-in zoom-in-95 duration-100 ${className}`}
+        className={`lit lit-strong w-full ${sizeStyles[size]} bg-surface rounded-xl shadow-modal overflow-hidden flex flex-col animate-in zoom-in-95 duration-100 ${className}`}
       >
         {/* Modal Header */}
         {(title || showCloseButton) && (
-          <header className="px-4 py-3 bg-[#0e0e12] border-b border-white/5 flex items-center justify-between gap-3 flex-shrink-0">
+          <header className="px-4 py-3 border-b border-edge flex items-center justify-between gap-3 flex-shrink-0">
             <div className="flex items-center gap-2.5 truncate">
               {icon && <span className="flex-shrink-0">{icon}</span>}
               <div className="flex flex-col truncate">
                 {title && (
-                  <h3 className="text-xs font-semibold text-white truncate tracking-tight">
+                  <h3 className="text-sm text-ink-bright truncate">
                     {title}
                   </h3>
                 )}
                 {subtitle && (
-                  <p className="text-3xs text-gray-400 font-normal truncate">{subtitle}</p>
+                  <p className="text-2xs text-ink-muted truncate">{subtitle}</p>
                 )}
               </div>
             </div>
 
             {showCloseButton && (
-              <button
-                type="button"
-                onClick={onClose}
-                className="p-1 rounded-lg text-gray-400 hover:text-white hover:bg-white/5 transition-colors"
-                title="Close (Esc)"
-              >
-                <X size={14} />
-              </button>
+              <MacCloseButton onClose={onClose} />
             )}
           </header>
         )}
@@ -95,7 +88,7 @@ export const Modal: React.FC<ModalProps> = ({
 
         {/* Modal Footer */}
         {footer && (
-          <footer className="px-4 py-2.5 bg-[#0a0a0d] border-t border-white/5 flex items-center justify-between text-xs flex-shrink-0">
+          <footer className="px-4 py-2.5 border-t border-edge flex items-center justify-between text-sm flex-shrink-0">
             {footer}
           </footer>
         )}

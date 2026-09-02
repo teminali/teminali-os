@@ -11,8 +11,10 @@ import {
   VISION_MODEL,
 } from "../src/services/attachmentPolicy.ts";
 
-const chatDrawerPath = new URL("../src/components/chat/ChatDrawer.tsx", import.meta.url);
-const aiServicePath = new URL("../src/services/aiService.ts", import.meta.url);
+const composerPath = new URL("../src/components/chat/Composer.tsx", import.meta.url);
+const attachmentsHookPath = new URL("../src/hooks/useAttachments.ts", import.meta.url);
+// The local vision route lives in the model engine, not the host adapter.
+const enginePath = new URL("../src/services/frontierEngine.ts", import.meta.url);
 
 test("image attachments use a bounded dedicated local vision route", async () => {
   assert.equal(IMAGE_ATTACHMENTS_AVAILABLE, true);
@@ -22,13 +24,21 @@ test("image attachments use a bounded dedicated local vision route", async () =>
   assert.match(IMAGE_ATTACHMENT_HELP, /analyzes them locally/);
   assert.equal(dataUrlByteLength("data:image/png;base64,YWJj"), 3);
 
-  const chatSource = await readFile(chatDrawerPath, "utf8");
-  assert.match(chatSource, /accept="image\/png,image\/jpeg,image\/webp"/);
-  assert.match(chatSource, /prepareImageAttachment/);
-  assert.match(chatSource, /onPaste=/);
-  assert.match(chatSource, /onDrop=/);
+  // The intake moved off the old chat drawer onto the composer and its hook,
+  // which is what every chat surface now shares. The contract is the same:
+  // paste, drop, and a bounded reader that never silently accepts more.
+  const composerSource = await readFile(composerPath, "utf8");
+  assert.match(composerSource, /onPaste=/);
+  assert.match(composerSource, /attachments\?\.dropProps/);
+  assert.match(composerSource, /filesFromClipboard/);
 
-  const serviceSource = await readFile(aiServicePath, "utf8");
+  const intakeSource = await readFile(attachmentsHookPath, "utf8");
+  assert.match(intakeSource, /onDrop:/);
+  // The intake is bounded on count and on per-file size before anything is read.
+  assert.match(intakeSource, /MAX_ATTACHMENTS/);
+  assert.match(intakeSource, /MAX_FILE_BYTES/);
+
+  const serviceSource = await readFile(enginePath, "utf8");
   assert.match(serviceSource, /frontier\.inspect_images/);
   assert.match(serviceSource, /GatewayClient\.request\("\/api\/ollama\/generate"/);
   assert.match(serviceSource, /payload\.response\?\.trim\(\)/);

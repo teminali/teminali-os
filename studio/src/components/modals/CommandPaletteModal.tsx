@@ -11,7 +11,7 @@ import {
   Terminal,
   Settings,
   Zap,
-  Sparkles,
+  Sparkle,
   Layers,
   FileText,
   CornerDownLeft,
@@ -24,7 +24,7 @@ import {
 import { useStudioStore, ChatSession } from "../../store/studioStore";
 import { WorkspaceService } from "../../services/workspaceService";
 import { FileIcon } from "../sidebar/FileTree";
-import { SegmentedTabs, Badge } from "../ui";
+import { Badge, MacCloseButton, SegmentedTabs } from "../ui";
 import type { FileItem } from "../../types";
 
 type FilterTab = "all" | "agents" | "files" | "actions" | "settings";
@@ -97,7 +97,7 @@ export const CommandPaletteModal: React.FC<{
         title: session.title,
         subtitle: session.workspace,
         badge: `${session.workspace} · ${session.timestamp}`,
-        icon: <Bot className="w-4 h-4 text-[#FF6C37]" />,
+        icon: <Bot className="w-4 h-4 text-accent" />,
         action: () => {
           switchSession(session.id);
           onClose();
@@ -113,7 +113,7 @@ export const CommandPaletteModal: React.FC<{
         type: "actions",
         title: "Go Back",
         shortcut: "⌘ [",
-        icon: <ArrowLeft className="w-4 h-4 text-gray-400" />,
+        icon: <ArrowLeft className="w-4 h-4 text-ink-muted" />,
         action: () => {
           window.history.back();
           onClose();
@@ -125,7 +125,7 @@ export const CommandPaletteModal: React.FC<{
         type: "actions",
         title: "Go Forward",
         shortcut: "⌘ ]",
-        icon: <ArrowRight className="w-4 h-4 text-gray-400" />,
+        icon: <ArrowRight className="w-4 h-4 text-ink-muted" />,
         action: () => {
           window.history.forward();
           onClose();
@@ -137,7 +137,7 @@ export const CommandPaletteModal: React.FC<{
         type: "actions",
         title: "New Agent",
         shortcut: "⌘ L",
-        icon: <Bot className="w-4 h-4 text-[#FF6C37]" />,
+        icon: <Bot className="w-4 h-4 text-accent" />,
         action: () => {
           clearEngineSession("frontier");
           onClose();
@@ -149,7 +149,7 @@ export const CommandPaletteModal: React.FC<{
         type: "actions",
         title: "Dictate / Voice Input",
         shortcut: "⇧ ⌘ _",
-        icon: <Mic className="w-4 h-4 text-amber-400" />,
+        icon: <Mic className="w-4 h-4 text-warning" />,
         action: () => {
           onClose();
         },
@@ -159,7 +159,7 @@ export const CommandPaletteModal: React.FC<{
         category: "Agent",
         type: "actions",
         title: "Pin / Unpin Agent",
-        icon: <Pin className="w-4 h-4 text-gray-400" />,
+        icon: <Pin className="w-4 h-4 text-ink-muted" />,
         action: () => {
           onClose();
         },
@@ -170,7 +170,7 @@ export const CommandPaletteModal: React.FC<{
         type: "actions",
         title: "Open Live Browser Preview",
         shortcut: "⌘ J",
-        icon: <Globe className="w-4 h-4 text-[#FF6C37]" />,
+        icon: <Globe className="w-4 h-4 text-accent" />,
         action: () => {
           openBrowserPreview();
           onClose();
@@ -182,7 +182,7 @@ export const CommandPaletteModal: React.FC<{
         type: "actions",
         title: "Open Terminal Panel",
         shortcut: "⌘ J",
-        icon: <Terminal className="w-4 h-4 text-emerald-400" />,
+        icon: <Terminal className="w-4 h-4 text-success" />,
         action: () => {
           setSplitTab("terminal");
           setSplitOpen(true);
@@ -199,7 +199,7 @@ export const CommandPaletteModal: React.FC<{
         type: "actions",
         title: "Plan Mode",
         subtitle: "Strategic architecture & design plans without modifying code",
-        icon: <Sliders className="w-4 h-4 text-purple-400" />,
+        icon: <Sliders className="w-4 h-4 text-reason" />,
         action: () => {
           onClose();
         },
@@ -211,7 +211,7 @@ export const CommandPaletteModal: React.FC<{
         title: "Agent Mode (Frontier Auto)",
         subtitle: "Autonomous local multi-file coding and tool execution",
         badge: currentProfile === "auto" ? "Active" : undefined,
-        icon: <Zap className="w-4 h-4 text-[#FF6C37]" />,
+        icon: <Zap className="w-4 h-4 text-accent" />,
         action: () => {
           setProfile("auto");
           onClose();
@@ -221,10 +221,10 @@ export const CommandPaletteModal: React.FC<{
         id: "mode-flash",
         category: "Mode",
         type: "actions",
-        title: "Flash Mode (Frontier Auto Flash)",
+        title: "Flash Mode (Frontier Flash)",
         subtitle: "Ultra-fast local generation with low memory footprint",
         badge: currentProfile === "flash" ? "Active" : undefined,
-        icon: <Sparkles className="w-4 h-4 text-emerald-400" />,
+        icon: <Sparkle className="w-4 h-4 text-success" />,
         action: () => {
           setProfile("flash");
           onClose();
@@ -267,7 +267,7 @@ export const CommandPaletteModal: React.FC<{
         title: "Open Studio Settings",
         subtitle: "Configure local models, VRAM budgets, and providers",
         shortcut: "⌘ ,",
-        icon: <Settings className="w-4 h-4 text-gray-400" />,
+        icon: <Settings className="w-4 h-4 text-ink-muted" />,
         action: () => {
           onOpenSettings?.();
           onClose();
@@ -279,7 +279,7 @@ export const CommandPaletteModal: React.FC<{
         type: "settings",
         title: "Open Benchmark Gap Analyzer",
         subtitle: "Measure code completion throughput and quality",
-        icon: <Zap className="w-4 h-4 text-amber-400" />,
+        icon: <Zap className="w-4 h-4 text-warning" />,
         action: () => {
           setBenchmarkModalOpen(true);
           onClose();
@@ -291,7 +291,7 @@ export const CommandPaletteModal: React.FC<{
         type: "settings",
         title: "Specialist AI Skills Marketplace",
         subtitle: "Website builder, video editing, and workflow tools",
-        icon: <Sparkles className="w-4 h-4 text-purple-400" />,
+        icon: <Sparkle className="w-4 h-4 text-reason" />,
         action: () => {
           setSkillsModalOpen(true);
           onClose();
@@ -303,7 +303,7 @@ export const CommandPaletteModal: React.FC<{
         type: "settings",
         title: "Purge Unified VRAM & Memory Cache",
         subtitle: "Release Apple Silicon GPU memory buffers",
-        icon: <Zap className="w-4 h-4 text-rose-400" />,
+        icon: <Zap className="w-4 h-4 text-danger" />,
         action: () => {
           purgeVRAM();
           onClose();
@@ -413,23 +413,26 @@ export const CommandPaletteModal: React.FC<{
 
   return (
     <div className="fixed inset-0 z-50 flex items-start justify-center pt-16 sm:pt-24 bg-black/75 backdrop-blur-md p-3 select-none font-sans animate-in fade-in duration-100">
-      <div className="w-full max-w-xl bg-[#131317] border border-white/10 rounded-2xl shadow-[0_30px_90px_rgba(0,0,0,0.9)] overflow-hidden flex flex-col">
+      <div className="lit lit-inner relative w-full max-w-xl bg-surface-sunken rounded-2xl shadow-[0_30px_90px_rgba(0,0,0,0.9)] overflow-hidden flex flex-col">
+        <div className="absolute top-3 right-3 z-20">
+          <MacCloseButton onClose={onClose} size={14} />
+        </div>
         {/* ── Top Search Input Header ─────────────────────────────────────── */}
-        <div className="flex items-center px-4 py-3 bg-[#0e0e12] border-b border-white/5 gap-3">
-          <Search className="w-4 h-4 text-[#FF6C37] flex-shrink-0" />
+        <div className="flex items-center px-4 py-3 bg-surface-sunken border-b border-edge-chrome gap-3">
+          <Search className="w-4 h-4 text-accent flex-shrink-0" />
           <input
             ref={inputRef}
             type="text"
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             placeholder="Search agents, Canvas, files, actions..."
-            className="w-full bg-transparent text-sm text-white placeholder:text-gray-500 outline-none font-sans"
+            className="w-full bg-transparent text-sm text-ink-bright placeholder:text-ink-placeholder outline-none font-sans"
             spellCheck={false}
           />
           {query && (
             <button
               onClick={() => setQuery("")}
-              className="p-1 rounded text-gray-500 hover:text-white"
+              className="p-1 rounded text-ink-placeholder hover:text-ink-high"
             >
               <X size={13} />
             </button>
@@ -437,16 +440,12 @@ export const CommandPaletteModal: React.FC<{
         </div>
 
         {/* ── Category Filter Pills Row ──────────────────────────────────── */}
-        <div className="flex items-center gap-1.5 px-4 py-2 bg-[#0f0f13] border-b border-white/5 overflow-x-auto text-xs">
+        <div className="flex items-center gap-1.5 px-4 py-2 bg-frame-mid border-b border-edge-chrome overflow-x-auto text-xs">
           {filterTabs.map((tab) => (
             <button
               key={tab.id}
               onClick={() => setActiveFilter(tab.id)}
-              className={`px-3 py-1 rounded-lg font-medium transition-all ${
-                activeFilter === tab.id
-                  ? "bg-[#23232a] text-white shadow-sm font-semibold border border-white/10"
-                  : "text-gray-400 hover:text-white hover:bg-white/5"
-              }`}
+              className={`lit lit-inner px-3 py-1 rounded-lg font-medium transition-all ${ activeFilter === tab.id ? "bg-surface-hover text-ink-bright shadow-sm font-semibold " : "text-ink-muted hover:text-ink-high hover:bg-surface-chip" }`}
             >
               {tab.label}
             </button>
@@ -456,14 +455,14 @@ export const CommandPaletteModal: React.FC<{
         {/* ── Results List with Grouped Categories ───────────────────────── */}
         <div ref={listRef} className="max-h-96 overflow-y-auto p-2 space-y-3">
           {filteredItems.length === 0 ? (
-            <div className="p-10 text-center text-gray-500 text-xs font-mono">
+            <div className="p-10 text-center text-ink-placeholder text-xs font-mono">
               No matching agents, files, or commands found.
             </div>
           ) : (
             Array.from(groupedItems.entries()).map(([category, items]) => (
               <div key={category} className="space-y-0.5">
                 {/* Category Header */}
-                <div className="px-3 py-1 text-3xs font-semibold text-gray-500 uppercase tracking-wider">
+                <div className="px-3 py-1 text-3xs font-semibold text-ink-placeholder uppercase tracking-wider">
                   {category}
                 </div>
 
@@ -477,21 +476,17 @@ export const CommandPaletteModal: React.FC<{
                       key={item.id}
                       onClick={() => void item.action()}
                       onMouseEnter={() => setSelectedIndex(currentIndex)}
-                      className={`flex items-center justify-between px-3 py-2 rounded-xl cursor-pointer transition-all ${
-                        isSelected
-                          ? "bg-[#222228] border border-white/10 text-white shadow-sm"
-                          : "text-gray-300 hover:bg-white/5 border border-transparent"
-                      }`}
+                      className={`lit lit-inner flex items-center justify-between px-3 py-2 rounded-xl cursor-pointer transition-all ${ isSelected ? "bg-surface-hover text-ink-bright shadow-sm" : "text-ink-prose hover:bg-surface-chip border border-transparent" }`}
                     >
                       {/* Left: Icon & Title */}
                       <div className="flex items-center gap-3 truncate">
                         <div className="flex-shrink-0">{item.icon}</div>
                         <div className="flex flex-col truncate">
-                          <span className="font-medium text-xs truncate text-gray-200">
+                          <span className="font-medium text-xs truncate text-ink-high">
                             {item.title}
                           </span>
                           {item.subtitle && (
-                            <span className="text-3xs text-gray-500 font-mono truncate">
+                            <span className="text-3xs text-ink-placeholder font-mono truncate">
                               {item.subtitle}
                             </span>
                           )}
@@ -501,17 +496,17 @@ export const CommandPaletteModal: React.FC<{
                       {/* Right: Badge / Keyboard Shortcut */}
                       <div className="flex items-center gap-2 flex-shrink-0">
                         {item.badge && (
-                          <span className="text-3xs font-mono text-gray-500 bg-white/5 px-2 py-0.5 rounded border border-white/5">
+                          <span className="text-3xs font-mono text-ink-placeholder bg-surface-chip px-2 py-0.5 rounded border border-edge-chrome">
                             {item.badge}
                           </span>
                         )}
                         {item.shortcut && (
-                          <span className="text-3xs font-mono text-gray-400 bg-white/5 px-2 py-0.5 rounded border border-white/10">
+                          <span className="text-3xs font-mono text-ink-muted bg-surface-chip px-2 py-0.5 rounded border border-edge">
                             {item.shortcut}
                           </span>
                         )}
                         {isSelected && !item.shortcut && !item.badge && (
-                          <CornerDownLeft className="w-3.5 h-3.5 text-[#FF6C37]" />
+                          <CornerDownLeft className="w-3.5 h-3.5 text-accent" />
                         )}
                       </div>
                     </div>
@@ -523,11 +518,11 @@ export const CommandPaletteModal: React.FC<{
         </div>
 
         {/* ── Footer Navigation Helper ──────────────────────────────────── */}
-        <footer className="px-4 py-2 bg-[#0a0a0d] border-t border-white/5 flex items-center justify-between text-3xs text-gray-500 font-mono">
+        <footer className="px-4 py-2 bg-frame-bot border-t border-edge-chrome flex items-center justify-between text-3xs text-ink-placeholder font-mono">
           <div className="flex items-center gap-3">
-            <span><strong className="text-gray-400">↑↓</strong> Select</span>
-            <span><strong className="text-gray-400">↵</strong> Open</span>
-            <span><strong className="text-gray-400">Tab</strong> Change Filter</span>
+            <span><strong className="text-ink-muted">↑↓</strong> Select</span>
+            <span><strong className="text-ink-muted">↵</strong> Open</span>
+            <span><strong className="text-ink-muted">Tab</strong> Change Filter</span>
           </div>
           <span>Esc to Close</span>
         </footer>

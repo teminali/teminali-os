@@ -14,3 +14,7 @@ coverage/
 *.tmp
 outputs/
 benchmark-results/
+
+# The compiled pointer helper. Built by `npm run build:pointer` from the Swift
+# source beside it; an unsigned Mach-O in git is one nobody can audit.
+studio/native/macos/bin/

@@ -1,14 +1,15 @@
 {
-  "name": "@teminali/studio",
-  "productName": "Teminali Studio",
-  "version": "1.0.0",
-  "description": "Teminali Studio — Autonomous AI Code Studio for full-stack, design-system-first development",
+  "name": "@teminali/code",
+  "productName": "Teminali Code",
+  "version": "1.1.0",
+  "description": "Teminali Code \u2014 Autonomous AI Code Studio for full-stack, design-system-first development",
   "private": true,
   "type": "module",
   "scripts": {
     "dev": "vite",
     "dev:full": "concurrently -k \"node server/api-server.js\" \"vite --port 3000 --host\"",
     "build": "tsc && vite build",
+    "build:pointer": "node scripts/build-pointer-helper.mjs",
     "typecheck": "tsc --noEmit",
     "test": "node --test server/gateway.test.js agent-runtime/runtime.test.js tests/*.test.mjs performance-runtime/metrics.test.js mcp-runtime/mcp-runtime.test.mjs visual-runtime/tests/visual-runtime.test.mjs quality-runtime/tests/orchestrator.test.mjs",
     "test:gateway": "node --test server/gateway.test.js",
@@ -24,7 +25,8 @@
     "package:win": "npm run build && electron-builder --win --x64",
     "package:linux": "npm run build && electron-builder --linux --x64",
     "package:all": "npm run build && electron-builder -mwl",
-    "dist": "npm run build && electron-builder"
+    "dist": "npm run build && electron-builder",
+    "assistant:doctor": "node scripts/assistant-doctor.mjs"
   },
   "dependencies": {
     "@monaco-editor/react": "^4.7.0",

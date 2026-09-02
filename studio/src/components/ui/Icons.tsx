@@ -2,9 +2,9 @@ import React from "react";
 
 export const FileIconTsx: React.FC<{ className?: string }> = ({ className = "w-3.5 h-3.5" }) => (
   <svg className={className} viewBox="0 0 16 16" fill="none">
-    <rect width="16" height="16" fill="#0284c7" fillOpacity="0.2" />
-    <path d="M4 4h8v8H4V4z" fill="#0284c7" fillOpacity="0.4" />
-    <text x="8" y="11.5" textAnchor="middle" fill="#38bdf8" fontSize="7.5" fontWeight="900" fontFamily="monospace">TS</text>
+    <rect width="16" height="16" fill="var(--accent-dim)" fillOpacity="0.2" />
+    <path d="M4 4h8v8H4V4z" fill="var(--accent-dim)" fillOpacity="0.4" />
+    <text x="8" y="11.5" textAnchor="middle" fill="var(--accent)" fontSize="7.5" fontWeight="900" fontFamily="monospace">TS</text>
   </svg>
 );
 
@@ -53,8 +53,8 @@ export const FolderIconDist: React.FC<{ className?: string }> = ({ className = "
 
 export const FolderIconSrc: React.FC<{ className?: string }> = ({ className = "w-3.5 h-3.5" }) => (
   <svg className={className} viewBox="0 0 16 16" fill="none">
-    <path d="M1 3h5l2 2h7v9H1V3z" fill="#0284c7" fillOpacity="0.3" stroke="#38bdf8" strokeWidth="1" />
-    <path d="M6 7l2 2-2 2M10 11l-2-2 2-2" stroke="#38bdf8" strokeWidth="1" strokeLinecap="square" />
+    <path d="M1 3h5l2 2h7v9H1V3z" fill="var(--accent-dim)" fillOpacity="0.3" stroke="var(--accent)" strokeWidth="1" />
+    <path d="M6 7l2 2-2 2M10 11l-2-2 2-2" stroke="var(--accent)" strokeWidth="1" strokeLinecap="square" />
   </svg>
 );
 

@@ -1,5 +1,8 @@
 import React, { useState } from "react";
-import { ChevronDown, ChevronRight, File, Folder, FolderOpen, LoaderCircle } from "lucide-react";
+import {
+  Braces, ChevronDown, ChevronRight, Code, File, FileCode, FileCog, FileTerminal, FileText,
+  Folder, FolderOpen, GitBranch, Hash, LoaderCircle, Package,
+} from "lucide-react";
 import type { FileItem } from "../../types";
 import { useStudioStore } from "../../store/studioStore";
 import { WorkspaceService } from "../../services/workspaceService";
@@ -15,53 +18,56 @@ function languageFor(name: string) {
   return languages[extension || ""] || "plaintext";
 }
 
+/**
+ * A file's glyph, tinted in its language colour.
+ *
+ * This used to render a filled text chip — a 14px square holding "npm", "PY",
+ * "{}" and so on. Two things were wrong with it. The chips were a different
+ * width on every row, because a flex item's `min-width: auto` lets its content
+ * override an explicit `w-3.5`, so each label pushed its own box out by however
+ * wide that label happened to be; the result was a ragged column of coloured
+ * bars. And a filled chip is not what an editor does: Cursor, like VS Code
+ * under it, draws a monochrome glyph tinted in the language's brand colour and
+ * puts no background behind it, so the tree reads as a list of files rather
+ * than as a stack of labels.
+ *
+ * A `size`d lucide icon has an intrinsic width, so the alignment problem cannot
+ * come back. The hexes here are third-party brand marks, which DESIGN.md §2
+ * exempts from the token rule — they identify someone else's language, and are
+ * not ours to re-theme.
+ */
+const LANG = {
+  ts: "#3178c6", js: "#f7df1e", json: "#cbcb41", css: "#1572b6", html: "#e44d26",
+  md: "#519aba", py: "#3776ab", rs: "#dea584", sh: "#4eaa25", npm: "#cb3837",
+  git: "#f05032", folder: "#dcb67a",
+} as const;
+
 export const FileIcon: React.FC<{ name: string; isDirectory?: boolean; isOpen?: boolean }> = ({ name, isDirectory, isOpen }) => {
-  if (isDirectory) {
-    return isOpen 
-      ? <FolderOpen size={15} className="text-[#dcb67a] flex-shrink-0" />
-      : <Folder size={15} className="text-[#dcb67a] flex-shrink-0" />;
-  }
+  const Glyph = (icon: React.ElementType, color: string) =>
+    React.createElement(icon, { size: 15, strokeWidth: 1.7, className: "shrink-0", style: { color } });
+
+  if (isDirectory) return Glyph(isOpen ? FolderOpen : Folder, LANG.folder);
 
   const ext = name.split(".").pop()?.toLowerCase() || "";
   const lowerName = name.toLowerCase();
 
-  if (lowerName === "package.json") {
-    return <span className="w-3.5 h-3.5 rounded-sm bg-[#cb3837]/20 text-[#cb3837] text-[9px] font-bold flex items-center justify-center font-mono flex-shrink-0">npm</span>;
-  }
-  if (lowerName === "tsconfig.json") {
-    return <span className="w-3.5 h-3.5 rounded-sm bg-[#3178c6]/20 text-[#3178c6] text-[9px] font-bold flex items-center justify-center font-mono flex-shrink-0">TS</span>;
-  }
-  if (lowerName.startsWith(".git")) {
-    return <span className="w-3.5 h-3.5 rounded-sm bg-[#f05032]/20 text-[#f05032] text-[9px] font-bold flex items-center justify-center font-mono flex-shrink-0">git</span>;
-  }
+  if (lowerName === "package.json" || lowerName === "package-lock.json") return Glyph(Package, LANG.npm);
+  if (lowerName === "tsconfig.json") return Glyph(FileCog, LANG.ts);
+  if (lowerName.startsWith(".git")) return Glyph(GitBranch, LANG.git);
 
   switch (ext) {
-    case "ts":
-    case "tsx":
-      return <span className="w-3.5 h-3.5 rounded-sm bg-[#3178c6]/20 text-[#3178c6] text-[9px] font-bold flex items-center justify-center font-mono flex-shrink-0">TS</span>;
-    case "js":
-    case "jsx":
-    case "mjs":
-      return <span className="w-3.5 h-3.5 rounded-sm bg-[#f7df1e]/20 text-[#e5a00d] text-[9px] font-bold flex items-center justify-center font-mono flex-shrink-0">JS</span>;
-    case "json":
-      return <span className="w-3.5 h-3.5 rounded-sm bg-[#cbcb41]/20 text-[#cbcb41] text-[9px] font-bold flex items-center justify-center font-mono flex-shrink-0">{"{}"}</span>;
-    case "css":
-    case "scss":
-      return <span className="w-3.5 h-3.5 rounded-sm bg-[#42a5f5]/20 text-[#42a5f5] text-[9px] font-bold flex items-center justify-center font-mono flex-shrink-0">#</span>;
-    case "html":
-    case "svg":
-      return <span className="w-3.5 h-3.5 rounded-sm bg-[#e44d26]/20 text-[#e44d26] text-[9px] font-bold flex items-center justify-center font-mono flex-shrink-0">&lt;&gt;</span>;
-    case "md":
-      return <span className="w-3.5 h-3.5 rounded-sm bg-[#61afef]/20 text-[#61afef] text-[9px] font-bold flex items-center justify-center font-mono flex-shrink-0">M↓</span>;
-    case "py":
-      return <span className="w-3.5 h-3.5 rounded-sm bg-[#3776ab]/20 text-[#3776ab] text-[9px] font-bold flex items-center justify-center font-mono flex-shrink-0">PY</span>;
-    case "rs":
-      return <span className="w-3.5 h-3.5 rounded-sm bg-[#dea584]/20 text-[#dea584] text-[9px] font-bold flex items-center justify-center font-mono flex-shrink-0">RS</span>;
-    case "sh":
-    case "zsh":
-      return <span className="w-3.5 h-3.5 rounded-sm bg-[#4eaa25]/20 text-[#4eaa25] text-[9px] font-bold flex items-center justify-center font-mono flex-shrink-0">$_</span>;
+    case "ts": case "tsx":            return Glyph(FileCode, LANG.ts);
+    case "js": case "jsx": case "mjs": case "cjs": return Glyph(FileCode, LANG.js);
+    case "json":                      return Glyph(Braces, LANG.json);
+    case "yaml": case "yml": case "toml": return Glyph(FileCog, LANG.json);
+    case "css": case "scss":          return Glyph(Hash, LANG.css);
+    case "html": case "htm": case "svg": case "xml": return Glyph(Code, LANG.html);
+    case "md":                        return Glyph(FileText, LANG.md);
+    case "py":                        return Glyph(FileCode, LANG.py);
+    case "rs":                        return Glyph(FileCode, LANG.rs);
+    case "sh": case "zsh": case "bash": return Glyph(FileTerminal, LANG.sh);
     default:
-      return <File size={14} className="text-[#858585] flex-shrink-0" />;
+      return <File size={15} strokeWidth={1.7} className="text-ink-placeholder shrink-0" />;
   }
 };
 
@@ -117,7 +123,7 @@ export const FileTreeItem: React.FC<{
         ) : <span className="workspace-tree-spacer" />}
         <FileIcon name={item.name} isDirectory={isDirectory} isOpen={isOpen} />
         <span className="truncate">{item.name}</span>
-        {!isDirectory && typeof item.size === "number" && <small className="text-[#666666]">{item.size < 1024 ? `${item.size} B` : `${Math.ceil(item.size / 1024)} KB`}</small>}
+        {!isDirectory && typeof item.size === "number" && <small className="text-ink-ghost">{item.size < 1024 ? `${item.size} B` : `${Math.ceil(item.size / 1024)} KB`}</small>}
       </button>
       {isDirectory && isOpen && matchingChildren?.map((child) => (
         <FileTreeItem key={child.id} item={child} depth={depth + 1} filter={filter} onError={onError} />

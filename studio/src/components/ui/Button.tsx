@@ -15,24 +15,24 @@ export interface ButtonProps extends React.ButtonHTMLAttributes<HTMLButtonElemen
 
 const variantStyles: Record<ButtonVariant, string> = {
   primary:
-    "bg-[#FF6C37] text-white font-semibold hover:bg-[#ff7d4d] border border-transparent shadow-sm active:scale-[0.98] disabled:opacity-40 disabled:bg-gray-800 disabled:text-gray-500",
+    "bg-accent text-ink-high font-semibold hover:bg-accent-hover border border-transparent shadow-sm active:scale-[0.98] disabled:opacity-40 disabled:bg-surface-chip disabled:text-ink-placeholder",
   secondary:
-    "bg-[#16161a] text-gray-200 hover:text-white hover:bg-[#1f1f25] border border-white/10 hover:border-white/20 shadow-sm active:scale-[0.98] disabled:opacity-40",
+    "bg-surface text-ink-prose hover:text-ink-high hover:bg-surface-hover border border-edge hover:border-edge-strong shadow-sm active:scale-[0.98] disabled:opacity-40",
   ghost:
-    "bg-transparent text-gray-400 hover:text-white hover:bg-white/5 border border-transparent disabled:opacity-30",
+    "bg-transparent text-ink-muted hover:text-ink-high hover:bg-surface-chip border border-transparent disabled:opacity-30",
   danger:
-    "bg-rose-500/15 text-rose-300 hover:bg-rose-500/25 border border-rose-500/30 hover:border-rose-500/50 shadow-sm active:scale-[0.98] disabled:opacity-40",
+    "bg-danger/15 text-danger hover:bg-danger/25 border border-danger/30 hover:border-danger/50 shadow-sm active:scale-[0.98] disabled:opacity-40",
   tab:
-    "bg-transparent text-gray-400 hover:text-white hover:bg-white/5 border border-transparent rounded-lg font-medium",
+    "bg-transparent text-ink-muted hover:text-ink-high hover:bg-surface-chip border border-transparent rounded-lg font-medium",
   pill:
-    "rounded-full bg-white/5 text-gray-300 hover:text-white hover:bg-white/10 border border-white/10 text-3xs font-mono transition-all",
+    "rounded-full bg-surface-chip text-ink-dim hover:text-ink-high hover:bg-surface-hover border border-edge text-3xs font-mono transition-all",
 };
 
 const activeStyles: Partial<Record<ButtonVariant, string>> = {
-  tab: "bg-[#FF6C37]/15 text-[#FF6C37] border border-[#FF6C37]/30 shadow-sm font-semibold",
-  secondary: "bg-[#FF6C37]/15 text-[#FF6C37] border-[#FF6C37]/40 shadow-sm font-semibold",
-  ghost: "bg-white/10 text-white font-medium",
-  pill: "bg-[#FF6C37]/20 text-[#FF6C37] border-[#FF6C37]/40 font-bold",
+  tab: "bg-accent/15 text-accent border border-accent/30 shadow-sm font-semibold",
+  secondary: "bg-accent/15 text-accent border-accent/40 shadow-sm font-semibold",
+  ghost: "bg-surface-hover text-ink-high font-medium",
+  pill: "bg-accent/20 text-accent border-accent/40 font-bold",
 };
 
 const sizeStyles: Record<ButtonSize, string> = {
@@ -76,7 +76,7 @@ export const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
         )}
         {children && <span>{children}</span>}
         {shortcut && (
-          <span className="text-4xs font-mono text-gray-400 bg-white/5 px-1 py-0.2 rounded border border-white/10 ml-auto">
+          <span className="text-4xs font-mono text-ink-muted bg-surface-chip px-1 py-0.2 rounded border border-edge ml-auto">
             {shortcut}
           </span>
         )}

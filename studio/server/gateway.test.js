@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdir, mkdtemp, readFile, readdir, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, readdir, realpath, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -513,4 +513,126 @@ test("persistent audit log rotates and stores only its allowlisted metadata", as
   assert.ok(files.some((file) => file.startsWith("gateway-audit.jsonl.")));
   const contents = await Promise.all(files.map((file) => readFile(join(directory, file), "utf8")));
   assert.equal(contents.join("").includes("must-never-persist"), false);
+});
+
+test("terminal execution requires auth, runs for real, and streams a true exit status", async (t) => {
+  const workspaceRoot = await mkdtemp(join(tmpdir(), "frontier-terminal-route-"));
+  await writeFile(join(workspaceRoot, "hello.txt"), "from disk\n");
+  const { gateway, baseUrl } = await startGateway({ config: { workspaceRoot } });
+  t.after(() => gateway.close());
+
+  const unauthenticated = await fetch(`${baseUrl}/api/terminal/exec`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ command: "cat hello.txt" }),
+  });
+  assert.equal(unauthenticated.status, 401);
+  assert.equal((await unauthenticated.json()).error.code, "AUTH_REQUIRED");
+
+  const response = await fetch(`${baseUrl}/api/terminal/exec`, {
+    method: "POST",
+    headers: authHeaders(),
+    body: JSON.stringify({ command: "cat hello.txt" }),
+  });
+  assert.equal(response.status, 200);
+  assert.match(response.headers.get("content-type"), /application\/x-ndjson/);
+
+  const events = (await response.text()).trim().split("\n").map((line) => JSON.parse(line));
+  const stdout = events.filter((event) => event.type === "stdout").map((event) => event.data).join("");
+  const exit = events.at(-1);
+  assert.equal(stdout, "from disk\n");
+  assert.equal(exit.type, "exit");
+  assert.equal(exit.code, 0);
+
+  const failing = await fetch(`${baseUrl}/api/terminal/exec`, {
+    method: "POST",
+    headers: authHeaders(),
+    body: JSON.stringify({ command: "cat nope.txt" }),
+  });
+  const failingEvents = (await failing.text()).trim().split("\n").map((line) => JSON.parse(line));
+  assert.notEqual(failingEvents.at(-1).code, 0);
+
+  const escaped = await fetch(`${baseUrl}/api/terminal/exec`, {
+    method: "POST",
+    headers: authHeaders(),
+    body: JSON.stringify({ command: "pwd", cwd: "../../.." }),
+  });
+  const escapedEvents = (await escaped.text()).trim().split("\n").map((line) => JSON.parse(line));
+  assert.equal(escapedEvents.at(-1).reason, "TERMINAL_CWD_ESCAPE");
+
+  const empty = await fetch(`${baseUrl}/api/terminal/exec`, {
+    method: "POST",
+    headers: authHeaders(),
+    body: JSON.stringify({ command: "   " }),
+  });
+  assert.equal(empty.status, 400);
+  assert.equal((await empty.json()).error.code, "TERMINAL_COMMAND_REQUIRED");
+});
+
+test("projects can be opened, remembered, and rebound the workspace root", async (t) => {
+  // realpath: the gateway resolves symlinks when binding a root (on macOS the
+  // temp dir is /var -> /private/var), so compare against the resolved path.
+  const projectA = await realpath(await mkdtemp(join(tmpdir(), "frontier-projA-")));
+  const projectB = await realpath(await mkdtemp(join(tmpdir(), "frontier-projB-")));
+  await writeFile(join(projectA, "a.txt"), "A\n");
+  await writeFile(join(projectB, "b.txt"), "B\n");
+  const store = join(await mkdtemp(join(tmpdir(), "frontier-store-")), "recent.json");
+
+  const { gateway, baseUrl } = await startGateway({ config: { workspaceRoot: projectA, projectsStorePath: store } });
+  t.after(() => gateway.close());
+
+  const initial = await (await fetch(`${baseUrl}/api/workspace/projects`, { headers: authHeaders() })).json();
+  assert.equal(initial.current.path, projectA);
+  assert.deepEqual(initial.recent, []);
+
+  // Opening B rebinds the root: the tree and the terminal both follow it.
+  const opened = await fetch(`${baseUrl}/api/workspace/open`, {
+    method: "POST", headers: authHeaders(), body: JSON.stringify({ path: projectB }),
+  });
+  assert.equal(opened.status, 200);
+  const payload = await opened.json();
+  assert.equal(payload.current.path, projectB);
+  assert.equal(payload.recent[0].path, projectB);
+
+  const tree = await (await fetch(`${baseUrl}/api/workspace/tree`, { headers: authHeaders() })).json();
+  assert.equal(tree.files.some((file) => file.name === "b.txt"), true);
+  assert.equal(tree.files.some((file) => file.name === "a.txt"), false);
+
+  const pwd = await fetch(`${baseUrl}/api/terminal/exec`, {
+    method: "POST", headers: authHeaders(), body: JSON.stringify({ command: "ls" }),
+  });
+  const events = (await pwd.text()).trim().split("\n").map((line) => JSON.parse(line));
+  assert.match(events.filter((e) => e.type === "stdout").map((e) => e.data).join(""), /b\.txt/);
+
+  // Recent list persists and de-duplicates, newest first.
+  await fetch(`${baseUrl}/api/workspace/open`, { method: "POST", headers: authHeaders(), body: JSON.stringify({ path: projectA }) });
+  const again = await fetch(`${baseUrl}/api/workspace/open`, { method: "POST", headers: authHeaders(), body: JSON.stringify({ path: projectB }) });
+  const recent = (await again.json()).recent;
+  assert.equal(recent[0].path, projectB);
+  assert.equal(recent.filter((entry) => entry.path === projectB).length, 1);
+
+  const forgotten = await fetch(`${baseUrl}/api/workspace/projects/forget`, {
+    method: "POST", headers: authHeaders(), body: JSON.stringify({ path: projectA }),
+  });
+  assert.equal((await forgotten.json()).recent.some((entry) => entry.path === projectA), false);
+});
+
+test("an unopenable or over-broad project root is refused", async (t) => {
+  const root = await mkdtemp(join(tmpdir(), "frontier-projC-"));
+  await writeFile(join(root, "file.txt"), "x\n");
+  const store = join(root, "recent.json");
+  const { gateway, baseUrl } = await startGateway({ config: { workspaceRoot: root, projectsStorePath: store } });
+  t.after(() => gateway.close());
+
+  const open = (path) => fetch(`${baseUrl}/api/workspace/open`, {
+    method: "POST", headers: authHeaders(), body: JSON.stringify({ path }),
+  });
+
+  assert.equal((await open(join(root, "does-not-exist"))).status, 404);
+  assert.equal((await open(join(root, "file.txt"))).status, 400);
+  // The filesystem root would expose the whole machine to workspace routes.
+  const broad = await open("/");
+  assert.equal(broad.status, 400);
+  assert.equal((await broad.json()).error.code, "PROJECT_ROOT_TOO_BROAD");
+  assert.equal((await open("")).status, 400);
 });

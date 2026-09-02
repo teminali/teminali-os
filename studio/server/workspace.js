@@ -131,3 +131,110 @@ export async function writeWorkspaceFile(root, requestedPath, content, options =
 
   return readWorkspaceFile(workspaceRoot, requestedPath, { maxFileBytes });
 }
+
+/**
+ * Search the workspace for a literal string or a regular expression.
+ *
+ * This exists because the studio's search view had been searching only the
+ * files already open in the editor, while calling itself global search. A
+ * search that silently excludes everything you have not opened is worse than no
+ * search: it answers "no matches" for a string that is right there on disk.
+ *
+ * Walks the same tree the explorer does, honouring the same ignore list and the
+ * same text-extension allowlist, so the two views never disagree about what the
+ * workspace contains. Bounded on every axis — files scanned, matches returned,
+ * bytes read per file — because an unbounded grep over a monorepo will hang the
+ * gateway rather than fail it.
+ */
+export async function searchWorkspace(root, query, options = {}) {
+  const {
+    caseSensitive = false,
+    regex = false,
+    wholeWord = false,
+    maxMatches = 500,
+    maxFiles = 3_000,
+    maxFileBytes = 2 * 1024 * 1024,
+  } = options;
+
+  if (typeof query !== "string" || query.trim().length === 0) throw new Error("SEARCH_QUERY_REQUIRED");
+  if (query.length > 1_000) throw new Error("SEARCH_QUERY_TOO_LONG");
+
+  let matcher;
+  try {
+    const source = regex ? query : query.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const bounded = wholeWord ? `\\b(?:${source})\\b` : source;
+    matcher = new RegExp(bounded, caseSensitive ? "g" : "gi");
+  } catch {
+    // An invalid regex is the operator mid-typing, not a server fault.
+    throw new Error("SEARCH_PATTERN_INVALID");
+  }
+
+  const workspaceRoot = resolve(root);
+  const files = [];
+  let scanned = 0;
+  let matches = 0;
+  let truncated = false;
+
+  async function walk(directory, depth) {
+    if (depth > WORKSPACE_LIMITS.maxDepth || scanned >= maxFiles || matches >= maxMatches) return;
+    let entries;
+    try {
+      entries = await readdir(directory, { withFileTypes: true });
+    } catch {
+      return;
+    }
+    for (const entry of entries) {
+      if (scanned >= maxFiles || matches >= maxMatches) {
+        truncated = true;
+        return;
+      }
+      if (DEFAULT_IGNORES.has(entry.name) || entry.name.startsWith(".")) continue;
+      const absolute = resolve(directory, entry.name);
+      if (entry.isDirectory()) {
+        await walk(absolute, depth + 1);
+        continue;
+      }
+      if (!entry.isFile() || !TEXT_EXTENSIONS.has(extname(entry.name).toLowerCase())) continue;
+
+      let info;
+      try {
+        info = await lstat(absolute);
+      } catch {
+        continue;
+      }
+      if (info.size > maxFileBytes) continue;
+      scanned += 1;
+
+      let text;
+      try {
+        text = await readFile(absolute, "utf8");
+      } catch {
+        continue;
+      }
+      // Cheap reject before splitting a whole file into lines.
+      matcher.lastIndex = 0;
+      if (!matcher.test(text)) continue;
+
+      const lines = text.split("\n");
+      const hits = [];
+      for (let index = 0; index < lines.length && matches < maxMatches; index += 1) {
+        const line = lines[index];
+        matcher.lastIndex = 0;
+        let hit;
+        while ((hit = matcher.exec(line)) !== null) {
+          hits.push({ line: index + 1, column: hit.index + 1, text: line.slice(0, 400), match: hit[0] });
+          matches += 1;
+          if (hit[0].length === 0) break; // a zero-width pattern would spin forever
+          if (matches >= maxMatches) {
+            truncated = true;
+            break;
+          }
+        }
+      }
+      if (hits.length > 0) files.push({ path: publicPath(workspaceRoot, absolute), name: basename(absolute), matches: hits });
+    }
+  }
+
+  await walk(workspaceRoot, 0);
+  return { query, files, totalMatches: matches, filesScanned: scanned, truncated };
+}

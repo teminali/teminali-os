@@ -1,0 +1,257 @@
+/* =============================================================================
+   TEMINALI DESIGN SYSTEM — TOKEN SHEET
+   Cursor Obsidian Dark, measured.
+
+   Every value below was sampled pixel-for-pixel out of Cursor's own agent
+   window (macOS, 2x retina, four reference captures) rather than eyeballed.
+   Where a comment says "measured", that hex came off a screenshot; the rest
+   are interpolations that keep a ramp monotonic between measured stops.
+
+   The governing observation: Cursor is *achromatic*. Five flat greys carry the
+   whole interface — #151515 canvas, #181818 sidebar, #212121 raised, #262626
+   chip, #313131/#3a3a3a hairline — and colour appears exactly once, on the
+   Update pill. No gradients, no edge lighting, no glow, no tinted surfaces.
+   Depth comes from a flat 1px border one step lighter than the fill, and from
+   nothing else. Resist the urge to add a highlight; that is the whole look.
+
+   This file is the ONLY place a raw hex, radius or duration may appear.
+   Everything else reads var(--*). See DESIGN.md §0.
+   ============================================================================= */
+
+:root {
+  /* ---------------------------------------------------------------------
+     GROUND — the app frame.
+
+     Cursor paints two flat planes and no gradient anywhere. The frame/rail/
+     panel triplets below are kept (components interpolate them into
+     `linear-gradient(...)` calls) but every stop within a triplet is the same
+     colour, so those gradients resolve to flat fills. That is deliberate: it
+     lets the shell stay gradient-free without every consumer being rewritten.
+     --------------------------------------------------------------------- */
+  --ground: #151515;                /* behind the window and under the canvas */
+
+  --frame-top: #151515;             /* window: flat, all three stops equal */
+  --frame-mid: #151515;
+  --frame-bot: #151515;
+
+  --rail-top: #181818;              /* left sidebar — measured */
+  --rail-mid: #181818;
+  --rail-bot: #181818;
+
+  --panel-top: #151515;             /* right panel — measured, no distinct fill */
+  --panel-mid: #151515;
+  --panel-bot: #151515;
+
+  /* ---------------------------------------------------------------------
+     SURFACES — raised planes, darkest to lightest.
+
+     Cursor inverts the usual convention: an inset card (the Getting Started
+     box) is *darker* than the sidebar it sits in, while a raised control (the
+     composer, a message bubble) is lighter than the canvas. Both read as
+     recessed/raised because the border does the work, not a gradient.
+     --------------------------------------------------------------------- */
+  --surface-sunken: #151515;        /* code blocks, getting-started card */
+  --surface: #212121;               /* composer, user bubble, inputs — measured */
+  --surface-raised: #262626;        /* buttons, +/chip circles — measured */
+  --surface-popover: #212121;       /* floating menus */
+  --surface-chip: #262626;          /* meta chips, inline code — measured */
+  --surface-control: #313131;       /* the +/mic discs inside a composer — measured */
+  --surface-hover: #242424;         /* hover on a sidebar row — measured */
+  --surface-active: #252525;        /* selected nav row — measured */
+  --surface-tab-active: #262626;    /* active panel tab, menu row hover */
+  --surface-skeleton: #262626;      /* canvas placeholder, strong */
+  --surface-skeleton-dim: #1e1e1e;  /* canvas placeholder, weak */
+
+  /* ---------------------------------------------------------------------
+     BORDERS — flat hairlines. This is Cursor's only depth cue.
+
+     Each step is the fill it sits on, lightened by roughly 0x10. A border is
+     never a gradient and never fades around a corner.
+     --------------------------------------------------------------------- */
+  --border-chrome: #282828;         /* sidebar/canvas divider — measured */
+  --border-subtle: #232323;         /* inner card rules */
+  --border: #262626;                /* table and card edge — measured */
+  --border-strong: #313131;         /* user bubble edge — measured */
+  --border-popover: #3a3a3a;        /* composer edge, popover edge — measured */
+
+  /* ---------------------------------------------------------------------
+     TEXT — a 10-step ramp. Pick by role, not by lightness.
+
+     Cursor runs a much shorter ramp than most dark UIs: body copy and headings
+     are the same #f0f0f0, and everything secondary drops straight to #b8b8b8.
+     There is no "slightly dimmer body text" tier — a thing is either what you
+     are reading or it is chrome.
+     --------------------------------------------------------------------- */
+  --text-bright: #f0f0f0;           /* headings — measured */
+  --text-strong: #f0f0f0;           /* active labels — measured */
+  --text-high: #f0f0f0;             /* filenames, primary button label */
+  --text: #ededed;                  /* default body on frame */
+  --text-body: #e0e0e0;             /* menu rows, list items */
+  --text-prose: #f0f0f0;            /* paragraphs in chat — measured, bright */
+  --text-code: #d4d4d4;             /* code, terminal output */
+  --text-dim: #c4c4c4;              /* secondary chrome */
+  --text-muted: #b8b8b8;            /* sidebar rows, icons, captions — measured */
+  --text-soft: #9f9f9f;             /* timestamps — measured */
+  --text-faint: #989898;            /* section labels — measured */
+  --text-placeholder: #6b6b6b;      /* input placeholders — measured */
+  --text-ghost: #6b6b6b;            /* empty-state copy */
+  --text-disabled: #5a5a5a;         /* line numbers, disabled glyphs */
+
+  /* ---------------------------------------------------------------------
+     ACCENT — achromatic.
+
+     Cursor has no brand accent in its chrome. What other systems paint in a
+     hue, Cursor paints in white: the send button is a white disc, an emphasised
+     glyph is simply brighter than its neighbours. So --accent here is a
+     near-white, and every `text-accent` / `bg-accent` in the app resolves to
+     that. The one true colour in the interface is --action, below.
+     --------------------------------------------------------------------- */
+  --accent: #e8e8e8;
+  --accent-hover: #ffffff;
+  --accent-dim: #9f9f9f;            /* chevrons, file-card glyphs */
+  --accent-code: #f0f0f0;           /* inline code text — measured */
+  --accent-code-bg: #262626;        /* inline code fill — measured */
+  --accent-code-border: #262626;    /* inline code edge — flush, no ring */
+  --accent-wash: transparent;       /* no floor glow in Cursor */
+  --accent-orb: transparent;        /* no empty-state orb in Cursor */
+
+  /* ---------------------------------------------------------------------
+     STATUS — never decorative; each one means one thing.
+
+     --action is the soft blue on the Update pill, the single chromatic moment
+     in the entire window. It is light, so it carries dark text: see
+     --action-ink. Do not reach for it as a general-purpose accent.
+     --------------------------------------------------------------------- */
+  --success: #65c466;               /* live, listening, exit 0 */
+  --info: #86aee4;                  /* links, hostnames */
+  --action: #86aee4;                /* the Update pill — measured */
+  --action-hover: #9dc0ea;
+  --action-ink: #151515;            /* dark text on the light action fill */
+  --warning: #f2ca44;
+  --danger: #ec6765;
+  /* Reasoning and plan mode. Cursor keeps this achromatic too — "the model is
+     thinking" is signalled by dimness and motion, not by a hue. */
+  --reason: #b8b8b8;
+  --info-orb: transparent;
+
+  /* ---------------------------------------------------------------------
+     DATA
+     One hue for magnitude, because the usage panel plots one series at a time
+     and a categorical palette has no job in an achromatic interface. It is a
+     step up in chroma from --action so a bar reads as data rather than as more
+     chrome; validated against the #151515 surface for chroma floor and a 3:1
+     contrast ratio rather than chosen by eye.
+     --------------------------------------------------------------------- */
+  --chart: #6aa2e8;
+  --chart-track: #212121;           /* the unfilled part of a bar — chrome, not data */
+
+  /* macOS traffic lights — measured off the window chrome */
+  --tl-close: #ec6765;
+  --tl-min: #f2ca44;
+  --tl-max: #65c466;
+
+  /* ---------------------------------------------------------------------
+     SYNTAX — Cursor's dark editor theme.
+     --------------------------------------------------------------------- */
+  --syn-keyword: #c586c0;
+  --syn-type: #4ec9b0;
+  --syn-string: #ce9178;
+  --syn-func: #dcdcaa;
+  --syn-attr: #9cdcfe;
+  --syn-tag: #569cd6;
+  --syn-comment: #6a9955;
+  --syn-plain: #d4d4d4;
+
+  /* ---------------------------------------------------------------------
+     TYPE — the system UI face, as Cursor uses it.
+
+     Cursor ships no custom UI font; it renders in the platform face, which is
+     what makes it feel like part of the OS rather than a web page in a window.
+     --------------------------------------------------------------------- */
+  --font-sans: -apple-system, BlinkMacSystemFont, "Inter", "Segoe UI", Roboto, "Helvetica Neue", sans-serif;
+  --font-mono: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
+
+  --text-3xs: 10px;   /* keycaps, badge text */
+  --text-2xs: 11px;   /* timestamps, counts */
+  --text-xs: 12px;    /* mono meta, tab labels */
+  --text-sm: 13px;    /* sidebar rows, chrome — measured */
+  --text-md: 14px;    /* chat body and headings — measured */
+  --text-lg: 16px;
+
+  /* ---------------------------------------------------------------------
+     RADII — measured off the reference.
+     --------------------------------------------------------------------- */
+  --r-xs: 4px;
+  --r-sm: 6px;        /* panel tabs */
+  --r-md: 8px;        /* sidebar rows, buttons, inputs — measured */
+  --r-lg: 10px;       /* chips, small cards */
+  --r-xl: 12px;       /* user bubble, tables, popovers — measured */
+  --r-2xl: 16px;      /* the tall composer — measured */
+  --r-full: 999px;    /* the follow-up composer and every pill */
+
+  /* ---------------------------------------------------------------------
+     STRUCTURE — the three-pane skeleton.
+     --------------------------------------------------------------------- */
+  --titlebar-h: 40px;               /* measured: canvas content starts at y41 */
+  --rail-w: 259px;                  /* measured, incl. its 1px divider */
+  --rail-w-min: 200px;
+  --rail-w-max: 480px;
+  --rail-w-collapsed: 0px;          /* Cursor's agent window has no icon rail */
+  --panel-w: 452px;
+  --panel-w-expanded: 736px;
+  --composer-max: 760px;            /* measured: the chat reading column */
+  /* Cursor gives the empty state a *narrower* composer than the conversation
+     one — 608 against 760. It reads as a place to start rather than as the
+     foot of a column that is not there yet, and it is the reason the empty
+     screen feels composed rather than merely centred. */
+  --composer-max-empty: 608px;      /* measured */
+  --control-disc: 24px;             /* the +/mic discs — measured, both variants */
+  --row-h: 30px;                    /* sidebar nav row — measured pitch 31 */
+  --row-h-lg: 32px;                 /* new chat, repo rows */
+  --control-h: 26px;                /* small pills */
+
+  /* ---------------------------------------------------------------------
+     EDGE LIGHTING — retired.
+
+     The previous system drew a masked gradient ring that was bright at the top
+     edge and faded around the corner, so a card read as a lit physical plane.
+     Cursor does the opposite: one flat colour, all four sides, no inner catch.
+     The variables survive because ~30 components consume them through the
+     `.lit` classes in index.css; collapsing every stop onto the same flat
+     border is what turns that whole system into a Cursor hairline at once.
+     --------------------------------------------------------------------- */
+  --lit-top: #313131;
+  --lit-mid: #313131;
+  --lit-bottom: #313131;
+  --lit-inner: none;                /* no inner highlight */
+
+  --lit-top-strong: #3a3a3a;
+  --lit-inner-strong: none;
+
+  /* Focus and active states brighten the same hairline rather than tinting it. */
+  --lit-accent-top: #4a4a4a;
+  --lit-accent-mid: #4a4a4a;
+
+  /* ---------------------------------------------------------------------
+     ELEVATION — Cursor floats things on shadow alone, with no lit edge.
+     --------------------------------------------------------------------- */
+  --shadow-popover: 0 12px 32px rgba(0, 0, 0, 0.55);
+  --shadow-modal: 0 24px 60px rgba(0, 0, 0, 0.6);
+  --shadow-lift: none;              /* flat surfaces do not cast a contact shadow */
+  --shadow-lift-lg: 0 8px 28px rgba(0, 0, 0, 0.35);
+  --inset-rail: none;
+  --inset-panel: none;
+
+  /* ---------------------------------------------------------------------
+     MOTION — one curve, three speeds.
+     --------------------------------------------------------------------- */
+  --ease: cubic-bezier(0.2, 0.7, 0.2, 1);
+  --dur-fast: 0.1s;
+  --dur: 0.15s;
+  --dur-slow: 0.2s;
+}
+
+/* Respect the OS setting. */
+@media (prefers-reduced-motion: reduce) {
+  :root { --dur-fast: 0s; --dur: 0s; --dur-slow: 0s; }
+}

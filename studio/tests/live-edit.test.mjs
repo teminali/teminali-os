@@ -40,3 +40,48 @@ test("live edit rejects unsafe and ambiguous inferred paths", () => {
     [],
   );
 });
+
+test("a multi-file scaffold answer with no path headers still reaches disk", () => {
+  // The exact shape a local model produced in the landing-page benchmark:
+  // three unlabelled fences, previously parsed to zero edits.
+  const answer = [
+    "Here is the page.",
+    "```html\n<!DOCTYPE html>\n<html></html>\n```",
+    "```css\nbody { margin: 0; }\n```",
+    "```js\nconsole.log('ready');\n```",
+  ].join("\n");
+
+  assert.deepEqual(
+    parseWorkspaceEdits(answer, { userPrompt: "Build a production-grade landing page for Teminali Nexus" }),
+    [
+      { path: "index.html", content: "<!DOCTYPE html>\n<html></html>\n", complete: true },
+      { path: "styles.css", content: "body { margin: 0; }\n", complete: true },
+      { path: "script.js", content: "console.log('ready');\n", complete: true },
+    ],
+  );
+});
+
+test("scaffold inference never guesses for repeated or unconventional languages", () => {
+  // Two css blocks: which one is styles.css is unknowable, so commit nothing.
+  assert.deepEqual(
+    parseWorkspaceEdits("```css\na{}\n```\n```css\nb{}\n```", { userPrompt: "build the page" }),
+    [],
+  );
+  // Python has no single conventional filename here.
+  assert.deepEqual(
+    parseWorkspaceEdits("```py\nprint(1)\n```", { userPrompt: "build a script" }),
+    [],
+  );
+  // No edit intent means an explanatory answer is never written to disk.
+  assert.deepEqual(
+    parseWorkspaceEdits("```html\n<p>demo</p>\n```", { userPrompt: "Explain how this markup works" }),
+    [],
+  );
+});
+
+test("an explicit path always wins over scaffold inference", () => {
+  assert.deepEqual(
+    parseWorkspaceEdits('```html path="public/landing.html"\n<main></main>\n```', { userPrompt: "build the landing page" }),
+    [{ path: "public/landing.html", content: "<main></main>\n", complete: true }],
+  );
+});

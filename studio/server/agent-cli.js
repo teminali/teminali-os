@@ -1,0 +1,588 @@
+/**
+ * Claude Code and Codex, run as themselves.
+ *
+ * These are not another provider behind the chat box. They are the two coding
+ * agents the operator already has installed, invoked as real processes in the
+ * real workspace, with their own auth, their own tools and their own session
+ * files. What this module does is translate their two very different event
+ * streams into one shape the studio can render, so a turn from either looks
+ * like a turn.
+ *
+ * Both are driven in headless mode, which is the only mode that emits a
+ * machine-readable stream:
+ *
+ *   claude -p <prompt> --output-format stream-json --verbose --include-partial-messages
+ *   codex exec --json --sandbox <mode> -C <cwd> <prompt>
+ *
+ * Neither is given a shell string. Arguments go across as an array, because a
+ * prompt is arbitrary operator text and a `;` in one must reach the agent as a
+ * semicolon rather than as a command separator.
+ *
+ * Two things were learned by running them rather than by reading about them,
+ * and both are load-bearing:
+ *
+ *   1. `claude --bare` forces `ANTHROPIC_API_KEY` auth and fails outright for a
+ *      subscription login ("Not logged in · Please run /login"). It looks like
+ *      a harmless speed-up. It is not; never add it.
+ *   2. Both CLIs wait on stdin when it is a pipe. Claude warns and stalls three
+ *      seconds, Codex blocks. stdin is therefore closed, not inherited.
+ */
+
+import { spawn } from "node:child_process";
+import { resolve, sep } from "node:path";
+
+export const AGENT_LIMITS = Object.freeze({
+  maxPromptLength: 100_000,
+  /** A single turn's stdout. Generous: a long agent turn is legitimately big. */
+  maxOutputBytes: 32 * 1024 * 1024,
+  timeoutMs: 30 * 60_000,
+  killGraceMs: 3_000,
+});
+
+export const AGENTS = Object.freeze({
+  claude: {
+    bin: "claude",
+    label: "Claude Code",
+    /**
+     * Permission ladder, safest first. `bypassPermissions` is reachable but is
+     * never the default — an agent that can run anything in your repo without
+     * asking is a choice the operator makes explicitly, not one we make for
+     * them.
+     */
+    permissions: ["manual", "acceptEdits", "bypassPermissions"],
+    defaultPermission: "acceptEdits",
+  },
+  codex: {
+    bin: "codex",
+    label: "Codex",
+    permissions: ["read-only", "workspace-write", "danger-full-access"],
+    defaultPermission: "workspace-write",
+  },
+});
+
+export function isAgentEngine(engine) {
+  return Object.prototype.hasOwnProperty.call(AGENTS, engine);
+}
+
+/** The workspace is the boundary; an agent may not be pointed outside it. */
+export function resolveAgentCwd(root, requestedCwd = "") {
+  if (typeof requestedCwd !== "string" || requestedCwd.includes("\0")) throw new Error("INVALID_AGENT_CWD");
+  const workspaceRoot = resolve(root);
+  const candidate = resolve(workspaceRoot, requestedCwd);
+  if (candidate !== workspaceRoot && !candidate.startsWith(`${workspaceRoot}${sep}`)) throw new Error("AGENT_CWD_ESCAPE");
+  return candidate;
+}
+
+/**
+ * The child's environment.
+ *
+ * Unlike a workspace shell command, an agent CLI legitimately needs the
+ * provider credentials — they are how it authenticates. What it must not
+ * inherit is the gateway's own session token, which would let a tool call turn
+ * around and drive the gateway as us.
+ */
+export function agentEnvironment(source = process.env) {
+  const environment = { ...source };
+  delete environment.FRONTIER_SESSION_TOKEN;
+  return environment;
+}
+
+function argsFor(engine, { prompt, cwd, sessionId, model, permission }) {
+  if (engine === "claude") {
+    const args = [
+      "-p", prompt,
+      "--output-format", "stream-json",
+      "--verbose",
+      // Without this, text arrives one whole assistant message at a time and
+      // the pane sits blank through the entire turn.
+      "--include-partial-messages",
+      "--permission-mode", permission,
+    ];
+    if (model) args.push("--model", model);
+    // Resuming is what makes a tab a conversation rather than a series of
+    // unrelated one-shots.
+    if (sessionId) args.push("--resume", sessionId);
+    return args;
+  }
+
+  const args = ["exec", "--json", "--skip-git-repo-check", "--sandbox", permission, "-C", cwd];
+  if (model) args.push("--model", model);
+  if (sessionId) {
+    // `codex exec resume <id>` is a subcommand, so the prompt follows it.
+    args.push("resume", sessionId, prompt);
+    return args;
+  }
+  args.push(prompt);
+  return args;
+}
+
+/* ── Event normalisation ─────────────────────────────────────────────────────
+   One shape out, whichever agent went in:
+
+     { type: "session", sessionId, model, cwd, tools }
+     { type: "token",     text }        assistant prose, as it arrives
+     { type: "reasoning", text }        thinking, as it arrives
+     { type: "tool",      id, name, input, status, output, isError }
+     { type: "result",    ok, durationMs, costUsd, sessionId, usage, text }
+     { type: "error",     code, message }
+   ------------------------------------------------------------------------- */
+
+/**
+ * Claude's token accounting, done from the source that is actually complete.
+ *
+ * `result.usage` describes only the *main* model of a turn. A single turn
+ * routinely uses more than one — a cheap model for a side task, the selected one
+ * for the reply — and `result.modelUsage` is the per-model breakdown whose
+ * costs sum to `total_cost_usd`. Reading `usage` alone undercounts a real turn
+ * badly: on a measured example it reported 4 input tokens for a turn whose
+ * models actually consumed 910, and omitted 40,808 cache-creation tokens
+ * entirely.
+ *
+ * Cache reads and cache writes are prompt tokens. They are billed at different
+ * rates, which is the cost figure's problem, not the token count's — leaving
+ * them out makes the count describe a smaller turn than the one that happened.
+ */
+function claudeUsage(event) {
+  const entries = event.modelUsage && typeof event.modelUsage === "object" ? Object.entries(event.modelUsage) : [];
+
+  if (entries.length > 0) {
+    const totals = { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheCreationTokens: 0 };
+    const models = [];
+    for (const [id, usage] of entries) {
+      totals.inputTokens += usage.inputTokens ?? 0;
+      totals.outputTokens += usage.outputTokens ?? 0;
+      totals.cacheReadTokens += usage.cacheReadInputTokens ?? 0;
+      totals.cacheCreationTokens += usage.cacheCreationInputTokens ?? 0;
+      models.push({
+        id,
+        costUsd: typeof usage.costUSD === "number" ? usage.costUSD : null,
+        inputTokens: usage.inputTokens ?? 0,
+        outputTokens: usage.outputTokens ?? 0,
+        // Carried per model too, so the per-model view in the usage panel sums
+        // back to the turn's total instead of quietly losing the cache.
+        cacheReadTokens: usage.cacheReadInputTokens ?? 0,
+        cacheCreationTokens: usage.cacheCreationInputTokens ?? 0,
+      });
+    }
+    return { ...totals, models };
+  }
+
+  const usage = event.usage ?? {};
+  return {
+    inputTokens: usage.input_tokens ?? 0,
+    outputTokens: usage.output_tokens ?? 0,
+    cacheReadTokens: usage.cache_read_input_tokens ?? 0,
+    cacheCreationTokens: usage.cache_creation_input_tokens ?? 0,
+    models: [],
+  };
+}
+
+/**
+ * Codex reports one flat usage block and no cost at all — it bills against the
+ * operator's ChatGPT subscription rather than per-turn. `costUsd` is therefore
+ * null and must stay null: rendering an unknown cost as $0.00 tells the
+ * operator the turn was free, which is a different claim entirely.
+ */
+function codexUsage(event) {
+  const usage = event.usage ?? {};
+  return {
+    inputTokens: usage.input_tokens ?? 0,
+    outputTokens: usage.output_tokens ?? 0,
+    cacheReadTokens: usage.cached_input_tokens ?? 0,
+    cacheCreationTokens: usage.cache_write_input_tokens ?? 0,
+    models: [],
+  };
+}
+
+/**
+ * Claude emits every text block twice — once as `stream_event` deltas and again
+ * as the settled `assistant` message. Tokens are taken from the deltas only and
+ * the settled message is read for tool calls alone, which is the whole reason
+ * the transcript does not come out duplicated.
+ */
+function normaliseClaude(event, state) {
+  const out = [];
+
+  if (event.type === "system" && event.subtype === "init") {
+    state.sessionId = event.session_id ?? state.sessionId;
+    out.push({
+      type: "session",
+      sessionId: event.session_id ?? null,
+      model: event.model ?? null,
+      cwd: event.cwd ?? null,
+      tools: Array.isArray(event.tools) ? event.tools : [],
+    });
+    return out;
+  }
+
+  if (event.type === "stream_event") {
+    const inner = event.event ?? {};
+    if (inner.type === "content_block_delta") {
+      const delta = inner.delta ?? {};
+      if (delta.type === "text_delta" && delta.text) out.push({ type: "token", text: delta.text });
+      else if (delta.type === "thinking_delta" && delta.thinking) out.push({ type: "reasoning", text: delta.thinking });
+    }
+    return out;
+  }
+
+  if (event.type === "assistant") {
+    for (const block of event.message?.content ?? []) {
+      if (block.type === "tool_use") {
+        out.push({
+          type: "tool",
+          id: block.id,
+          name: block.name,
+          input: block.input ?? {},
+          status: "running",
+        });
+      }
+    }
+    return out;
+  }
+
+  if (event.type === "user") {
+    for (const block of event.message?.content ?? []) {
+      if (block.type === "tool_result") {
+        out.push({
+          type: "tool",
+          id: block.tool_use_id,
+          status: block.is_error ? "error" : "completed",
+          isError: Boolean(block.is_error),
+          output: typeof block.content === "string" ? block.content : JSON.stringify(block.content ?? null),
+        });
+      }
+    }
+    return out;
+  }
+
+  if (event.type === "result") {
+    state.sessionId = event.session_id ?? state.sessionId;
+    out.push({
+      type: "result",
+      ok: !event.is_error,
+      durationMs: event.duration_ms ?? null,
+      costUsd: typeof event.total_cost_usd === "number" ? event.total_cost_usd : null,
+      sessionId: event.session_id ?? null,
+      usage: claudeUsage(event),
+      text: typeof event.result === "string" ? event.result : null,
+      // Surfaced rather than swallowed: "it did nothing" and "it was not
+      // allowed to do the thing" are different answers and the operator is
+      // entitled to know which one happened.
+      permissionDenials: Array.isArray(event.permission_denials) ? event.permission_denials : [],
+    });
+  }
+
+  return out;
+}
+
+/**
+ * Codex reports progress as items with a lifecycle — started, updated,
+ * completed — rather than as token deltas. `agent_message` text therefore lands
+ * in one piece at `item.completed`, and the pane fills in a step rather than a
+ * stream. That is the CLI's contract, not a shortcut here.
+ */
+function normaliseCodex(event, state) {
+  const out = [];
+  const item = event.item ?? {};
+  const kind = item.item_type ?? item.type ?? null;
+
+  switch (event.type) {
+    case "thread.started":
+      state.sessionId = event.thread_id ?? state.sessionId;
+      out.push({ type: "session", sessionId: event.thread_id ?? null, model: null, cwd: null, tools: [] });
+      break;
+
+    case "item.started":
+    case "item.updated":
+    case "item.completed": {
+      const done = event.type === "item.completed";
+
+      if (kind === "agent_message") {
+        if (done && item.text) out.push({ type: "token", text: item.text });
+      } else if (kind === "reasoning") {
+        const text = item.text ?? item.summary ?? "";
+        if (done && text) out.push({ type: "reasoning", text });
+      } else if (kind === "command_execution") {
+        out.push({
+          type: "tool",
+          id: item.id ?? `cmd-${out.length}`,
+          name: "Bash",
+          input: { command: item.command ?? "" },
+          status: done ? (item.exit_code === 0 || item.exit_code == null ? "completed" : "error") : "running",
+          isError: done && item.exit_code != null && item.exit_code !== 0,
+          output: done ? (item.aggregated_output ?? "") : undefined,
+        });
+      } else if (kind === "file_change") {
+        out.push({
+          type: "tool",
+          id: item.id ?? `edit-${out.length}`,
+          name: "Edit",
+          input: { changes: item.changes ?? item.path ?? null },
+          status: done ? "completed" : "running",
+          output: done ? (item.unified_diff ?? "") : undefined,
+        });
+      } else if (kind === "mcp_tool_call") {
+        out.push({
+          type: "tool",
+          id: item.id ?? `mcp-${out.length}`,
+          name: `${item.server ?? "mcp"}.${item.tool ?? item.tool_name ?? "call"}`,
+          input: item.arguments ?? {},
+          status: done ? (item.error ? "error" : "completed") : "running",
+          isError: Boolean(item.error),
+          output: done ? JSON.stringify(item.result ?? null) : undefined,
+        });
+      } else if (kind === "web_search") {
+        out.push({
+          type: "tool",
+          id: item.id ?? `search-${out.length}`,
+          name: "WebSearch",
+          input: { query: item.query ?? "" },
+          status: done ? "completed" : "running",
+        });
+      } else if (kind === "error") {
+        out.push({ type: "error", code: "AGENT_ITEM_ERROR", message: item.message ?? "The agent reported an error." });
+      } else if (done && kind) {
+        // An item type this build has not seen. Showing it as a tool step is
+        // wrong far less often than dropping it, and dropping it silently would
+        // make the transcript quietly incomplete.
+        out.push({
+          type: "tool",
+          id: item.id ?? `item-${out.length}`,
+          name: kind,
+          input: {},
+          status: "completed",
+          output: JSON.stringify(item),
+        });
+      }
+      break;
+    }
+
+    case "turn.completed":
+      out.push({
+        type: "result",
+        ok: true,
+        durationMs: null,
+        costUsd: null,
+        sessionId: state.sessionId,
+        usage: codexUsage(event),
+        text: null,
+        permissionDenials: [],
+      });
+      break;
+
+    case "turn.failed":
+      out.push({
+        type: "result",
+        ok: false,
+        durationMs: null,
+        costUsd: null,
+        sessionId: state.sessionId,
+        usage: null,
+        text: event.error?.message ?? null,
+        permissionDenials: [],
+      });
+      break;
+
+    case "error":
+      out.push({ type: "error", code: "AGENT_ERROR", message: event.message ?? "The agent reported an error." });
+      break;
+
+    default:
+      break;
+  }
+
+  return out;
+}
+
+/**
+ * Runs one turn and streams normalised events to `onEvent`.
+ *
+ * Resolves with the turn's summary. Never throws for an agent that merely
+ * failed — a refused turn, a usage limit, a non-zero exit are all ordinary
+ * answers the interface has to be able to render. It throws only when the turn
+ * could not be started at all.
+ */
+export function runAgentTurn(options) {
+  const {
+    engine,
+    prompt,
+    root,
+    cwd = "",
+    sessionId = null,
+    model = null,
+    permission,
+    onEvent,
+    signal,
+    bin,
+    timeoutMs = AGENT_LIMITS.timeoutMs,
+    maxOutputBytes = AGENT_LIMITS.maxOutputBytes,
+    env = agentEnvironment(),
+  } = options;
+
+  const agent = AGENTS[engine];
+  if (!agent) throw new Error("UNKNOWN_AGENT");
+  // `bin` lets an operator point at a CLI installed under a different name or
+  // path, and lets the contract test drive a fake agent that emits canned
+  // events — the parse and normalise path is then exercised for real.
+  const binary = bin || agent.bin;
+
+  const mode = agent.permissions.includes(permission) ? permission : agent.defaultPermission;
+  const workingDirectory = resolveAgentCwd(root, cwd);
+  const args = argsFor(engine, { prompt, cwd: workingDirectory, sessionId, model, permission: mode });
+
+  return new Promise((resolvePromise) => {
+    const startedAt = Date.now();
+    const state = { sessionId };
+    let stdoutBytes = 0;
+    let stderr = "";
+    let buffer = "";
+    let truncated = false;
+    let settled = false;
+    let summary = null;
+
+    const child = spawn(binary, args, {
+      cwd: workingDirectory,
+      env,
+      // stdin is closed rather than inherited: both CLIs block on a pipe they
+      // are never going to be written to.
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+
+    const finish = (reason) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      resolvePromise({
+        sessionId: state.sessionId,
+        durationMs: Date.now() - startedAt,
+        truncated,
+        reason: reason ?? null,
+        stderr: stderr.slice(-4_000),
+        summary,
+      });
+    };
+
+    const kill = (reason) => {
+      if (settled) return;
+      child.kill("SIGTERM");
+      setTimeout(() => {
+        if (!child.killed) child.kill("SIGKILL");
+      }, AGENT_LIMITS.killGraceMs).unref?.();
+      finish(reason);
+    };
+
+    const timer = setTimeout(() => kill("AGENT_TIMEOUT"), timeoutMs);
+    const onAbort = () => kill("AGENT_ABORTED");
+    signal?.addEventListener("abort", onAbort, { once: true });
+
+    const emit = (event) => {
+      if (event.type === "result") summary = event;
+      try {
+        onEvent(event);
+      } catch {
+        /* A consumer that has gone away must not kill the child mid-turn. */
+      }
+    };
+
+    const consumeLine = (line) => {
+      const text = line.trim();
+      if (!text) return;
+      let parsed;
+      try {
+        parsed = JSON.parse(text);
+      } catch {
+        // Not every line is an event — a CLI may print a plain notice. Pass it
+        // through as a notice rather than discarding it.
+        emit({ type: "notice", text });
+        return;
+      }
+      const events = engine === "claude" ? normaliseClaude(parsed, state) : normaliseCodex(parsed, state);
+      for (const event of events) emit(event);
+    };
+
+    child.stdout.on("data", (chunk) => {
+      stdoutBytes += chunk.length;
+      if (stdoutBytes > maxOutputBytes) {
+        truncated = true;
+        kill("AGENT_OUTPUT_LIMIT");
+        return;
+      }
+      buffer += chunk.toString("utf8");
+      let index = buffer.indexOf("\n");
+      while (index !== -1) {
+        consumeLine(buffer.slice(0, index));
+        buffer = buffer.slice(index + 1);
+        index = buffer.indexOf("\n");
+      }
+    });
+
+    child.stderr.on("data", (chunk) => {
+      stderr += chunk.toString("utf8");
+      if (stderr.length > 64_000) stderr = stderr.slice(-64_000);
+    });
+
+    child.on("error", (error) => {
+      const missing = error?.code === "ENOENT";
+      emit({
+        type: "error",
+        code: missing ? "AGENT_NOT_INSTALLED" : "AGENT_SPAWN_FAILED",
+        message: missing
+          ? `${agent.label} is not installed, or \`${agent.bin}\` is not on the gateway's PATH.`
+          : `${agent.label} could not be started: ${error?.message ?? "unknown error"}`,
+      });
+      signal?.removeEventListener("abort", onAbort);
+      finish(missing ? "AGENT_NOT_INSTALLED" : "AGENT_SPAWN_FAILED");
+    });
+
+    child.on("close", (code) => {
+      if (buffer.trim()) consumeLine(buffer);
+      signal?.removeEventListener("abort", onAbort);
+      // A non-zero exit with no result event of its own still has to reach the
+      // transcript, or the turn just stops with no explanation.
+      if (!summary && !settled) {
+        emit({
+          type: "result",
+          ok: code === 0,
+          durationMs: Date.now() - startedAt,
+          costUsd: null,
+          sessionId: state.sessionId,
+          usage: null,
+          text: code === 0 ? null : stderr.trim().slice(-2_000) || `${agent.label} exited with status ${code}.`,
+          permissionDenials: [],
+        });
+      }
+      finish(code === 0 ? null : "AGENT_NONZERO_EXIT");
+    });
+  });
+}
+
+/** Whether each agent is actually installed, for the pane to render honestly. */
+export async function agentAvailability(env = agentEnvironment()) {
+  const entries = await Promise.all(
+    Object.entries(AGENTS).map(async ([engine, agent]) => {
+      const version = await new Promise((resolvePromise) => {
+        const child = spawn(agent.bin, ["--version"], { env, stdio: ["ignore", "pipe", "ignore"] });
+        let out = "";
+        const timer = setTimeout(() => {
+          child.kill("SIGKILL");
+          resolvePromise(null);
+        }, 5_000);
+        child.stdout.on("data", (chunk) => { out += chunk.toString("utf8"); });
+        child.on("error", () => { clearTimeout(timer); resolvePromise(null); });
+        child.on("close", (code) => {
+          clearTimeout(timer);
+          resolvePromise(code === 0 ? out.trim().split("\n")[0] || null : null);
+        });
+      });
+      return [engine, {
+        label: agent.label,
+        bin: agent.bin,
+        installed: version !== null,
+        version,
+        permissions: agent.permissions,
+        defaultPermission: agent.defaultPermission,
+      }];
+    }),
+  );
+  return Object.fromEntries(entries);
+}

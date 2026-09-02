@@ -10,6 +10,7 @@ import {
 } from "lucide-react";
 import { useStudioStore } from "../../store/studioStore";
 import { highlightCode } from "../../utils/syntaxHighlight";
+import { useStickyScroll } from "../../hooks/useStickyScroll";
 
 export interface CodeSnippetProps {
   content: string;
@@ -66,6 +67,10 @@ export const CodeSnippet: React.FC<CodeSnippetProps> = ({
 
   const { openFileAtSnippet } = useStudioStore();
 
+  // Follows the code as it is written, but stops the moment the reader scrolls
+  // up so they can read earlier lines while generation continues.
+  const codeScroll = useStickyScroll<HTMLDivElement>(content, { enabled: isStreaming });
+
   useEffect(() => {
     if (!isStreaming && !hasManuallyToggled) {
       setIsExpanded(false);
@@ -107,12 +112,12 @@ export const CodeSnippet: React.FC<CodeSnippetProps> = ({
 
   return (
     <div
-      className={`my-3 bg-[#121215] border border-white/[0.08] rounded-xl overflow-hidden shadow-lg font-mono text-xs transition-all duration-150 ${className}`}
+      className={`lit lit-inner my-3 bg-surface-sunken rounded-xl overflow-hidden shadow-lg font-mono text-xs transition-all duration-150 ${className}`}
     >
       {/* ── Header Strip (Clickable to Expand/Collapse) ────────────────── */}
       <header
         onClick={handleToggle}
-        className={`px-3 py-2 bg-[#18181c] border-b border-white/[0.06] flex items-center justify-between gap-2 cursor-pointer hover:bg-[#1e1e24] transition-colors select-none ${
+        className={`px-3 py-2 bg-surface border-b border-edge-chrome flex items-center justify-between gap-2 cursor-pointer hover:bg-surface-active transition-colors select-none ${
           !isExpanded ? "border-b-0" : ""
         }`}
       >
@@ -124,27 +129,27 @@ export const CodeSnippet: React.FC<CodeSnippetProps> = ({
               e.stopPropagation();
               handleToggle();
             }}
-            className="p-0.5 text-zinc-400 hover:text-white rounded"
+            className="p-0.5 text-ink-muted hover:text-ink-high rounded"
             title={isExpanded ? "Minimize code snippet" : "Expand code snippet"}
           >
             {isExpanded ? (
-              <ChevronDown size={14} className="text-zinc-300" />
+              <ChevronDown size={14} className="text-ink-dim" />
             ) : (
-              <ChevronRight size={14} className="text-[#FF6C37]" />
+              <ChevronRight size={14} className="text-accent" />
             )}
           </button>
 
           {detectedFilename ? (
-            <FileCode size={13} className="text-[#FF6C37] flex-shrink-0" />
+            <FileCode size={13} className="text-accent flex-shrink-0" />
           ) : (
-            <Code2 size={13} className="text-[#FF6C37] flex-shrink-0" />
+            <Code2 size={13} className="text-accent flex-shrink-0" />
           )}
 
           <span
             onClick={detectedFilename ? handleJumpToFile : undefined}
-            className={`font-semibold text-zinc-200 text-2xs truncate ${
+            className={`font-semibold text-ink-high text-2xs truncate ${
               detectedFilename
-                ? "hover:text-[#FF6C37] hover:underline cursor-pointer"
+                ? "hover:text-accent hover:underline cursor-pointer"
                 : ""
             }`}
             title={detectedFilename ? `Click to jump to ${detectedFilename} in Editor` : undefined}
@@ -152,13 +157,13 @@ export const CodeSnippet: React.FC<CodeSnippetProps> = ({
             {detectedFilename || cleanLang || "Code snippet"}
           </span>
 
-          <span className="text-4xs font-mono text-zinc-400 bg-white/[0.04] px-1.5 py-0.2 rounded border border-white/[0.06] flex-shrink-0">
+          <span className="text-4xs font-mono text-ink-muted bg-surface-chip px-1.5 py-0.2 rounded border border-edge-chrome flex-shrink-0">
             {lineCount} {lineCount === 1 ? "line" : "lines"}
           </span>
 
           {isStreaming && (
-            <span className="flex items-center gap-1 text-4xs font-mono text-[#FF6C37] bg-[#FF6C37]/10 px-1.5 py-0.2 rounded border border-[#FF6C37]/25">
-              <span className="w-1.5 h-1.5 rounded-full bg-[#FF6C37] animate-pulse" />
+            <span className="flex items-center gap-1 text-4xs font-mono text-accent bg-accent/10 px-1.5 py-0.2 rounded border border-accent/25">
+              <span className="w-1.5 h-1.5 rounded-full bg-accent animate-pulse" />
               generating...
             </span>
           )}
@@ -172,12 +177,12 @@ export const CodeSnippet: React.FC<CodeSnippetProps> = ({
               onClick={handleJumpToFile}
               className={`flex items-center gap-1 px-2 py-0.5 rounded text-3xs border transition-all ${
                 jumping
-                  ? "bg-[#FF6C37]/20 border-[#FF6C37] text-[#FF6C37]"
-                  : "bg-white/[0.04] border-white/[0.08] text-zinc-300 hover:text-white hover:border-[#FF6C37]/40 hover:bg-[#FF6C37]/10"
+                  ? "bg-accent/20 border-accent text-accent"
+                  : "bg-surface-chip border-edge text-ink-dim hover:text-ink-high hover:border-accent/40 hover:bg-accent/10"
               }`}
               title={`Open ${detectedFilename} and jump directly to this code range`}
             >
-              <ArrowUpRight size={11} className="text-[#FF6C37]" />
+              <ArrowUpRight size={11} className="text-accent" />
               <span className="hidden sm:inline">Jump to File</span>
             </button>
           )}
@@ -185,13 +190,13 @@ export const CodeSnippet: React.FC<CodeSnippetProps> = ({
           <button
             type="button"
             onClick={handleCopy}
-            className="flex items-center gap-1 px-2 py-0.5 rounded text-3xs text-zinc-400 hover:text-white hover:bg-white/[0.06] transition-colors"
+            className="flex items-center gap-1 px-2 py-0.5 rounded text-3xs text-ink-muted hover:text-ink-high hover:bg-surface-chip transition-colors"
             title="Copy code"
           >
             {copied ? (
               <>
-                <Check size={11} className="text-emerald-400" />
-                <span className="text-emerald-400">Copied</span>
+                <Check size={11} className="text-success" />
+                <span className="text-success">Copied</span>
               </>
             ) : (
               <>
@@ -201,7 +206,7 @@ export const CodeSnippet: React.FC<CodeSnippetProps> = ({
             )}
           </button>
 
-          <span className="text-4xs text-zinc-400 px-1.5 py-0.5 rounded bg-white/[0.04] border border-white/[0.06] font-mono hover:text-white">
+          <span className="text-4xs text-ink-muted px-1.5 py-0.5 rounded bg-surface-chip border border-edge-chrome font-mono hover:text-ink-high">
             {isExpanded ? "Minimize" : "Expand"}
           </span>
         </div>
@@ -209,11 +214,14 @@ export const CodeSnippet: React.FC<CodeSnippetProps> = ({
 
       {/* ── Expanded Code Block (Deep Obsidian Matte Background) ────────── */}
       {isExpanded && (
-        <div className="p-3 bg-[#0a0a0c] overflow-x-auto text-zinc-200 leading-relaxed max-h-[500px] overflow-y-auto code-highlight-container">
+        <div
+          ref={codeScroll.ref}
+          className="relative p-3 bg-frame-bot overflow-auto text-ink-high leading-relaxed max-h-[200px] code-highlight-container"
+        >
           <pre className="font-mono text-xs whitespace-pre">
             {highlightedLines.map((lineHtml, lIdx) => (
               <div key={lIdx} className="table-row">
-                <span className="table-cell pr-3.5 text-right text-zinc-600 select-none text-3xs w-8">
+                <span className="table-cell pr-3.5 text-right text-ink-ghost select-none text-3xs w-8">
                   {lIdx + 1}
                 </span>
                 <span
