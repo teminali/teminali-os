@@ -7,6 +7,7 @@
     "name": "Teminali",
     "email": "muhasibudigital@gmail.com"
   },
+  "desktopName": "teminali-code.desktop",
   "private": true,
   "type": "module",
   "scripts": {

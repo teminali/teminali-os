@@ -104,7 +104,8 @@ linux:
   # and an "@" is not legal in a Linux executable path. The AppImage build fails
   # outright rather than warning.
   executableName: teminali-code
-  # Without it, desktop environments cannot associate a running window with the
-  # .desktop entry, so the app gets a generic icon in the dock.
-  desktopName: teminali-code.desktop
-  synopsis: Autonomous AI code studio with local models and a screen assistant
+  # Copies `desktopName` out of package.json into the .desktop entry. Without
+  # the pair, desktop environments cannot associate a running window with its
+  # entry and the app takes a generic icon. The name itself lives in
+  # package.json because that is where electron-builder 26 reads it from.
+  syncDesktopName: true
