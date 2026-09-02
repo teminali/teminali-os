@@ -245,7 +245,7 @@ export const useStudioStore = create<StudioState>()(
       purgeVRAM: purgeOllamaMemory,
       
       activeWorkspaceId: "teminali",
-      workspacePath: "/Users/teminali/Documents/my_projects/frontier",
+      workspacePath: "/Users/teminali/Documents/my_projects/teminali/teminaliCode",
       setWorkspace: (ws) => {
         if (ws === "teminali-code-tests") {
           set({
@@ -262,7 +262,7 @@ export const useStudioStore = create<StudioState>()(
         } else {
           set({
             activeWorkspaceId: "teminali",
-            workspacePath: "/Users/teminali/Documents/my_projects/frontier",
+            workspacePath: "/Users/teminali/Documents/my_projects/teminali/teminaliCode",
           });
         }
       },

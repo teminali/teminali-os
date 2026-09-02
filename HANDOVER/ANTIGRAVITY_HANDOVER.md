@@ -1,7 +1,7 @@
 # Frontier Antigravity handover
 
 **Owner:** Antigravity Gemini 3.7 Flash High  
-**Canonical repository:** `/Users/teminali/Documents/my_projects/frontier`  
+**Canonical repository:** `/Users/teminali/Documents/my_projects/teminali/teminaliCode`  
 **Long-form engineering guide:** `outputs/FRONTIERCODE_POST_BENCHMARK_CODEX_GUIDE.md`  
 **Benchmark-007 gate:** `outputs/BENCHMARK_007_READINESS.md`  
 **Frozen benchmark:** `benchmarks/frontier-auto-vs-codex-006`

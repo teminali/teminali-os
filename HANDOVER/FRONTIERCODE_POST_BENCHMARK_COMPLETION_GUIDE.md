@@ -2,8 +2,8 @@
 
 **Execution owner:** Antigravity Gemini 3.7 Flash High (handoff from Codex)  
 **Benchmark opponent:** Codex; benchmark 006 used a fresh isolated Codex context and `codex-cli 0.149.1`, while the desktop UI did not expose the underlying model/build, reasoning effort, or service tier  
-**Canonical repository:** `/Users/teminali/Documents/my_projects/frontier`  
-**Studio application:** `/Users/teminali/Documents/my_projects/frontier/studio`  
+**Canonical repository:** `/Users/teminali/Documents/my_projects/teminali/teminaliCode`  
+**Studio application:** `/Users/teminali/Documents/my_projects/teminali/teminaliCode/studio`  
 **This guide begins:** from completed, immutable benchmark 006 evidence; the ordered work packages now begin with repairs for the measured Frontier Auto failures  
 **Primary objective:** turn FrontierCode from a promising local-first prototype into a dependable, evidence-driven coding assistant that can be fairly measured against frontier coding products  
 **Date of baseline:** 2026-08-31
@@ -16,7 +16,7 @@ Benchmark 006 is complete and frozen. Do not rerun the old pre-benchmark sequenc
 
 Current verified position:
 
-- FrontierCode is consolidated into one canonical repository at `/Users/teminali/Documents/my_projects/frontier`; the browser Studio is the `studio/` package in that repository.
+- FrontierCode is consolidated into one canonical repository at `/Users/teminali/Documents/my_projects/teminali/teminaliCode`; the browser Studio is the `studio/` package in that repository.
 - The final combined verification gate passes **190/190**: **109/109** root/runtime tests plus **81/81** Studio tests, followed by TypeScript checks and a successful Vite production build. This includes the generate-endpoint vision transport patch.
 - The live Studio is available at `http://localhost:3000` with the authenticated local gateway at `http://127.0.0.1:4310` while the development process is running.
 - The browser Copilot exposes only the product names **Frontier Flash**, **Frontier Auto**, and **Frontier Max**. It does not display provider or underlying local-model names, including in persisted route labels.

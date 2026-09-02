@@ -3,7 +3,7 @@
 You are taking over the Frontier project as the primary implementation owner.
 
 Canonical repository:
-`/Users/teminali/Documents/my_projects/frontier`
+`/Users/teminali/Documents/my_projects/teminali/teminaliCode`
 
 Before changing anything, read these files completely and treat them as authoritative:
 

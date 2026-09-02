@@ -1,6 +1,6 @@
 # 🚀 Frontier Studio // Autonomous AI Code & Video Studio — Master Handover to Codex
 
-> **Migration notice (2026-08-31):** this document contains historical architecture claims. The canonical repository is now `/Users/teminali/Documents/my_projects/frontier`, and the browser editor lives in `frontier/studio`. Current verified state and benchmark rules in the repository root supersede conflicting instructions below.
+> **Migration notice (2026-08-31):** this document contains historical architecture claims. The canonical repository is now `/Users/teminali/Documents/my_projects/teminali/teminaliCode`, and the browser editor lives in `frontier/studio`. Current verified state and benchmark rules in the repository root supersede conflicting instructions below.
 
 ## 📌 Executive Summary & Architecture State
 
@@ -12,7 +12,7 @@ You are taking over **Frontier Studio**, an ultra-high-performance, autonomous A
 - **Local GPU Inference Engine**: Ollama running `devstral-small-2:24b-instruct-2512-q4_K_M` (15 GB Q4_K_M) on Apple Silicon Metal at **$0.00 / token** with **96–104 tok/s**.
 - **Model Context Protocol (MCP)**: Video Engine active on **Port 3888** (`Kerf`).
 - **Live Local Servers**:
-  - **Port 3000**: `/Users/teminali/Documents/my_projects/frontier/studio` (Frontier Studio development instance).
+  - **Port 3000**: `/Users/teminali/Documents/my_projects/teminali/teminaliCode/studio` (Frontier Studio development instance).
   - **Port 3001**: `/Users/teminali/Downloads/frontier-reference-clone` (Antigravity Comparison & Dual-Port Benchmark Clone).
 
 ---
@@ -86,13 +86,13 @@ You are taking over **Frontier Studio**, an ultra-high-performance, autonomous A
 
 ```bash
 # 1. Start / Verify Port 3000 (Development Master)
-cd /Users/teminali/Documents/my_projects/frontier && npm run dev:ui -- --port 3000 --host
+cd /Users/teminali/Documents/my_projects/teminali/teminaliCode && npm run dev:ui -- --port 3000 --host
 
 # 2. Build Production Bundle
-cd /Users/teminali/Documents/my_projects/frontier && npm run studio:build
+cd /Users/teminali/Documents/my_projects/teminali/teminaliCode && npm run studio:build
 
 # 3. Synchronize Port 3000 to Port 3001 Clone
-rsync -av --delete --exclude 'node_modules' --exclude '.git' /Users/teminali/Documents/my_projects/frontier/studio/ /Users/teminali/Downloads/frontier-reference-clone/
+rsync -av --delete --exclude 'node_modules' --exclude '.git' /Users/teminali/Documents/my_projects/teminali/teminaliCode/studio/ /Users/teminali/Downloads/frontier-reference-clone/
 
 # 4. Restart Ollama Service Cleanly
 brew services restart ollama

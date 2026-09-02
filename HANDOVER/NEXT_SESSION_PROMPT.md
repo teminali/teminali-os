@@ -2,7 +2,7 @@
 
 ## Context (read before acting)
 
-Repo: `/Users/teminali/Documents/my_projects/frontier` (reachable as `studio/` from
+Repo: `/Users/teminali/Documents/my_projects/teminali/teminaliCode` (reachable as `studio/` from
 `/Users/teminali/Documents/my_projects/teminali`). Teminali Studio is an Electron IDE
 (Cursor Obsidian Dark aesthetic, see `DESIGN.md`) with a coding-agent backend.
 

@@ -151,7 +151,7 @@ hard budgets, repository recovery, and reproducible domain evaluations.
   propagated through the runner and unloaded the model, restoring 78% free memory.
 ## Completed
 - Consolidated the product, gateway, runtime, benchmarks, and browser Studio under
-  `/Users/teminali/Documents/my_projects/frontier`; `studio/` is the browser application.
+  `/Users/teminali/Documents/my_projects/teminali/teminaliCode`; `studio/` is the browser application.
 - Added the public Frontier Flash, Frontier Auto, and Frontier Max modes across the
   shared routing policy and browser Copilot. Auto is the flagship; Max fails closed
   and remains visibly locked until its exact heavyweight path qualifies.
