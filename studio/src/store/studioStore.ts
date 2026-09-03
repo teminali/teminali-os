@@ -256,7 +256,7 @@ export const useStudioStore = create<StudioState>()(
         } else if (ws === "antigravity-vpn") {
           set({
             activeWorkspaceId: "antigravity-vpn",
-            workspacePath: "/Users/teminali/Documents/my_projects/antigravity-vpn-landing",
+            workspacePath: "/Users/teminali/Documents/my_projects/argus-vpn-landing",
             activeTabId: "tab-agy-vpn",
           });
         } else {
