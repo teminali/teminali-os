@@ -4,6 +4,8 @@ const fs = require("fs");
 const { attachGuardianTray } = require("./tray.cjs");
 const { attachAssistantTray } = require("./assistant-tray.cjs");
 const { attachAssistantOverlay } = require("./assistant-overlay.cjs");
+const { initVideoToolBridge, setBridgeWindow, videoBridge } = require("./videoToolBridge.cjs");
+const { startVideoRpcServer } = require("./videoRpc.cjs");
 
 const logFile = path.join(app.getPath("userData"), "studio-main.log");
 function log(...args) {
@@ -117,6 +119,7 @@ ipcMain.on("gateway:session-sync", (event) => {
 
 
 let mainWindow = null;
+let videoRpc = null;
 
 function createWindow() {
   log("Creating BrowserWindow...");
@@ -139,6 +142,11 @@ function createWindow() {
       preload: path.join(__dirname, "preload.cjs"),
     },
   });
+
+  // This is the window an external agent's tool calls are asked of. Set before
+  // the page loads, because the renderer announces its bridge as it boots and
+  // main must already know which window that announcement can come from.
+  setBridgeWindow(mainWindow);
 
   mainWindow.once("ready-to-show", () => {
     log("Window ready to show, displaying mainWindow");
@@ -174,6 +182,9 @@ function createWindow() {
   mainWindow.on("closed", () => {
     log("MainWindow closed");
     mainWindow = null;
+    // The bridge now has nothing to ask, and a request against a destroyed
+    // window should say so rather than wait out its timeout.
+    setBridgeWindow(null);
   });
 
   // Keep the renderer's maximize/restore icon truthful even when the window is
@@ -552,6 +563,23 @@ app.whenReady().then(async () => {
     }
   }
 
+  /*
+    The video panel's MCP bridge, before anything that might use it.
+
+    An agent CLI cannot see this renderer's timeline stores, so it reaches them
+    through this: shim → 127.0.0.1 → main → IPC → renderer. Started even when
+    the panel has never been opened, because the stores are seeded at module
+    load and a tool list that came back empty would leave an agent believing
+    there is no editor here at all. Failure is survivable and deliberately not
+    thrown — Code with no video bridge is still Code.
+  */
+  try {
+    initVideoToolBridge();
+    videoRpc = startVideoRpcServer({ bridge: videoBridge, log });
+  } catch (error) {
+    log("The video MCP bridge could not be started:", error?.message || error);
+  }
+
   buildMenu();
   createWindow();
 
@@ -612,6 +640,9 @@ app.on("will-quit", () => {
     log("Could not release global shortcuts:", error.message);
   }
   assistantOverlay?.destroy();
+  // Takes the endpoint file with it, so the next launch's gateway cannot find
+  // credentials for a window that no longer exists.
+  videoRpc?.close();
   // Best effort, and deliberately not awaited: `will-quit` does not wait for a
   // promise, and the listening socket dies with this process regardless.
   try {

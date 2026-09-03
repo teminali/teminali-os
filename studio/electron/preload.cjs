@@ -82,6 +82,27 @@ contextBridge.exposeInMainWorld("teminali", {
     restart: () => ipcRenderer.invoke("updates:restart"),
   },
   /**
+   * The video panel's MCP bridge.
+   *
+   * Four verbs and no passthrough: main pushes a tool call in, the renderer
+   * pushes one answer back. Nothing here lets the page choose a channel, and
+   * nothing lets it read main's state — the reason it exists at all is that an
+   * agent CLI in another process cannot reach the timeline stores in this one.
+   */
+  videoBridge: {
+    onListTools: (listener) => {
+      ipcRenderer.on("video-bridge:list-tools", (_event, message) => listener(message?.id));
+    },
+    onCallTool: (listener) => {
+      ipcRenderer.on("video-bridge:call-tool", (_event, message) => {
+        listener(message?.id, message?.payload?.name, message?.payload?.args ?? {});
+      });
+    },
+    respond: (payload) => ipcRenderer.send("video-bridge:response", payload),
+    /** Announces that the two listeners above are installed. */
+    ready: () => ipcRenderer.send("video-bridge:ready"),
+  },
+  /**
    * The screen assistant.
    *
    * Two directions and nothing else. Commands come *in* from the global

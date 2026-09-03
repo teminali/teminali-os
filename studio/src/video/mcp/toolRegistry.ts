@@ -113,56 +113,96 @@ defineTool({
   name: 'describe_timeline',
   category: 'discovery',
   description:
-    'Read the full project state: tracks, clips (with ids, timing, type, effects), markers, playhead and canvas settings. Call this FIRST so later edits target real ids.',
+    'Read the project: tracks and clips with their ids and timing. Call this FIRST so later ' +
+    'edits target real ids. Returns a SUMMARY by default — ids, names, types, start and ' +
+    'duration, and a track\'s mute/lock/solo only when set. Pass detail:"full" for effects ' +
+    '(with their ids), keyframe counts, speed, blend mode, clip text, markers and the media ' +
+    'pool; add includeProperties:true for every editable property path.',
   schema: z.object({
-    includeProperties: z.boolean().optional().describe('Include every editable property of each clip (verbose)'),
+    detail: z.enum(['summary', 'full']).optional()
+      .describe('"summary" (default) or "full". Ask for full only when you need effect ids or timing detail'),
+    includeProperties: z.boolean().optional().describe('Every editable property of every clip. Implies full, and is long'),
   }),
-  handler: ({ includeProperties }) => {
+  handler: ({ detail, includeProperties }) => {
     const state = timeline();
     const proj = project().project;
+    /*
+      Summary is the default because of what the full answer costs.
+
+      One `describe_timeline` on the seed project is 5,033 characters
+      (~1.3k tokens) — and a tool result does not go away: it stays in
+      the transcript and is re-sent on every later turn of the
+      conversation. The model asks this question to learn clip ids, and
+      then never needs the rest again. So the verbose fields are opt-in
+      and the description says what asking buys.
+    */
+    const full = detail === 'full' || includeProperties === true;
 
     return {
       project: {
         name: proj.name,
         aspectRatio: proj.aspectRatio,
-        width: proj.width,
-        height: proj.height,
         fps: proj.fps,
         durationMs: proj.durationMs,
         contentEndMs: getContentEndMs(state.tracks),
+        ...(full ? { width: proj.width, height: proj.height } : {}),
       },
       playheadMs: state.playheadMs,
       selectedClipIds: state.selectedClipIds,
-      selectedTrackId: state.selectedTrackId,
-      markers: state.markers.map((m) => ({ id: m.id, timeMs: m.timeMs, kind: m.kind, label: m.label })),
+      ...(full
+        ? {
+            selectedTrackId: state.selectedTrackId,
+            markers: state.markers.map((m) => ({ id: m.id, timeMs: m.timeMs, kind: m.kind, label: m.label })),
+            mediaPool: state.mediaPool.map((a) => ({ id: a.id, name: a.name, type: a.type, durationMs: a.durationMs })),
+          }
+        : {
+            /* Counts, so the model can tell there is something there to
+               ask for rather than concluding the project has neither. */
+            ...(state.markers.length ? { markerCount: state.markers.length } : {}),
+            ...(state.mediaPool.length ? { mediaPoolCount: state.mediaPool.length } : {}),
+          }),
       tracks: state.tracks.map((track) => ({
         id: track.id,
         name: track.name,
         type: track.type,
         index: track.index,
-        muted: track.muted,
-        locked: track.locked,
         /* solo and volume were settable and unreadable: nothing in the
            tool surface reported them, so an agent could mute a mix and
-           had no way to find out what it had done. */
-        solo: track.solo,
-        volume: track.volume,
+           had no way to find out what it had done. In summary they are
+           reported only when they are not at rest — an absent flag
+           means false, which the description states. */
+        ...(full
+          ? { muted: track.muted, locked: track.locked, solo: track.solo, volume: track.volume }
+          : {
+              ...(track.muted ? { muted: true } : {}),
+              ...(track.locked ? { locked: true } : {}),
+              ...(track.solo ? { solo: true } : {}),
+            }),
         clips: track.clips.map((clip) => ({
           id: clip.id,
           name: clip.name,
           type: clip.type,
           startMs: clip.startTimeMs,
-          endMs: clip.startTimeMs + clip.durationMs,
           durationMs: clip.durationMs,
-          effects: clip.effects.map((e) => ({ id: e.id, type: e.type, enabled: e.enabled, intensity: e.intensity })),
-          keyframeCount: clip.keyframes.length,
-          speed: clip.speed.multiplier,
-          blendMode: clip.blendMode,
-          text: clip.textStyle?.text,
+          ...(full
+            ? {
+                endMs: clip.startTimeMs + clip.durationMs,
+                effects: clip.effects.map((e) => ({ id: e.id, type: e.type, enabled: e.enabled, intensity: e.intensity })),
+                keyframeCount: clip.keyframes.length,
+                speed: clip.speed.multiplier,
+                blendMode: clip.blendMode,
+                text: clip.textStyle?.text,
+              }
+            : {
+                /* Which clip to ask about in full, without listing the
+                   effects themselves. `set_effect_param` takes an effect
+                   TYPE as well as an id, so a count is often enough. */
+                ...(clip.effects.length ? { effectCount: clip.effects.length } : {}),
+                ...(clip.locked ? { locked: true } : {}),
+              }),
           ...(includeProperties ? { properties: describeClipProperties(clip) } : {}),
         })),
       })),
-      mediaPool: state.mediaPool.map((a) => ({ id: a.id, name: a.name, type: a.type, durationMs: a.durationMs })),
     };
   },
 });
@@ -257,6 +297,45 @@ export function getTool(name: string): KerfTool | undefined {
   return tools.find((t) => t.name === name);
 }
 
+/* ── The exposed surface ────────────────────────────────────────────
+   An ALLOWLIST, not `tools`, because the tool surface is the only part
+   of this that costs tokens.
+
+   Measured, not estimated: the Cut's 115 tool descriptions are 34,660
+   characters (~8.7k tokens), and 15-20k once their JSON schemas go with
+   them, since several carry long enums. The three below are ~900. That
+   cost is paid on EVERY request that advertises the panel, and it is
+   identical whichever transport carries the call — a function pointer
+   in this renderer, an IPC hop, or the MCP shim's stdio pipe all move
+   the same bytes past the model.
+
+   So copy-pasting tool number four out of the Cut does not put it in
+   front of a model: someone has to add its name here and accept the
+   cost. The ceiling is deliberate, and a test asserts on it — the point
+   of this file is three tools growing to maybe a dozen, never 115.
+*/
+export const TOOL_BUDGET = 15;
+
+export const EXPOSED_TOOLS: readonly string[] = [
+  'describe_timeline',
+  'patch_clip',
+  'set_effect_param',
+];
+
+/**
+ * Whether a tool may be reached from OUTSIDE this renderer.
+ *
+ * The in-renderer chat and the MCP bridge are not the same trust
+ * boundary. A tool that is merely un-advertised is still callable by a
+ * client that knows its name, and the tools this file will grow next
+ * are import and export — the two that touch the user's disk and want
+ * an approval gate first. The bridge checks this; `executeTool` does
+ * not, so the panel's own code can still call anything defined here.
+ */
+export function isExposed(name: string): boolean {
+  return EXPOSED_TOOLS.includes(name);
+}
+
 export interface ToolResult {
   success: boolean;
   data?: unknown;
@@ -299,9 +378,16 @@ export async function executeTool(
   }
 }
 
-/** JSON-Schema style listing for an MCP `tools/list` response. */
-export function getToolManifest() {
-  return KERF_TOOLS.map((t) => ({
+/**
+ * JSON-Schema style listing for an MCP `tools/list` response.
+ *
+ * Curated by default — see EXPOSED_TOOLS for why. `{ all: true }` lists
+ * everything defined, which is for looking at the file's contents, not
+ * for handing to a model.
+ */
+export function getToolManifest(options: { all?: boolean } = {}) {
+  const listed = options.all ? KERF_TOOLS : KERF_TOOLS.filter((t) => isExposed(t.name));
+  return listed.map((t) => ({
     name: t.name,
     description: t.description,
     category: t.category,
