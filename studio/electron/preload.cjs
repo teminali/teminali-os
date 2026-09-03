@@ -43,9 +43,19 @@ try {
   mediaPaths = null;
 }
 
+/** The bundle the operator has to name in System Settings. See main.cjs. */
+let host = null;
+try {
+  host = ipcRenderer.sendSync("assistant:host-sync") ?? null;
+} catch {
+  host = null;
+}
+
 contextBridge.exposeInMainWorld("teminali", {
   isElectron: true,
   platform: process.platform,
+  /** `{ name, isPackaged }` — which app owns this window, or null outside Electron. */
+  host,
   /** `{ url, token }` when the main process runs the gateway, else null. */
   gateway: gatewaySession,
   window: {

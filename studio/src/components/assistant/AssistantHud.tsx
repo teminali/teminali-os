@@ -64,6 +64,26 @@ export interface AssistantHudProps {
   voiceState?: VoiceState;
 }
 
+/**
+ * Which switch to actually flip, which is the half the old message left out.
+ *
+ * Accessibility is granted to the application responsible for the pointer
+ * helper, never to the helper itself, and that application is not always the
+ * one whose name is on the window. A packaged run is "Teminali Code". A
+ * development run is attributed to whatever launched it — the terminal that ran
+ * `npm start`, not Electron and not the product — so the only honest advice
+ * there is to test from the installed app.
+ */
+function accessibilityHelp(): string {
+  const off = "Accessibility is off, so the assistant cannot point at or click anything.";
+  const host = (window as { teminali?: { host?: { name?: string; isPackaged?: boolean } | null } }).teminali?.host;
+  if (!host) return off;
+  if (host.isPackaged) {
+    return `${off} Turn on \u201C${host.name}\u201D under System Settings \u203A Privacy & Security \u203A Accessibility.`;
+  }
+  return `${off} This is a development run, which macOS attributes to whatever launched it \u2014 usually your terminal, not \u201C${host.name}\u201D. Grant it there, or test from the installed app.`;
+}
+
 export const AssistantHud: React.FC<AssistantHudProps> = ({ assistant, transcript, voiceState }) => {
   const { phase, turn, capabilities, settings, awaiting } = assistant;
   if (!assistant.open) return null;
@@ -76,7 +96,7 @@ export const AssistantHud: React.FC<AssistantHudProps> = ({ assistant, transcrip
     if (!capabilities.helperBuilt) missing.push("The pointer helper is not built — run npm run build:pointer.");
     else {
       if (!capabilities.screenRecordingGranted) missing.push("Screen Recording is off, so the assistant cannot see the screen.");
-      if (!capabilities.accessibilityTrusted) missing.push("Accessibility is off, so the assistant cannot point at or click anything.");
+      if (!capabilities.accessibilityTrusted) missing.push(accessibilityHelp());
     }
   } else if (capabilities && !capabilities.supported) {
     missing.push(capabilities.detail ?? "Screen control is not available on this system.");

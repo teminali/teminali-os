@@ -635,6 +635,16 @@ touch anything on it. A single "grant access" would say neither. The observation
 degrades rather than fails, and `limits` carries the sentence the interface
 shows. `npm run assistant:doctor` reports the whole path on the screen as it is.
 
+Naming the permission is not enough on its own, because the switch is not
+labelled with the product. TCC grants Accessibility to the application
+*responsible* for the pointer helper, never to the ad-hoc-signed helper itself,
+so the row to turn on is "Teminali Code" in a packaged run — and in a
+development run it is whatever launched the window, which for `npm start` is the
+terminal. The HUD reads `window.teminali.host` (`{ name, isPackaged }`, put
+there by `assistant:host-sync` in `main.cjs`) and says which of those two cases
+the operator is in, rather than leaving them to grant the product and watch
+nothing change.
+
 Accessibility has a prompt an application may raise, so the offer there is
 "Ask macOS". **Screen Recording has none** — no API, no entitlement, nothing
 that puts a row in that list except a person dragging the bundle into it. The

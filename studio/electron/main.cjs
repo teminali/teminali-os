@@ -570,6 +570,21 @@ ipcMain.handle("dialog:open-folder", async (event) => {
 // Synchronous, and read once at preload time, because the deny list is
 // consulted on the first tool call and an `await` there would mean a window in
 // which the policy is not loaded yet and every path looks ungranted.
+/**
+ * Which application macOS attributes the assistant's screen control to.
+ *
+ * Accessibility is granted to a bundle, not to a helper: the pointer binary is
+ * ad-hoc signed and short-lived, so TCC judges whoever is responsible for it.
+ * The name of that bundle is the executable's, which is "Teminali Code" in a
+ * packaged run and "Electron" in a development one — and the renderer cannot
+ * work either out for itself. `isPackaged` rides along because a development
+ * run launched from a terminal is attributed to the terminal, which makes the
+ * grant land somewhere the operator would never think to look.
+ */
+ipcMain.on("assistant:host-sync", (event) => {
+  event.returnValue = { name: path.basename(app.getPath("exe")), isPackaged: app.isPackaged };
+});
+
 ipcMain.on("media:paths-sync", (event) => {
   event.returnValue = { home: app.getPath("home"), userData: app.getPath("userData") };
 });
