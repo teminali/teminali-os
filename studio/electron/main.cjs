@@ -278,9 +278,14 @@ ipcMain.handle("assistant:hide-overlay", () => {
 ipcMain.handle("assistant:overlay-state", () => assistantOverlay?.getState() ?? { visible: false });
 
 /* ── Updates ────────────────────────────────────────────────────────────────
-   This build is ad-hoc signed, so an update is a whole new .dmg / .exe /
-   .AppImage rather than an in-place patch — Squirrel will not apply an update
-   to a binary it cannot verify, and no amount of wiring changes that.
+   This build is ad-hoc signed, so an update is a whole new artifact rather than
+   an in-place patch — Squirrel will not apply an update to a binary it cannot
+   verify, and no amount of wiring changes that.
+
+   Windows and Linux hand that artifact to the operating system to open. macOS
+   cannot: Gatekeeper refuses to launch an ad-hoc bundle through LaunchServices
+   and offers only Done / Move to Bin. So macOS downloads the published .zip and
+   swaps the bundle in this process instead — see server/install-macos.js.
 
    The consequence handled here is the restart. Each ad-hoc build carries a
    different signature, and macOS keys Screen Recording, Accessibility and
@@ -294,6 +299,11 @@ const loadUpdates = () =>
   updatesModule
     ?? (updatesModule = import(require("url").pathToFileURL(path.join(__dirname, "..", "server", "updates.js")).href));
 
+let macInstallerModule = null;
+const loadMacInstaller = () =>
+  macInstallerModule
+    ?? (macInstallerModule = import(require("url").pathToFileURL(path.join(__dirname, "..", "server", "install-macos.js")).href));
+
 ipcMain.handle("updates:install", async (_event, filePath) => {
   const { isDownloadedInstaller } = await loadUpdates();
   // The renderer names the path, so it is checked against the one directory the
@@ -303,6 +313,23 @@ ipcMain.handle("updates:install", async (_event, filePath) => {
     log("Refused to open a path that is not a downloaded installer:", filePath);
     return { ok: false, reason: "That file was not downloaded by the updater." };
   }
+
+  if (process.platform === "darwin") {
+    // Only a packaged build may do this. Unpackaged, `exe` points into the
+    // Electron binary that npm installed, and the bundle three levels above it
+    // is Electron.app itself — which this would then overwrite.
+    if (!app.isPackaged) {
+      return { ok: false, reason: "A development build cannot replace itself." };
+    }
+    // Teminali Code.app/Contents/MacOS/Teminali Code — the bundle is three
+    // levels above the executable.
+    const bundlePath = path.resolve(app.getPath("exe"), "..", "..", "..");
+    const { installMacUpdate } = await loadMacInstaller();
+    const result = await installMacUpdate({ zipPath: filePath, bundlePath });
+    if (!result.ok) log("The update was not installed:", result.message);
+    return result.ok ? { ok: true } : { ok: false, reason: result.message };
+  }
+
   const problem = await shell.openPath(filePath);
   if (problem) {
     log("Could not open the installer:", problem);

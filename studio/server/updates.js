@@ -91,7 +91,12 @@ const ANY_ARCH = new RegExp(Object.values(ARCH_TOKENS).flat().join("|"));
 export function assetForPlatform(assets, { platform, arch } = {}) {
   if (!Array.isArray(assets) || assets.length === 0) return null;
 
-  const extension = platform === "darwin" ? ".dmg" : platform === "win32" ? ".exe" : ".AppImage";
+  // macOS takes the .zip, not the .dmg. A .dmg can only be installed by handing
+  // it to LaunchServices, and LaunchServices is exactly what Gatekeeper refuses
+  // for an ad-hoc signed download — the user gets "Apple could not verify" with
+  // no Open button. The .zip is expanded and swapped into place by this process
+  // instead, which never asks LaunchServices anything. See installMacUpdate.
+  const extension = platform === "darwin" ? ".zip" : platform === "win32" ? ".exe" : ".AppImage";
   // Lower-cased once here rather than at each comparison below, because the
   // architecture tokens are matched case-insensitively and the extension is not:
   // `.AppImage` is spelled the way the packager spells it.
@@ -232,7 +237,7 @@ export function isDownloadedInstaller(path) {
   // Directly inside, not nested: this module only ever writes at the top level,
   // so a path with a separator left in it came from somewhere else.
   if (resolved.slice(prefix.length).includes(sep)) return false;
-  return /\.(dmg|exe|AppImage)$/i.test(resolved);
+  return /\.(zip|dmg|exe|AppImage)$/i.test(resolved);
 }
 
 /**
@@ -246,7 +251,7 @@ export async function downloadAsset({ url, name, onProgress, signal, fetchImpl =
   if (typeof url !== "string" || !/^https:\/\/[^/]*github(usercontent)?\.com\//.test(url)) {
     throw new Error("UPDATE_ASSET_URL_INVALID");
   }
-  if (typeof name !== "string" || !/^[\w.\- ]+\.(dmg|exe|AppImage)$/i.test(name)) {
+  if (typeof name !== "string" || !/^[\w.\- ]+\.(zip|dmg|exe|AppImage)$/i.test(name)) {
     throw new Error("UPDATE_ASSET_NAME_INVALID");
   }
 

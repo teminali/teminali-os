@@ -33,6 +33,9 @@ export interface UpdateModalProps {
 
 export const UpdateModal: React.FC<UpdateModalProps> = ({ updates, isOpen, onClose }) => {
   const { status, phase, progress, receivedBytes, error, awaitingRestart } = updates;
+  // macOS replaces the bundle in place rather than handing a .dmg to the
+  // Finder, so it never asks anyone to drag anything anywhere.
+  const isMac = typeof navigator !== "undefined" && /Mac/i.test(navigator.userAgent);
   const latest = status?.latest;
   const asset = status?.asset;
   const desktop = Boolean(window.teminali?.updates);
@@ -91,12 +94,13 @@ export const UpdateModal: React.FC<UpdateModalProps> = ({ updates, isOpen, onClo
           </div>
         )}
 
-        {/* Once it is open, the manual half — and why it is manual. */}
+        {/* What is left to do, which is a whole step less on macOS. */}
         {(phase === "installed" || awaitingRestart) && (
           <div className="rounded-xl border border-edge bg-surface-sunken px-3.5 py-3 space-y-2">
             <p className="text-sm text-ink-prose">
-              The installer is open. Drag Teminali Code into Applications, replacing the copy that is there, then reopen
-              it below.
+              {isMac
+                ? "The new version is in place. Reopen the app below to start running it."
+                : "The installer is open. Follow it through, then reopen the app below."}
             </p>
             <p className="text-2xs text-ink-faint leading-relaxed">
               This app is not signed with an Apple Developer certificate, so macOS treats each new build as a different
@@ -124,7 +128,7 @@ export const UpdateModal: React.FC<UpdateModalProps> = ({ updates, isOpen, onClo
           </Button>
         ) : phase === "ready" ? (
           <Button variant="primary" size="sm" onClick={() => void updates.install()} icon={<ArrowDownToLine size={13} />}>
-            Open the installer
+            {isMac ? "Install the update" : "Open the installer"}
           </Button>
         ) : awaitingRestart ? (
           /* The label promises both, and both are attempted: the relaunch is
