@@ -5,12 +5,17 @@
 # AppImage built on a Mac is unreliable in ways that only show up on someone
 # else's machine. Three runners is the boring answer and the one that works.
 #
-# There is no code signing. The app is ad-hoc signed by build/afterPack.cjs, so
-# macOS Gatekeeper will warn on first launch and the in-app updater replaces the
-# whole .dmg rather than patching in place — see server/updates.js for why that
-# is a constraint rather than a choice. Adding an Apple Developer ID later means
-# setting CSC_LINK, CSC_KEY_PASSWORD and the notarization variables here; the
-# rest of this file does not change.
+# There is no Developer ID certificate yet, so the app is ad-hoc signed by
+# build/afterPack.cjs: macOS Gatekeeper warns on first launch, and the in-app
+# updater replaces the whole .dmg rather than patching in place — see
+# server/updates.js for why that is a constraint rather than a choice.
+#
+# Signing is wired but pending. The packaging step below already reads every
+# variable a real signature needs, and each one arrives empty while the secret
+# is absent; electron-builder and afterPack.cjs both read empty as "no
+# certificate" and take the ad-hoc path. Adding CSC_LINK, CSC_KEY_PASSWORD and
+# the three APPLE_* secrets in repository settings switches this build over to
+# a real signature and notarization without touching a file.
 
 name: Release
 
@@ -105,6 +110,27 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Pending, and deliberately harmless while it is. An absent secret is
+          # an empty string, which every reader below treats as absent:
+          # electron-builder skips signing, and afterPack.cjs ad-hoc signs.
+          #
+          # Scoped to the macOS runner because CSC_LINK is not a macOS variable —
+          # electron-builder hands it to signtool on Windows too, and a Developer
+          # ID .p12 would fail that build the day the secret is added.
+          CSC_LINK: ${{ matrix.os == 'macos-latest' && secrets.CSC_LINK || '' }}
+          CSC_KEY_PASSWORD: ${{ matrix.os == 'macos-latest' && secrets.CSC_KEY_PASSWORD || '' }}
+          # Otherwise electron-builder searches the runner keychain for any
+          # identity it can find. That is a no-op on a runner with no
+          # certificate, and it is how a build picks up the wrong one on a
+          # runner image that ships with one.
+          CSC_IDENTITY_AUTO_DISCOVERY: ${{ secrets.CSC_LINK != '' }}
+          # Notarization runs only after a successful Developer ID signature, so
+          # these stay inert until CSC_LINK exists. All three go together —
+          # electron-builder fails the build on a partial set rather than
+          # quietly shipping something Gatekeeper will reject.
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         run: >-
           npx electron-builder ${{ matrix.args }}
           --publish ${{ (github.event_name == 'push' && 'always') || 'never' }}
