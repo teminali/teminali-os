@@ -12,6 +12,7 @@ import { AgentPane } from "./panels/AgentPane";
 import { UsagePane } from "./panels/UsagePane";
 import { ReleasePane } from "./panels/ReleasePane";
 import { ArenaPane } from "./panels/ArenaPane";
+import { VideoPane } from "./panels/VideoPane";
 import { GuardianPanel } from "../guardian/GuardianPanel";
 
 /**
@@ -81,6 +82,8 @@ const PaneFor: React.FC = () => {
       return <ReleasePane />;
     case "arena":
       return <ArenaPane />;
+    case "video":
+      return <VideoPane />;
     case "claude":
     case "codex":
       return <AgentPane panel={panel as typeof panel & { kind: "claude" | "codex" }} />;

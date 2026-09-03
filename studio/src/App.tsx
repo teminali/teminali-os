@@ -156,6 +156,11 @@ export default function App() {
           focusOrOpen({ kind: "release" });
           return;
         }
+        if (key === "v") {
+          event.preventDefault();
+          focusOrOpen({ kind: "video" });
+          return;
+        }
         // Sidebar tabs keep the editor bindings people already have in their
         // fingers, so the rail needs no legend of its own.
         const tabFor: Record<string, SidebarTabId> = { e: "files", f: "search" };

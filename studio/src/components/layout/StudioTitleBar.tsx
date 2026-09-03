@@ -82,7 +82,7 @@ export const StudioTitleBar: React.FC<StudioTitleBarProps> = ({
   // operator who is not an admin has no use for a row that always refuses. The
   // routes behind them re-check regardless — this is presentation, not the gate.
   const adminOnly = new Set<PanelKind>(["release", "arena"]);
-  const kinds = (["file", "terminal", "browser", "canvas", "side", "claude", "codex", "usage", "arena", "release", "guardian"] as PanelKind[])
+  const kinds = (["file", "terminal", "browser", "canvas", "video", "side", "claude", "codex", "usage", "arena", "release", "guardian"] as PanelKind[])
     .filter((kind) => !adminOnly.has(kind) || isAdmin);
 
   const addItems: MenuItem[] = kinds.map((kind) => ({
@@ -186,23 +186,36 @@ export const StudioTitleBar: React.FC<StudioTitleBarProps> = ({
                   onKeyDown={(event) => {
                     if (event.key === "Enter" || event.key === " ") activate(panel.id);
                   }}
-                  className={`group flex items-center gap-2 h-7 px-2.5 rounded-sm cursor-pointer text-xs whitespace-nowrap transition-colors duration-ds ease-ds ${
-                    active ? "bg-surface-tab text-ink-strong" : "text-ink-muted hover:text-ink-dim"
+                  title={panel.label}
+                  aria-label={panel.label}
+                  className={`group flex items-center justify-center h-7 rounded-sm cursor-pointer text-xs whitespace-nowrap transition-all duration-ds ease-ds ${
+                    active
+                      ? "gap-2 px-2 bg-surface-tab text-ink-strong"
+                      : "w-7 text-ink-muted hover:text-ink-dim hover:bg-surface-hover"
                   }`}
                 >
                   <PanelGlyph kind={panel.kind} size={13} />
-                  <span className="max-w-[120px] truncate">{panel.label}</span>
-                  <button
-                    type="button"
-                    aria-label={`Close ${panel.label}`}
-                    onClick={(event) => {
-                      event.stopPropagation();
-                      close(panel.id);
-                    }}
-                    className="opacity-0 group-hover:opacity-60 hover:!opacity-100 transition-opacity duration-ds ease-ds"
-                  >
-                    <X size={12} />
-                  </button>
+                  {/* Square icon tiles, because the strip has to hold a growing
+                      set of tools — the video editor is only the first. Just
+                      the active tile spends width on its label, which is what
+                      keeps three tabs called "File" tellable apart; the rest
+                      carry theirs in the tooltip. */}
+                  {active && (
+                    <>
+                      <span className="max-w-[120px] truncate">{panel.label}</span>
+                      <button
+                        type="button"
+                        aria-label={`Close ${panel.label}`}
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          close(panel.id);
+                        }}
+                        className="opacity-60 hover:opacity-100 transition-opacity duration-ds ease-ds"
+                      >
+                        <X size={12} />
+                      </button>
+                    </>
+                  )}
                 </div>
               );
             })}

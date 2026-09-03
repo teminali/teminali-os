@@ -1,0 +1,399 @@
+/* ═══════════════════════════════════════════════════════════════════
+   Multi-track timeline.
+
+   The scroll container owns the horizontal scroll for both the ruler and
+   the lanes, so they can never drift apart. Snapping candidates (clip
+   edges, playhead, markers, in/out) are gathered once per drag rather
+   than per pointer move.
+   ═══════════════════════════════════════════════════════════════════ */
+
+import React, { useCallback, useMemo, useRef, useState, useEffect } from 'react';
+import { useTimelineStore } from '../../store/timelineStore';
+import { useProjectStore } from '../../store/projectStore';
+import { TimelineToolbar } from './TimelineToolbar';
+import { TimelineRuler } from './TimelineRuler';
+import { TrackHeader } from './TrackHeader';
+import { ClipBlock } from './ClipBlock';
+import { Playhead, PlayheadHead } from './Playhead';
+import { MarkerLane } from './MarkerLane';
+import { MediaAsset } from '../../types/edl';
+
+/* The scale and its clamp live in the store, because the store is what
+   enforces them. Re-exported here so the existing import sites keep
+   working — this module was their source before. */
+export { BASE_PX_PER_MS } from '../../store/timelineStore';
+import { BASE_PX_PER_MS } from '../../store/timelineStore';
+export const HEADER_WIDTH = 160;
+const RULER_HEIGHT = 30;
+const MARKER_HEIGHT = 18;
+
+export interface DragGhost {
+  clipIds: string[];
+  trackId: string;
+  startTimeMs: number;
+  /** Guide line to draw during the drag, in ms. */
+  snapLineMs: number | null;
+}
+
+export const Timeline: React.FC = () => {
+  const tracks = useTimelineStore((s) => s.tracks);
+  const zoomLevel = useTimelineStore((s) => s.zoomLevel);
+  const selectedTrackId = useTimelineStore((s) => s.selectedTrackId);
+  const inPointMs = useTimelineStore((s) => s.inPointMs);
+  const outPointMs = useTimelineStore((s) => s.outPointMs);
+
+  const setPlayheadMs = useTimelineStore((s) => s.setPlayheadMs);
+  const setSelectedTrackId = useTimelineStore((s) => s.setSelectedTrackId);
+  const clearSelection = useTimelineStore((s) => s.clearSelection);
+  const selectClips = useTimelineStore((s) => s.selectClips);
+  const insertClip = useTimelineStore((s) => s.insertClip);
+  const setZoomLevel = useTimelineStore((s) => s.setZoomLevel);
+
+  const project = useProjectStore((s) => s.project);
+
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const lanesRef = useRef<HTMLDivElement>(null);
+  const [snapLineMs, setSnapLineMs] = useState<number | null>(null);
+  const [marquee, setMarquee] = useState<{ x0: number; y0: number; x1: number; y1: number } | null>(null);
+  const [dropTargetTrack, setDropTargetTrack] = useState<string | null>(null);
+
+  const pxPerMs = BASE_PX_PER_MS * zoomLevel;
+
+  /*
+    The lanes have to reach the right edge of the viewport.
+
+    Content width used to be `duration * pxPerMs + 240` and nothing
+    else, so a short project in a wide window drew lanes that stopped
+    part way across and left bare panel background beyond them — an
+    11.5s project at the default zoom is 815px of lanes in a 1226px
+    viewport, and the 411px of nothing after it reads as a rendering
+    fault rather than as "the sequence ends here". Every NLE fills the
+    track area and lets the ruler run past the content.
+  */
+  const [viewportWidth, setViewportWidth] = useState(0);
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (!el || typeof ResizeObserver !== 'function') return;
+    const ro = new ResizeObserver(() => setViewportWidth(el.clientWidth));
+    ro.observe(el);
+    setViewportWidth(el.clientWidth);
+    return () => ro.disconnect();
+  }, []);
+
+  const contentWidth = Math.max(600, viewportWidth, project.durationMs * pxPerMs + 240);
+
+  /* ── Snap candidates ── */
+
+  const collectSnapPoints = useCallback(
+    (excludeClipIds: string[] = []): number[] => {
+      const state = useTimelineStore.getState();
+      if (!state.snappingEnabled) return [];
+
+      const points = new Set<number>([0, state.playheadMs]);
+      if (state.inPointMs !== null) points.add(state.inPointMs);
+      if (state.outPointMs !== null) points.add(state.outPointMs);
+      for (const m of state.markers) points.add(m.timeMs);
+      for (const track of state.tracks) {
+        for (const clip of track.clips) {
+          if (excludeClipIds.includes(clip.id)) continue;
+          points.add(clip.startTimeMs);
+          points.add(clip.startTimeMs + clip.durationMs);
+        }
+      }
+      return [...points];
+    },
+    []
+  );
+
+  /** Snap `ms` to the nearest candidate within ~9 screen px. */
+  const snapTime = useCallback(
+    (ms: number, candidates: number[]): { value: number; snappedTo: number | null } => {
+      if (candidates.length === 0) return { value: ms, snappedTo: null };
+      const toleranceMs = 9 / pxPerMs;
+
+      let best: number | null = null;
+      let bestDist = Infinity;
+      for (const c of candidates) {
+        const d = Math.abs(c - ms);
+        if (d < bestDist && d <= toleranceMs) {
+          bestDist = d;
+          best = c;
+        }
+      }
+      return best !== null ? { value: best, snappedTo: best } : { value: ms, snappedTo: null };
+    },
+    [pxPerMs]
+  );
+
+  /* ── Scrub / deselect on empty lane click ── */
+
+  const laneTimeFromEvent = useCallback(
+    (clientX: number): number => {
+      const lanes = lanesRef.current;
+      if (!lanes) return 0;
+      const rect = lanes.getBoundingClientRect();
+      return Math.max(0, (clientX - rect.left) / pxPerMs);
+    },
+    [pxPerMs]
+  );
+
+  const handleLaneBackgroundDown = useCallback(
+    (e: React.PointerEvent, trackId: string) => {
+      if (e.button !== 0) return;
+      const lanes = lanesRef.current;
+      if (!lanes) return;
+
+      setSelectedTrackId(trackId);
+      const rect = lanes.getBoundingClientRect();
+      const originX = e.clientX - rect.left;
+      const originY = e.clientY - rect.top;
+
+      let didMarquee = false;
+
+      const move = (ev: PointerEvent) => {
+        const x = ev.clientX - rect.left;
+        const y = ev.clientY - rect.top;
+        if (!didMarquee && Math.hypot(x - originX, y - originY) < 4) return;
+        didMarquee = true;
+        setMarquee({ x0: originX, y0: originY, x1: x, y1: y });
+      };
+
+      const up = (ev: PointerEvent) => {
+        window.removeEventListener('pointermove', move);
+        window.removeEventListener('pointerup', up);
+
+        if (didMarquee) {
+          // Rubber-band select every clip the box touches.
+          const x = ev.clientX - rect.left;
+          const y = ev.clientY - rect.top;
+          const minX = Math.min(originX, x);
+          const maxX = Math.max(originX, x);
+          const minY = Math.min(originY, y);
+          const maxY = Math.max(originY, y);
+
+          const hits: string[] = [];
+          let laneTop = 0;
+          for (const track of tracks) {
+            const laneBottom = laneTop + track.heightPx;
+            if (laneBottom >= minY && laneTop <= maxY) {
+              for (const clip of track.clips) {
+                const clipLeft = clip.startTimeMs * pxPerMs;
+                const clipRight = clipLeft + clip.durationMs * pxPerMs;
+                if (clipRight >= minX && clipLeft <= maxX) hits.push(clip.id);
+              }
+            }
+            laneTop = laneBottom;
+          }
+          selectClips(hits);
+          setMarquee(null);
+        } else {
+          setPlayheadMs(Math.min(project.durationMs, laneTimeFromEvent(ev.clientX)));
+          if (!ev.shiftKey) clearSelection();
+        }
+      };
+
+      window.addEventListener('pointermove', move);
+      window.addEventListener('pointerup', up);
+    },
+    [tracks, pxPerMs, project.durationMs, setSelectedTrackId, setPlayheadMs, clearSelection, selectClips, laneTimeFromEvent]
+  );
+
+  /* ── Ctrl/⌘ + wheel zooms around the cursor ── */
+
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (!el) return;
+
+    const onWheel = (e: WheelEvent) => {
+      if (!e.ctrlKey && !e.metaKey) return;
+      e.preventDefault();
+
+      const state = useTimelineStore.getState();
+      const rect = el.getBoundingClientRect();
+      const cursorX = e.clientX - rect.left + el.scrollLeft;
+      const timeAtCursor = cursorX / (BASE_PX_PER_MS * state.zoomLevel);
+
+      /* The clamp is the store's, and only the store's. This line used
+         to carry its own `Math.max(0.05, Math.min(20, …))`, which is a
+         second copy of a limit that has now moved — ⌘-wheel would have
+         kept stopping at the old ceiling while every other zoom control
+         went further. Ask the store what it actually settled on and
+         scroll to THAT, so the pointer anchor cannot drift at the
+         limits. */
+      const factor = e.deltaY < 0 ? 1.15 : 1 / 1.15;
+      state.setZoomLevel(state.zoomLevel * factor);
+      const nextZoom = useTimelineStore.getState().zoomLevel;
+
+      // Keep whatever was under the cursor under the cursor.
+      requestAnimationFrame(() => {
+        el.scrollLeft = timeAtCursor * BASE_PX_PER_MS * nextZoom - (e.clientX - rect.left);
+      });
+    };
+
+    el.addEventListener('wheel', onWheel, { passive: false });
+    return () => el.removeEventListener('wheel', onWheel);
+  }, []);
+
+  /* ── Keep the playhead in view while playing ── */
+
+  useEffect(() => {
+    const unsub = useTimelineStore.subscribe((state, prev) => {
+      if (!state.isPlaying || state.playheadMs === prev.playheadMs) return;
+      const el = scrollRef.current;
+      if (!el) return;
+
+      const x = state.playheadMs * BASE_PX_PER_MS * state.zoomLevel;
+      const viewLeft = el.scrollLeft;
+      const viewRight = viewLeft + el.clientWidth;
+
+      if (x > viewRight - 80 || x < viewLeft) {
+        el.scrollLeft = Math.max(0, x - el.clientWidth * 0.35);
+      }
+    });
+    return unsub;
+  }, []);
+
+  /* ── Media drop from the pool ── */
+
+  const handleDrop = useCallback(
+    (e: React.DragEvent, trackId: string) => {
+      e.preventDefault();
+      setDropTargetTrack(null);
+      const raw = e.dataTransfer.getData('application/x-kerf-asset');
+      if (!raw) return;
+      try {
+        const asset = JSON.parse(raw) as MediaAsset;
+        const candidates = collectSnapPoints();
+        const dropped = laneTimeFromEvent(e.clientX);
+        const { value } = snapTime(dropped, candidates);
+        insertClip(trackId, asset, Math.max(0, value));
+      } catch {
+        /* malformed payload — ignore */
+      }
+    },
+    [collectSnapPoints, laneTimeFromEvent, snapTime, insertClip]
+  );
+
+  const lanesTotalHeight = useMemo(
+    () => tracks.reduce((sum, t) => sum + t.heightPx, 0),
+    [tracks]
+  );
+
+  return (
+    <div className="editor-timeline-inner flex flex-col h-full bg-spectrum-panel border-t border-line overflow-hidden select-none">
+      <TimelineToolbar scrollRef={scrollRef} />
+
+      <div className="flex-1 flex overflow-hidden min-h-0">
+        {/* ── Track headers ── */}
+        <div
+          className="editor-track-list flex-shrink-0 flex flex-col bg-spectrum-panelHeader border-r border-line z-20"
+          style={{ width: HEADER_WIDTH }}
+        >
+          <div
+            className="editor-track-list-header flex items-center px-[12px] pt-px border-b border-line bg-spectrum-panelHeader flex-shrink-0"
+            style={{ height: RULER_HEIGHT + MARKER_HEIGHT }}
+          >
+            <span className="panel-title text-spectrum-textDimCool">Tracks</span>
+          </div>
+
+          <div className="flex-1 overflow-hidden">
+            {tracks.map((track) => (
+              <TrackHeader key={track.id} track={track} />
+            ))}
+          </div>
+        </div>
+
+        {/* ── Scrollable lanes ── */}
+        <div ref={scrollRef} className="editor-timeline-lanes flex-1 overflow-x-auto overflow-y-auto relative bg-spectrum-sunken min-w-0">
+          <div style={{ width: contentWidth, minHeight: '100%' }} className="relative">
+            {/* Ruler + markers pinned to the top of the scroll area */}
+            <div className="editor-time-ruler-stack sticky top-0 z-30 bg-spectrum-panelHeader border-b border-line">
+              <TimelineRuler pxPerMs={pxPerMs} durationMs={project.durationMs} height={RULER_HEIGHT} />
+              <MarkerLane pxPerMs={pxPerMs} height={MARKER_HEIGHT} />
+              <PlayheadHead pxPerMs={pxPerMs} height={RULER_HEIGHT + MARKER_HEIGHT} />
+            </div>
+
+            {/* Lanes */}
+            <div ref={lanesRef} className="relative">
+              {/* In / out shading */}
+              {(inPointMs !== null || outPointMs !== null) && (
+                <div
+                  className="absolute top-0 bg-spectrum-accent/[0.07] border-x border-spectrum-accent/40 pointer-events-none z-[1]"
+                  style={{
+                    left: (inPointMs ?? 0) * pxPerMs,
+                    width: ((outPointMs ?? project.durationMs) - (inPointMs ?? 0)) * pxPerMs,
+                    height: lanesTotalHeight,
+                  }}
+                />
+              )}
+
+              {tracks.map((track, idx) => (
+                <div
+                  key={track.id}
+                  onPointerDown={(e) => {
+                    if (e.target === e.currentTarget) handleLaneBackgroundDown(e, track.id);
+                  }}
+                  onDragOver={(e) => {
+                    e.preventDefault();
+                    setDropTargetTrack(track.id);
+                  }}
+                  onDragLeave={() => setDropTargetTrack((t) => (t === track.id ? null : t))}
+                  onDrop={(e) => handleDrop(e, track.id)}
+                  style={{ height: track.heightPx }}
+                  className={`editor-track-lane relative w-full border-b border-line lane-stripe transition-colors ${
+                    dropTargetTrack === track.id
+                      ? 'bg-spectrum-accent/12 ring-1 ring-inset ring-spectrum-accent/50'
+                      : selectedTrackId === track.id
+                        ? 'is-active bg-spectrum-hover'
+                        : idx % 2 === 0
+                          ? 'bg-spectrum-hover'
+                          : 'bg-transparent'
+                  } ${track.locked ? 'opacity-55' : ''}`}
+                >
+                  {track.clips.map((clip) => (
+                    <ClipBlock
+                      key={clip.id}
+                      clip={clip}
+                      track={track}
+                      pxPerMs={pxPerMs}
+                      trackHeightPx={track.heightPx}
+                      collectSnapPoints={collectSnapPoints}
+                      snapTime={snapTime}
+                      onSnapLine={setSnapLineMs}
+                    />
+                  ))}
+                </div>
+              ))}
+
+              {/* Snap guide */}
+              {snapLineMs !== null && (
+                <div
+                  /* Teal, not amber. The playhead is the accent now, and two
+                     vertical lines in the same colour a few pixels apart are
+                     two different meanings wearing one signal. */
+                  className="absolute top-0 w-px bg-spectrum-blue pointer-events-none z-40 shadow-[0_0_6px_rgba(74,144,255,0.75)]"
+                  style={{ left: snapLineMs * pxPerMs, height: lanesTotalHeight }}
+                />
+              )}
+
+              {/* Marquee */}
+              {marquee && (
+                <div
+                  className="absolute border border-spectrum-accent bg-spectrum-accent/12 pointer-events-none z-40 rounded-squircle-2xs"
+                  style={{
+                    left: Math.min(marquee.x0, marquee.x1),
+                    top: Math.min(marquee.y0, marquee.y1),
+                    width: Math.abs(marquee.x1 - marquee.x0),
+                    height: Math.abs(marquee.y1 - marquee.y0),
+                  }}
+                />
+              )}
+
+              <Playhead pxPerMs={pxPerMs} height={lanesTotalHeight} />
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+};

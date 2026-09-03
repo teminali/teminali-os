@@ -1,5 +1,5 @@
 import React from "react";
-import { Activity, ChartColumn, FileText, MessageSquare, PenLine, Rocket, Scale, SquareTerminal, Globe } from "lucide-react";
+import { Activity, ChartColumn, Clapperboard, FileText, MessageSquare, PenLine, Rocket, Scale, SquareTerminal, Globe } from "lucide-react";
 import { BrandGlyph } from "../ui";
 import type { PanelKind } from "../../store/panelStore";
 
@@ -36,6 +36,8 @@ export const PanelGlyph: React.FC<{ kind: PanelKind; size?: number; className?: 
       return <Rocket {...props} />;
     case "arena":
       return <Scale {...props} />;
+    case "video":
+      return <Clapperboard {...props} />;
     case "file":
     default:
       return <FileText {...props} />;
