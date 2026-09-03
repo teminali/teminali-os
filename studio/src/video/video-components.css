@@ -941,6 +941,16 @@
     font-weight: 500;
   }
 
+  /* A button with no word in it is square, not a wide slab with its label
+     cut out. `:has()` asks the button whether it kept its span rather than
+     making the pane pass a second flag down for something the DOM already
+     knows. */
+  .video-workspace .editor-summon-btn:not(:has(span)) {
+    padding: 0;
+    width: var(--h-sm);
+    justify-content: center;
+  }
+
   /* ── Context menu ─────────────────────────────────────────────────
      The store has had one since the port; this is the first sheet that
      draws it. See `components/ui/Overlays.tsx`. */

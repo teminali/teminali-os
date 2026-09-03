@@ -42,8 +42,14 @@ const ZOOM_STEPS = [0.25, 0.5, 0.75, 1, 1.5, 2, 3, 4];
  *   alignment shelf up to clear it. The header is chrome that never wraps and
  *   never overlaps anything, and it has the room — measured free space beside
  *   the label is 179px at `xs`, 279px at `sm` and 120px at `md`, against a bar
- *   of 147px, 147px and 81px. At `lg` both panels are seated and there is no
- *   bar to place, which is just as well: the header is exactly full there.
+ *   of 147px, 147px and 81px.
+ *
+ *   At `lg` the bar is no longer empty: the inspector's minimize toggle lives
+ *   there at every width, so a seated inspector can be put away. The header is
+ *   effectively full at `lg`, and what pays for the toggle is the format strip
+ *   above — it is `truncate` and not `flex-shrink-0`, so it yields characters
+ *   rather than pushing the row over. The toggle is drawn icon-only wherever
+ *   the inspector is seated, to keep that bill small.
  */
 export const PreviewPlayer: React.FC<{ headerNav?: React.ReactNode }> = ({ headerNav }) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);

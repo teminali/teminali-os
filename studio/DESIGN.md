@@ -410,8 +410,11 @@ makes a quiet week look busy.
 
 **The editor is a panel, so its layout is a function of the panel's width — not
 the window's, and not a designer's guess.** It opens at 452px beside a chat
-column, the tab strip's expand button swaps that for 736px, and the panel edge
-drags to anything. A media query would answer about the display while the editor
+column, the tab strip's expand button runs it out to the edge of the vertical
+tab rail — `--panel-w-expanded` is `calc(100vw - var(--shell-left-inset))`, not
+the flat 736px it was — and the panel edge drags to anything. While expanded the
+chat is hidden rather than crushed, and stays mounted. Dragging short of that,
+the chat keeps a `--chat-min-w` floor of 420px. A media query would answer about the display while the editor
 lives in a third of one; a 452px panel on a 5K monitor is the *narrowest* case
 and `@media` would call it the widest.
 
@@ -507,10 +510,22 @@ with a modifier, so the shell's ⌘-shortcuts still land.
 **The summon bar sits in the monitor's header, not on the stage.** Below `lg`
 the library and inspector are summoned rather than seated, and their buttons had
 been laid over the picture. Beside the `Program` label there is 179px of free
-space at `xs`, 279 at `sm` and 120 at `md` for a bar of 147/147/81px; at `lg`
-both panels are seated and there is no bar, which is as well, because the header
-is exactly full there. The alignment shelf's `:has(.editor-summon-bar)` lift
-went with it.
+space at `xs`, 279 at `sm` and 120 at `md` for a bar of 147/147/81px. The
+alignment shelf's `:has(.editor-summon-bar)` lift went with it.
+
+**The inspector can be put away at every width, through that one control.**
+Wide enough to seat the inspector is not the same as wanting it — a 296px rail
+is 296px the picture does not get, and the editor at full width is where someone
+watches rather than tweaks. So `Edit` is drawn at every tier, unlike `Media`,
+and only the mechanism behind it changes: seated, it clears
+`inspectorSeated = canSeatInspector && !inspectorMinimized`; summoned, it opens
+the overlay. The overlay stays gated on `!canSeatInspector`, so a minimised
+column never summons a sheet over the space it just gave back. The choice is
+kept across a trip down through the narrow tiers and back — except that widening
+with the overlay open spends it, since that is a request to see the inspector,
+not to hide it. At `lg` the header is effectively full, so the toggle is drawn
+icon-only wherever the inspector is seated and the format strip beside `Program`
+truncates to pay for it. `tests/responsive-layout.test.mjs` holds the shape.
 
 **The track gutter is wider than the tier minimum** — 76 / 120 / 150 / 176px
 across the four tiers. It was cut to the narrowest legible width when the

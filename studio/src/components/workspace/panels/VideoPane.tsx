@@ -114,6 +114,17 @@ export const VideoPane: React.FC = () => {
   const [inspectorOpen, setInspectorOpen] = useState(false);
   const [libraryOpen, setLibraryOpen] = useState(false);
 
+  /* ── Minimising the seated inspector ───────────────────────────────────
+     Wide enough to SEAT the inspector is not the same as wanting it: a
+     296px rail is 296px the picture does not get, and the editor at its
+     full width is exactly where someone watches rather than tweaks. So the
+     column can be put away — and, like the splitter below, the choice is
+     kept rather than silently replaced. It survives a trip down through the
+     narrow tiers and back, so dragging the panel small does not quietly
+     undo it. */
+  const [inspectorMinimized, setInspectorMinimized] = useState(false);
+  const inspectorSeated = canSeatInspector && !inspectorMinimized;
+
   /* ── The splitter ──────────────────────────────────────────────────────
      `null` means "you have not chosen", and the pane picks. Once dragged,
      the choice is kept and only ever clamped — never silently replaced,
@@ -158,8 +169,14 @@ export const VideoPane: React.FC = () => {
      column appears. Without this, dragging the panel wider left an overlay
      floating on top of the very column it was standing in for. */
   useEffect(() => {
-    if (canSeatInspector) setInspectorOpen(false);
-  }, [canSeatInspector]);
+    if (!canSeatInspector) return;
+    /* Widening while the overlay stood OPEN is a request to see the
+       inspector, so the column takes over and any earlier minimize is
+       spent. Without this the overlay would be cleared into a minimized
+       column and the inspector would vanish on the way up. */
+    if (inspectorOpen) setInspectorMinimized(false);
+    setInspectorOpen(false);
+  }, [canSeatInspector, inspectorOpen]);
   useEffect(() => {
     if (canSeatLibrary) setLibraryOpen(false);
   }, [canSeatLibrary]);
@@ -175,10 +192,24 @@ export const VideoPane: React.FC = () => {
     and pushed the alignment shelf up to get out of its way. In the header it
     overlaps nothing and lifts nothing, and it reads as navigation, which is
     what it is. They are still the only chrome this pane adds to the ported
-    editor, and each is drawn only when its panel is not already seated, so the
-    pane never offers to open something that is open.
+    editor.
+
+    `Media` is drawn only when the library is not already seated, so the pane
+    never offers to open something that is open. `Edit` is always drawn,
+    because at every width it answers the same question — inspector, or
+    picture — and only the mechanism behind it changes: seated, it minimizes
+    the column; summoned, it opens the overlay. One control, so there is no
+    second affordance to learn and no width at which the inspector cannot be
+    put away.
   */
-  const summonBar = (!canSeatLibrary || !canSeatInspector) && (
+  const toggleInspector = useCallback(() => {
+    if (canSeatInspector) setInspectorMinimized((m) => !m);
+    else setInspectorOpen((o) => !o);
+  }, [canSeatInspector]);
+
+  const inspectorShown = inspectorSeated || inspectorOpen;
+
+  const summonBar = (
     <div className="editor-summon-bar">
         {!canSeatLibrary && (
           <button
@@ -192,18 +223,22 @@ export const VideoPane: React.FC = () => {
             <span>Media</span>
           </button>
         )}
-        {!canSeatInspector && (
-          <button
-            onClick={() => setInspectorOpen((o) => !o)}
-            className={`pro-btn editor-summon-btn ${inspectorOpen ? "pro-btn-active" : ""}`}
-            title={inspectorOpen ? "Hide the inspector" : "Show the inspector"}
-            aria-label={inspectorOpen ? "Hide the inspector" : "Show the inspector"}
-            aria-pressed={inspectorOpen}
-          >
-            {inspectorOpen ? <X className="w-3.5 h-3.5" /> : <Sliders className="w-3.5 h-3.5" />}
-            <span>Edit</span>
-          </button>
-        )}
+        <button
+          onClick={toggleInspector}
+          className={`pro-btn editor-summon-btn ${inspectorShown ? "pro-btn-active" : ""}`}
+          title={inspectorShown ? "Hide the inspector" : "Show the inspector"}
+          aria-label={inspectorShown ? "Hide the inspector" : "Show the inspector"}
+          aria-pressed={inspectorShown}
+        >
+          {inspectorShown ? <X className="w-3.5 h-3.5" /> : <Sliders className="w-3.5 h-3.5" />}
+          {/* The word rides along only where the bar IS a summon bar. Where
+              the inspector is seated the button is a minimize toggle in a
+              header that is already full — at `lg` the format strip beside
+              `Program` is what pays for anything added here, in truncated
+              characters — so there the icon carries it alone, with the name
+              still in the tooltip and the accessible label. */}
+          {!canSeatInspector && <span>Edit</span>}
+        </button>
     </div>
   );
 
@@ -242,12 +277,12 @@ export const VideoPane: React.FC = () => {
           </div>
 
           {/* ── Inspector ── */}
-          {canSeatInspector ? (
+          {inspectorSeated ? (
             <div className="flex-shrink-0 min-h-0" style={{ width: INSPECTOR_W }}>
               <InspectorPanel />
             </div>
           ) : (
-            inspectorOpen && (
+            !canSeatInspector && inspectorOpen && (
               <>
                 <div
                   className="editor-overlay-scrim"

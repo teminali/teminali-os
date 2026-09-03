@@ -106,3 +106,24 @@ test("the media library in the editor is the shell's own panel, not a second cop
   assert.match(pane, /import \{ MediaPanel \} from "\.\.\/\.\.\/sidebar\/MediaPanel";/);
   assert.equal((pane.match(/<MediaPanel \/>/g) ?? []).length, 2, "one seated column, one overlay");
 });
+
+test("the inspector can be put away at every width, through one control", async () => {
+  const pane = await readFile(panePath, "utf8");
+
+  // Seated is `wide enough` MINUS `put away`. If the column ever reads
+  // `canSeatInspector` again directly, minimising it silently stops working
+  // at exactly the width the feature exists for.
+  assert.match(pane, /const inspectorSeated = canSeatInspector && !inspectorMinimized;/);
+  assert.match(pane, /\{inspectorSeated \? \(/);
+
+  // The overlay is the NARROW tier's answer only. Without the guard, a
+  // minimised column at `lg` would summon an overlay over the space it just
+  // gave back — two inspectors' worth of chrome for one inspector.
+  assert.match(pane, /!canSeatInspector && inspectorOpen && \(/);
+
+  // One button, both mechanisms. `Edit` must NOT be gated on the tier the
+  // way `Media` is: gating it is how the seated inspector became permanent.
+  assert.doesNotMatch(pane, /\{!canSeatInspector && \(\s*<button/);
+  assert.match(pane, /if \(canSeatInspector\) setInspectorMinimized\(\(m\) => !m\);/);
+  assert.match(pane, /else setInspectorOpen\(\(o\) => !o\);/);
+});
