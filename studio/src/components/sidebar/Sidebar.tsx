@@ -9,7 +9,6 @@ import { StudioSidebar } from "./StudioSidebar";
 import { SidebarFooter } from "./SidebarFooter";
 import type { UseUpdatesResult } from "../../hooks/useUpdates";
 import type { SpecialistSkill } from "../../types";
-import { MediaPanel } from "./MediaPanel";
 import type { SidebarTabId } from "./ActivityBar";
 
 /**
@@ -23,7 +22,8 @@ import type { SidebarTabId } from "./ActivityBar";
  *
  * Each tab is a view that already existed somewhere in the shell; this file
  * does not re-implement any of them, it only decides which one is on screen.
- * `media` is the exception and the reason for the change — see `MediaPanel`.
+ * Media is no longer among them: its pool is the video editor's own rail now,
+ * and the approval gate never depended on this panel — see `ActivityBar`.
  */
 
 /* ── Shared panel head ────────────────────────────────────────────────────── */
@@ -260,8 +260,6 @@ export const Sidebar: React.FC<SidebarProps> = ({
         );
       case "skills":
         return <SkillsPanel />;
-      case "media":
-        return <MediaPanel />;
       case "chats":
       default:
         return <StudioSidebar activeView={activeView} />;

@@ -39,8 +39,8 @@ import { BASE_PX_PER_MS } from '../../store/timelineStore';
  * hover, still editable by double-click, and the row's right-click menu
  * carries rename, reorder and delete at every width.
  */
-export const HEADER_WIDTH = 160;
-const HEADER_WIDTH_BY_TIER = { xs: 62, sm: 104, md: 132, lg: HEADER_WIDTH } as const;
+export const HEADER_WIDTH = 176;
+const HEADER_WIDTH_BY_TIER = { xs: 76, sm: 120, md: 150, lg: HEADER_WIDTH } as const;
 const RULER_HEIGHT = 30;
 const MARKER_HEIGHT = 18;
 

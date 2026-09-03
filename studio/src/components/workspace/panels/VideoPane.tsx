@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
 
 import { useMeasure } from "../../../video/hooks/useMeasure";
+import { useTransportShortcuts } from "../../../video/hooks/useTransportShortcuts";
 import { DensityProvider, densityFor, TIER_MIN } from "../../../video/hooks/useDensity";
 import { PreviewPlayer } from "../../../video/components/preview/PreviewPlayer";
 import { InspectorPanel } from "../../../video/components/inspector/InspectorPanel";
@@ -101,6 +102,10 @@ const LIBRARY_COLUMN_MIN_W = LIBRARY_W + MONITOR_MIN_W + INSPECTOR_W;
  */
 export const VideoPane: React.FC = () => {
   const [paneRef, { width, height }] = useMeasure<HTMLDivElement>();
+
+  /* The transport keys the buttons advertise — Space, Home/End, ←/→, M, I,
+     L. Scoped to this pane, which is the only one mounted while it lives. */
+  useTransportShortcuts(paneRef);
   const density = densityFor(width, height);
 
   const canSeatInspector = width >= INSPECTOR_COLUMN_MIN_W;
@@ -162,13 +167,16 @@ export const VideoPane: React.FC = () => {
   /*
     The summon controls.
 
-    They ride the STAGE's floor, not the monitor column's. The column's floor
-    is the transport, and at `sm` and below the transport wraps to two rows —
-    so a bar pinned there sat squarely on mark-in, mark-out and the speed
-    selector, hiding 51px of a 68px control and swallowing its clicks. The
-    stage has room to spare at every tier. They are still the only chrome this
-    pane adds to the ported editor, and each is drawn only when its panel is
-    not already seated, so the pane never offers to open something that is open.
+    They ride the monitor's HEADER, beside the `Program` label, which is the
+    one strip of this pane that never wraps and never has anything else on it.
+    Two earlier homes were both floors: the monitor column's, where the bar sat
+    on mark-in, mark-out and the speed selector as soon as the transport wrapped
+    at `sm`; and the stage's, which cleared the controls but covered the picture
+    and pushed the alignment shelf up to get out of its way. In the header it
+    overlaps nothing and lifts nothing, and it reads as navigation, which is
+    what it is. They are still the only chrome this pane adds to the ported
+    editor, and each is drawn only when its panel is not already seated, so the
+    pane never offers to open something that is open.
   */
   const summonBar = (!canSeatLibrary || !canSeatInspector) && (
     <div className="editor-summon-bar">
@@ -230,7 +238,7 @@ export const VideoPane: React.FC = () => {
           )}
 
           <div className="flex-1 flex flex-col min-w-0 min-h-0">
-            <PreviewPlayer stageOverlay={summonBar} />
+            <PreviewPlayer headerNav={summonBar} />
           </div>
 
           {/* ── Inspector ── */}

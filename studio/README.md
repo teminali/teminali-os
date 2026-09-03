@@ -74,8 +74,8 @@ and transcripts are never written to it.
 ### The shell
 
 A 48px activity bar, a 212px sidebar panel beside it, the conversation, and a
-workspace panel strip. Sidebar views: **Chats · Explorer · Search · Skills ·
-Media**. The rail stays on screen when the panel is collapsed, so a dismissed
+workspace panel strip. Sidebar views: **Chats · Explorer · Search · Skills**.
+The rail stays on screen when the panel is collapsed, so a dismissed
 sidebar is one click from open on any view. The panel strip holds any number of
 tabs of twelve kinds:
 
@@ -92,8 +92,8 @@ Video Editor is the one kind limited to a single tab: it owns a timeline and a
 playback clock, and a second copy would be a second project competing for them.
 
 Plus `⌘B` sidebar · `⌘L` chats · `⇧⌘E` explorer · `⇧⌘F` search · `⌘K`/`⌘P`
-command palette · `⌘,` settings. Skills and Media are reached from the rail; they
-have no shortcut.
+command palette · `⌘,` settings. Skills is reached from the rail; it has no
+shortcut. The media pool lives in the video editor's own rail.
 
 ### Engines
 
@@ -226,16 +226,24 @@ at `lg` only; the controls themselves get *larger* at `xs`, not smaller. A drag
 handle between the monitor and the timeline sets the split (arrow keys move it,
 double-click resets it).
 
-**The media library is in the editor as well as the sidebar.** Same component,
-same pool — the editor's rail is where you reach for a clip, and the sidebar tab
-stays because it is the import gate's consent surface (below).
+**The transport has keys.** `Space` plays and pauses — and replays, when the
+playhead is parked at the end — `Home` / `End` jump to the in and out points,
+`←` / `→` step a frame (hold to scrub), `M` drops a marker, `I` sets or clears
+the in point, and `L` toggles loop. They are live only while the editor is the
+open panel, and never while you are typing in a field.
+
+**The media library lives in the editor.** It was a sidebar tab as well; that
+tab is gone, and the editor's rail is the only seat now — which is where you
+reach for a clip. It is the same component reading the same pool. The import
+gate is unaffected: its prompt is mounted by `App.tsx`, never by this panel
+(below).
 
 Right-click menus and toasts now render inside the panel. They had been pushed
 to `uiStore` since the port with nothing subscribed, so every track and clip
 context menu was dead and beat detection reported its result to no one.
 
-**Media is a sidebar tab, and importing from it is a grant.** A file you pick or
-drop is a human gesture, so it grants that file and its containing folder for the
+**Importing is a grant.** A file you pick or drop in the editor's media rail is
+a human gesture, so it grants that file and its containing folder for the
 session. Anything else — a path an agent names — raises an approval prompt that
 shows the *resolved* path and offers: allow this file · allow this folder for the
 session · deny. Nothing is persisted, and there is no "always allow".
@@ -326,7 +334,7 @@ ollama serve              # local models on 127.0.0.1:11434
 
 ```bash
 npm run typecheck   # tsc --noEmit
-npm test            # 610 tests, 0 failures
+npm test            # 615 tests, 0 failures
 npm run build       # tsc && vite build
 npm run verify:core # all three
 ```

@@ -199,7 +199,7 @@ export const TrackHeader: React.FC<{ track: Track }> = ({ track }) => {
         video row so the icons lined up between rows of different types
         — but a row's type never changes, so nothing could ever shift,
         and the reservation was costing the track NAME a quarter of its
-        width. At 160px that is the difference between "Ground" and
+        width. At 176px that is the difference between "Ground" and
         "Gr…".
       */}
       <div className="flex items-center gap-0.5 flex-shrink-0">

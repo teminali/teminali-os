@@ -190,7 +190,13 @@ export interface TimelineActions {
   setPlayheadMs: (ms: number) => void;
   nudgePlayhead: (deltaMs: number) => void;
   setIsPlaying: (playing: boolean) => void;
-  togglePlay: () => void;
+  /**
+   * Flip play/pause. Takes the program's end because a finished pass
+   * has to rewind before it can play again — see the implementation.
+   * `programEndMs` is `projectStore`'s `project.durationMs`; this store
+   * does not depend on that one, so the caller supplies it.
+   */
+  togglePlay: (programEndMs: number) => void;
   setPlaybackRate: (rate: number) => void;
   toggleLoop: () => void;
   /*
@@ -865,7 +871,24 @@ export const useTimelineStore = create<TimelineStore>()(
       }),
 
     setIsPlaying: (isPlaying) => set((s) => { s.isPlaying = isPlaying; }),
-    togglePlay: () => set((s) => { s.isPlaying = !s.isPlaying; }),
+    /* Play from the top when the playhead is already parked at the end.
+
+       `useProgramLoop` ends a pass by parking the playhead exactly ON
+       the end and clearing `isPlaying`. Flipping the flag back on from
+       there is undone on the very next frame — the loop recomputes
+       `playhead + delta >= end`, re-parks and re-clears — so the button
+       looks dead after a project finishes. Rewinding first is what makes
+       the second press replay.
+
+       The end mirrors the loop's own `outPointMs ?? project.durationMs`,
+       so the two agree about where the program stops. */
+    togglePlay: (programEndMs) =>
+      set((s) => {
+        const starting = !s.isPlaying;
+        s.isPlaying = starting;
+        if (!starting) return;
+        if (s.playheadMs >= (s.outPointMs ?? programEndMs)) s.playheadMs = s.inPointMs ?? 0;
+      }),
     setPlaybackRate: (rate) => set((s) => { s.playbackRate = Math.max(0.25, Math.min(4, rate)); }),
     toggleLoop: () => set((s) => { s.loopEnabled = !s.loopEnabled; }),
     setInPoint: (ms) => {

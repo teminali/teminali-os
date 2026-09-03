@@ -179,7 +179,7 @@ StudioTitleBar    traffic lights · sidebar toggle · title · panel tab strip
 │   ├── ActivityBar    New Chat · SIDEBAR_TABS glyphs · Customize
 │   └── Sidebar        the selected view · SidebarFooter
 │       └── view       StudioSidebar (chats) · Explorer · GlobalSearchView
-│                      · Skills · MediaPanel
+│                      · Skills
 ├── StudioChat       empty state (brand mark) / transcript · Composer
 │                    (voice lives here) · AssistantHud
 └── WorkspacePanel   terminal · browser · canvas · side chat · file · guardian
@@ -206,11 +206,12 @@ true and it is still a cost. What was paid for it (`3ba5b55`) is width. Labelled
 rows priced the sidebar at 260px because the switch had to fit the word
 "Customize"; glyphs cost 48 and let the panel open at 212 — the same 260px of
 shell, with the labels' width handed back to whatever the panel is showing. Five
-destinations now fit the switch without wrapping, and the fifth is Media.
+destinations fit the switch without wrapping; Media was the fifth until it
+moved into the video editor's rail (below), and four fit with room to spare.
 
 One list, `SIDEBAR_TABS` in `sidebar/ActivityBar.tsx`, not the old
 `PRIMARY_NAV` / `WORKSPACE_NAV` pair: Chats (⌘L) · Explorer (⇧⌘E) · Search
-(⇧⌘F) · Skills · Media. New Chat sits above it and Customize below, both
+(⇧⌘F) · Skills. New Chat sits above it and Customize below, both
 gestures rather than destinations. `ACTIVITY_BAR_WIDTH` is exported because the
 title bar lines its edge up with the rail; `DEFAULT_SIDEBAR_WIDTH` is 212 in
 `App.tsx`, under `frontier_sidebar_width_v2` — the key is bumped because a 260
@@ -226,22 +227,28 @@ teaches the operator that tabs in this list might not do anything. **A glyph
 earns its place by having a view behind it**; at 48px the label is one hover
 away, which costs no pixels, where a label in the layout costs 212 of them.
 
-**Media is a sidebar tab, not a workspace panel, and that is load-bearing.** A
-workspace panel is mounted only while it is open; a sidebar tab always is. The
-operator's import gesture (`sidebar/MediaPanel.tsx`, `bring()`) and the approval
-gate that must take consent from it therefore have the same lifetime — a gate
-drawn inside the video panel would be absent exactly when it is needed most.
-See `src/video/P3-import-gate.md`.
+**Media is no longer a sidebar tab.** It was one, and this document argued at
+length that it had to stay: a workspace panel is mounted only while it is open,
+a sidebar tab always is, so the import gesture and the approval gate that takes
+consent from it were said to need the tab's lifetime.
 
-**The video editor also renders `MediaPanel`, and that does not weaken the
-sentence above.** The editor's library rail is the *same component*, reading the
-same `mediaPool` out of `timelineStore` — not a port, not a second browser — so
-an import made in either place appears in both, and there is still exactly one
-implementation of the import gesture to hold the gate. What the rule forbids is
-the sidebar tab *going away*, because then the gate's lifetime would follow a
-workspace panel. It stays. The editor's copy is a convenience seat: CapCut puts
-the library inside the editor because that is where you reach for a clip, and
-reaching for it should not mean leaving the timeline.
+**That argument was wrong on its facts, and the code already said so.** The
+gate's subscriber is not `MediaPanel` — it is `MediaConsentModal`, which
+`App.tsx` mounts in its modal layer at the top level, and whose own header
+comment gives the reason in as many words: `WorkspacePanel.tsx` mounts the video
+panel conditionally while the tool bridge is registered at module load in
+`main.tsx`, so the prompt must live above both. The gate's lifetime never
+depended on the sidebar. What the tab actually held was the operator's *import
+gesture* (`sidebar/MediaPanel.tsx`, `bring()`) — a convenience, not a safety
+property.
+
+**So the pool lives in the video editor's rail only** (`VideoPane.tsx`), by the
+operator's explicit call. It is the *same component* reading the same
+`mediaPool` out of `timelineStore`, so there is still exactly one implementation
+of the import gesture, and CapCut's reasoning applies: the library belongs where
+you reach for a clip. The cost is real and worth naming — importing now means
+opening the video panel first, where before it was one glyph away from any view.
+See `src/video/P3-import-gate.md`.
 
 Panel state is its own store (`store/panelStore.ts`) because it is pure view
 state; chat and session state stay in `store/studioStore.ts`. Which sidebar view
@@ -456,6 +463,56 @@ derived from the pane's before, which is defensible at 291px on a desktop and
 useless in a 380px panel where the only two useful answers are "mostly monitor"
 and "mostly lanes". A dragged height is kept and only ever clamped, so a choice
 made when the panel was tall cannot strand the monitor when it is short.
+
+**The transport is a two-row grid, and the play button is the centre of it.**
+The row had been one line of three groups — timecode, transport, marking — and
+at `md`/`lg` that is 527px of content in a 320–324px row: all three groups
+overlapping by 15–16px. The rails take the pane's extra width, so the monitor
+column stays ~480px at both tiers and the master meters take 159px of it, which
+is why the two *wider* tiers were the ones that broke and `xs`, where the meters
+are hidden, was fine. The fix is `'time actions' / 'transport transport'` at
+every tier, with a 336px floor under the transport so the meters yield first;
+they shrink to ~105px and stay visible. The play disc is then centred in the
+pane to within a pixel at all four tiers, measured in the running app rather
+than reasoned about — an earlier diagnosis of this same row was argued from the
+markup and was simply wrong. **The disc's colour is constant brand green**: the
+icon alone carries play/pause, and an older build that turned it accent only
+while playing was saying the same thing twice.
+
+**Play at the end replays.** `useProgramLoop` finishes a pass by parking the
+playhead exactly on the end and clearing `isPlaying`, so flipping the flag back
+on from there was undone on the next frame and the button looked dead once a
+project had run through. `togglePlay(programEndMs)` rewinds to `inPointMs ?? 0`
+first. The end is passed in rather than read, because `timelineStore`
+deliberately does not import `projectStore`.
+
+**The transport's keys are bound, because they were already promised.** Every
+button in the row named a shortcut in its `title` — Space, Home, End, ← / →, M,
+I, L — and not one of them was bound anywhere in `src/`; the affordance rule
+above forbids exactly that, so `video/hooks/useTransportShortcuts.ts` now binds
+the eight the buttons name and nothing more. `O` for the out point is the
+standard partner of `I` and is deliberately absent, because no control offers
+it. Each key calls the same thing its button calls — `stepPlayheadByFrames` is
+shared with `PlaybackControls`, not reimplemented — so the two paths cannot
+drift. The listener is on `window`, since a freshly opened editor has focus on
+nothing and a subtree listener would hear nothing; `WorkspacePanel` mounts one
+pane at a time, so while the hook lives the editor *is* the workspace. It stands
+down for modals, typing targets and `<select>` (which is what leaves the rate
+picker's own arrow keys alone), for focus outside the pane, and for anything
+with a modifier, so the shell's ⌘-shortcuts still land.
+
+**The summon bar sits in the monitor's header, not on the stage.** Below `lg`
+the library and inspector are summoned rather than seated, and their buttons had
+been laid over the picture. Beside the `Program` label there is 179px of free
+space at `xs`, 279 at `sm` and 120 at `md` for a bar of 147/147/81px; at `lg`
+both panels are seated and there is no bar, which is as well, because the header
+is exactly full there. The alignment shelf's `:has(.editor-summon-bar)` lift
+went with it.
+
+**The track gutter is wider than the tier minimum** — 76 / 120 / 150 / 176px
+across the four tiers. It was cut to the narrowest legible width when the
+folding rules were written, which is the right instinct applied one step too
+far: the gutter is where the operator aims, not merely where the name is read.
 
 **Two surfaces the slice had always talked to are now drawn.** `uiStore` has
 carried `contextMenu` and `toasts` since the port and eleven call sites push to

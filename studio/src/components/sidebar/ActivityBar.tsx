@@ -2,7 +2,6 @@ import React from "react";
 import {
   Boxes,
   Files,
-  FolderOpen,
   MessagesSquare,
   Search,
   SlidersHorizontal,
@@ -37,7 +36,7 @@ import {
 /** The rail's fixed width. The title bar reads this to line its edge up. */
 export const ACTIVITY_BAR_WIDTH = 48;
 
-export type SidebarTabId = "chats" | "files" | "search" | "skills" | "media";
+export type SidebarTabId = "chats" | "files" | "search" | "skills";
 
 export interface SidebarTabDef {
   id: SidebarTabId;
@@ -57,19 +56,17 @@ export interface SidebarTabDef {
  * destination is one tile in one column — so the two groups collapsed into
  * this.
  *
- * `media` is the newcomer, and it is load-bearing rather than decorative: it
- * is where the operator's own import gesture lives, and therefore where the
- * media approval gate takes consent from. See `src/video/P3-import-gate.md`.
+ * Media used to be a fifth tile here, on the reasoning that the approval gate
+ * needed an always-mounted host. It did not: the gate's subscriber is
+ * `MediaConsentModal`, which `App.tsx` mounts at the top level for exactly
+ * that reason. The media pool now lives only in the video editor's own rail,
+ * which is where an operator reaches for a clip. See `src/video/P3-import-gate.md`.
  */
 export const SIDEBAR_TABS: readonly SidebarTabDef[] = [
   { id: "chats", label: "Chats", shortcut: "⌘L", icon: MessagesSquare },
   { id: "files", label: "Explorer", shortcut: "⇧⌘E", icon: Files },
   { id: "search", label: "Search", shortcut: "⇧⌘F", icon: Search },
   { id: "skills", label: "Skills", icon: Boxes },
-  // `FolderOpen` is the Cut's own Media glyph (`SidebarNav.tsx`). Two apps that
-  // will be used side by side for months should not name the same drawer with
-  // two different marks.
-  { id: "media", label: "Media", icon: FolderOpen },
 ];
 
 /* ── One tile ─────────────────────────────────────────────────────────────── */

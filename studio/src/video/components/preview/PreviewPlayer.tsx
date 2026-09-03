@@ -32,13 +32,20 @@ import {
 const ZOOM_STEPS = [0.25, 0.5, 0.75, 1, 1.5, 2, 3, 4];
 
 /**
- * @param stageOverlay Chrome the *pane* wants floating on the monitor's floor.
- *   It is rendered inside the stage rather than over the whole monitor column,
- *   because the column's floor is the transport — and a bar pinned there covers
- *   the mark-in, mark-out and speed controls the moment the transport wraps to
- *   two rows, which it does at `sm` and below.
+ * @param headerNav Chrome the *pane* wants in the monitor's header, on the
+ *   left, reading as navigation beside the `Program` label.
+ *
+ *   This used to be a `stageOverlay` floating on the stage's floor, and before
+ *   that on the monitor column's floor — where it covered mark-in, mark-out and
+ *   the speed control as soon as the transport wrapped. The stage was a safer
+ *   floor but still the wrong one: it sat over the picture and pushed the
+ *   alignment shelf up to clear it. The header is chrome that never wraps and
+ *   never overlaps anything, and it has the room — measured free space beside
+ *   the label is 179px at `xs`, 279px at `sm` and 120px at `md`, against a bar
+ *   of 147px, 147px and 81px. At `lg` both panels are seated and there is no
+ *   bar to place, which is just as well: the header is exactly full there.
  */
-export const PreviewPlayer: React.FC<{ stageOverlay?: React.ReactNode }> = ({ stageOverlay }) => {
+export const PreviewPlayer: React.FC<{ headerNav?: React.ReactNode }> = ({ headerNav }) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [stageRef, stageSize] = useMeasure<HTMLDivElement>();
   const density = useDensity();
@@ -231,6 +238,7 @@ export const PreviewPlayer: React.FC<{ stageOverlay?: React.ReactNode }> = ({ st
               </span>
             </>
           )}
+          {headerNav}
         </div>
 
         <div className="flex items-center gap-1.5 flex-shrink-0">
@@ -375,7 +383,6 @@ export const PreviewPlayer: React.FC<{ stageOverlay?: React.ReactNode }> = ({ st
           </div>
         )}
 
-        {stageOverlay}
       </div>
 
       {/* ── Transport ── */}

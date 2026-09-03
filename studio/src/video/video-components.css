@@ -500,20 +500,48 @@
     gap: 5px;
   }
 
+  /* Two rows, at every tier, with the transport centred on its own.
+
+     This was a three-column grid — timecode | transport | marking —
+     centring the transport by putting equal tracks either side of it.
+     Measured in the running app, that row is 324px wide at `md` and
+     320px at `lg`: the rails take the pane's extra width, so the
+     monitor column stays ~480px and the master meters take 159px of
+     it. Its content needs 163 + 176 + 164 plus gaps = 527px. It
+     overflowed by ~150px and the three groups sat 15px ON each other
+     at both tiers. Hiding the meters would not have saved it either.
+
+     So the transport gets a row to itself and is centred in it, which
+     is both what the design asked for and the only arrangement the
+     width allows. `minmax(0, 1fr)` on the timecode's track lets the
+     first row shrink rather than overflow the way the old one did. */
   .video-workspace .editor-transport-row {
     display: grid;
-    grid-template-columns: minmax(136px, 1fr) auto minmax(136px, 1fr);
-    column-gap: 12px;
+    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-areas:
+      'time actions'
+      'transport transport';
+    row-gap: var(--sp-2);
+    column-gap: var(--sp-2);
   }
 
   .video-workspace .editor-transport-time {
+    grid-area: time;
     justify-self: start;
+    min-width: 0;
     min-height: 20px;
     column-gap: 8px;
   }
 
+  .video-workspace .editor-transport-cluster {
+    grid-area: transport;
+    justify-self: center;
+  }
+
   .video-workspace .editor-transport-actions {
+    grid-area: actions;
     justify-self: end;
+    min-width: 0;
   }
 
   .video-workspace .editor-align-shelf .glass {
@@ -885,24 +913,24 @@
   }
 
   /* ── Summoning them ───────────────────────────────────────────────
-     Bottom-left of the monitor, over the picture, on the one edge that
-     has nothing on it at any width. Labelled, because these two are
-     the whole navigation of the compact editor and an unlabelled icon
-     is a thing you have to have been told about. */
+     In the monitor's header, beside the `Program` label. It floated on
+     the stage's floor before, which cost the picture and made the
+     alignment shelf move aside for it; the header is chrome and has the
+     room. Labelled, because these two are the whole navigation of the
+     compact editor and an unlabelled icon is a thing you have to have
+     been told about. No float shadow now that it sits IN chrome rather
+     than over the picture — it reads as a segmented control. */
 
   .video-workspace .editor-summon-bar {
-    position: absolute;
-    left: var(--sp-4);
-    bottom: var(--sp-4);
-    z-index: 35;
     display: flex;
     align-items: center;
-    gap: var(--sp-2);
-    padding: 3px;
+    gap: var(--sp-1);
+    flex-shrink: 0;
+    margin-left: var(--sp-1);
+    padding: 2px;
     border-radius: var(--r-md);
     background: var(--surface-2);
-    border: 1px solid var(--line-popover);
-    box-shadow: var(--lift-float);
+    border: 1px solid var(--line);
   }
 
   .video-workspace .editor-summon-btn {
@@ -1025,38 +1053,33 @@
   /* ── sm and below: one column, and the transport stops being a
         three-part grid it no longer has the width to be ──────────── */
 
-  .video-workspace[data-tier='sm'] .editor-transport-row,
-  .video-workspace[data-tier='xs'] .editor-transport-row {
-    /* Two rows rather than three columns: timecode and transport on the
-       first, the marking tools on the second. The 3-column grid asked
-       for 136 + auto + 136 = 320px of content in a 400px pane and got
-       it by overlapping. */
-    grid-template-columns: 1fr auto;
-    grid-template-areas:
-      'time transport'
-      'actions actions';
-    row-gap: var(--sp-2);
-    column-gap: var(--sp-2);
-  }
-
-  .video-workspace[data-tier='sm'] .editor-transport-time,
-  .video-workspace[data-tier='xs'] .editor-transport-time {
-    grid-area: time;
-    min-width: 0;
-  }
-
-  .video-workspace[data-tier='sm'] .editor-transport-actions,
-  .video-workspace[data-tier='xs'] .editor-transport-actions {
-    grid-area: actions;
-    justify-self: stretch;
-    justify-content: flex-start;
-    min-width: 0;
-  }
-
   .video-workspace[data-tier='sm'] .editor-program-transport,
   .video-workspace[data-tier='xs'] .editor-program-transport {
     min-height: 0;
     padding: var(--sp-2) var(--sp-3) var(--sp-3);
+  }
+
+  /* Where the meters DO show, they yield before the transport does.
+
+     They ship `flex-shrink-0` at 119px, which is why `md` and `lg` gave
+     the transport only 324px and 320px — less than the 383px `xs` gets,
+     because `xs` hides the meters entirely. The transport's first row
+     needs 335px, so the primary controls were the ones overflowing to
+     pay for a secondary readout. A level meter is a bar and degrades
+     with width; the floor keeps it a meter rather than a stub. */
+  .video-workspace .editor-program-transport > :last-child {
+    flex-shrink: 1;
+    min-width: 88px;
+  }
+
+  /* And the transport has to CLAIM that width, or nothing yields: the
+     controls are `flex-1 min-w-0`, so they absorb whatever is left over
+     and the row is never over-full for the meters to shrink against.
+     336px is the measured first row — timecode 163 + 8 gap + marking
+     tools 164 — rounded up. Below `md` the meters are gone and the
+     transport has 383px at `xs` anyway, so this floor never binds. */
+  .video-workspace .editor-program-transport > :first-child {
+    min-width: 336px;
   }
 
   /* The master meters are a 92px instrument for a mix you cannot make
@@ -1107,25 +1130,27 @@
     --h-md: 32px;
   }
 
-  .video-workspace[data-tier='xs'] .editor-summon-bar {
-    left: var(--sp-3);
-    bottom: var(--sp-3);
+  /* The primary transport control, in the brand green.
+
+     The ported sheet drew a near-white disc here, matched to the
+     reference's fullscreen player. Code paints this editor in the brand
+     accent, and the transport's primary action is the one control where
+     that accent means ACT rather than "this is on" — so it wears it.
+
+     The colour does not change while playing. An earlier version turned
+     accent on play, which said with colour what the icon already said
+     with shape; the near-white disc was the fix for that, and a green
+     disc must not walk back into it. `--on-accent` is the ink for a fill
+     of `--accent`; `--accent-ink` is the host's and means something else
+     here (see `video-tokens.css`). */
+  .video-workspace .editor-play-btn {
+    background: var(--accent);
+    color: var(--on-accent);
+    box-shadow: 0 6px 18px var(--accent-soft), 0 2px 6px rgba(0, 0, 0, 0.3);
   }
 
-  /* The stage floor carries two floating bars: the summon bar at its left and
-     the alignment shelf across its middle. The shelf is a fixed 345px and the
-     stage is not, so whether they clear each other is not a question a tier
-     can answer — at `md` the seated library leaves a stage narrow enough that
-     a centred shelf reaches back over an 81px bar. So the shelf stacks ABOVE
-     the bar whenever the bar is there at all, keyed off its presence rather
-     than off a width. The lift is the bar's own box: its offset from the
-     floor, 3px of padding either side of a `--h-sm` button, and a gap. */
-  .video-workspace .editor-program-stage:has(.editor-summon-bar) .editor-align-shelf {
-    bottom: calc(var(--sp-4) + 6px + var(--h-sm) + var(--sp-2));
-  }
-
-  .video-workspace[data-tier='xs'] .editor-program-stage:has(.editor-summon-bar) .editor-align-shelf {
-    bottom: calc(var(--sp-3) + 6px + var(--h-sm) + var(--sp-2));
+  .video-workspace .editor-play-btn:hover {
+    background: var(--accent-hover);
   }
 
   /* ── Short panes ─────────────────────────────────────────────────
