@@ -556,6 +556,27 @@ mean the transport and the meters; an added element would have moved the 336px
 minimum onto the spacer. At `sm`/`xs` the meters are `display: none` and so is
 the mirror, or it would push the transport right by the error it removes.
 
+**The mirror is the meters' width, held as one token.** It first shipped as a
+literal `159px` against meters that measure `119px`, which did not centre the
+disc so much as mirror the error — measured at 21px to the *right* of the
+picture, where it had been ~85px to the left. Both sides now read
+`--transport-meters-w`, so there is no second number to drift. Measured after:
+0–1px off centre at every panel width from 700 to 1716.
+
+**The meters are gated on the bar's own width, not on the tier.** `data-tier` is
+the *pane's* width, but the transport bar gets only what the seated library and
+inspector leave behind: at `lg` with both seated it is 439px, and at `md` 339px,
+where the tier gate still says the meters may stay. Their 88px floor plus the
+mirror's plus the transport's 336px minimum needs 564px, and the bar does not
+clip — below that it painted its own controls and the meters straight over the
+inspector column beside it, measured at 111px of spill at `lg` and 211px at
+`md`. `PreviewPlayer` measures the bar with `useMeasure` and sets `data-narrow`
+below `TRANSPORT_METERS_MIN`; the stylesheet then drops the meters and the
+mirror together, which is what `sm`/`xs` already do through the tier gate.
+*Not yet solved:* at a 339px bar the transport's own 336px minimum still
+overflows by 11px, which moves the disc 12px off centre. That floor predates
+the mirror and needs the two-row grid `sm`/`xs` use, not a wider gate.
+
 **The alignment shelf holds alignment.** It floats over the stage whenever
 something is selected, and it had grown to fourteen icons — six align, two
 distribute, then flip H, flip V, fit-to-frame and reset. The last four are

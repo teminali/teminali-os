@@ -37,6 +37,8 @@ const toolbarPath = new URL("../src/video/components/timeline/TimelineToolbar.ts
 const alignBarPath = new URL("../src/video/components/canvas/AlignmentBar.tsx", import.meta.url);
 const panelStorePath = new URL("../src/store/panelStore.ts", import.meta.url);
 const workspacePath = new URL("../src/components/workspace/WorkspacePanel.tsx", import.meta.url);
+const previewPath = new URL("../src/video/components/preview/PreviewPlayer.tsx", import.meta.url);
+const videoTokensPath = new URL("../src/video/video-tokens.css", import.meta.url);
 
 test("the tier scale is declared once and every tier has a stylesheet", async () => {
   const density = await readFile(densityPath, "utf8");
@@ -190,4 +192,43 @@ test("the panel cannot be wider than the room, however it got its width", async 
   // answer.
   assert.match(store, /document\.querySelector\("\[data-chat-column\]"\)\?\.getBoundingClientRect\(\)/);
   assert.match(store, /panel\.left - chat\.right/);
+});
+
+test("the play disc sits under the centre of the picture, and the meters go where they do not fit", async () => {
+  const css = await readFile(videoCssPath, "utf8");
+  const tokens = await readFile(videoTokensPath, "utf8");
+  const preview = await readFile(previewPath, "utf8");
+
+  // The transport row is the flex child to the LEFT of the meters, so the bar
+  // carries a mirror of them on its other side. The mirror MUST be the meters'
+  // own width: written as a literal 159px against meters that measure 119, it
+  // moved the disc 21px right of the picture — the same defect mirrored.
+  assert.match(tokens, /--transport-meters-w: 119px;/);
+  assert.match(
+    css,
+    /\.editor-program-transport::before \{\s*content: '';\s*width: var\(--transport-meters-w\);/
+  );
+  assert.match(
+    css,
+    /\.editor-program-transport > :last-child \{[^}]*width: var\(--transport-meters-w\);/
+  );
+  // A second literal width on either side is how the two drift apart again.
+  assert.doesNotMatch(css, /editor-program-transport::before \{\s*content: '';\s*width: \d+px/);
+
+  // `data-tier` is the PANE's width; this bar gets only what the seated
+  // library and inspector leave. At `lg` with both seated it is 439px and at
+  // `md` 339px, where the tier gate still says the meters may stay — and the
+  // bar does not clip, it painted 111px (lg) and 211px (md) of its own
+  // controls and the meters over the inspector beside it. So the gate is the
+  // bar's measured width.
+  assert.match(preview, /const TRANSPORT_METERS_MIN = 564;/);
+  assert.match(preview, /const \[transportRef, transportSize\] = useMeasure<HTMLDivElement>\(\);/);
+  assert.match(
+    preview,
+    /data-narrow=\{transportSize\.width > 0 && transportSize\.width < TRANSPORT_METERS_MIN \? '' : undefined\}/
+  );
+  assert.match(
+    css,
+    /\.editor-program-transport\[data-narrow\] > :last-child,\s*\.video-workspace \.editor-program-transport\[data-narrow\]::before \{\s*display: none;/
+  );
 });

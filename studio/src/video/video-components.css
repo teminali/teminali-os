@@ -1078,6 +1078,10 @@
      pay for a secondary readout. A level meter is a bar and degrades
      with width; the floor keeps it a meter rather than a stub. */
   .video-workspace .editor-program-transport > :last-child {
+    /* Stated, not left to the content, so the mirror below can be the same
+       number rather than a second copy of it. 119px is what the meters
+       measured — the value the note above already quotes. */
+    width: var(--transport-meters-w);
     flex-shrink: 1;
     min-width: 88px;
   }
@@ -1093,14 +1097,28 @@
      and a pseudo-element is not matched by either — an added <div> would
      have silently moved the 336px minimum onto the spacer.
 
-     159px is this file's own measured meters width (see the transport-row
-     note above); the mirror shares the meters' shrink and floor so the two
-     narrow together and the centre holds while they do. */
+     The mirror is the meters' own width, shrink and floor, so the two
+     narrow together and the centre holds while they do. It was written as a
+     literal 159px, which is not what the meters measure — the note above says
+     119 — and a mirror 40px too wide moved the disc 21px to the RIGHT of the
+     picture instead of leaving it under the middle. One variable now, so
+     there is no second number to drift. */
   .video-workspace .editor-program-transport::before {
     content: '';
-    width: 159px;
+    width: var(--transport-meters-w);
     flex-shrink: 1;
     min-width: 88px;
+  }
+
+  /* Below `TRANSPORT_METERS_MIN` the bar cannot hold the meters at their
+     floor, and it does not clip: it paints its own controls and the meters
+     over the inspector column beside it. The tier gate cannot see this —
+     `data-tier` is the pane's width, and this bar gets only what the seated
+     library and inspector leave. `PreviewPlayer` measures the bar and sets
+     `data-narrow`; here that means what `sm`/`xs` already mean below. */
+  .video-workspace .editor-program-transport[data-narrow] > :last-child,
+  .video-workspace .editor-program-transport[data-narrow]::before {
+    display: none;
   }
 
   /* And the transport has to CLAIM that width, or nothing yields: the

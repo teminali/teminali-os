@@ -32,6 +32,16 @@ import {
 const ZOOM_STEPS = [0.25, 0.5, 0.75, 1, 1.5, 2, 3, 4];
 
 /**
+ * The narrowest transport bar that can still hold the master meters.
+ *
+ * Measured in the running app, not derived: the bar's content at its floors
+ * is the mirror (88) + gap (12) + the transport's minimum (336) + gap (12) +
+ * the meters' floor (88), inside 14px of padding on each side. Below this the
+ * bar is over-full, and it does not clip — it paints over the column beside it.
+ */
+const TRANSPORT_METERS_MIN = 564;
+
+/**
  * @param headerNav Chrome the *pane* wants in the monitor's header, on the
  *   left, reading as navigation beside the `Program` label.
  *
@@ -54,6 +64,7 @@ const ZOOM_STEPS = [0.25, 0.5, 0.75, 1, 1.5, 2, 3, 4];
 export const PreviewPlayer: React.FC<{ headerNav?: React.ReactNode }> = ({ headerNav }) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [stageRef, stageSize] = useMeasure<HTMLDivElement>();
+  const [transportRef, transportSize] = useMeasure<HTMLDivElement>();
   const density = useDensity();
   const openMenu = useAnchoredMenu();
 
@@ -391,8 +402,26 @@ export const PreviewPlayer: React.FC<{ headerNav?: React.ReactNode }> = ({ heade
 
       </div>
 
-      {/* ── Transport ── */}
-      <div className="editor-program-transport flex-shrink-0 px-[14px] pt-[10px] pb-[11px] border-t border-line bg-spectrum-panel flex items-stretch gap-3">
+      {/*
+        ── Transport ──
+
+        The meters are gated on the bar's OWN width, not on `data-tier`.
+        The tier is the pane's width, but this bar only gets what the seated
+        library and inspector leave behind: at tier `lg` with both seated the
+        bar is 439px, and at `md` it is 339px, where the tier gate says the
+        meters may stay. Their floor plus the transport's minimum needs
+        TRANSPORT_METERS_MIN, so below that the bar overflowed and painted its
+        own controls and the meters over the inspector beside it — measured at
+        111px of spill at `lg` and 211px at `md`.
+
+        `sm`/`xs` still drop the meters through the tier gate; this is the same
+        decision, taken where the tier cannot see the width.
+      */}
+      <div
+        ref={transportRef}
+        data-narrow={transportSize.width > 0 && transportSize.width < TRANSPORT_METERS_MIN ? '' : undefined}
+        className="editor-program-transport flex-shrink-0 px-[14px] pt-[10px] pb-[11px] border-t border-line bg-spectrum-panel flex items-stretch gap-3"
+      >
         <div className="flex-1 min-w-0">
           <PlaybackControls />
         </div>
