@@ -6,6 +6,7 @@ const { attachAssistantTray } = require("./assistant-tray.cjs");
 const { attachAssistantOverlay } = require("./assistant-overlay.cjs");
 const { initVideoToolBridge, setBridgeWindow, videoBridge } = require("./videoToolBridge.cjs");
 const { startVideoRpcServer } = require("./videoRpc.cjs");
+const { resolveRealPath, processWithFfmpeg, formatAuditLine } = require("./mediaAccess.cjs");
 
 const logFile = path.join(app.getPath("userData"), "studio-main.log");
 function log(...args) {
@@ -521,6 +522,26 @@ ipcMain.handle("menu:set-recent-projects", (_event, projects) => {
 ipcMain.handle("dialog:open-folder", async (event) => {
   return chooseProjectFolder(BrowserWindow.fromWebContents(event.sender));
 });
+
+/* ── The media approval gate's half in main ───────────────────────────────
+   The gate lives in the renderer and is free of I/O so it stays testable;
+   these are the three things it cannot do there, plus ffmpeg. See
+   `electron/mediaAccess.cjs` and `src/video/P3-import-gate.md`.
+   ────────────────────────────────────────────────────────────────────────── */
+
+// Synchronous, and read once at preload time, because the deny list is
+// consulted on the first tool call and an `await` there would mean a window in
+// which the policy is not loaded yet and every path looks ungranted.
+ipcMain.on("media:paths-sync", (event) => {
+  event.returnValue = { home: app.getPath("home"), userData: app.getPath("userData") };
+});
+
+ipcMain.handle("media:resolve-path", (_event, requested) => resolveRealPath(requested));
+
+// Every decision, in the same log the rest of main writes to.
+ipcMain.on("media:audit", (_event, entry) => log(formatAuditLine(entry)));
+
+ipcMain.handle("media:ffmpeg", (_event, options) => processWithFfmpeg(options ?? {}));
 
 ipcMain.handle("window:minimize", (event) => {
   focusedWindow(event)?.minimize();

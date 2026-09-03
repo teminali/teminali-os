@@ -47,7 +47,23 @@ let rendererReady = false;
 const DEFAULT_TIMEOUT_MS = 20_000;
 
 const SLOW_TOOLS = Object.freeze({
-  // Empty on purpose: nothing exposed today is slow. See above.
+  /*
+    P3's two gated tools, and the entries the comment above predicted.
+
+    Neither number is about how long the WORK takes. Both are about the
+    human: the call blocks while the approval prompt is on screen, and the
+    gate gives the operator 90 seconds (`CONSENT_DEADLINE_MS` in
+    `src/services/mediaConsent.ts`) before it settles as "nobody answered".
+    A 20s bridge timeout would answer the caller with "the editor wedged"
+    while the operator was still reading the question — so each entry is
+    that deadline plus room for the work that follows it.
+
+    ffmpeg's own `execFile` timeout is 15 minutes (`mediaAccess.cjs`), and a
+    gate deadline is not a work deadline: 16 minutes is the sum, so the
+    bridge is never the thing that gives up first.
+  */
+  import_media_from_path: 120_000,
+  ffmpeg_process: 16 * 60_000,
 });
 
 function setBridgeWindow(window) {

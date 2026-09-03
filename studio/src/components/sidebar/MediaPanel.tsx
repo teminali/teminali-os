@@ -1,7 +1,9 @@
-import React, { useMemo, useState } from "react";
-import { Film, Image as ImageIcon, Music, Search as SearchIcon, Trash2, Type } from "lucide-react";
+import React, { useMemo, useRef, useState } from "react";
+import { Film, Image as ImageIcon, Music, Plus, Search as SearchIcon, Trash2, Type } from "lucide-react";
 import { EmptyState, IconButton, Input } from "../ui";
 import { useMediaPool, useTimelineStore } from "../../video/store/timelineStore";
+import { importMediaFromPath } from "../../video/mcp/toolRegistry";
+import { mediaConsentGate } from "../../services/mediaConsent";
 import type { MediaAsset } from "../../video/types/edl";
 
 /**
@@ -19,11 +21,14 @@ import type { MediaAsset } from "../../video/types/edl";
  * apps can be diffed for months; a file that only Code has would quietly end
  * that property. See `src/video/README.md`.
  *
- * **Import from disk is deliberately absent.** It is the first gesture that
- * touches the operator's own filesystem, and it does not ship until the
- * approval gate designed in `src/video/P3-import-gate.md` exists to take
- * consent from it. A tab that is always mounted is exactly what that gate
- * needs, which is why this landed first.
+ * **Import from disk is the gate's source of consent, not just a convenience.**
+ * A file the operator picked or dropped is a real human gesture, so it grants
+ * that file *and its containing folder* for the session — the folder you took
+ * one clip out of is the folder the rest of the shoot is in. That is why the
+ * import gesture and the approval gate had to arrive together, and why this
+ * tab is always mounted: `VideoPane` is not, and a consent surface that
+ * depends on which workspace panel is open is not a consent surface. See
+ * `src/video/P3-import-gate.md` and `services/mediaConsent.ts`.
  */
 
 /** `m:ss`, which is how the timeline and the inspector both say it. */
@@ -45,6 +50,49 @@ export const MediaPanel: React.FC = () => {
   const insertClip = useTimelineStore((state) => state.insertClip);
   const removeMediaAsset = useTimelineStore((state) => state.removeMediaAsset);
   const [filter, setFilter] = useState("");
+  const [importError, setImportError] = useState<string | null>(null);
+  const fileInput = useRef<HTMLInputElement>(null);
+
+  /**
+   * Bring in files the operator chose themselves.
+   *
+   * `webUtils.getPathForFile` (exposed through preload) is the only way to an
+   * absolute path now that `File.path` is gone from Electron — and an absolute
+   * path is exactly what a grant is made of. The old fallback,
+   * `URL.createObjectURL(file)`, previews and then dies on reload, and ffmpeg
+   * and export cannot read a blob, so a file with no path is refused with the
+   * reason rather than imported as something that half works.
+   */
+  const bring = async (files: FileList | null) => {
+    const media = (window.teminali as unknown as {
+      media?: { getPathForFile?: (file: File) => string | null };
+    } | undefined)?.media;
+
+    if (!files || files.length === 0) return;
+    if (!media?.getPathForFile) {
+      setImportError("Importing from disk needs the desktop app.");
+      return;
+    }
+
+    const failed: string[] = [];
+    for (const file of Array.from(files)) {
+      const path = media.getPathForFile(file);
+      if (!path) {
+        failed.push(file.name);
+        continue;
+      }
+      // The gesture, before the read: granting first is what makes this the
+      // same code path as the agent's without prompting the operator about a
+      // file they just handed us.
+      mediaConsentGate().grantRoot(path, "picker");
+      try {
+        await importMediaFromPath(path);
+      } catch (error) {
+        failed.push(`${file.name} — ${(error as Error).message}`);
+      }
+    }
+    setImportError(failed.length ? `Could not import: ${failed.join(", ")}` : null);
+  };
 
   const visible = useMemo(() => {
     const query = filter.trim().toLowerCase();
@@ -70,12 +118,37 @@ export const MediaPanel: React.FC = () => {
 
   return (
     <div className="flex-1 min-h-0 flex flex-col">
-      <header className="h-8 flex-shrink-0 flex items-center justify-between gap-2 pl-3.5 pr-2">
+      <header className="h-8 flex-shrink-0 flex items-center justify-between gap-2 pl-3.5 pr-1.5">
         <span className="text-sm text-ink-faint truncate">Media</span>
-        <span className="font-mono text-3xs text-ink-disabled flex-shrink-0">
-          {pool.length} {pool.length === 1 ? "asset" : "assets"}
+        <span className="flex items-center gap-1 flex-shrink-0">
+          <span className="font-mono text-3xs text-ink-disabled">
+            {pool.length} {pool.length === 1 ? "asset" : "assets"}
+          </span>
+          <IconButton
+            onClick={() => fileInput.current?.click()}
+            title="Import media from disk"
+            aria-label="Import media from disk"
+            size={22}
+          >
+            <Plus size={13} />
+          </IconButton>
         </span>
       </header>
+
+      <input
+        ref={fileInput}
+        type="file"
+        multiple
+        // The same list the gate holds the agent to, so a human and an agent
+        // reach the pool through one rule. See MEDIA_EXTENSIONS in the registry.
+        accept=".mp4,.mov,.mkv,.webm,.mp3,.wav,.aac,.png,.jpg,.jpeg,.webp"
+        className="hidden"
+        onChange={(event) => {
+          void bring(event.target.files);
+          // Reset, or picking the same file twice fires no second change.
+          event.target.value = "";
+        }}
+      />
 
       <div className="px-2 pt-2">
         <Input
@@ -89,13 +162,27 @@ export const MediaPanel: React.FC = () => {
         />
       </div>
 
-      <div className="flex-1 min-h-0 overflow-y-auto p-2 space-y-1" aria-label="Media pool">
+      {importError && (
+        <p role="alert" className="mx-2 mt-2 rounded-lg bg-danger/10 border border-danger/25 px-2.5 py-1.5 text-2xs text-danger leading-relaxed">
+          {importError}
+        </p>
+      )}
+
+      <div
+        className="flex-1 min-h-0 overflow-y-auto p-2 space-y-1"
+        aria-label="Media pool"
+        onDragOver={(event) => event.preventDefault()}
+        onDrop={(event) => {
+          event.preventDefault();
+          void bring(event.dataTransfer.files);
+        }}
+      >
         {visible.length === 0 && (
           <EmptyState
             title={pool.length === 0 ? "The pool is empty" : "Nothing matches"}
             detail={
               pool.length === 0
-                ? "Assets the project already knows about appear here."
+                ? "Drop media here, or use + above. Files you bring in yourself are trusted for the session."
                 : "No asset in the pool matches this filter."
             }
           />
@@ -151,8 +238,8 @@ export const MediaPanel: React.FC = () => {
       </div>
 
       <p className="flex-shrink-0 border-t border-edge-subtle px-3.5 py-2 text-2xs text-ink-disabled leading-relaxed">
-        Click an asset to place it at the playhead. Importing from disk arrives with the media
-        approval gate.
+        Click an asset to place it at the playhead. A file you import here is granted to the
+        session, along with the folder it came from.
       </p>
     </div>
   );

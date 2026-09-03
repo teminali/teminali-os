@@ -8,6 +8,7 @@ import { WorkspacePanel } from "./components/workspace/WorkspacePanel";
 import { CursorSettingsModal } from "./components/modals/CursorSettingsModal";
 import { CommandPaletteModal } from "./components/modals/CommandPaletteModal";
 import { SkillsModal } from "./components/modals/SkillsModal";
+import { MediaConsentModal } from "./components/modals/MediaConsentModal";
 import { DiffInspectorModal } from "./components/diff/DiffInspectorModal";
 import { BenchmarkGapAnalyzer } from "./components/benchmark/BenchmarkGapAnalyzer";
 import { CopilotLiveEditController } from "./components/editor/CopilotLiveEditController";
@@ -320,6 +321,10 @@ export default function App() {
       <UpdateModal updates={updates} isOpen={isUpdateOpen} onClose={() => setUpdateOpen(false)} />
       <SkillsModal />
       <DiffInspectorModal />
+      {/* App-level, not panel-level: the video tool bridge is registered at
+          module load and serves agent CLIs whether or not a video panel is
+          open, so the question it asks has to have somewhere to be asked. */}
+      <MediaConsentModal />
 
       {isBenchmarkModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4">
