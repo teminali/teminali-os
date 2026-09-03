@@ -356,6 +356,7 @@ export const StudioChat: React.FC<{
        take the whole column, and it hides the chat rather than crushing
        it — the conversation stays mounted, so nothing is lost. */
     <main
+      data-chat-column
       className={`flex-1 min-w-[var(--chat-min-w)] flex-col bg-frame-mid ${
         panelExpanded ? "hidden" : "flex"
       }`}

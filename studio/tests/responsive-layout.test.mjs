@@ -35,6 +35,8 @@ const densityPath = new URL("../src/video/hooks/useDensity.tsx", import.meta.url
 const panePath = new URL("../src/components/workspace/panels/VideoPane.tsx", import.meta.url);
 const toolbarPath = new URL("../src/video/components/timeline/TimelineToolbar.tsx", import.meta.url);
 const alignBarPath = new URL("../src/video/components/canvas/AlignmentBar.tsx", import.meta.url);
+const panelStorePath = new URL("../src/store/panelStore.ts", import.meta.url);
+const workspacePath = new URL("../src/components/workspace/WorkspacePanel.tsx", import.meta.url);
 
 test("the tier scale is declared once and every tier has a stylesheet", async () => {
   const density = await readFile(densityPath, "utf8");
@@ -159,4 +161,33 @@ test("the inspector can be put away at every width, through one control", async 
   assert.doesNotMatch(pane, /\{!canSeatInspector && \(\s*<button/);
   assert.match(pane, /if \(canSeatInspector\) setInspectorMinimized\(\(m\) => !m\);/);
   assert.match(pane, /else setInspectorOpen\(\(o\) => !o\);/);
+});
+
+test("the panel cannot be wider than the room, however it got its width", async () => {
+  const store = await readFile(panelStorePath, "utf8");
+  const workspace = await readFile(workspacePath, "utf8");
+
+  // Clamping inside `setWidth` alone covers the drag and nothing else. A
+  // width rehydrated from a session on a wider window, and a window dragged
+  // narrower afterwards, both skip it — and the shell does not scroll, so the
+  // overflow was measured at 684px of the editor simply gone off the right.
+  assert.match(store, /export function clampPanelWidth\(width: number\): number \{/);
+  assert.match(store, /setWidth: \(width\) => set\(\(\) => \(\{ width: clampPanelWidth\(width\) \}\)\),/);
+  assert.match(workspace, /clampPanelWidth/);
+
+  // The rendered width is the clamped one. Putting the store's `width` back
+  // in the style is the regression this exists to catch.
+  assert.match(workspace, /style=\{\{ width: isExpanded \? "var\(--panel-w-expanded\)" : available \}\}/);
+
+  // ...and it is re-clamped when the room changes, by either route: the
+  // window, or the inset App.tsx publishes as the sidebar moves.
+  assert.match(workspace, /window\.addEventListener\("resize", measure\)/);
+  assert.match(workspace, /attributeFilter: \["style"\]/);
+
+  // The inset stops at the sidebar's edge and counts neither splitter. Those
+  // two 2px gutters are exactly what a derived clamp still spilled, so the
+  // shell is measured; the CSS vars are the pre-paint fallback, not the
+  // answer.
+  assert.match(store, /document\.querySelector\("\[data-chat-column\]"\)\?\.getBoundingClientRect\(\)/);
+  assert.match(store, /panel\.left - chat\.right/);
 });

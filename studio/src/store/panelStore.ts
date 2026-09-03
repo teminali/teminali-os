@@ -86,6 +86,43 @@ interface PanelState {
 const MIN_WIDTH = 320;
 const DEFAULT_WIDTH = 452;
 
+/**
+ * The widest the panel may be *right now*.
+ *
+ * The old clamp reserved 420px OF THE WINDOW for the chat and then let the
+ * sidebar spend 260 of it, so the conversation was squeezed to ~160px — the
+ * defect this replaces. The room the chat actually gets is the window minus
+ * the rail and sidebar, and both numbers are read from the shell rather than
+ * assumed, so the clamp follows the sidebar as it is dragged or collapsed.
+ *
+ * It is exported because a drag is not the only way a panel gets too wide: a
+ * width restored from a session on a wider window, and a window dragged
+ * narrower afterwards, both arrive without passing through `setWidth`.
+ */
+export function clampPanelWidth(width: number): number {
+  if (typeof window === "undefined") return width;
+  const css = getComputedStyle(document.documentElement);
+  const px = (name: string, fallback: number) => {
+    const value = parseFloat(css.getPropertyValue(name));
+    return Number.isFinite(value) ? value : fallback;
+  };
+
+  /* Where the conversation actually starts, and what sits between it and the
+     panel, are measured rather than derived. `--shell-left-inset` stops at the
+     sidebar's edge and so counts neither splitter, and those two 2px gutters
+     are exactly the amount by which a derived clamp still put the panel off
+     the screen. Before first paint — and while an expanded panel has the chat
+     hidden — there is nothing to measure, and the inset is the right answer. */
+  const chat = document.querySelector("[data-chat-column]")?.getBoundingClientRect();
+  const panel = document.querySelector("[data-workspace-panel]")?.getBoundingClientRect();
+  const laidOut = chat !== undefined && chat.width > 0;
+  const left = laidOut ? chat.left : px("--shell-left-inset", 260);
+  const gutter = laidOut && panel !== undefined ? Math.max(0, panel.left - chat.right) : 0;
+
+  const room = window.innerWidth - left - px("--chat-min-w", 420) - gutter;
+  return Math.max(MIN_WIDTH, Math.min(width, Math.max(MIN_WIDTH, room)));
+}
+
 let sequence = 0;
 function panelId(): string {
   sequence += 1;
@@ -175,24 +212,10 @@ export const usePanelStore = create<PanelState>()(
 
       toggleExpanded: () => set((state) => ({ isExpanded: !state.isExpanded })),
 
-      setWidth: (width) =>
-        set(() => {
-          if (typeof window === "undefined") return { width };
-          /* The old clamp reserved 420px OF THE WINDOW for the chat and then
-             let the sidebar spend 260 of it, so the conversation was squeezed
-             to ~160px — the defect this replaces. The room the chat actually
-             gets is the window minus the rail and sidebar, and both numbers
-             are read from the shell rather than assumed, so the clamp follows
-             the sidebar as it is dragged or collapsed. */
-          const css = getComputedStyle(document.documentElement);
-          const px = (name: string, fallback: number) => {
-            const value = parseFloat(css.getPropertyValue(name));
-            return Number.isFinite(value) ? value : fallback;
-          };
-          const room =
-            window.innerWidth - px("--shell-left-inset", 260) - px("--chat-min-w", 420);
-          return { width: Math.max(MIN_WIDTH, Math.min(width, Math.max(MIN_WIDTH, room))) };
-        }),
+      /* A drag records an intent the operator could actually express, so it is
+         clamped on the way in. Everything else is clamped on the way out, by
+         `WorkspacePanel`, which leaves the chosen width intact in the store. */
+      setWidth: (width) => set(() => ({ width: clampPanelWidth(width) })),
 
       setAddMenuOpen: (open) => set({ isAddMenuOpen: open }),
     }),

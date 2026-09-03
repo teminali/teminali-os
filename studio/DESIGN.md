@@ -415,7 +415,22 @@ column, the tab strip's expand button runs it out to the edge of the vertical
 tab rail — `--panel-w-expanded` is `calc(100vw - var(--shell-left-inset))`, not
 the flat 736px it was — and the panel edge drags to anything. While expanded the
 chat is hidden rather than crushed, and stays mounted. Dragging short of that,
-the chat keeps a `--chat-min-w` floor of 420px. A media query would answer about the display while the editor
+the chat keeps a `--chat-min-w` floor of 420px.
+
+**That floor is enforced on every route to a width, not just on the drag.** The
+store clamped `setWidth`, which is the only route it can see; a width restored
+from a session on a wider window, and a window dragged narrower afterwards, both
+arrive without passing through it. The shell does not scroll, so what runs past
+the right edge is not awkward to reach but gone — 684px of the editor, its
+inspector and meters and the end of its timeline, measured off-screen after
+narrowing a 1600px window to 900px. `clampPanelWidth` is therefore applied where
+the width is *rendered*, and the store keeps the width the operator chose, so it
+comes back when the room does — the rule the splitter and the inspector's
+minimize already follow. It measures `[data-chat-column]` and the gutter to
+`[data-workspace-panel]` rather than deriving them: `--shell-left-inset` stops at
+the sidebar's edge and counts neither splitter, and those two 2px gutters were
+exactly what a derived clamp still spilled. The CSS variables remain the
+pre-paint fallback. A media query would answer about the display while the editor
 lives in a third of one; a 452px panel on a 5K monitor is the *narrowest* case
 and `@media` would call it the widest.
 
