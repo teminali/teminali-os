@@ -188,6 +188,7 @@ StudioTitleBar    traffic lights · sidebar toggle · title · panel tab strip
 AssistantProvider    wraps the shell; one session, reachable from every composer
 AssistantBridge      renders nothing — keeps the tray, hotkey and overlay in step
 MediaConsentModal    the media approval gate's prompt; App.tsx's modal layer
+VersionControl       bottom-right, fixed: the running version, updates, rollback
 ```
 
 The **empty state carries the mark**: `BrandGlyph brand="teminali"` at 52px
@@ -232,12 +233,41 @@ gate that must take consent from it therefore have the same lifetime — a gate
 drawn inside the video panel would be absent exactly when it is needed most.
 See `src/video/P3-import-gate.md`.
 
+**The video editor also renders `MediaPanel`, and that does not weaken the
+sentence above.** The editor's library rail is the *same component*, reading the
+same `mediaPool` out of `timelineStore` — not a port, not a second browser — so
+an import made in either place appears in both, and there is still exactly one
+implementation of the import gesture to hold the gate. What the rule forbids is
+the sidebar tab *going away*, because then the gate's lifetime would follow a
+workspace panel. It stays. The editor's copy is a convenience seat: CapCut puts
+the library inside the editor because that is where you reach for a clip, and
+reaching for it should not mean leaving the timeline.
+
 Panel state is its own store (`store/panelStore.ts`) because it is pure view
 state; chat and session state stay in `store/studioStore.ts`. Which sidebar view
 is selected lives in `App.tsx` beside the sidebar geometry, because the global
 shortcuts (⇧⌘E / ⇧⌘F, ⌘B, ⌘L) drive it. The panel shortcuts live beside them and
 mirror the add-panel menu exactly, so the menu doubles as the shortcut reference
 and the two cannot drift apart.
+
+**The version is a control, bottom right** (`components/updates/VersionControl.tsx`).
+The shell has no status bar, so it is `fixed bottom-2 right-3 z-40` — over the
+canvas and the workspace panel, under the modal layer — and the version string
+itself is the button. That placement is deliberate: "which build is this" is
+asked from wherever you happen to be, and on an ad-hoc signed application it is
+the first question worth asking when the assistant stops seeing the screen,
+because every update clears its permission grants.
+
+Behind it: **Update to X** (which opens `UpdateModal`, where the release notes
+are), **Check for updates**, and **exactly one** previous release to roll back
+to. One, not a catalogue — the regression a rollback is for arrived in the
+update just installed, so the build below it is the one that answers, and a
+longer list invites landing on a version nobody is testing. A rollback is
+confirmed in place before it runs and names what it costs. There is **no update
+banner**; the announcement is a dot on this control and the pill in
+`SidebarFooter`, both reading the one `useUpdates` check so they cannot
+disagree. In a browser the rollback rows are absent rather than dead — replacing
+the bundle needs the desktop bridge (`no dead affordances`, below).
 
 ### Agent tabs (`server/agent-cli.js`, `panels/AgentPane.tsx`)
 
@@ -328,6 +358,72 @@ contrast on the dark surface rather than picked by eye), marks capped at 24px
 with a 2px surface gap, and text on ink tokens so a label never wears the data
 colour. Empty days are drawn as zero rows: dropping them compresses the axis and
 makes a quiet week look busy.
+
+### Video editor (`panels/VideoPane.tsx`, `src/video/**`)
+
+**The editor is a panel, so its layout is a function of the panel's width — not
+the window's, and not a designer's guess.** It opens at 452px beside a chat
+column, the tab strip's expand button swaps that for 736px, and the panel edge
+drags to anything. A media query would answer about the display while the editor
+lives in a third of one; a 452px panel on a 5K monitor is the *narrowest* case
+and `@media` would call it the widest.
+
+So the pane measures itself with a `ResizeObserver`, resolves a tier through
+`src/video/hooks/useDensity.tsx`, publishes it on a context, and stamps it on
+the root as `data-tier` / `data-vtier` for the stylesheet. **One measurement,
+one answer.** The four ad-hoc width checks that preceded it — the pane's own
+two-column minimum, `ClipBlock`'s 72px, `TrackHeader`'s 46px, and the toolbars'
+none at all — were four thresholds measured against four different boxes, and
+they could not agree. The visible consequence was the panel drawing a toolbar
+built for 1200px: "Delete" clipped to "Du", the zoom slider under its own
+readout, the Add-track button off the end.
+
+| Tier | Width | The upper band |
+| --- | --- | --- |
+| `xs` | < 460 | monitor only; library and inspector are summoned, the inspector as a bottom sheet |
+| `sm` | 460–639 | monitor only; both visit as side overlays |
+| `md` | 640–899 | monitor │ inspector; the library visits |
+| `lg` | ≥ 900 | library │ monitor │ inspector — the desktop editor |
+
+`data-vtier` (`short` < 460, `mid`, `tall` ≥ 680) is independent, because a pane
+can be wide and short and a 291px timeline in a 360px-tall pane leaves no
+monitor at any width.
+
+**Nothing is removed at any width; only the number of clicks changes.** That is
+the whole of the mobile lesson and it is enforced, not intended:
+`TimelineToolbar` is a *list* of 12 tools, each declaring the tier from which it
+earns a seat on the bar, and `onBar` / `inMenu` are complements over that list —
+so a tool that leaves the bar is in the overflow menu by construction, carrying
+its label and its shortcut. `tests/responsive-layout.test.mjs` asserts the
+partition is total and that split, delete and snap keep their seats at every
+width. The same folding applies to the monitor's five overlay switches (one
+`Eye` button with the on-count as a badge, below `lg`) and to the track gutter,
+which drops 160px to 62px by moving the lane name to a tooltip and solo/lock
+into the row menu it already had.
+
+**Labels are the first thing bought with width and the first thing sold.** They
+appear at `lg` only. Icons never leave.
+
+**The tightest tier gets bigger controls, not smaller ones.** `--h-xs` / `--h-sm`
+/ `--h-md` step up under `[data-tier='xs']`. A narrow pane is the one being used
+in a hurry or on a touch display, and shrinking a 22px target because the pane
+shrank is exactly backwards; the buttons could afford it because they had
+already stopped carrying labels.
+
+**The band and the timeline are separated by a real splitter** (`.editor-splitter`
+— 6px of grab, 1px of line, arrow keys, double-click to reset). The height was
+derived from the pane's before, which is defensible at 291px on a desktop and
+useless in a 380px panel where the only two useful answers are "mostly monitor"
+and "mostly lanes". A dragged height is kept and only ever clamped, so a choice
+made when the panel was tall cannot strand the monitor when it is short.
+
+**Two surfaces the slice had always talked to are now drawn.** `uiStore` has
+carried `contextMenu` and `toasts` since the port and eleven call sites push to
+them — every track and clip right-click menu, and the entire result path of beat
+detection. Nothing subscribed, so right-click opened the browser's own menu and
+a failed analysis reported success by saying nothing. `video/components/ui/Overlays.tsx`
+renders both, and it renders them *inside* `.video-workspace` because the classes
+they wear are scoped to it.
 
 ### Two menu bar items
 

@@ -60,7 +60,7 @@ route requires it. Roughly sixty routes across:
 | Benchmark arena | `/api/arena/{sandbox,measure,measure/stream,history,cleanup}` |
 | Usage, files, device | `/api/usage` · `/api/files/{capabilities,ingest}` · `/api/system/device` |
 | GitHub, admin | `/api/github/{status,repos,token,clone}` · `/api/me` · `/api/admin/*` |
-| Updates & releases | `/api/updates/{check,download,publish}` |
+| Updates & releases | `/api/updates/{check,releases,download,publish}` |
 | Upstream proxies | `/api/ollama/*` · `/api/anthropic/v1/messages` · `/api/mcp` |
 
 Audit records are metadata only — route, status, duration, byte counts — with
@@ -214,6 +214,26 @@ that advertises the panel, so a name gets added only when someone decides to pay
 for it. `ffmpeg_process`'s `custom` operation, which takes a raw filtergraph,
 is reachable from the panel's own chat and is **not** advertised over MCP.
 
+**The layout is a function of the panel's width.** The pane measures itself and
+resolves a tier (`xs` < 460 · `sm` 460–639 · `md` 640–899 · `lg` ≥ 900), then
+spends the width it actually has: at `lg` the media library, the program monitor
+and the inspector are three columns; at `md` the library visits as an overlay;
+below 576px both visit, and on the tightest tier the inspector arrives as a
+bottom sheet so the monitor keeps the room. Nothing is removed at any width —
+the 12 timeline tools that exist at 1200px all exist at 400px, folding into an
+overflow menu that carries their labels and shortcuts. Labels on the bar appear
+at `lg` only; the controls themselves get *larger* at `xs`, not smaller. A drag
+handle between the monitor and the timeline sets the split (arrow keys move it,
+double-click resets it).
+
+**The media library is in the editor as well as the sidebar.** Same component,
+same pool — the editor's rail is where you reach for a clip, and the sidebar tab
+stays because it is the import gate's consent surface (below).
+
+Right-click menus and toasts now render inside the panel. They had been pushed
+to `uiStore` since the port with nothing subscribed, so every track and clip
+context menu was dead and beat detection reported its result to no one.
+
 **Media is a sidebar tab, and importing from it is a grant.** A file you pick or
 drop is a human gesture, so it grants that file and its containing folder for the
 session. Anything else — a path an agent names — raises an approval prompt that
@@ -246,6 +266,14 @@ against the public Releases API with no credential. Installs are **full asset
 replacement** — the app is ad-hoc signed, so Squirrel-style in-place updating is
 not available, and macOS clears Screen Recording / Accessibility / Microphone on
 every update.
+
+The running version is shown bottom-right and is itself the control: it opens
+update, check and **rollback**. `/api/updates/releases` lists recent releases
+with the artifact this machine could install and marks each one against the
+running build, so the menu can offer the one release below it — a single step
+back, which is where a regression introduced by an update lives. A rollback is
+confirmed before it runs, downloads that release's own asset and installs it the
+same way an update is installed. There is no update banner.
 
 ---
 
@@ -298,7 +326,7 @@ ollama serve              # local models on 127.0.0.1:11434
 
 ```bash
 npm run typecheck   # tsc --noEmit
-npm test            # 591 tests, 0 failures
+npm test            # 603 tests, 0 failures
 npm run build       # tsc && vite build
 npm run verify:core # all three
 ```

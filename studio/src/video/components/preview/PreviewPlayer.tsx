@@ -21,16 +21,28 @@ import { AlignmentBar } from '../canvas/AlignmentBar';
 import { PlaybackControls } from './PlaybackControls';
 import { useMeasure } from '../../hooks/useMeasure';
 import { useProgramLoop } from '../../hooks/useProgramLoop';
+import { useDensity } from '../../hooks/useDensity';
+import { useAnchoredMenu } from '../ui/Overlays';
 import { audioEngine } from '../../engine/audioEngine';
+import type { ContextMenuItem } from '../../store/uiStore';
 import {
-  Grid3x3, Ratio, Film, Magnet, ZoomIn, ZoomOut, Maximize2, Gauge,
+  Grid3x3, Ratio, Film, Magnet, ZoomIn, ZoomOut, Maximize2, Gauge, Eye,
 } from '../ui/icons';
 
 const ZOOM_STEPS = [0.25, 0.5, 0.75, 1, 1.5, 2, 3, 4];
 
-export const PreviewPlayer: React.FC = () => {
+/**
+ * @param stageOverlay Chrome the *pane* wants floating on the monitor's floor.
+ *   It is rendered inside the stage rather than over the whole monitor column,
+ *   because the column's floor is the transport — and a bar pinned there covers
+ *   the mark-in, mark-out and speed controls the moment the transport wraps to
+ *   two rows, which it does at `sm` and below.
+ */
+export const PreviewPlayer: React.FC<{ stageOverlay?: React.ReactNode }> = ({ stageOverlay }) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [stageRef, stageSize] = useMeasure<HTMLDivElement>();
+  const density = useDensity();
+  const openMenu = useAnchoredMenu();
 
   const project = useProjectStore((s) => s.project);
   const setDurationMs = useProjectStore((s) => s.setDurationMs);
@@ -55,23 +67,33 @@ export const PreviewPlayer: React.FC = () => {
   const openPlayer = useLayoutStore((s) => s.openPlayer);
   const [meters, setMeters] = useState({ l: 0.04, r: 0.04, peak: 0 });
 
-  // Match the approved monitor's optical inset. The gizmo is an overlay and
-  // must not shrink the picture by a second, hidden 44px margin.
-  const STAGE_PAD_X = 18;
-  const STAGE_PAD_TOP = 16;
-  const STAGE_PAD_BOTTOM = 12;
-  const MAX_CANVAS_WIDTH = 720;
+  /*
+    The optical inset around the picture. The gizmo is an overlay and must
+    not shrink the picture by a second, hidden margin — so these are the
+    only numbers that decide how much of the stage the frame gets.
+
+    They SCALE WITH THE PANE. 18px of padding either side is 8% of a 452px
+    panel and 3% of a 1200px one; held constant it read as generous on the
+    desktop and as wasted picture in the panel, where the frame is already
+    the smallest thing on screen. The `MAX_CANVAS_WIDTH` ceiling exists so
+    a very wide pane does not blow the monitor up past what the timeline
+    below it can balance, and it lifts with the tier for the same reason.
+  */
+  const STAGE_PAD_X = density.isTight ? 8 : density.isCompact ? 12 : 18;
+  const STAGE_PAD_TOP = density.isCompact ? 8 : 16;
+  const STAGE_PAD_BOTTOM = density.isCompact ? 8 : 12;
+  const MAX_CANVAS_WIDTH = density.rank >= 3 ? 960 : 720;
   const stageInner = useMemo(
     () => ({
       width: Math.max(1, stageSize.width - STAGE_PAD_X * 2),
       height: Math.max(1, stageSize.height - STAGE_PAD_TOP - STAGE_PAD_BOTTOM),
     }),
-    [stageSize.width, stageSize.height]
+    [stageSize.width, stageSize.height, STAGE_PAD_X, STAGE_PAD_TOP, STAGE_PAD_BOTTOM]
   );
 
   const fitScale = useMemo(
     () => Math.min(stageInner.width / project.width, stageInner.height / project.height, MAX_CANVAS_WIDTH / project.width),
-    [stageInner, project.width, project.height]
+    [stageInner, project.width, project.height, MAX_CANVAS_WIDTH]
   );
 
   const zoomFactor = zoomMode === 'fit' ? 1 : zoomMode / Math.max(0.0001, fitScale);
@@ -84,7 +106,7 @@ export const PreviewPlayer: React.FC = () => {
       offsetX: STAGE_PAD_X + (stageInner.width - fitted.displayWidth) / 2,
       offsetY: STAGE_PAD_TOP + (stageInner.height - fitted.displayHeight) / 2,
     };
-  }, [stageInner, stageSize.width, stageSize.height, project, zoomFactor]);
+  }, [stageInner, stageSize.width, stageSize.height, project, zoomFactor, STAGE_PAD_X, STAGE_PAD_TOP]);
 
   const effectiveScale = viewport.scale;
 
@@ -151,57 +173,110 @@ export const PreviewPlayer: React.FC = () => {
 
   const zoomLabel = zoomMode === 'fit' ? 'Fit' : `${Math.round(zoomMode * 100)}%`;
 
+  /* ── The overlays ──────────────────────────────────────────────
+     ONE list, two shapes. The segmented group and the folded menu are
+     both generated from this, so a sixth overlay is one line here and
+     appears in both — rather than the two hand-written copies that
+     would otherwise have drifted the first time one was added. */
+  const overlays = [
+    { id: 'safe', active: showSafeAreas, toggle: toggleSafeAreas, icon: Ratio, title: 'Action & title safe margins' },
+    { id: 'thirds', active: showRuleOfThirds, toggle: toggleRuleOfThirds, icon: Grid3x3, title: 'Rule-of-thirds grid' },
+    { id: 'scope', active: showCinemaLetterbox, toggle: toggleCinemaLetterbox, icon: Film, title: '2.39:1 letterbox matte' },
+    { id: 'guides', active: guidesEnabled, toggle: toggleCanvasGuides, icon: Magnet, title: 'Smart alignment guides' },
+    { id: 'scopes', active: showScopes, toggle: toggleScopes, icon: Gauge, title: 'Video scopes' },
+  ];
+  const activeOverlays = overlays.filter((o) => o.active).length;
+  const overlayMenu: ContextMenuItem[] = overlays.map((o) => ({
+    id: o.id,
+    label: o.active ? `${o.title} · on` : o.title,
+    icon: o.icon,
+    onSelect: o.toggle,
+  }));
+
   return (
     /* The monitor column sits on chrome, not on the app backdrop —
        measured off the approved editor, where this plane is the single
        largest surface on the screen. */
     <div className="editor-program-inner flex-1 flex flex-col min-h-0 bg-spectrum-panelHeader relative">
       {/* ── Monitor bar ──────────────────────────────────────────────
-          Overlay toggles are icon-only: they are glanced at constantly
-          and named rarely, so a label on each is pure noise.            */}
-      <div className="editor-program-header h-[42px] flex items-center justify-between gap-3 px-[13px] flex-shrink-0 border-b border-line bg-spectrum-panelHeader">
+          Three things, always in this order: what you are looking at,
+          what is drawn over it, and how big it is drawn. Which of the
+          three you can SEE depends on the tier — but the order never
+          changes, so the fullscreen button is at the same end of the bar
+          in a 400px panel as it is on a 1400px display.
+
+          The five overlay switches are the interesting case. On the
+          desktop they are five icons in a segmented group, glanced at
+          constantly and named rarely, which is exactly what a segmented
+          group is for. Below `lg` those same five icons are 150px of a
+          452px bar, competing with the zoom controls for the last 40 of
+          them — so they fold into one switch that says how many are on,
+          and opens the five as a menu. Folding is not hiding: the menu
+          carries the same five names, and the button carries the count,
+          so "something is being drawn over my picture" stays visible at
+          every width. That was the one fact worth keeping on the bar.  */}
+      <div className="editor-program-header flex items-center justify-between gap-2 flex-shrink-0 border-b border-line bg-spectrum-panelHeader">
         <div className="flex items-center gap-2 min-w-0">
           {/* The shared panel title, not a hand-typed copy of it: the
               library and the monitor wear the same label control in the
               reference, and re-typing it is how they drifted apart. */}
           <span className="panel-title flex-shrink-0">Program</span>
-          <span className="w-px h-3 bg-line flex-shrink-0" />
-          <span className="text-ui-xs text-spectrum-textDim font-mono truncate tabular">
-            {project.width}×{project.height} · {project.fps} fps · Rec.709
-          </span>
+          {density.rank >= 2 && (
+            <>
+              <span className="w-px h-3 bg-line flex-shrink-0" />
+              <span className="text-ui-xs text-spectrum-textDim font-mono truncate tabular">
+                {density.hasLabels
+                  ? `${project.width}×${project.height} · ${project.fps} fps · Rec.709`
+                  : `${project.height}p · ${project.fps}`}
+              </span>
+            </>
+          )}
         </div>
 
         <div className="flex items-center gap-1.5 flex-shrink-0">
-          <div className="seg-group">
-            <OverlayToggle active={showSafeAreas} onClick={toggleSafeAreas} icon={Ratio} title="Action & title safe margins" />
-            <OverlayToggle active={showRuleOfThirds} onClick={toggleRuleOfThirds} icon={Grid3x3} title="Rule-of-thirds grid" />
-            <OverlayToggle active={showCinemaLetterbox} onClick={toggleCinemaLetterbox} icon={Film} title="2.39:1 letterbox matte" />
-            <OverlayToggle active={guidesEnabled} onClick={toggleCanvasGuides} icon={Magnet} title="Smart alignment guides" />
-            <OverlayToggle active={showScopes} onClick={toggleScopes} icon={Gauge} title="Video scopes" />
-          </div>
+          {density.hasLabels ? (
+            <div className="seg-group">
+              {overlays.map((o) => (
+                <OverlayToggle key={o.id} active={o.active} onClick={o.toggle} icon={o.icon} title={o.title} />
+              ))}
+            </div>
+          ) : (
+            <button
+              onClick={(e) => openMenu(e, overlayMenu)}
+              className={`pro-btn editor-tool-btn relative ${activeOverlays > 0 ? 'pro-btn-active' : ''}`}
+              title={`View overlays${activeOverlays > 0 ? ` · ${activeOverlays} on` : ''}`}
+              aria-label="View overlays"
+              aria-haspopup="menu"
+            >
+              <Eye className="w-3.5 h-3.5" weight={activeOverlays > 0 ? 'fill' : 'regular'} />
+              {activeOverlays > 0 && <span className="pro-badge">{activeOverlays}</span>}
+            </button>
+          )}
 
           <div className="seg-group">
-            <button onClick={() => stepZoom(-1)} className="seg-item !px-1.5" title="Zoom out"
-            aria-label="Zoom out">
-              <ZoomOut className="w-3.5 h-3.5" />
-            </button>
+            {!density.isTight && (
+              <button onClick={() => stepZoom(-1)} className="seg-item !px-1.5" title="Zoom out" aria-label="Zoom out">
+                <ZoomOut className="w-3.5 h-3.5" />
+              </button>
+            )}
             <button
               onClick={() => setZoomMode(zoomMode === 'fit' ? 1 : 'fit')}
               className="seg-item font-mono min-w-[42px]"
               title="Toggle fit / 100%"
-            
-            aria-label="Toggle fit / 100%">
+              aria-label="Toggle fit / 100%"
+            >
               {zoomLabel}
             </button>
-            <button onClick={() => stepZoom(1)} className="seg-item !px-1.5" title="Zoom in"
-            aria-label="Zoom in">
-              <ZoomIn className="w-3.5 h-3.5" />
-            </button>
+            {!density.isTight && (
+              <button onClick={() => stepZoom(1)} className="seg-item !px-1.5" title="Zoom in" aria-label="Zoom in">
+                <ZoomIn className="w-3.5 h-3.5" />
+              </button>
+            )}
           </div>
 
           <button
             onClick={openPlayer}
-            className="pro-btn w-6 h-6"
+            className="pro-btn editor-tool-btn"
             title="Play fullscreen"
             aria-label="Play fullscreen">
             <Maximize2 className="w-3.5 h-3.5" />
@@ -299,6 +374,8 @@ export const PreviewPlayer: React.FC = () => {
             </div>
           </div>
         )}
+
+        {stageOverlay}
       </div>
 
       {/* ── Transport ── */}
