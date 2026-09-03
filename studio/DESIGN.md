@@ -539,6 +539,20 @@ mean the transport and the meters; an added element would have moved the 336px
 minimum onto the spacer. At `sm`/`xs` the meters are `display: none` and so is
 the mirror, or it would push the transport right by the error it removes.
 
+**The alignment shelf holds alignment.** It floats over the stage whenever
+something is selected, and it had grown to fourteen icons — six align, two
+distribute, then flip H, flip V, fit-to-frame and reset. The last four are
+*transform* actions on a shelf named for alignment, which is what makes them the
+ones to demote: they answer a question about one layer, not about how several
+sit together, and three of the four already have a twin in the Transform
+inspector — both flips and reset (the inspector's `Fit to frame` is the `fitMode`
+select, a different mechanism). They now live behind a single `⋯` that opens the editor's own anchored menu
+(`useAnchoredMenu` → `ContextMenuItem[]`, the same pattern the timeline toolbar's
+overflow uses), so eight icons cover the picture instead of fourteen. Nothing is
+removed at any width — only the click count changes — and
+`tests/responsive-layout.test.mjs` fails if any of the four grows a button back
+or drops out of the menu.
+
 **The track gutter is wider than the tier minimum** — 76 / 120 / 150 / 176px
 across the four tiers. It was cut to the narrowest legible width when the
 folding rules were written, which is the right instinct applied one step too

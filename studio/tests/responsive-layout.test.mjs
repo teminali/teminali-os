@@ -34,6 +34,7 @@ const videoCssPath = new URL("../src/video/video-components.css", import.meta.ur
 const densityPath = new URL("../src/video/hooks/useDensity.tsx", import.meta.url);
 const panePath = new URL("../src/components/workspace/panels/VideoPane.tsx", import.meta.url);
 const toolbarPath = new URL("../src/video/components/timeline/TimelineToolbar.tsx", import.meta.url);
+const alignBarPath = new URL("../src/video/components/canvas/AlignmentBar.tsx", import.meta.url);
 
 test("the tier scale is declared once and every tier has a stylesheet", async () => {
   const density = await readFile(densityPath, "utf8");
@@ -95,6 +96,38 @@ test("every timeline tool that leaves the bar is still reachable in the menu", a
       `${id} must keep its seat on the bar at every width`,
     );
   }
+});
+
+test("the alignment shelf keeps alignment, and hides transforms without losing them", async () => {
+  const bar = await readFile(alignBarPath, "utf8");
+  // The menu is declared before the JSX; the JSX is everything from the
+  // component's one `return (`.
+  const menu = bar.slice(bar.indexOf("const menuItems"), bar.indexOf("return ("));
+  const strip = bar.slice(bar.indexOf("return ("));
+
+  // Align and distribute are what the shelf is named for, and they only
+  // mean anything side by side. They stay on the strip.
+  assert.match(strip, /ALIGN_BUTTONS\.map/);
+  for (const axis of ["x", "y"]) {
+    assert.ok(strip.includes(`handleDistribute('${axis}')`), `distribute ${axis} must stay on the shelf`);
+  }
+
+  // The four transform actions are demoted, not removed. A fourteen-icon
+  // strip floating over the picture is what this was asked to stop being,
+  // and "nothing may be removed — only the click count changes" is the
+  // other half of that instruction.
+  for (const call of ["handleFlip('h')", "handleFlip('v')", "handleFitToFrame", "handleReset"]) {
+    assert.ok(menu.includes(call), `${call} must survive in the overflow menu`);
+    assert.ok(
+      !strip.includes(`onClick={() => ${call}}`) && !strip.includes(`onClick={${call}}`),
+      `${call} must not keep its own button on the shelf`,
+    );
+  }
+
+  // One overflow control, opened the way every other one here is opened,
+  // and it says how much it is holding.
+  assert.match(strip, /openMenu\(e, menuItems, 'left'\)/);
+  assert.match(strip, /\$\{menuItems\.length\} more layer tools/);
 });
 
 test("the media library in the editor is the shell's own panel, not a second copy", async () => {

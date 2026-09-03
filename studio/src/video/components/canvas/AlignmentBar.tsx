@@ -3,12 +3,14 @@
 import React from 'react';
 import { useTimelineStore } from '../../store/timelineStore';
 import { useProjectStore } from '../../store/projectStore';
+import { type ContextMenuItem } from '../../store/uiStore';
+import { useAnchoredMenu } from '../ui/Overlays';
 import { getClipBox, getBoxAABB } from '../../engine/geometry';
 import { alignToCanvas, AlignAction } from '../../engine/snapping';
 import { getNaturalSize } from '../../engine/compositor';
 import { Clip } from '../../types/edl';
 import {
-  AlignHorizontalJustifyStart, AlignHorizontalJustifyCenter, AlignHorizontalJustifyEnd, AlignVerticalJustifyStart, AlignVerticalJustifyCenter, AlignVerticalJustifyEnd, AlignHorizontalSpaceAround, AlignVerticalSpaceAround, Maximize, RotateCcw, FlipHorizontal2, FlipVertical2,
+  AlignHorizontalJustifyStart, AlignHorizontalJustifyCenter, AlignHorizontalJustifyEnd, AlignVerticalJustifyStart, AlignVerticalJustifyCenter, AlignVerticalJustifyEnd, AlignHorizontalSpaceAround, AlignVerticalSpaceAround, Maximize, RotateCcw, FlipHorizontal2, FlipVertical2, DotsThree,
 } from '../ui/icons';
 
 const ALIGN_BUTTONS: { action: AlignAction; icon: React.ElementType; label: string }[] = [
@@ -21,6 +23,7 @@ const ALIGN_BUTTONS: { action: AlignAction; icon: React.ElementType; label: stri
 ];
 
 export const AlignmentBar: React.FC = () => {
+  const openMenu = useAnchoredMenu();
   const project = useProjectStore((s) => s.project);
   const tracks = useTimelineStore((s) => s.tracks);
   const selectedClipIds = useTimelineStore((s) => s.selectedClipIds);
@@ -130,6 +133,17 @@ export const AlignmentBar: React.FC = () => {
 
   const canDistribute = selected.length >= 3;
 
+  /* Flip, fit and reset are transform actions on a shelf named for
+     alignment, and they are what made it a fourteen-icon strip floating
+     over the picture. Demoted, not removed: nothing here is unreachable
+     at any width, only one click further away. */
+  const menuItems: ContextMenuItem[] = [
+    { id: 'flip-h', label: 'Flip horizontal', icon: FlipHorizontal2, onSelect: () => handleFlip('h') },
+    { id: 'flip-v', label: 'Flip vertical', icon: FlipVertical2, onSelect: () => handleFlip('v') },
+    { id: 'fit', label: 'Fit layer to frame', icon: Maximize, separatorBefore: true, onSelect: handleFitToFrame },
+    { id: 'reset', label: 'Reset transform', icon: RotateCcw, onSelect: handleReset },
+  ];
+
   return (
     /* The caller owns the surface — this is just the control row. */
     <div className="flex items-center gap-0.5">
@@ -166,21 +180,14 @@ export const AlignmentBar: React.FC = () => {
 
       <div className="w-px h-4 bg-line mx-0.5" />
 
-      <button onClick={() => handleFlip('h')} className="pro-btn w-6 h-6" title="Flip horizontal"
-            aria-label="Flip horizontal">
-        <FlipHorizontal2 className="w-3.5 h-3.5" />
-      </button>
-      <button onClick={() => handleFlip('v')} className="pro-btn w-6 h-6" title="Flip vertical"
-            aria-label="Flip vertical">
-        <FlipVertical2 className="w-3.5 h-3.5" />
-      </button>
-      <button onClick={handleFitToFrame} className="pro-btn w-6 h-6" title="Fit layer to frame"
-            aria-label="Fit layer to frame">
-        <Maximize className="w-3.5 h-3.5" />
-      </button>
-      <button onClick={handleReset} className="pro-btn w-6 h-6" title="Reset transform"
-            aria-label="Reset transform">
-        <RotateCcw className="w-3.5 h-3.5" />
+      <button
+        onClick={(e) => openMenu(e, menuItems, 'left')}
+        className="pro-btn w-6 h-6"
+        title={`${menuItems.length} more layer tools`}
+        aria-label={`${menuItems.length} more layer tools`}
+        aria-haspopup="menu"
+      >
+        <DotsThree className="w-4 h-4" weight="bold" />
       </button>
     </div>
   );
