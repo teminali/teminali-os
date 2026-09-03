@@ -49,7 +49,7 @@ assistant hotkey and the screen overlay — run `npm start` inside `studio/`.
 
 ```bash
 npm test            # root gateway/runner suite — 109 tests
-npm run studio:test # application suite — 543 tests
+npm run studio:test # application suite — 549 tests
 npm run verify:all  # both, plus the studio typecheck and production build
 ```
 

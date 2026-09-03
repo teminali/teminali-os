@@ -103,6 +103,20 @@ by profiles in `gateway/frontier-runner.js`:
 | `local-24b` | Devstral 24B | Needs 32 GB. |
 | `auto` | Qwen Coder + Claude Sonnet escalation | Hybrid. |
 
+Which installed model each lane actually resolves to is decided by
+`planRouting` in `studio/server/model-catalog.js`, against the machine it is
+running on. Two rules govern the heavy lane: it ranks by **parameter count, not
+file size** — quantisation changes bytes without changing what a model knows —
+and it refuses anything estimated below 10 tok/s, because a stronger answer
+nobody waits for is not the stronger answer. If nothing clears that bar the
+heavy lane collapses onto the light one rather than pretending.
+
+Mixture-of-experts models are budgeted separately: memory against the whole
+file, speed against the `activeBytes` a single token actually reads. GPT-OSS 20B
+is the first such entry — measured on an M4 Pro at **29.4 tok/s against
+Devstral 24B's 6.0**, on 4 GB less resident memory, which is why it wins the
+heavy lane on a 24 GB machine despite the smaller file.
+
 **Agent CLIs.** Claude Code and Codex are not providers behind the chat box —
 they are the CLIs already installed on the machine, spawned as real processes in
 the real workspace with their own auth, tools and resumable sessions, driven
@@ -219,7 +233,19 @@ npm install
 npm run dev:full     # gateway + Vite renderer in the browser
 npm start            # gateway + Vite + Electron (the real app)
 npm run desktop      # Electron only, against an already-running dev server
+
+ELECTRON_DIST=1 npm run desktop   # Electron against the built dist/ bundle
 ```
+
+An unpackaged Electron always loads the Vite dev server, retrying for ten
+seconds while Vite starts, and only falls back to `dist/index.html` if the dev
+server never answers. That preference is not cosmetic: only a packaged app
+starts the gateway in-process and hands the renderer a session, so an
+unpackaged `file://` page has neither an injected session nor an Origin the
+gateway will accept. It draws, fails to bootstrap a session, and then reports
+the gateway offline for good — empty explorer, silent Guardian, no voice.
+`ELECTRON_DIST=1` opts into the built bundle deliberately, and inherits that
+limitation.
 
 Optional local capabilities:
 
@@ -234,7 +260,7 @@ ollama serve              # local models on 127.0.0.1:11434
 
 ```bash
 npm run typecheck   # tsc --noEmit
-npm test            # 543 tests, 0 failures
+npm test            # 549 tests, 0 failures
 npm run build       # tsc && vite build
 npm run verify:core # all three
 ```
@@ -253,6 +279,27 @@ npm run package:linux
 `build/afterAllArtifactBuild.cjs` renames the two macOS DMGs after the fact,
 because `artifactName` cannot branch on architecture. That is only safe because
 `dmg.publish: null` is set in `electron-builder.yml` — do not remove it.
+
+### Signing — wired, pending a certificate
+
+There is no Apple Developer ID, so every build is **ad-hoc signed** by
+`build/afterPack.cjs`, inside out and with `build/entitlements.mac.plist`
+attached. That is what lets the assistant ask for Apple Events and Accessibility
+at all; the hook fails the build rather than shipping a bundle whose signature
+carries no entitlements.
+
+The release workflow already passes `CSC_LINK`, `CSC_KEY_PASSWORD` and
+`APPLE_ID` / `APPLE_APP_SPECIFIC_PASSWORD` / `APPLE_TEAM_ID`. An absent secret
+arrives as an empty string, and every reader treats empty as "no certificate":
+electron-builder skips signing, `afterPack.cjs` ad-hoc signs, and notarization —
+which only runs after a real signature — never starts. **Adding the secrets in
+repository settings is the whole switch-over; no file changes.** The macOS
+variables are scoped to the macOS runner, because `CSC_LINK` also feeds
+`signtool` on Windows.
+
+Signing is not what gates updates. The updater here is bespoke
+(`server/updates.js`, `server/install-macos.js`) and replaces the whole app, so
+it works unsigned — see [Releases and updates](#releases-and-updates).
 
 ### What actually ships
 

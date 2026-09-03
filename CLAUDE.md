@@ -34,7 +34,7 @@ can observe are doc-neutral. Say so explicitly rather than staying silent.
 | `studio/{agent,mcp,performance,quality,visual}-runtime/**` | that runtime's own `README.md`, and `studio/README.md` if its role changed |
 | `studio/src/services/diligenceEngine.ts` (rules) | `studio/docs/INVESTIGATION_DOCTRINE.md` and `studio/docs/DILIGENCE_TEST_PLAN.md` |
 | any `package.json` scripts, or the test count | both READMEs' Verification blocks — **run the suite, quote the real number** |
-| `electron-builder.yml`, `studio/build/**` | `studio/README.md` Packaging |
+| `studio/electron-builder.yml`, `studio/build/**`, `.github/workflows/release.yml` | `studio/README.md` Packaging |
 
 `studio/DESIGN.md` is the **canonical** design contract. Root `DESIGN.md` is a
 pointer to it plus repo-level decisions — do not fork the TDS contract back into
@@ -55,7 +55,7 @@ it. That duplication is what drifted last time.
 
 ```bash
 npm test              # root gateway/runner suite — 109 tests
-npm run studio:test   # application suite — 543 tests
+npm run studio:test   # application suite — 549 tests
 npm run verify:all    # both, plus studio typecheck and production build
 ```
 
@@ -66,5 +66,6 @@ environment, so the packaged app exits instantly as a bare Node process. To
 reproduce a Finder launch faithfully, also pin the launchd PATH:
 `env -u ELECTRON_RUN_AS_NODE PATH=/usr/bin:/bin:/usr/sbin:/sbin open -a ...`.
 A gateway is often already on `:4310`; use
-`FRONTIER_GATEWAY_PORT=4319` for tests. `npm run assistant:doctor` exits 1 until
+`FRONTIER_GATEWAY_PORT=4319` for tests. `npm run assistant:doctor` (a `studio/`
+script — it does not exist at the root) exits 1 until
 macOS Accessibility is granted — that is expected, not a regression.

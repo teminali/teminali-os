@@ -602,7 +602,7 @@ bundle with `?surface=overlay`, so the drawing is ordinary React against this
 token sheet — a hand-written HTML overlay would have needed its own copy of
 every colour, and a copy of the token sheet drifts.
 
-Three details cost a debugging session each:
+Four details cost a debugging session each:
 
 1. **`enableLargerThanScreen` is required.** Without it macOS clamps the window
    to the work area and every ring lands 34px below the control it points at.
@@ -614,6 +614,18 @@ Three details cost a debugging session each:
 3. **The ring is drawn twice** — a near-white stroke inside a dark one — so it
    reads over a white document and a black terminal without any glow, blur or
    gradient, none of which this system has.
+4. **The overlay must be able to die on its own.** It is click-through,
+   non-focusable and `closable: false`, and it shows precisely when the app is
+   *not* focused — so a bubble left behind by a turn that never finished has no
+   dismissal path at all: it floats over every space, outlives the editor, and
+   macOS keeps the process alive after the last window closes. Two things now
+   take it down without the operator: closing the last window hides it, and a
+   state nobody refreshed for `STALE_AFTER_MS` (45 s) hides itself. The menu-bar
+   item still toggles it by hand. Pinned down in
+   [`tests/assistant-overlay.test.mjs`](tests/assistant-overlay.test.mjs), which
+   answers `require("electron")` with a stand-in so the visibility rules can be
+   exercised without a display — three of its six cases fail against the code
+   that shipped the stuck bubble.
 
 ### Measured numbers worth keeping
 

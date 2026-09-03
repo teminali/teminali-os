@@ -1,4 +1,7 @@
 const { BrowserWindow, screen } = require("electron");
+
+/** How long a bubble may go without a fresh state before it hides itself. */
+const STALE_AFTER_MS = 45_000;
 const path = require("path");
 
 /**
@@ -35,6 +38,15 @@ function attachAssistantOverlay({ devUrl, indexPath, log = () => {} }) {
    * the operator is already looking at, so it stands down until they leave.
    */
   let appFocused = false;
+  /*
+    A turn that ends without a final state — the assistant errored, the CLI died,
+    the renderer went away — used to leave the last bubble on screen forever. The
+    window is click-through, unfocusable and `closable: false`, so the operator
+    has no way to dismiss it: it outlives the editor and survives closing every
+    window. Guidance nobody refreshed for this long is stale, and a stale bubble
+    is worse than none.
+  */
+  let expiry = null;
   /** Put away by hand. Survives new messages until it is brought back. */
   let minimized = false;
 
@@ -121,6 +133,21 @@ function attachAssistantOverlay({ devUrl, indexPath, log = () => {} }) {
    * looking at Teminali Code. Kept in one place so no caller can show the
    * overlay while another reason to stay hidden is still true.
    */
+  function clearExpiry() {
+    if (expiry) clearTimeout(expiry);
+    expiry = null;
+  }
+
+  function scheduleExpiry() {
+    clearExpiry();
+    expiry = setTimeout(() => {
+      log("Assistant overlay went stale; hiding it.");
+      hide();
+    }, STALE_AFTER_MS);
+    // Never hold the event loop open on the overlay's behalf.
+    if (typeof expiry.unref === "function") expiry.unref();
+  }
+
   function apply() {
     if (!window || window.isDestroyed()) return;
     const wanted = Boolean(lastState) && !minimized && !appFocused;
@@ -163,16 +190,19 @@ function attachAssistantOverlay({ devUrl, indexPath, log = () => {} }) {
     lastState = { ...state, visible: true, origin };
     overlay.webContents.send("assistant:overlay-state", lastState);
     apply();
+    scheduleExpiry();
   }
 
   function hide() {
     lastState = null;
+    clearExpiry();
     if (!window || window.isDestroyed()) return;
     window.webContents.send("assistant:overlay-state", { visible: false });
     window.hide();
   }
 
   function destroy() {
+    clearExpiry();
     if (window && !window.isDestroyed()) {
       window.destroy();
     }

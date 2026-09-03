@@ -118,6 +118,36 @@ ipcMain.on("gateway:session-sync", (event) => {
 
 let mainWindow = null;
 
+const DEV_URL = "http://localhost:3000";
+
+/** An unpackaged build is a development build unless it asks for the bundle. */
+function preferDevServer() {
+  return !app.isPackaged && process.env.ELECTRON_DIST !== "1";
+}
+
+/*
+  Vite and Electron start together, so the first load usually beats the dev
+  server to the port. Retrying is what keeps the window off the file:// path,
+  which cannot bootstrap a gateway session however the gateway is started.
+*/
+async function loadDevUrl(window, indexPath, attempts = 20, delayMs = 500) {
+  for (let attempt = 1; attempt <= attempts; attempt += 1) {
+    if (window.isDestroyed()) return;
+    try {
+      await window.loadURL(DEV_URL);
+      return;
+    } catch (error) {
+      if (attempt === attempts) {
+        log("Dev server never answered:", error.message);
+        log("Falling back to file://, where the gateway session cannot bootstrap.");
+        if (!window.isDestroyed()) window.loadFile(indexPath).catch(() => {});
+        return;
+      }
+      await new Promise((resolve) => setTimeout(resolve, delayMs));
+    }
+  }
+}
+
 function createWindow() {
   log("Creating BrowserWindow...");
   mainWindow = new BrowserWindow({
@@ -148,17 +178,20 @@ function createWindow() {
   const indexPath = path.join(__dirname, "../dist/index.html");
   log("Computed indexPath:", indexPath, "exists:", fs.existsSync(indexPath));
 
-  if (!app.isPackaged && process.env.ELECTRON_DEV) {
-    log("Loading DEV URL http://localhost:3000");
-    mainWindow.loadURL("http://localhost:3000").catch((err) => {
-      log("Failed to load dev URL, falling back to file:", err.message);
-      mainWindow.loadFile(indexPath);
-    });
+  // Only a packaged app starts the gateway in-process and hands the renderer a
+  // session. An unpackaged file:// page has neither that session nor an Origin
+  // the gateway will accept, so it draws and then reports the gateway offline
+  // for good: empty explorer, silent Guardian, no voice. An unpackaged build
+  // therefore prefers Vite and waits for it rather than racing it. Set
+  // ELECTRON_DIST=1 to load the built bundle instead.
+  if (preferDevServer()) {
+    log(`Loading DEV URL ${DEV_URL}`);
+    loadDevUrl(mainWindow, indexPath);
   } else {
     log("Loading production file:", indexPath);
     mainWindow.loadFile(indexPath).catch((err) => {
       log("Failed to load dist/index.html:", err.message);
-      mainWindow.loadURL("http://localhost:3000").catch(() => {});
+      mainWindow.loadURL(DEV_URL).catch(() => {});
     });
   }
 
@@ -174,6 +207,11 @@ function createWindow() {
   mainWindow.on("closed", () => {
     log("MainWindow closed");
     mainWindow = null;
+    // The overlay only shows while the app is unfocused, so closing the last
+    // window is exactly the condition that pins it on screen — and macOS keeps
+    // the process alive, so nothing else takes it down. It guides the operator
+    // around this app; with no window there is nothing left to guide.
+    assistantOverlay?.hide();
   });
 
   // Keep the renderer's maximize/restore icon truthful even when the window is
@@ -588,7 +626,7 @@ app.whenReady().then(async () => {
 
   try {
     assistantOverlay = attachAssistantOverlay({
-      devUrl: !app.isPackaged && process.env.ELECTRON_DEV ? "http://localhost:3000" : null,
+      devUrl: preferDevServer() ? DEV_URL : null,
       indexPath: path.join(__dirname, "../dist/index.html"),
       log,
     });
