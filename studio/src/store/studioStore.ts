@@ -174,8 +174,8 @@ interface StudioState {
   setBudget: (budget: number) => void;
   
   workspacePath: string;
-  activeWorkspaceId: "teminali" | "teminali-code-tests" | "antigravity-vpn";
-  setWorkspace: (ws: "teminali" | "teminali-code-tests" | "antigravity-vpn") => void;
+  activeWorkspaceId: "teminali" | "teminali-code-tests" | "argus-vpn";
+  setWorkspace: (ws: "teminali" | "teminali-code-tests" | "argus-vpn") => void;
   files: FileItem[];
   setFiles: (files: FileItem[]) => void;
   
@@ -270,11 +270,11 @@ export const useStudioStore = create<StudioState>()(
             workspacePath: "/Users/teminali/Downloads/frontier code tests",
             activeTabId: "tab-frontier-hypercar",
           });
-        } else if (ws === "antigravity-vpn") {
+        } else if (ws === "argus-vpn") {
           set({
-            activeWorkspaceId: "antigravity-vpn",
+            activeWorkspaceId: "argus-vpn",
             workspacePath: "/Users/teminali/Documents/my_projects/argus-vpn-landing",
-            activeTabId: "tab-agy-vpn",
+            activeTabId: "tab-argus-vpn",
           });
         } else {
           set({
