@@ -130,6 +130,10 @@ export const VersionControl: React.FC<VersionControlProps> = ({ updates, onOpenU
      this machine can install is not a place it can go. */
   const older = (options ?? []).filter((release) => release.older && release.asset).slice(0, ROLLBACK_CHOICES);
 
+  /* Floating chrome, so it is over whatever pane owns the window's bottom-right
+     corner. The one pane that draws content that far down is the video editor's
+     timeline, and it reserves this 30px strip (Timeline.tsx) — move this offset
+     and that reservation moves too. */
   return (
     <div ref={root} className="fixed bottom-2 right-3 z-40">
       {open && (

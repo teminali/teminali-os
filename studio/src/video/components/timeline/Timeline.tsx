@@ -303,7 +303,12 @@ export const Timeline: React.FC = () => {
     <div className="editor-timeline-inner flex flex-col h-full bg-spectrum-panel border-t border-line overflow-hidden select-none">
       <TimelineToolbar scrollRef={scrollRef} />
 
-      <div className="flex-1 flex overflow-hidden min-h-0">
+      {/* The version control floats in the window's bottom-right corner, and the
+          timeline is what sits under it (VersionControl.tsx: bottom-2, 22px tall
+          => a 30px strip). Reserve that strip so a lane never renders beneath it;
+          slack under the last track is what an editor wants there anyway. If that
+          offset changes, change this with it. */}
+      <div className="flex-1 flex overflow-hidden min-h-0 pb-[30px]">
         {/* ── Track headers ── */}
         <div
           className="editor-track-list flex-shrink-0 flex flex-col bg-spectrum-panelHeader border-r border-line z-20"
