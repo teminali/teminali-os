@@ -1,9 +1,14 @@
 # P3 — the approval gate for media import
 
-**Status: design, not built.** Nothing in this file exists in code yet. It is
-written before the port because the gate is the deliberate gap in P2's design
+**Status: built in `40544f6`, tested in `tests/media-consent-gate.test.mjs`.**
+Written before the port because the gate is the deliberate gap in P2's design
 (`README.md` § "The exposed surface is an allowlist"), and because the shape of
-the gate decides which tools P3 can afford to expose at all.
+the gate decides which tools P3 can afford to expose at all. It remains the
+spec: where the build diverged, the divergence is marked **Built:** in place,
+with the reason. Two things it describes are still not true, and say so —
+`assemble_from_folder` (§ "What goes into `EXPOSED_TOOLS`") and the
+project-folder grant (§ 2). Nothing here has been seen running: the gate has
+never raised a prompt in a real window.
 
 ## What P3 actually grants
 
@@ -65,8 +70,14 @@ load-bearing:
 `defineTool` gains one field beside `name` and `category`:
 
 ```ts
-consent?: 'read-path' | 'spawn'   // absent means what the three P2 tools mean: none
+consent?: readonly ConsentCapability[]   // absent means what the three P2 tools mean: none
 ```
+
+**Built: a list, not one value.** The table in § "What goes into
+`EXPOSED_TOOLS`" demands `read-path` *and* `spawn` for `ffmpeg_process`, which a
+single field cannot express. The two are also different scopes — "may you read
+this file" is per path, "may you spend fifteen minutes of this machine" is per
+session — so they could not have been collapsed into one either.
 
 It lives in `mcp/toolRegistry.ts` for the reason `agentCommands.ts` gives in its
 own header — the rule a call is judged by and the code that runs it stay in one
@@ -84,8 +95,10 @@ Roots are granted three ways, all of them a real gesture:
 - **The operator picked the file.** A file chosen in the picker or dropped on
   the window grants that file, and grants its containing directory — because
   the folder you took one clip out of is the folder the rest of the shoot is in.
-- **The open project folder.** Code already knows it (`menu:open-project`,
-  `chooseProjectFolder` at `electron/main.cjs:416`).
+- **The open project folder.** **Not wired.** `grantRoot(path, 'project-root')`
+  is implemented and has no caller: nothing in `src/` tracks an open project
+  folder — `chooseFolder` is only a type declaration in `WindowControls.tsx`.
+  Two of the three grant paths work; this is the third.
 - **The operator answered a prompt with "this folder".**
 
 The point of folder scope is that the gate has to survive being used. A
@@ -118,6 +131,13 @@ operator is not asked:
   `import_media_from_path('/etc/passwd')` is "that is not media", and returning
   it without a prompt means the operator is never shown a question whose only
   correct answer is no.
+
+  **Built: the list is per path argument, not one global media list.**
+  `ffmpeg_process`'s `lutPath` is a real read of a real `.cube` sidecar, and a
+  media-only rule would refuse it forever — leaving the `lut` operation
+  permanently dead. Each `RequestedPath` carries its own `accepts`, and
+  `MEDIA_EXTENSIONS` / `LUT_EXTENSIONS` are the two that exist. The rule is
+  still the schema's list rather than a human's judgement, which is the point.
 
 Both checks run on the **resolved** path — symlinks followed, `..` collapsed —
 and the resolved string is the one shown in the prompt. A gate that validates
@@ -205,6 +225,13 @@ grant satisfied it — `picker`, `project-root`, `session-folder`, `prompt`,
 `deny-list`, `not-media`, `no-ui`, `deadline`. The assistant subsystem already
 does this for `act`. Without the grant reason, "the agent imported something
 odd" has no answer.
+
+**Built: two more, and one rename.** `declined` (the operator said no) and
+`superseded` (a second prompt arrived and denied this one) are the two
+operator-driven outcomes this list did not enumerate — a denial that cannot tell
+"someone said no" from "nobody was there" is not an audit line. `session-spawn`
+joins `session-folder` because the two session grants answer different
+questions. The full set is `ConsentOutcome` in `services/mediaConsent.ts`.
 
 ## What goes into `EXPOSED_TOOLS`, in what order
 
@@ -295,8 +322,12 @@ not name.
 
 ## Tests the gate owes
 
-In the shape of `tests/video-mcp-bridge.test.mjs`, which drives the real shim as
-a real child process:
+**Built: all ten, as `tests/media-consent-gate.test.mjs`.** 1–7 drive the real
+gate under plain Node — it is React-free and takes its path resolution as an
+argument, so the real policy runs with a fake filesystem beneath it and a short
+deadline. 8–10 are assertions over source in the style of
+`tests/video-mcp-bridge.test.mjs`, because `toolRegistry.ts` reaches the
+timeline store through extensionless specifiers that plain Node cannot resolve.
 
 1. An ungranted path raises a prompt; the granted path does not.
 2. The deny list refuses inside a granted root.
@@ -308,4 +339,8 @@ a real child process:
    dropping its resolver — the invariant `createApprovalGate` already holds.
 8. `operation: "custom"` is refused over MCP and accepted in-process.
 9. `getToolManifest()` does not list a `consent` tool that has no gate wired.
-10. `EXPOSED_TOOLS` stays within `TOOL_BUDGET`.
+10. `EXPOSED_TOOLS` stays within `TOOL_BUDGET`. **Built wider:** the budget
+    alone was already asserted in `tests/video-mcp-bridge.test.mjs`, so this one
+    also pins the *gated* subset by name. It is meant to fail when the list
+    changes — a new tool that reads a path needs its `consent` declaration and a
+    line in the test, and a tool that loses `consent` needs someone to say why.

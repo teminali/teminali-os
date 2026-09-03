@@ -140,11 +140,11 @@ The pre-redesign code is swept onto tokens by role, not by hue:
 
 ```
 StudioTitleBar    traffic lights · sidebar toggle · title · panel tab strip
-├── SidebarDock      one 260px panel, flush to the window edge (no icon rail)
-│   └── Sidebar        nav rows (always) · the selected view · SidebarFooter
-│       ├── PRIMARY_NAV    New Chat · Search · Customize
-│       ├── WORKSPACE_NAV  Explorer · Skills
-│       └── view           StudioSidebar (chats) · Explorer · GlobalSearchView · Skills
+├── SidebarDock      ActivityBar (48px, always) + one 212px panel
+│   ├── ActivityBar    New Chat · SIDEBAR_TABS glyphs · Customize
+│   └── Sidebar        the selected view · SidebarFooter
+│       └── view       StudioSidebar (chats) · Explorer · GlobalSearchView
+│                      · Skills · MediaPanel
 ├── StudioChat       empty state / transcript · Composer (voice lives here)
 │                    · AssistantHud
 └── WorkspacePanel   terminal · browser · canvas · side chat · file · guardian
@@ -152,23 +152,42 @@ StudioTitleBar    traffic lights · sidebar toggle · title · panel tab strip
 
 AssistantProvider    wraps the shell; one session, reachable from every composer
 AssistantBridge      renders nothing — keeps the tray, hotkey and overlay in step
+MediaConsentModal    the media approval gate's prompt; App.tsx's modal layer
 ```
 
-There is **no activity rail**. Cursor's agent window has one sidebar holding the
-traffic lights, the nav rows and the chat list, and its right edge is the only
-structural divider in the shell. A 48px rail beside a panel put two vertical
-seams where the reference has one, and no amount of recolouring would have made
-that read as Cursor. The nav rows are the view switch, and they stay on screen
-for every view so no view can strand you.
+**There is an activity rail, and it reverses an earlier decision knowingly.**
+This section used to argue the opposite: Cursor's agent window has one sidebar
+and one structural seam, and a 48px rail beside a panel puts two. That is still
+true and it is still a cost. What was paid for it (`3ba5b55`) is width. Labelled
+rows priced the sidebar at 260px because the switch had to fit the word
+"Customize"; glyphs cost 48 and let the panel open at 212 — the same 260px of
+shell, with the labels' width handed back to whatever the panel is showing. Five
+destinations now fit the switch without wrapping, and the fifth is Media.
 
-`PRIMARY_NAV` reproduces Cursor's primary rows in Cursor's order, **minus the
-ones this studio has no feature behind** — Cursor's fourth row, "Automations",
-is absent because nothing here schedules recurring work, and a nav row that
-highlights itself and shows nothing teaches the operator that rows in this list
-might not do anything. Add it back the day there is an automations view. **Do
-not extend it for anything else**: this studio's extra views live under
-`WORKSPACE_NAV` and its own section label, so the top of the sidebar still reads
-exactly like the reference and the extras arrive in the same visual grammar.
+One list, `SIDEBAR_TABS` in `sidebar/ActivityBar.tsx`, not the old
+`PRIMARY_NAV` / `WORKSPACE_NAV` pair: Chats (⌘L) · Explorer (⇧⌘E) · Search
+(⇧⌘F) · Skills · Media. New Chat sits above it and Customize below, both
+gestures rather than destinations. `ACTIVITY_BAR_WIDTH` is exported because the
+title bar lines its edge up with the rail; `DEFAULT_SIDEBAR_WIDTH` is 212 in
+`App.tsx`, under `frontier_sidebar_width_v2` — the key is bumped because a 260
+saved for the old panel would have made the new dock wider, not thinner.
+
+**The rail stays when the panel collapses.** That is the difference between
+collapsing and closing: with the glyphs still on screen, a dismissed sidebar is
+one click from open on any view, instead of depending on the title bar.
+
+Cursor's fourth row, "Automations", is still absent because nothing here
+schedules recurring work, and a tab that highlights itself and shows nothing
+teaches the operator that tabs in this list might not do anything. **A glyph
+earns its place by having a view behind it**; at 48px the label is one hover
+away, which costs no pixels, where a label in the layout costs 212 of them.
+
+**Media is a sidebar tab, not a workspace panel, and that is load-bearing.** A
+workspace panel is mounted only while it is open; a sidebar tab always is. The
+operator's import gesture (`sidebar/MediaPanel.tsx`, `bring()`) and the approval
+gate that must take consent from it therefore have the same lifetime — a gate
+drawn inside the video panel would be absent exactly when it is needed most.
+See `src/video/P3-import-gate.md`.
 
 Panel state is its own store (`store/panelStore.ts`) because it is pure view
 state; chat and session state stay in `store/studioStore.ts`. Which sidebar view
@@ -287,6 +306,15 @@ Every dialog goes through the `Modal` primitive — raised `--surface` behind th
 brightest hairline, one close control, sentence-case title at body size. A
 dialog that draws its own backdrop and its own header is how the Skills modal
 ended up in uppercase mono with two close buttons and a broken template literal.
+
+`MediaConsentModal` is the one dialog nothing in the shell opens. It subscribes
+to the media approval gate's singleton and appears when a tool asks to read a
+path the operator has not granted — which means it is mounted in `App.tsx`'s
+modal layer rather than beside the feature that raises it, because the caller
+may be an agent CLI in another application and the video panel may be shut. It
+shows the **resolved** path, never the requested one, and offers three answers:
+allow this file · allow this folder for the session · deny. There is no "always
+allow" — no grant survives the session.
 
 ### Menus are keyboard-driven
 
@@ -626,6 +654,42 @@ Three details cost a debugging session each:
   It is context, not geometry, so nothing that matters is lost.
 
 ---
+
+### The media approval gate (`studio/src/services/mediaConsent.ts`)
+
+A second gate, unrelated to the assistant's autonomy ladder but built on the
+same rule: the promise always settles. `createMediaConsentGate` is React-free
+and does no I/O of its own — path resolution is injected, because collapsing `..`
+and following symlinks needs a real filesystem and the renderer has none; main
+does it over the `media:*` bridge. The difference from `createApprovalGate` in
+`agentCommands.ts` is ownership: that one is created per hook, this one is a
+module singleton (`mediaConsentGate()`), because `registerVideoToolBridge()`
+runs outside React at module load.
+
+What it guards is **reading** a path the operator did not name and **spawning**
+a subprocess on their machine — not writing; nothing P3 exposes destroys data.
+`services/videoToolBridge.ts` is the only enforcement point, checked after
+`isExposed(name)` and before `executeTool`, and the call blocks while a person
+decides: a protocol that lets the agent proceed while the question is open is a
+gate that can be waited out. It has to be on this side of the bridge because the
+CLI's own permission model is already spent — `server/video-mcp.js` passes
+`--allowedTools mcp__cut`, which names the *server*, so every tool it serves is
+pre-approved.
+
+Two refusals never reach a person, because their only defensible answer is no: a
+deny list (`~/.ssh`, `~/.aws`, `~/.gnupg`, `~/Library/Keychains`, the app's own
+`userData`, and any dotfile or dotdir) that overrides every grant, and an
+extension rule per path argument. A prompt whose only correct answer is "no"
+teaches the operator to click through prompts, which is worse than no gate.
+
+`CONSENT_DEADLINE_MS` is 90s — a *human* deadline, where
+`electron/videoToolBridge.cjs`'s 20s default was a figure for in-memory writes.
+`SLOW_TOOLS` carries the sum (import 120s, ffmpeg 16min) so the bridge is never
+what gives up first. With no subscriber the answer is no immediately, not after
+the deadline: a gate that cannot ask must not grant.
+
+Designed in `src/video/P3-import-gate.md`; tested in
+`tests/media-consent-gate.test.mjs`.
 
 ## 6. Voice (`studio/src/services/voice/`)
 

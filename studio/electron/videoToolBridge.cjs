@@ -37,12 +37,13 @@ let rendererReady = false;
 /**
  * How long one tool may take before the caller is answered anyway.
  *
- * The three tools exposed today are synchronous writes to an in-memory store —
- * they finish in single-digit milliseconds, so a wait this long means the
- * renderer has wedged, not that the work is slow. The Cut runs 60s because its
- * surface includes transcription and export, which load models and render
- * frames; when those arrive here (P3/P4) they need their own entries, because a
- * per-tool timeout is not inherited by a tool that got slower.
+ * This is the default for the tools that do not have an entry below: reads of,
+ * and synchronous writes to, an in-memory store. They finish in single-digit
+ * milliseconds, so a wait this long means the renderer has wedged, not that the
+ * work is slow. The Cut runs 60s because its surface includes transcription and
+ * export, which load models and render frames; P3's two gated tools are the
+ * first arrivals here that needed their own entries, because a per-tool timeout
+ * is not inherited by a tool that got slower.
  */
 const DEFAULT_TIMEOUT_MS = 20_000;
 
