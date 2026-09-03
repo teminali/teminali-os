@@ -89,6 +89,25 @@ tinted. Internalise these five and the rest follows:
    brand hue and that is a live tension: "exit 0" and "this is Teminali" now
    rhyme. Left as-is deliberately rather than collapsed into one green, because
    a run that succeeded and a button you can press are not the same statement.
+
+   **The video workspace pays for this twice.** Track lanes are the one place
+   the system permits colour as *data* — video blue, overlay purple, text pink,
+   audio green, effect teal — and the audio lane is `#65c466`, the same softer
+   green. While the accent was achromatic every lane cleared it on hue. Now the
+   accent is green and the audio lane is green, and they separate only on
+   saturation and on shape: a lane wears full strength as a 2px spine, the
+   accent appears as a wash (`--accent-soft`) or a hairline (`--accent-line`).
+   That holds today. It is the weakest joint in the palette, and re-hueing the
+   audio lane — not de-greening the accent — is the fix if it ever stops
+   holding.
+
+   The green alphas in `.video-workspace` are **not** the host's. Green carries
+   far less luminance than the near-white it replaced, so the ported 0.10 /
+   0.28 alphas left a selected clip and a focus wash invisible on that
+   subsystem's deeper planes. Measured over `--chrome` #181818: white at 0.10
+   lifts 10.1 L\*, green needs 0.16 to lift 11.5; white at 0.28 reaches 2.28:1,
+   green needs 0.45 to reach 2.43. Matching a colour across two grounds means
+   matching what it *does*, not the number that produced it.
 4. **A card is recessed, not raised.** Cursor inverts the usual convention: an
    inset card (Getting Started) is *darker* than the sidebar around it, while a
    raised control (composer, message bubble) is lighter than the canvas. Both

@@ -28,12 +28,21 @@ isolation in one go.
 
 ## The three seams
 
-**1. Tokens.** `video-tokens.css` declares the 47 CSS variables the Cut's sheet
+**1. Tokens.** `video-tokens.css` declares the 46 CSS variables the Cut's sheet
 has that Code's `src/styles/tokens.css` lacks, scoped to `.video-workspace`.
 The 37 the two systems share are *not* redeclared, so ported components inherit
 the host's values. Its most visible consequence: Code runs `--r-sm: 6px` /
 `--r-md: 8px` where the Cut runs 8 / 10, so ported controls render 2px tighter
 here than they do in the Cut. That is accepted — the shell wins.
+
+Redeclaring a host name with a *different meaning* is the failure mode this
+seam invites, and it happened twice. `--accent-ink` meant "text on an accent
+fill" (#151515) to the host and #f0f0f0 here; `--focus-ring` is a bare colour to
+the host and a full shadow list here. Both would have broken any host component
+rendered inside `.video-workspace` — near-white text on a green button, and a
+focus ring that resolved to invalid CSS and vanished. The first is deleted, the
+second renamed `--focus-shadow`. **Shadow a host token only to change its value,
+never its type or its role.**
 
 **2. Component classes.** `video-components.css` carries the 63 hand-written
 classes the slice reaches for (`.pro-btn`, `.editor-clip`, `.seg-item`,

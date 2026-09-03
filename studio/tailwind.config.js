@@ -46,12 +46,20 @@ const V_INK_FAINT = "#989898";
 const V_INK_PLACEHOLDER = "#6b6b6b";
 const V_INK_DISABLED = "#5a5a5a";
 
-const V_ACCENT = "#e8e8e8";
+/* The brand green, held as a literal because this family is the ported
+   Cut's palette rather than the host's var-bound one. It must track
+   `--accent` in `styles/tokens.css`; if that moves, move this. */
+const V_ACCENT = "#00bf63";
 
-/* Role colours. Each clears the achromatic accent on saturation and
-   every OTHER role on hue — a lane hue is DATA (it answers "what kind
-   of track is this" at a glance), which is the one place the design
-   system permits colour in the chrome. */
+/* Role colours. Each clears every OTHER role on hue — a lane hue is
+   DATA (it answers "what kind of track is this" at a glance), which is
+   the one place the design system permits colour in the chrome.
+
+   They used to clear the accent too, because the accent was achromatic.
+   The accent is now the brand green and V_GREEN is the audio lane, so
+   that no longer holds on hue alone: the two separate on saturation
+   (#00bf63 against a softer #65c466) and on shape (a full-strength
+   spine against a wash). It is the weakest joint in this palette. */
 const V_BLUE = "#86aee4";
 const V_GREEN = "#65c466";
 const V_TEAL = "#4ec9b0";
@@ -189,11 +197,13 @@ export default {
           textDisabled: V_INK_DISABLED,
 
           accent: V_ACCENT,
-          accentHover: "#ffffff",
-          accentSoft: "rgba(232,232,232,0.10)",
-          accentLine: "rgba(232,232,232,0.28)",
+          accentHover: "#00d66f",
+          // Lifted from the near-white's 0.10 / 0.28: green carries less
+          // luminance, so the old alphas left these invisible. Matched by
+          // measurement — see the accent block in `video/video-tokens.css`.
+          accentSoft: "rgba(0,191,99,0.16)",
+          accentLine: "rgba(0,191,99,0.45)",
           onAccent: V_GROUND,
-          accentInk: V_INK_BRIGHT,
 
           action: V_BLUE,
           actionHover: "#9dc0ea",

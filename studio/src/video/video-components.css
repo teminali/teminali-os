@@ -342,7 +342,7 @@
   .video-workspace .squircle-input:focus,
   .video-workspace .squircle-input:focus-within {
     border-color: var(--line-popover);
-    box-shadow: 0 0 0 3px rgba(232, 232, 232, 0.13);
+    box-shadow: 0 0 0 3px var(--focus-ring);
   }
 
   .video-workspace .pro-input::placeholder {
@@ -429,15 +429,15 @@
 
   .video-workspace .pro-btn-filled:focus-visible,
   .video-workspace .squircle-btn:focus-visible {
-    box-shadow: var(--focus-ring), var(--lift-1);
+    box-shadow: var(--focus-shadow), var(--lift-1);
   }
 
   .video-workspace .seg-item-active:focus-visible {
-    box-shadow: var(--focus-ring), var(--lift-1);
+    box-shadow: var(--focus-shadow), var(--lift-1);
   }
 
   .video-workspace .btn-primary:focus-visible {
-    box-shadow: var(--focus-ring), 0 1px 2px rgba(0, 0, 0, 0.4), 0 6px 18px -6px rgba(232, 232, 232, 0.22);
+    box-shadow: var(--focus-shadow), 0 1px 2px rgba(0, 0, 0, 0.4), 0 6px 18px -6px rgba(0, 191, 99, 0.22);
   }
 
   .video-workspace input[type='range'].range-accent::-webkit-slider-thumb {
@@ -580,7 +580,7 @@
 
   .video-workspace .editor-track-row.is-active {
     background: var(--surface-2);
-    box-shadow: inset 2px 0 rgba(232, 232, 232, 0.22);
+    box-shadow: inset 2px 0 var(--accent-line);
   }
 
   .video-workspace .editor-track-lane {
@@ -606,7 +606,7 @@
   }
 
   .video-workspace .editor-clip.is-selected {
-    box-shadow: 0 0 0 2px var(--accent), 0 0 0 5px rgba(232, 232, 232, 0.10),
+    box-shadow: 0 0 0 2px var(--accent), 0 0 0 5px var(--accent-soft),
     0 9px 24px rgba(0, 0, 0, 0.24);
   }
 

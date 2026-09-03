@@ -327,9 +327,9 @@ const ActiveTransformGizmo: React.FC<TransformGizmoProps> = ({ viewport, stageRe
           onPointerDown={(e) => startDrag(e, 'move')}
           className={`absolute inset-0 pointer-events-auto ${locked ? 'cursor-not-allowed' : 'cursor-move'}`}
           style={{
-            outline: `1.5px solid ${locked ? 'rgba(242,202,68,0.9)' : 'rgba(76,157,255,0.95)'}`,
+            outline: `1.5px solid ${locked ? 'rgba(242,202,68,0.9)' : 'rgba(0,191,99,0.95)'}`,
             outlineOffset: '-0.75px',
-            boxShadow: dragMode ? '0 0 0 1px rgba(76,157,255,0.25), 0 0 22px rgba(76,157,255,0.18)' : 'none',
+            boxShadow: dragMode ? '0 0 0 1px rgba(0,191,99,0.25), 0 0 22px rgba(0,191,99,0.18)' : 'none',
           }}
         />
 

@@ -56,10 +56,27 @@
   --edge-faint: rgba(255, 255, 255, 0.028);
 
   /* ── Accent ─────────────────────────────────────────────────────
-     Achromatic, so it has no hue to collide with a role colour. */
-  --accent-soft: rgba(232, 232, 232, 0.10);
-  --accent-line: rgba(232, 232, 232, 0.28);
-  --accent-ink: #f0f0f0;
+     The brand green, inherited from the host's `--accent`. The ALPHAS
+     are deliberately not the host's: green carries far less luminance
+     than the near-white it replaced, so reusing 0.10 / 0.28 would have
+     left a selected clip and a focus wash invisible on these deeper
+     planes. Measured over `--chrome` #181818 — white at 0.10 lifts
+     10.1 L*, green needs 0.16 to lift 11.5; white at 0.28 reaches
+     2.28:1, green needs 0.45 to reach 2.43.
+
+     This costs the old guarantee that the accent clears every role
+     colour on hue: `--lane-audio` is #65c466 and also green. They now
+     separate on saturation and on shape — a lane is a full-strength
+     2px spine, the accent is a wash or a hairline — which holds, but
+     it is the first thing to revisit if the lanes are ever re-hued.
+
+     `--accent-ink` is deliberately NOT redefined here. The host means
+     it as "text ON an accent fill" (#151515); this block used to bind
+     the same name to #f0f0f0, the opposite, with no consumer. Any host
+     component rendering inside `.video-workspace` would have inherited
+     near-white text on a green button. Use `--on-accent`.               */
+  --accent-soft: rgba(0, 191, 99, 0.16);
+  --accent-line: rgba(0, 191, 99, 0.45);
   --on-accent: #151515;
   --ink-warm: #2b1609;
 
@@ -110,7 +127,12 @@
   --lift-2: none;
   --lift-float: 0 12px 32px rgba(0, 0, 0, 0.55);
   --lift-modal: 0 24px 60px rgba(0, 0, 0, 0.6);
-  --focus-ring: 0 0 0 1px var(--line-popover), 0 0 0 3px rgba(232, 232, 232, 0.16);
+  /* A complete shadow list, not a colour — which is why it cannot be
+     called `--focus-ring`: the host binds that name to a bare rgba and
+     writes `0 0 0 3px var(--focus-ring)`. Shadowing it here meant any
+     host control focused inside this subtree emitted nonsense and lost
+     its ring entirely. Different meaning, different name. */
+  --focus-shadow: 0 0 0 1px var(--line-popover), 0 0 0 3px var(--focus-ring);
 
   /* feTurbulence, inlined. ~700 bytes and no network. */
   --grain: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='140' height='140'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='140' height='140' filter='url(%23n)'/%3E%3C/svg%3E");

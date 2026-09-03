@@ -457,7 +457,7 @@ export const KeyframeEditor: React.FC<KeyframeEditorProps> = ({ clip }) => {
           {/* Playhead */}
           {isPlayheadOverClip && (
             <div
-              className="absolute top-0 bottom-0 w-px bg-spectrum-accent pointer-events-none z-20 shadow-[0_0_5px_rgba(76,157,255,0.8)]"
+              className="absolute top-0 bottom-0 w-px bg-spectrum-accent pointer-events-none z-20 shadow-[0_0_5px_rgba(0,191,99,0.8)]"
               style={{ left: `${timeToPct(clipOffsetMs)}%` }}
             />
           )}
@@ -606,7 +606,7 @@ const BezierEditor: React.FC<{
       <div ref={boxRef} className="well relative h-28 overflow-visible">
         <svg className="absolute inset-0 w-full h-full" viewBox="0 0 100 100" preserveAspectRatio="none">
           <line x1="0" y1="100" x2="100" y2="0" stroke="rgba(255,255,255,0.07)" strokeWidth="1" vectorEffect="non-scaling-stroke" />
-          <line x1="0" y1="100" x2={p1x * 100} y2={100 - p1y * 100} stroke="rgba(76,157,255,0.4)" strokeWidth="1" vectorEffect="non-scaling-stroke" />
+          <line x1="0" y1="100" x2={p1x * 100} y2={100 - p1y * 100} stroke="rgba(0,191,99,0.4)" strokeWidth="1" vectorEffect="non-scaling-stroke" />
           <line x1="100" y1="0" x2={p2x * 100} y2={100 - p2y * 100} stroke="rgba(242,202,68,0.4)" strokeWidth="1" vectorEffect="non-scaling-stroke" />
           <path
             d={`M 0 100 C ${p1x * 100} ${100 - p1y * 100}, ${p2x * 100} ${100 - p2y * 100}, 100 0`}

@@ -82,7 +82,7 @@ export const Playhead: React.FC<PlayheadProps> = ({ pxPerMs, height }) => {
     >
       {/* Wider invisible grab strip than the visible needle */}
       <div className="absolute top-0 bottom-0 -left-2 w-4" />
-      <div className="absolute top-0 bottom-0 left-0 w-px bg-spectrum-accent shadow-[0_0_4px_rgba(232,232,232,0.35)]" />
+      <div className="absolute top-0 bottom-0 left-0 w-px bg-spectrum-accent shadow-[0_0_4px_rgba(0,191,99,0.35)]" />
     </div>
   );
 };
