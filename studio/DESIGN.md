@@ -494,7 +494,10 @@ the eight the buttons name and nothing more. `O` for the out point is the
 standard partner of `I` and is deliberately absent, because no control offers
 it. Each key calls the same thing its button calls — `stepPlayheadByFrames` is
 shared with `PlaybackControls`, not reimplemented — so the two paths cannot
-drift. The listener is on `window`, since a freshly opened editor has focus on
+drift. That step counts in *frames*: adding `frames * (1000 / fps)` is the
+obvious version and is wrong at 30fps, because the store rounds the playhead to
+whole milliseconds and `formatTimecode` then floors 33ms against a 33.333ms
+frame, so one press of → moved nothing. Both inputs had that bug. The listener is on `window`, since a freshly opened editor has focus on
 nothing and a subtree listener would hear nothing; `WorkspacePanel` mounts one
 pane at a time, so while the hook lives the editor *is* the workspace. It stands
 down for modals, typing targets and `<select>` (which is what leaves the rate

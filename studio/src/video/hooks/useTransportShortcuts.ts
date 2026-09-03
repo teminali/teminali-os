@@ -53,12 +53,22 @@ const isActivatable = (el: Element | null): boolean =>
  * Exported because the ← / → buttons in `PlaybackControls` run it too — the
  * store's own `nudgePlayhead` clamps only at zero, which would let the keys
  * walk the playhead past the end where the buttons stop.
+ *
+ * **It counts in frames, not milliseconds, and lands on the boundary.** Adding
+ * `frames * (1000 / fps)` is the obvious version and it is wrong at 30fps: the
+ * store rounds the playhead to whole milliseconds, so one step from zero
+ * stores 33ms, and `formatTimecode` floors 33ms against a 33.333ms frame and
+ * reads it back as frame 0. Pressing → once appeared to do nothing. Rounding
+ * to the current frame and taking the ceiling of the target's start puts the
+ * playhead just inside the frame it names, which is what the readout agrees
+ * with, and stepping back returns to exactly the value it came from.
  */
 export function stepPlayheadByFrames(frames: number): void {
   const { fps, durationMs } = useProjectStore.getState().project;
   const { playheadMs, setPlayheadMs } = useTimelineStore.getState();
   const frameMs = 1000 / fps;
-  setPlayheadMs(Math.max(0, Math.min(durationMs, playheadMs + frames * frameMs)));
+  const target = Math.max(0, Math.round(playheadMs / frameMs) + frames);
+  setPlayheadMs(Math.min(durationMs, Math.ceil(target * frameMs)));
 }
 
 export function useTransportShortcuts(

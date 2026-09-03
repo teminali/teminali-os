@@ -107,3 +107,15 @@ test("the keyboard and the buttons run the same frame step", async () => {
   assert.match(controls, /stepPlayheadByFrames\(1\)/);
   assert.doesNotMatch(controls, /const stepFrame =/);
 });
+
+test("a frame step counts in frames, not milliseconds", async () => {
+  const hook = await readFile(hookPath, "utf8");
+
+  /* The naive `playheadMs + frames * frameMs` reads as the obvious version and
+     is wrong at 30fps: the store rounds to whole milliseconds, so one step from
+     zero stores 33ms, and `formatTimecode` floors that against a 33.333ms frame
+     and shows frame 0 — one press of → moving nothing. */
+  assert.match(hook, /Math\.round\(playheadMs \/ frameMs\) \+ frames/);
+  assert.match(hook, /Math\.ceil\(target \* frameMs\)/);
+  assert.doesNotMatch(hook, /playheadMs \+ frames \* frameMs/);
+});
