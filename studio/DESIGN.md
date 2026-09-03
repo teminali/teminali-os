@@ -610,11 +610,21 @@ to make the page transparent — a body painted with the editor ground would put
 a hard-edged dark square behind the rounded pill. It is a second renderer with
 no access to the store: one `recorder:state` message in, one command out.
 
-**Review promises nothing it cannot do.** `recordingProject.ts` is not ported,
-so the panel names the take's folder instead of offering to open it on the
-timeline, and the capture options are Camera, Sound and Capture only — Auto
-zoom, Tutorial skill and Go live belong to the unported auto-edit stack and are
-absent rather than present and inert.
+**Review promises nothing it cannot do.** It offers **Open on the timeline**,
+which is a RAW assemble and says so: `recordingProject.ts` lays down screen,
+camera and narration as separate clips and stops. Nothing is interpreted, so
+there is nothing to undo piecemeal — the whole build is one history entry.
+The Cut's Tutorial skill, which places zooms on real clicks and captions the
+narration, needs a speech model this app does not ship and the unported
+auto-edit stack besides; Auto zoom, Tutorial skill and Go live are therefore
+absent from the capture options rather than present and inert.
+
+**The panel switch is the pane's decision, not the recorder's.** Everything
+under `src/video/` knows about tracks and clips and nothing about which tabs the
+shell has open, so `RecorderPanel` takes an `onOpenedOnTimeline` callback and
+`RecorderPane` — app-side already — is what calls `focusOrOpen({ kind: "video" })`.
+Reaching for `panelStore` from inside `src/video/` would have been that
+boundary's first exception.
 
 ### Two menu bar items
 

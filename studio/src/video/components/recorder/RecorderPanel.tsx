@@ -15,11 +15,12 @@
    showing the grid greyed out behind a timer would only invite it.
 
    ── What is deliberately not here yet ────────────────────────────────
-   The review offers the take and the files, and no further. Opening a
-   take on the timeline needs `recordingProject.ts`, and the Tutorial
-   skill needs a speech model this app does not ship — neither is
-   ported, so neither is promised. A button that cannot do the thing it
-   names is worse than no button.
+   The review opens the take on the timeline as a RAW assemble — screen,
+   camera, narration, nothing interpreted. The Cut's Tutorial skill,
+   which places zooms on real clicks and captions the narration, needs a
+   speech model this app does not ship and half a dozen engine modules
+   it does not have; it is not ported, so it is not offered. A button
+   that cannot do the thing it names is worse than no button.
    ═══════════════════════════════════════════════════════════════════ */
 
 import React from 'react';
@@ -29,7 +30,7 @@ import { CaptureOptions } from './CaptureOptions';
 import { formatDuration, formatFileSize } from '../../utils/time';
 import {
   Record, Pause, Play, Square, Loader2, AlertTriangle, CheckCircle2, X,
-  FolderOpen, CursorClick, Camera, Monitor, Mic, Trash2, Sliders,
+  FolderOpen, CursorClick, Camera, Monitor, Mic, Trash2, Sliders, Film,
 } from '../ui/icons';
 
 /** The options rail's own width, matching the Cut's. */
@@ -46,9 +47,21 @@ const REVIEW_COLUMN_MIN_W = REVIEW_RAIL_W + GRID_MIN_W;
 interface Props {
   /** The measured width of the panel. `RecorderPane` supplies it. */
   width?: number;
+  /**
+   * Show the take that was just laid down.
+   *
+   * A callback rather than a `panelStore` import, because everything
+   * under `src/video/` is workspace-agnostic and reaching for the
+   * workspace's panel list from in here would be the first exception.
+   * `RecorderPane` — which is app-side already — supplies it.
+   */
+  onOpenedOnTimeline?: () => void;
 }
 
-export const RecorderPanel: React.FC<Props> = ({ width = OPTIONS_COLUMN_MIN_W }) => {
+export const RecorderPanel: React.FC<Props> = ({
+  width = OPTIONS_COLUMN_MIN_W,
+  onOpenedOnTimeline,
+}) => {
   const store = useRecorderStore();
   const phase = store.phase;
 
@@ -153,7 +166,9 @@ export const RecorderPanel: React.FC<Props> = ({ width = OPTIONS_COLUMN_MIN_W })
         </div>
       )}
 
-      {phase === 'review' && store.take && <Review stacked={width < REVIEW_COLUMN_MIN_W} />}
+      {phase === 'review' && store.take && (
+        <Review stacked={width < REVIEW_COLUMN_MIN_W} onOpened={onOpenedOnTimeline} />
+      )}
 
       {phase === 'error' && (
         <div className="flex-1 flex flex-col items-center justify-center gap-3 px-10 text-center">
@@ -387,7 +402,7 @@ const Running: React.FC = () => {
 
 /* ── Review ─────────────────────────────────────────────────────── */
 
-const Review: React.FC<{ stacked: boolean }> = ({ stacked }) => {
+const Review: React.FC<{ stacked: boolean; onOpened?: () => void }> = ({ stacked, onOpened }) => {
   const store = useRecorderStore();
   /* The phase gate above this only renders `Review` when a take exists. */
   const take = store.take!;
@@ -515,11 +530,13 @@ const Review: React.FC<{ stacked: boolean }> = ({ stacked }) => {
             </div>
           )}
 
-          {/* Until a take can be opened on the timeline, the files ARE the
-              deliverable, so saying where they are is not a footnote. */}
+          {/* The take is on disk whatever happens next, and a build can be
+              thrown away and rebuilt, so both facts are worth stating
+              beside the button rather than only after it is pressed. */}
           <p className="text-micro text-spectrum-textFaint leading-relaxed pt-1">
-            The take is on disk and can be imported into the video panel by hand. Opening it on
-            the timeline in one step is not built yet.
+            Opening the take lays the screen, the camera and the narration down as separate
+            clips you can move, resize and cut. It replaces whatever is on the timeline now;
+            the files stay on disk, so you can build it again.
           </p>
 
           <button
@@ -535,8 +552,18 @@ const Review: React.FC<{ stacked: boolean }> = ({ stacked }) => {
 
       <div className="flex-shrink-0 border-t border-line px-3 py-2 flex items-center gap-2">
         <button
-          onClick={() => void store.discard()}
+          onClick={() => { if (store.openOnTimeline()) onOpened?.(); }}
           className="btn-primary h-8 px-3 text-ui gap-1.5"
+          title="Lay the take down as clips and show the timeline"
+        >
+          <Film className="w-3.5 h-3.5" />
+          Open on the timeline
+        </button>
+        {/* Secondary now, because the take in hand is the thing to act on
+            and recording over it is the step back, not the step on. */}
+        <button
+          onClick={() => void store.discard()}
+          className="pro-btn h-8 px-3 text-ui gap-1.5"
           title="Go back to setup. The take stays on disk."
         >
           <Record className="w-3.5 h-3.5" weight="fill" />

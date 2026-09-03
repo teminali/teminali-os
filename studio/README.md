@@ -315,13 +315,20 @@ options) mounted through `src/components/workspace/panels/RecorderPane.tsx`, and
 window and so lives outside `src/video/`, loaded from this same bundle at
 `?window=recorder-bar`.
 
-**Not yet ported from the Cut:** `recordingProject.ts`, so a finished take
-names its folder rather than opening on the timeline in one step; and the
-auto-edit stack (`cursorZoom`, `cursorLayer`, `cinematicLook`,
-`pictureInPicture`, `kineticCaptions`, `sfxEngine`, `recordingSound`). The
-capture options the panel offers are Camera, Sound and Capture only — Auto
-zoom, Tutorial skill and Go live belong to that stack and are not shown, rather
-than shown and inert.
+`src/video/engine/recordingProject.ts` turns a finished take into a project:
+**Open on the timeline** in the review lays the screen, the camera and the
+narration down as separate clips on their own tracks, sized and cornered by
+`pictureInPicture.ts`, in one undoable step. It is a RAW assemble — nothing is
+interpreted — so its options are the four the panel actually offers
+(`detachNarration`, `cameraSizePct`, `cameraCorner`, `mirrorCamera`) rather than
+the Cut's twenty.
+
+**Not yet ported from the Cut:** the auto-edit stack — `cursorZoom`,
+`cursorLayer`, `cinematicLook`, `kineticCaptions`, `sfxEngine`,
+`recordingSound` — and with it the Cut's `TUTORIAL_ASSEMBLE`, which also needs a
+speech model this app does not ship. The capture options the panel offers are
+Camera, Sound and Capture only — Auto zoom, Tutorial skill and Go live belong to
+that stack and are not shown, rather than shown and inert.
 
 ### File ingestion
 
@@ -399,7 +406,7 @@ ollama serve              # local models on 127.0.0.1:11434
 
 ```bash
 npm run typecheck   # tsc --noEmit
-npm test            # 616 tests, 0 failures
+npm test            # 631 tests, 0 failures
 npm run build       # tsc && vite build
 npm run verify:core # all three
 ```

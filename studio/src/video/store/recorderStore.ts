@@ -27,6 +27,12 @@ import {
   startCapture, stopCapture, pauseCapture, cancelCapture, listDevices, isRecording,
 } from '../engine/screenCapture';
 import type { CaptureSettings, DeviceOption, Take } from '../engine/screenCapture';
+/* The corner and the inset size belong to the assemble that acts on
+   them, so the sticky settings take their shape and their defaults from
+   there rather than keeping a second copy. */
+import {
+  assembleRecording, RAW_ASSEMBLE, type AssembleOptions, type AssembleReport,
+} from '../engine/recordingProject';
 
 export type RecorderPhase =
   | 'setup'
@@ -36,14 +42,6 @@ export type RecorderPhase =
   | 'processing'
   | 'review'
   | 'error';
-
-/**
- * The four corners the camera inset can sit in.
- *
- * Lives here until `recordingProject.ts` lands, which is where the rest
- * of the assemble options live and where this one belongs.
- */
-export type CameraCorner = 'bottom-right' | 'bottom-left' | 'top-right' | 'top-left';
 
 /** The half of the settings that survives a restart. */
 export interface StickySettings {
@@ -59,7 +57,7 @@ export interface StickySettings {
   /** Split the microphone off the camera clip, onto its own audio track. */
   detachNarration: boolean;
   cameraSizePct: number;
-  cameraCorner: CameraCorner;
+  cameraCorner: AssembleOptions['cameraCorner'];
 }
 
 const STORAGE_KEY = 'teminali.recorder.v1';
@@ -77,8 +75,8 @@ const DEFAULT_STICKY: StickySettings = {
   countdownSec: 3,
   hideWindow: true,
   detachNarration: true,
-  cameraSizePct: 24,
-  cameraCorner: 'bottom-right',
+  cameraSizePct: RAW_ASSEMBLE.cameraSizePct,
+  cameraCorner: RAW_ASSEMBLE.cameraCorner,
 };
 
 function loadSticky(): StickySettings {
@@ -155,6 +153,15 @@ interface RecorderState {
   mark: () => void;
   /** The echo coming back, which is what moves the counter. */
   noteMark: () => void;
+  /**
+   * Lay the reviewed take down on the timeline.
+   *
+   * Returns the build report, or `null` when there was nothing to
+   * build — the caller uses that to decide whether to switch panels.
+   * The take is left on disk and the phase is left in `review`, so a
+   * build that the user did not like can simply be built again.
+   */
+  openOnTimeline: () => AssembleReport | null;
 }
 
 let ticker: number | null = null;
@@ -573,6 +580,38 @@ export const useRecorderStore = create<RecorderState>((set, get) => ({
     const markCount = get().markCount + 1;
     set({ markCount });
     publish({ phase: get().phase, elapsedMs: get().elapsedMs, markCount });
+  },
+
+  openOnTimeline: () => {
+    const take = get().take;
+    if (!take?.screen) return null;
+
+    const settings = get().settings;
+    try {
+      const report = assembleRecording(take, {
+        detachNarration: settings.detachNarration,
+        cameraSizePct: settings.cameraSizePct,
+        cameraCorner: settings.cameraCorner,
+        mirrorCamera: settings.mirrorCamera,
+      });
+      /*
+        The notes are the build's own account of what it had to give
+        way on — a camera too small to hit the requested size, a
+        narration track that could not be split. They are warnings
+        about the EDIT, so they replace the capture's, which the
+        review has already shown.
+      */
+      set({ warnings: report.notes });
+      return report;
+    } catch (error) {
+      useUiStore.getState().pushToast({
+        kind: 'error',
+        title: 'Could not open the take on the timeline',
+        detail: error instanceof Error ? error.message : String(error),
+        ttl: 8000,
+      });
+      return null;
+    }
   },
 }));
 

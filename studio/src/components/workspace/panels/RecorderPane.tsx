@@ -4,6 +4,7 @@ import { useMeasure } from "../../../video/hooks/useMeasure";
 import { DensityProvider, densityFor } from "../../../video/hooks/useDensity";
 import { Toasts } from "../../../video/components/ui/Overlays";
 import { RecorderPanel } from "../../../video/components/recorder/RecorderPanel";
+import { usePanelStore } from "../../../store/panelStore";
 
 /**
  * The screen recorder, mounted as a workspace panel.
@@ -28,15 +29,24 @@ import { RecorderPanel } from "../../../video/components/recorder/RecorderPanel"
  * the options rail can be a column. The width is measured here, once, and
  * handed down, so the pane answers that question in one place rather than
  * having the stylesheet re-ask it against a different box.
+ *
+ * ## Why the panel switch is here and not in the recorder
+ *
+ * Everything under `src/video/` is workspace-agnostic — it knows about
+ * tracks and clips, never about which tabs the shell has open. Opening the
+ * video panel on a finished build is a workspace decision, so the recorder
+ * reports that it built something and this wrapper, which is app-side
+ * already, is what reaches for `panelStore`.
  */
 export const RecorderPane: React.FC = () => {
   const [paneRef, { width, height }] = useMeasure<HTMLDivElement>();
   const density = densityFor(width, height);
+  const focusOrOpen = usePanelStore((state) => state.focusOrOpen);
 
   return (
     <DensityProvider width={width} height={height}>
       <div ref={paneRef} className="video-workspace" data-tier={density.tier} data-vtier={density.vTier}>
-        <RecorderPanel width={width} />
+        <RecorderPanel width={width} onOpenedOnTimeline={() => focusOrOpen({ kind: "video" })} />
         <Toasts />
       </div>
     </DensityProvider>
