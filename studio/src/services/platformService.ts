@@ -41,6 +41,30 @@ export interface UpdateStatus {
   error: string | null;
 }
 
+/** One published release, as the version control in the corner sees it. */
+export interface ReleaseOption {
+  tag: string;
+  /** The tag without its `v`, which is how a version is written in the UI. */
+  version: string;
+  name: string;
+  publishedAt: string | null;
+  url: string | null;
+  prerelease: boolean;
+  /** Null when that release shipped nothing this machine can install. */
+  asset: { name: string; size: number | null; url: string } | null;
+  /** True for the build that is running. */
+  current: boolean;
+  /** True for a build older than the running one — a rollback candidate. */
+  older: boolean;
+}
+
+export interface ReleaseList {
+  version: string | null;
+  releases: ReleaseOption[];
+  checkedAt: string;
+  error: string | null;
+}
+
 export type UpdateDownloadEvent =
   | { type: "progress"; received: number; total: number | null }
   | { type: "done"; path: string; bytes: number }
@@ -85,6 +109,23 @@ export class PlatformService {
       const response = await GatewayClient.request("/api/updates/check", { method: "GET", signal });
       if (!response.ok) return null;
       return (await response.json()) as UpdateStatus;
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * Every release this machine could install, newest first.
+   *
+   * Read on demand rather than polled: it is a round trip to GitHub for a menu
+   * most sessions never open, and the answer only matters once somebody is
+   * looking at it.
+   */
+  public static async listReleases(signal?: AbortSignal): Promise<ReleaseList | null> {
+    try {
+      const response = await GatewayClient.request("/api/updates/releases", { method: "GET", signal });
+      if (!response.ok) return null;
+      return (await response.json()) as ReleaseList;
     } catch {
       return null;
     }

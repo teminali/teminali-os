@@ -17,6 +17,7 @@ import { AssistantProvider } from "./components/assistant/AssistantContext";
 import { useAssistant } from "./hooks/useAssistant";
 import { useUpdates } from "./hooks/useUpdates";
 import { UpdateModal } from "./components/updates/UpdateModal";
+import { VersionControl } from "./components/updates/VersionControl";
 import { GitHubModal } from "./components/github/GitHubModal";
 import { useStudioStore } from "./store/studioStore";
 import { usePanelStore } from "./store/panelStore";
@@ -308,6 +309,13 @@ export default function App() {
           <WorkspacePanel />
         </div>
       </div>
+
+      {/* ── Version, updates and rollback ───────────────────────────────
+          Bottom right, over everything and owned by nothing: the shell has no
+          status bar, and the question it answers — which build is this — is
+          asked from wherever you happen to be. It reads the same update check
+          the sidebar pill does, so the two can never disagree. */}
+      <VersionControl updates={updates} onOpenUpdate={() => setUpdateOpen(true)} />
 
       {/* ── Modal layer ─────────────────────────────────────────────────── */}
 

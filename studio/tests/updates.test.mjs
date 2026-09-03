@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { readFileSync } from "node:fs";
 import { join } from "node:path";
 
 import {
@@ -8,6 +9,7 @@ import {
   checkForUpdate,
   downloadAsset,
   isDownloadedInstaller,
+  listReleases,
 } from "../server/updates.js";
 
 /* ── Picking the right file ───────────────────────────────────────────────── */
@@ -223,6 +225,87 @@ test("an update with no build for this platform says which platform", async () =
   assert.equal(result.updateAvailable, true);
   assert.equal(result.asset, null);
   assert.match(result.error, /no build for linux\/arm64/);
+});
+
+/* ── What the version control can offer ───────────────────────────────────── */
+
+/** The running build, read from package.json, is what everything is measured against. */
+const RUNNING = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8")).version;
+
+function listing(tags) {
+  return tags.map((tag) => release({ tag_name: tag, name: `Teminali Code ${tag}`, html_url: `https://github.com/x/y/releases/tag/${tag}` }));
+}
+
+test("every release is placed relative to the build that is running", async () => {
+  const [major, minor, patch] = RUNNING.split(".").map(Number);
+  const newer = `v${major}.${minor + 1}.0`;
+  const older = `v${major}.${minor}.${patch}`.replace(/\d+$/, String(Math.max(0, patch - 1)));
+
+  const result = await listReleases({
+    appRoot, repo: "x/y", platform: "darwin", arch: "arm64",
+    fetchImpl: stubFetch(200, listing([newer, `v${RUNNING}`, older])),
+  });
+
+  assert.equal(result.version, RUNNING);
+  const byVersion = Object.fromEntries(result.releases.map((entry) => [entry.version, entry]));
+  assert.equal(byVersion[RUNNING].current, true);
+  assert.equal(byVersion[RUNNING].older, false);
+  assert.equal(byVersion[newer.slice(1)].older, false);
+  assert.equal(byVersion[older.slice(1)].older, true);
+  // A rollback is only offered if there is something to install for it.
+  assert.equal(byVersion[older.slice(1)].asset.name, "Teminali.Code-1.0.1-macOS-arm64.zip");
+});
+
+test("releases are ordered by version, not by the date they were published", async () => {
+  // A patch to an old line can be cut after a newer minor, and GitHub returns
+  // them in publication order. Rolling back to "the one before this" has to
+  // mean the version below it, not whatever was published most recently.
+  const result = await listReleases({
+    appRoot, repo: "x/y", platform: "darwin", arch: "arm64",
+    fetchImpl: stubFetch(200, listing(["v1.0.9", "v1.2.0", "v1.1.0"])),
+  });
+  assert.deepEqual(result.releases.map((entry) => entry.version), ["1.2.0", "1.1.0", "1.0.9"]);
+});
+
+test("a draft is not somewhere anybody can go back to", async () => {
+  const result = await listReleases({
+    appRoot, repo: "x/y", platform: "darwin", arch: "arm64",
+    fetchImpl: stubFetch(200, [release({ tag_name: "v1.0.0", draft: true }), release({ tag_name: "v1.0.1" })]),
+  });
+  assert.deepEqual(result.releases.map((entry) => entry.version), ["1.0.1"]);
+});
+
+test("an unreadable running version offers no rollback rather than a blind one", async () => {
+  // Nothing is marked `older`, so the menu offers nothing. Installing an
+  // arbitrary build over a version you cannot name is the worse failure.
+  const result = await listReleases({
+    appRoot: "/nonexistent", repo: "x/y", platform: "darwin", arch: "arm64",
+    fetchImpl: stubFetch(200, listing(["v1.0.0", "v0.9.0"])),
+  });
+  assert.equal(result.version, null);
+  assert.equal(result.releases.every((entry) => entry.older === false), true);
+});
+
+test("a release with no build for this machine is listed without an asset", async () => {
+  const result = await listReleases({
+    appRoot, repo: "x/y", platform: "linux", arch: "arm64",
+    fetchImpl: stubFetch(200, listing(["v1.0.0"])),
+  });
+  assert.equal(result.releases[0].asset, null);
+});
+
+test("an unreachable GitHub is an empty list with a reason, not a thrown error", async () => {
+  const result = await listReleases({
+    appRoot, repo: "x/y",
+    fetchImpl: async () => { throw new Error("network down"); },
+  });
+  assert.deepEqual(result.releases, []);
+  assert.match(result.error, /could not be reached/);
+});
+
+test("rate limiting is named on the release list too", async () => {
+  const result = await listReleases({ appRoot, repo: "x/y", fetchImpl: stubFetch(403, {}) });
+  assert.match(result.error, /rate-limit/i);
 });
 
 /* ── The open boundary ────────────────────────────────────────────────────── */

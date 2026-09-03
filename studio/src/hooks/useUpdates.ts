@@ -14,7 +14,7 @@
  */
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { PlatformService, type UpdateStatus } from "../services/platformService";
+import { PlatformService, type ReleaseList, type UpdateStatus } from "../services/platformService";
 
 /** Quiet enough not to be noticed, often enough that a fix reaches people. */
 const CHECK_INTERVAL_MS = 6 * 60 * 60 * 1000;
@@ -32,10 +32,27 @@ export interface UseUpdatesResult {
   installerPath: string | null;
   /** True once the installer has been handed to the operating system. */
   awaitingRestart: boolean;
+  /** True while a check is in flight, so a control can say it is running. */
+  checking: boolean;
+  /**
+   * The version being fetched, when it is not simply "the latest one" — a
+   * rollback has to be able to say which build it is installing.
+   */
+  target: string | null;
 
   check: () => Promise<void>;
   download: () => Promise<void>;
   install: () => Promise<void>;
+  /**
+   * Download one named release and install it, as a single action.
+   *
+   * The modal splits download from install because it is showing release notes
+   * and a size, and the operator reads before committing. A rollback is already
+   * committed by the time it is confirmed, so it does not ask twice.
+   */
+  apply: (asset: { url: string; name: string }, version?: string | null) => Promise<void>;
+  /** Every release this machine could install. Fetched on demand, not polled. */
+  releases: () => Promise<ReleaseList | null>;
   restart: () => Promise<void>;
   cancel: () => void;
   dismiss: () => void;
@@ -51,11 +68,15 @@ export function useUpdates(): UseUpdatesResult {
   const [installerPath, setInstallerPath] = useState<string | null>(null);
   const [awaitingRestart, setAwaitingRestart] = useState(false);
   const [dismissed, setDismissed] = useState(false);
+  const [checking, setChecking] = useState(false);
+  const [target, setTarget] = useState<string | null>(null);
 
   const abortRef = useRef<AbortController | null>(null);
 
   const check = useCallback(async () => {
+    setChecking(true);
     const next = await PlatformService.checkForUpdate();
+    setChecking(false);
     setStatus(next);
     // A version the operator dismissed should not keep reappearing, but a
     // *newer* one than the one they dismissed must.
@@ -73,10 +94,14 @@ export function useUpdates(): UseUpdatesResult {
     };
   }, [check]);
 
-  const download = useCallback(async () => {
-    const asset = status?.asset;
-    if (!asset) return;
-
+  /**
+   * The download half on its own.
+   *
+   * Shared by the modal's read-then-commit flow and by the one-step rollback,
+   * so there is a single place that knows how progress, cancellation and a
+   * half-finished transfer are handled.
+   */
+  const fetchAsset = useCallback(async (asset: { url: string; name: string }): Promise<string | null> => {
     abortRef.current?.abort();
     const controller = new AbortController();
     abortRef.current = controller;
@@ -86,6 +111,9 @@ export function useUpdates(): UseUpdatesResult {
     setReceived(0);
     setError(null);
 
+    // Held in an object because the assignment happens inside a callback, and
+    // the compiler cannot see through one to narrow a plain local.
+    const landed: { path: string | null } = { path: null };
     try {
       await PlatformService.downloadUpdate(
         { url: asset.url, name: asset.name },
@@ -94,11 +122,9 @@ export function useUpdates(): UseUpdatesResult {
             setReceived(event.received);
             setProgress(event.total ? event.received / event.total : null);
           } else if (event.type === "done") {
-            setInstallerPath(event.path);
-            setPhase("ready");
+            landed.path = event.path;
           } else if (event.type === "error") {
             setError(event.message);
-            setPhase("failed");
           }
         },
         controller.signal,
@@ -106,12 +132,31 @@ export function useUpdates(): UseUpdatesResult {
     } catch (caught) {
       if (controller.signal.aborted) {
         setPhase("idle");
-        return;
+        return null;
       }
       setError(caught instanceof Error ? caught.message : "The update could not be downloaded.");
       setPhase("failed");
+      return null;
     }
-  }, [status]);
+
+    if (!landed.path) {
+      // The stream ended without a file. It has usually said why already.
+      setError((previous) => previous ?? "The update could not be downloaded.");
+      setPhase("failed");
+      return null;
+    }
+
+    setInstallerPath(landed.path);
+    return landed.path;
+  }, []);
+
+  const download = useCallback(async () => {
+    const asset = status?.asset;
+    if (!asset) return;
+    setTarget(status?.latest?.tag?.replace(/^v/, "") ?? null);
+    const path = await fetchAsset(asset);
+    if (path) setPhase("ready");
+  }, [status, fetchAsset]);
 
   const install = useCallback(async () => {
     const bridge = window.teminali?.updates;
@@ -127,6 +172,35 @@ export function useUpdates(): UseUpdatesResult {
     setAwaitingRestart(true);
   }, [installerPath]);
 
+  const apply = useCallback(
+    async (asset: { url: string; name: string }, version: string | null = null) => {
+      setTarget(version);
+      const path = await fetchAsset(asset);
+      if (!path) return;
+
+      const bridge = window.teminali?.updates;
+      if (!bridge) {
+        // In a browser there is nothing to install into. The file is on disk
+        // and the phase says so rather than claiming a version was installed.
+        setPhase("ready");
+        return;
+      }
+
+      setPhase("opening");
+      const result = await bridge.install(path);
+      if (!result.ok) {
+        setError(result.reason ?? "The installer could not be opened.");
+        setPhase("failed");
+        return;
+      }
+      setPhase("installed");
+      setAwaitingRestart(true);
+    },
+    [fetchAsset],
+  );
+
+  const releases = useCallback(() => PlatformService.listReleases(), []);
+
   const restart = useCallback(async () => {
     await window.teminali?.updates?.restart();
   }, []);
@@ -135,6 +209,7 @@ export function useUpdates(): UseUpdatesResult {
     abortRef.current?.abort();
     setPhase("idle");
     setProgress(null);
+    setTarget(null);
   }, []);
 
   const dismiss = useCallback(() => {
@@ -154,9 +229,13 @@ export function useUpdates(): UseUpdatesResult {
     error,
     installerPath,
     awaitingRestart,
+    checking,
+    target,
     check,
     download,
     install,
+    apply,
+    releases,
     restart,
     cancel,
     dismiss,

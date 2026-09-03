@@ -20,7 +20,7 @@ import { appendUsage, summariseUsage, usageRecord } from "./usage-ledger.js";
 import { isValidLogin, readAdmins, requireAdmin, whoami, writeAdmins } from "./admin.js";
 import { appendRun, createSandbox, measureSandbox, readRuns, removeRun } from "./arena.js";
 import { currentVersion, publishRelease, validateNextVersion } from "./releases.js";
-import { checkForUpdate, downloadAsset } from "./updates.js";
+import { checkForUpdate, downloadAsset, listReleases } from "./updates.js";
 import { readdir as readNodeDir, readFile as readNodeFile } from "node:fs/promises";
 import { join as joinPath } from "node:path";
 import { MAX_FILE_BYTES, extractFilePart, fileCapabilities, ingestFile } from "./files.js";
@@ -1274,6 +1274,15 @@ export async function createGateway(options = {}) {
         // Available to every install, not just administrators: knowing you are
         // behind is not a privileged fact.
         replyJson(response, 200, await checkForUpdate({ appRoot: config.appRoot, repo: config.releaseRepo }));
+        return;
+      }
+
+      if (request.method === "GET" && route === "/api/updates/releases") {
+        // What the version control in the corner reads to know what it could go
+        // back to. Public for the same reason the check is: which builds exist
+        // is not a privileged fact, and rolling back a bad update is something
+        // every install has to be able to do for itself.
+        replyJson(response, 200, await listReleases({ appRoot: config.appRoot, repo: config.releaseRepo }));
         return;
       }
 
