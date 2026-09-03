@@ -77,7 +77,7 @@ A 48px activity bar, a 212px sidebar panel beside it, the conversation, and a
 workspace panel strip. Sidebar views: **Chats · Explorer · Search · Skills**.
 The rail stays on screen when the panel is collapsed, so a dismissed
 sidebar is one click from open on any view. The panel strip holds any number of
-tabs of twelve kinds:
+tabs of thirteen kinds:
 
 | Panel | Shortcut | Panel | Shortcut |
 | --- | --- | --- | --- |
@@ -87,9 +87,14 @@ tabs of twelve kinds:
 | Canvas | `⇧⌘A` | Benchmark | `⇧⌘N` |
 | Side chat | `⇧⌘S` | Release *(admin)* | `⇧⌘R` |
 | Guardian | `⇧⌘G` | Video Editor | `⇧⌘V` |
+| Record Screen | `⇧⌘8` | | |
 
-Video Editor is the one kind limited to a single tab: it owns a timeline and a
-playback clock, and a second copy would be a second project competing for them.
+Video Editor and Record Screen are the two kinds limited to a single tab. The
+editor owns a timeline and a playback clock, and a second copy would be a
+second project competing for them; the recorder owns the take, and a second
+copy would offer to stop a recording the first one is holding. `⇧⌘8` is the
+File menu's own accelerator — the recorder has no separate binding of its
+own, and the menu item is the shortcut.
 
 Plus `⌘B` sidebar · `⌘L` chats · `⇧⌘E` explorer · `⇧⌘F` search · `⌘K`/`⌘P`
 command palette · `⌘,` settings. Skills is reached from the rail; it has no
@@ -257,6 +262,66 @@ is one audit line naming the tool, the agent, the resolved path and *which* gran
 satisfied it.
 
 Design and reasoning: [`src/video/P3-import-gate.md`](src/video/P3-import-gate.md).
+
+### Screen recording
+
+Reachable three ways: **File → Record Screen…** (`⇧⌘8`), the **Record Screen**
+pill on the empty-chat screen, and the add-panel menu in the title bar. All
+three open the same single recorder panel.
+
+Recording is split across the process boundary because it has to be. A renderer
+is the only place a `MediaStream` can live, and main is the only place the four
+things a `MediaRecorder` cannot reach can live:
+
+| in main (`electron/screenRecorder.cjs`) | why it cannot be in the renderer |
+| --- | --- |
+| `desktopCapturer.getSources` | the renderer is handed ids, and can never ask for a source that was not offered |
+| chunk-to-disk writing | a twenty-minute take held as a renderer blob is a gigabyte of heap, copied again on read |
+| the cursor track, 30Hz | `screen.getCursorScreenPoint()` is main-only, and is the only cursor position in Electron |
+| the floating control bar | its own window, `setContentProtection(true)`, so it is not *in* the recording it controls |
+
+The cursor track is **not a click stream** — nothing in Electron reports a mouse
+button pressed in another application. `electron/inputEvents.cjs` can see real
+clicks when its optional `uiohook-napi` binding is installed; that binding is
+deliberately **not** in this app's dependencies, so today the module reports
+`not-installed` and the recorder falls back to inferring attention from the
+track (travel, then stillness). The operator can also mark a moment by hand.
+
+Takes land in `~/Videos/Teminali Code Recordings/<timestamp>/`, mode 0700 —
+never in a temp directory, because losing a recording to a reboot would be
+indefensible. Each take is remuxed to MP4 before it reaches a timeline: a
+MediaRecorder file carries no duration in its header and no cue index, so a
+`<video>` element reports `Infinity` and cannot seek. Stream copy is attempted
+only when the file **actually holds** an MP4-taggable codec, which is read off
+ffmpeg rather than trusted from the mime the renderer asked for
+(`electron/remuxPlan.cjs`).
+
+The sidecar — every cursor position and the timing of every keystroke — is
+sealed with AES-GCM (`electron/recorderVault.cjs`). The video is deliberately
+left in the clear: encrypting it would put the plaintext back on the same disk
+at every export and buy nothing. What sealing buys and what it cannot is written
+out in that file's header.
+
+Global shortcuts while a take runs: `⌥⇧R` stop · `⌥⇧P` pause · `⌥⇧Z` mark.
+These take the key away from every app on the machine for the length of the
+recording, which is why they are `⌥⇧` rather than anything a person presses by
+accident.
+
+The renderer half is `src/video/engine/screenCapture.ts` (the capture engine),
+`src/video/store/recorderStore.ts` (phases, sticky settings, the fault
+watchdog), `src/video/components/recorder/` (the panel, source grid and capture
+options) mounted through `src/components/workspace/panels/RecorderPane.tsx`, and
+`src/components/recorder/RecorderBar.tsx` — the floating bar, which is its own
+window and so lives outside `src/video/`, loaded from this same bundle at
+`?window=recorder-bar`.
+
+**Not yet ported from the Cut:** `recordingProject.ts`, so a finished take
+names its folder rather than opening on the timeline in one step; and the
+auto-edit stack (`cursorZoom`, `cursorLayer`, `cinematicLook`,
+`pictureInPicture`, `kineticCaptions`, `sfxEngine`, `recordingSound`). The
+capture options the panel offers are Camera, Sound and Capture only — Auto
+zoom, Tutorial skill and Go live belong to that stack and are not shown, rather
+than shown and inert.
 
 ### File ingestion
 

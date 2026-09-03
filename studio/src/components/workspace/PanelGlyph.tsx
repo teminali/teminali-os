@@ -1,5 +1,5 @@
 import React from "react";
-import { Activity, ChartColumn, Clapperboard, FileText, MessageSquare, PenLine, Rocket, Scale, SquareTerminal, Globe } from "lucide-react";
+import { Activity, ChartColumn, Clapperboard, FileText, MessageSquare, MonitorDot, PenLine, Rocket, Scale, SquareTerminal, Globe } from "lucide-react";
 import { BrandGlyph } from "../ui";
 import type { PanelKind } from "../../store/panelStore";
 
@@ -38,6 +38,11 @@ export const PanelGlyph: React.FC<{ kind: PanelKind; size?: number; className?: 
       return <Scale {...props} />;
     case "video":
       return <Clapperboard {...props} />;
+    // A screen with a live dot, not a second clapperboard: the recorder and the
+    // editor sit next to each other in the menu, and two film marks there would
+    // make the operator read the label to tell them apart.
+    case "recorder":
+      return <MonitorDot {...props} />;
     case "file":
     default:
       return <FileText {...props} />;

@@ -84,7 +84,7 @@ export const StudioTitleBar: React.FC<StudioTitleBarProps> = ({
   // operator who is not an admin has no use for a row that always refuses. The
   // routes behind them re-check regardless — this is presentation, not the gate.
   const adminOnly = new Set<PanelKind>(["release", "arena"]);
-  const kinds = (["file", "terminal", "browser", "canvas", "video", "side", "claude", "codex", "usage", "arena", "release", "guardian"] as PanelKind[])
+  const kinds = (["file", "terminal", "browser", "canvas", "video", "recorder", "side", "claude", "codex", "usage", "arena", "release", "guardian"] as PanelKind[])
     .filter((kind) => !adminOnly.has(kind) || isAdmin);
 
   const addItems: MenuItem[] = kinds.map((kind) => ({

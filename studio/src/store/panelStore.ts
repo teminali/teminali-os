@@ -2,10 +2,10 @@
  * Workspace panel model.
  *
  * The redesign replaces the old single-slot split view with a tab strip that
- * holds any number of panels of twelve kinds — terminal, browser, canvas, side
- * chat, file, guardian, the two agent CLIs, usage, benchmark, release (the
- * last of which the tab strip hides for non-administrators) and the video
- * editor. It lives in its
+ * holds any number of panels of thirteen kinds — terminal, browser, canvas,
+ * side chat, file, guardian, the two agent CLIs, usage, benchmark, release (the
+ * last of which the tab strip hides for non-administrators), the video editor
+ * and the screen recorder. It lives in its
  * own store rather than inside
  * studioStore because it is pure view state: which panels exist, which one is
  * showing, and how wide the strip is. None of it belongs in the chat/session
@@ -16,7 +16,7 @@
 import { create } from "zustand";
 import { persist, createJSONStorage } from "zustand/middleware";
 
-export type PanelKind = "terminal" | "browser" | "canvas" | "side" | "file" | "guardian" | "claude" | "codex" | "usage" | "release" | "arena" | "video";
+export type PanelKind = "terminal" | "browser" | "canvas" | "side" | "file" | "guardian" | "claude" | "codex" | "usage" | "release" | "arena" | "video" | "recorder";
 
 export interface PanelTab {
   id: string;
@@ -53,6 +53,9 @@ export const PANEL_DEFAULTS: Record<PanelKind, { label: string; shortcut: string
   // timeline and a preview surface, and a second copy would be a second
   // project competing for the same playback clock.
   video: { label: "Video Editor", shortcut: "⇧⌘V" },
+  // The screen recorder. One at a time as well, and for a harder reason than
+  // the editor's: a second copy would offer to stop a take the first one owns.
+  recorder: { label: "Record Screen", shortcut: "⇧⌘8" },
 };
 
 interface PanelState {

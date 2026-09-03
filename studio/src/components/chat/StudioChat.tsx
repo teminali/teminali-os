@@ -408,8 +408,11 @@ export const StudioChat: React.FC<{
           </div>
 
           <div className="w-full max-w-composerEmpty flex items-center gap-2 pl-1">
-            <Pill onClick={() => setInput("Plan: ")} shortcut="⇧Tab">
-              Plan New Idea
+            {/* The shortcut is ⇧⌘8 because that is the File menu accelerator
+                that opens this exact panel. The pill it replaced advertised
+                ⇧Tab, which nothing in the app has ever bound. */}
+            <Pill onClick={() => focusOrOpen({ kind: "recorder" })} shortcut="⇧⌘8">
+              Record Screen
             </Pill>
             <Pill onClick={onConnectGitHub}>
               {github?.connected ? "Open a Repository" : "Connect Your Repos"}

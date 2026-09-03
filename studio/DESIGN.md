@@ -184,6 +184,7 @@ StudioTitleBar    traffic lights · sidebar toggle · title · panel tab strip
 │                    (voice lives here) · AssistantHud
 └── WorkspacePanel   terminal · browser · canvas · side chat · file · guardian
                      · Claude Code · Codex · usage · benchmark · release
+                     · video editor · screen recorder
 
 AssistantProvider    wraps the shell; one session, reachable from every composer
 AssistantBridge      renders nothing — keeps the tray, hotkey and overlay in step
@@ -565,6 +566,55 @@ detection. Nothing subscribed, so right-click opened the browser's own menu and
 a failed analysis reported success by saying nothing. `video/components/ui/Overlays.tsx`
 renders both, and it renders them *inside* `.video-workspace` because the classes
 they wear are scoped to it.
+
+### Screen recorder (`panels/RecorderPane.tsx`, `src/video/components/recorder/**`)
+
+The thirteenth panel kind, and the second one limited to a single tab: it owns
+the take, and a second copy would offer to stop a recording the first is
+holding. Reachable from **File → Record Screen…** (`⇧⌘8`), the **Record Screen**
+pill on the empty-chat screen, and the add-panel menu — all three land on
+`focusOrOpen({ kind: "recorder" })`. `⇧⌘8` in `PANEL_DEFAULTS` is display-only,
+but it is not a decoration: it is the File menu's real accelerator for this
+panel, so the row and the menu agree. The pill it replaced advertised `⇧Tab`,
+which nothing in the app bound.
+
+`RecorderPane` is the same wrapper `VideoPane` is, and for the same reason: the
+ported UI wears `.video-workspace`-scoped classes, and the recorder store's
+fault watchdog — the one warning that can save a take recording nothing —
+pushes to the video `uiStore`, whose toast surface only renders inside that
+scope. Outside it the panel is not slightly off; it is unstyled and silent.
+
+**A panel opens at 452px, and that drove the layout.** The Cut's shape puts the
+source grid beside a fixed 288px options rail, which needs 568px before either
+half works. So the rail is *seated* at ≥568px and *summoned* below it, reusing
+`VideoPane`'s own `editor-side-overlay is-right` and `editor-overlay-scrim`
+rather than inventing a second overlay mechanism. The review rail (320px)
+stacks under 600px instead of overlaying — a summary reads fine stacked.
+
+**Mount is `open()`, and it is guarded.** `open()` resets the phase and clears
+the take, which is right when opening to record and catastrophic mid-take: a
+recording started from the File menu with the panel shut would be forgotten by
+the one surface that can stop it. So the panel calls `open()` only when
+`phase === 'setup' && !take`. Unmount calls `close()`, which itself refuses
+while a take is running.
+
+**The floating bar is the one recorder file outside `src/video/`.**
+`components/recorder/RecorderBar.tsx` renders in its own transparent,
+always-on-top window — `setContentProtection(true)`, so it is not *in* the
+recording it controls — loaded from this same bundle at `?window=recorder-bar`
+(`main.tsx` branches on it, and skips the video tool bridge there so the two
+windows do not race the same channel). Being its own window means no
+`.video-workspace` above it, so it wears only Tailwind utilities and
+`tailwind.config.js` tokens, and it stamps `html.recorder-bar-window` on mount
+to make the page transparent — a body painted with the editor ground would put
+a hard-edged dark square behind the rounded pill. It is a second renderer with
+no access to the store: one `recorder:state` message in, one command out.
+
+**Review promises nothing it cannot do.** `recordingProject.ts` is not ported,
+so the panel names the take's folder instead of offering to open it on the
+timeline, and the capture options are Camera, Sound and Capture only — Auto
+zoom, Tutorial skill and Go live belong to the unported auto-edit stack and are
+absent rather than present and inert.
 
 ### Two menu bar items
 

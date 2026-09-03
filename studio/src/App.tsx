@@ -248,6 +248,15 @@ export default function App() {
     return bridge.menu.on("menu:open-guardian", () => focusOrOpen({ kind: "guardian" }));
   }, [focusOrOpen]);
 
+  // "Record Screen…" (⇧⌘8) only asks for the panel; the take is started by a
+  // person choosing a source. focusOrOpen rather than open, because a second
+  // recorder panel would offer to stop a take the first one owns.
+  useEffect(() => {
+    const bridge = window.teminali;
+    if (!bridge) return;
+    return bridge.menu.on("menu:record-screen", () => focusOrOpen({ kind: "recorder" }));
+  }, [focusOrOpen]);
+
   /* ── Sidebar geometry ──────────────────────────────────────────────────── */
 
   const resizeSidebar = useCallback((delta: number) => {

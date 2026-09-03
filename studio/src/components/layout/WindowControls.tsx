@@ -1,5 +1,7 @@
 import React, { useEffect, useState } from "react";
 
+import type { RecorderBridge } from "../../types/recorder";
+
 interface TeminaliBridge {
   isElectron: boolean;
   platform: string;
@@ -22,6 +24,13 @@ interface TeminaliBridge {
     install: (filePath: string) => Promise<{ ok: boolean; reason?: string }>;
     restart: () => Promise<boolean>;
   };
+  /**
+   * Screen recording. Optional for the same reason as the assistant: a
+   * browser build has no bridge, and the recorder falls back to
+   * `getDisplayMedia` rather than pretending the source grid, the
+   * floating bar and the global shortcuts exist.
+   */
+  recorder?: RecorderBridge;
   /**
    * The screen assistant. Optional because a browser build has no bridge at
    * all, and the assistant degrades to the in-window panel rather than
