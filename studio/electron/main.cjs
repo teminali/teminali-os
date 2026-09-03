@@ -272,6 +272,16 @@ ipcMain.handle("assistant:hide-overlay", () => {
   return true;
 });
 
+ipcMain.handle("assistant:minimise-overlay", (_event, value) => {
+  if (!assistantOverlay) return false;
+  const next = typeof value === "boolean" ? value : !assistantOverlay.isMinimized();
+  const settled = assistantOverlay.setMinimized(next);
+  assistantTray?.rebuildMenu();
+  return settled;
+});
+
+ipcMain.handle("assistant:overlay-minimised", () => Boolean(assistantOverlay?.isMinimized()));
+
 // The overlay page asks for the current drawing when it mounts. A push alone
 // races the first paint: the state is sent the moment the window is created,
 // which is before React has subscribed to anything.
@@ -545,6 +555,10 @@ app.whenReady().then(async () => {
       onCreateWindow: createWindow,
       onCommand: () => {},
       getHotkeyStatus: () => assistantHotkey,
+      isOverlayMinimised: () => Boolean(assistantOverlay?.isMinimized()),
+      onToggleOverlayMinimised: () => {
+        assistantOverlay?.setMinimized(!assistantOverlay.isMinimized());
+      },
       log,
     });
   } catch (error) {
@@ -584,6 +598,18 @@ app.on("will-quit", () => {
   } catch (error) {
     log("Could not close the gateway:", error.message);
   }
+});
+
+/* The overlay points at other applications, so it stands down while the
+   operator is inside Teminali Code. Focus moving between our own windows fires
+   blur before the next focus, hence the deferred re-read rather than trusting
+   the blur on its own. */
+app.on("browser-window-focus", () => assistantOverlay?.setAppFocused(true));
+app.on("browser-window-blur", () => {
+  setImmediate(() => {
+    const ours = BrowserWindow.getAllWindows().some((win) => !win.isDestroyed() && win.isFocused());
+    assistantOverlay?.setAppFocused(ours);
+  });
 });
 
 app.on("window-all-closed", () => {

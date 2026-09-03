@@ -679,6 +679,60 @@ export class VoiceEngine {
   }
 
   /**
+   * Speak a line that belongs to no voice turn.
+   *
+   * The screen assistant reaches this instead of `speakReply`. It has its own
+   * spoken-reply toggle, and it answers a global hotkey rather than a
+   * microphone session, so gating it on conversation mode — as `speakReply`
+   * must be gated, or push-to-talk dictation would start reading itself back —
+   * silenced it entirely: the guard returned before the synthesiser was ever
+   * asked for audio.
+   *
+   * When a session *is* open the two paths must still not talk over each
+   * other, so the synthesis handle and the ducking are shared. When none is
+   * open, the turn-taking machine is left alone: there is nothing to duck and
+   * no state to return to, and forcing "listening" would light up the HUD over
+   * a microphone that was never started.
+   */
+  async speakAside(text: string): Promise<void> {
+    const spoken = speakableText(text);
+    if (!spoken.trim()) return;
+
+    const tts = this.providers?.tts;
+    if (!tts) return;
+
+    // Whatever is still in the air is stale the moment a new line arrives.
+    this.synthesis?.cancel();
+    this.synthesis = null;
+
+    const inSession = this.state !== "idle";
+    if (inSession) {
+      this.setState("speaking");
+      this.graph.setDucked(true);
+    }
+
+    const restore = () => {
+      this.synthesis = null;
+      if (!inSession) return;
+      this.graph.setDucked(false);
+      this.assistantTurnEndedAt = Date.now();
+      if (this.state === "speaking") this.setState("listening");
+    };
+
+    try {
+      this.synthesis = await tts.speak({
+        text: spoken,
+        language: this.settings.language === "auto" ? navigator.language : this.settings.language,
+        voice: this.settings.ttsVoice ?? undefined,
+        rate: this.settings.ttsRate,
+        onEnd: restore,
+      });
+    } catch {
+      restore();
+    }
+  }
+
+  /**
    * The operator started talking over the reply. Stop speaking immediately and
    * treat what follows as the next turn. The host is told how much of the reply
    * was actually heard so the conversation history can reflect that rather than

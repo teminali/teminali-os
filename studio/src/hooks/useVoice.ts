@@ -49,6 +49,8 @@ export interface UseVoiceResult extends VoiceSnapshot {
   update: (patch: Partial<VoiceSettings>) => void;
   /** Tell the engine a reply is ready to be read aloud. */
   speakReply: (text: string) => Promise<void>;
+  /** Speak a line outside a voice turn — the screen assistant's path. */
+  speakAside: (text: string) => Promise<void>;
   captureEnrolmentClip: (seconds?: number) => Promise<{ samples: Float32Array; sampleRate: number }>;
   finishEnrolment: (clips: Array<{ samples: Float32Array; sampleRate: number }>) => boolean;
   clearEnrolment: () => void;
@@ -123,6 +125,7 @@ export function useVoice(host: VoiceHost): UseVoiceResult {
     silence: useCallback(() => engine.silence(), [engine]),
     update,
     speakReply: useCallback((text: string) => engine.speakReply(text), [engine]),
+    speakAside: useCallback((text: string) => engine.speakAside(text), [engine]),
     captureEnrolmentClip: useCallback((seconds?: number) => engine.captureEnrolmentClip(seconds), [engine]),
     finishEnrolment: useCallback(
       (clips: Array<{ samples: Float32Array; sampleRate: number }>) => engine.finishEnrolment(clips) !== null,

@@ -133,7 +133,15 @@ function prettyAccelerator(accelerator) {
  * @param {() => object} options.getHotkeyStatus
  * @param {(...args: unknown[]) => void} [options.log]
  */
-function attachAssistantTray({ getWindow, onCreateWindow, onCommand, getHotkeyStatus, log = () => {} }) {
+function attachAssistantTray({
+  getWindow,
+  onCreateWindow,
+  onCommand,
+  getHotkeyStatus,
+  isOverlayMinimised = () => false,
+  onToggleOverlayMinimised = () => {},
+  log = () => {},
+}) {
   let tray = null;
   let timer = null;
   let permissions = null;
@@ -157,7 +165,7 @@ function attachAssistantTray({ getWindow, onCreateWindow, onCommand, getHotkeySt
     tray = new Tray(assistantIcon());
   } catch (error) {
     log("Assistant tray unavailable:", error && error.message ? error.message : String(error));
-    return { destroy() {}, setState() {}, refresh() {} };
+    return { destroy() {}, setState() {}, refresh() {}, rebuildMenu() {} };
   }
 
   tray.setToolTip("Teminali Assistant");
@@ -309,6 +317,20 @@ function attachAssistantTray({ getWindow, onCreateWindow, onCommand, getHotkeySt
         checked: Boolean(state.overlay),
         click: () => send({ overlay: !state.overlay }),
       },
+      {
+        // The overlay takes no clicks of its own — it has to ignore them to
+        // stay a heads-up display — so putting it away has to be reachable
+        // from somewhere that does. Distinct from "Draw on screen": that turns
+        // the feature off, this just gets it out of the way.
+        label: "Minimise the overlay",
+        type: "checkbox",
+        enabled: Boolean(state.overlay),
+        checked: Boolean(isOverlayMinimised()),
+        click: () => {
+          onToggleOverlayMinimised();
+          applyMenu();
+        },
+      },
       { type: "separator" },
       ...permissionItems(),
       { type: "separator" },
@@ -430,6 +452,8 @@ function attachAssistantTray({ getWindow, onCreateWindow, onCommand, getHotkeySt
   return {
     destroy,
     refresh,
+    /** Redraw the menu when something outside the mirrored state changes. */
+    rebuildMenu: applyMenu,
     /** The renderer owns the settings; the tray mirrors them. */
     setState(next) {
       state = { ...state, ...next };

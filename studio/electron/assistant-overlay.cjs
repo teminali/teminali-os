@@ -29,6 +29,14 @@ function attachAssistantOverlay({ devUrl, indexPath, log = () => {} }) {
   /** The display the window currently covers, so frames can be made relative. */
   let origin = { x: 0, y: 0 };
   let lastState = null;
+  /**
+   * Whether one of our own windows is in front. The overlay exists to point at
+   * *other* applications; drawn over Teminali Code itself it covers the thing
+   * the operator is already looking at, so it stands down until they leave.
+   */
+  let appFocused = false;
+  /** Put away by hand. Survives new messages until it is brought back. */
+  let minimized = false;
 
   function targetDisplay(point) {
     try {
@@ -107,6 +115,23 @@ function attachAssistantOverlay({ devUrl, indexPath, log = () => {} }) {
     return window;
   }
 
+  /**
+   * Reconcile visibility against the three things that decide it: whether there
+   * is anything to draw, whether the operator put it away, and whether they are
+   * looking at Teminali Code. Kept in one place so no caller can show the
+   * overlay while another reason to stay hidden is still true.
+   */
+  function apply() {
+    if (!window || window.isDestroyed()) return;
+    const wanted = Boolean(lastState) && !minimized && !appFocused;
+    if (wanted) {
+      // showInactive, never show: the overlay must not become the key window.
+      if (!window.isVisible()) window.showInactive();
+    } else if (window.isVisible()) {
+      window.hide();
+    }
+  }
+
   function show(state) {
     const display = targetDisplay(
       state && state.target
@@ -137,8 +162,7 @@ function attachAssistantOverlay({ devUrl, indexPath, log = () => {} }) {
 
     lastState = { ...state, visible: true, origin };
     overlay.webContents.send("assistant:overlay-state", lastState);
-    // showInactive, never show: the overlay must not become the key window.
-    if (!overlay.isVisible()) overlay.showInactive();
+    apply();
   }
 
   function hide() {
@@ -155,12 +179,31 @@ function attachAssistantOverlay({ devUrl, indexPath, log = () => {} }) {
     window = null;
   }
 
+  /** Follow the operator between applications. */
+  function setAppFocused(value) {
+    const next = Boolean(value);
+    if (next === appFocused) return;
+    appFocused = next;
+    apply();
+  }
+
+  /** Put the overlay away, or bring it back. Returns the state it landed in. */
+  function setMinimized(value) {
+    minimized = Boolean(value);
+    apply();
+    return minimized;
+  }
+
+  function isMinimized() {
+    return minimized;
+  }
+
   /** What the overlay page pulls on mount, closing the first-paint race. */
   function getState() {
     return lastState ?? { visible: false };
   }
 
-  return { show, hide, destroy, getState };
+  return { show, hide, destroy, getState, setAppFocused, setMinimized, isMinimized };
 }
 
 module.exports = { attachAssistantOverlay };
