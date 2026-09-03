@@ -1,14 +1,19 @@
 # P3 — the approval gate for media import
 
-**Status: built in `40544f6`, tested in `tests/media-consent-gate.test.mjs`.**
+**Status: built in `40544f6`, tested in `tests/media-consent-gate.test.mjs`,
+seen running 2026-09-03.**
 Written before the port because the gate is the deliberate gap in P2's design
 (`README.md` § "The exposed surface is an allowlist"), and because the shape of
 the gate decides which tools P3 can afford to expose at all. It remains the
 spec: where the build diverged, the divergence is marked **Built:** in place,
 with the reason. Two things it describes are still not true, and say so —
 `assemble_from_folder` (§ "What goes into `EXPOSED_TOOLS`") and the
-project-folder grant (§ 2). Nothing here has been seen running: the gate has
-never raised a prompt in a real window.
+project-folder grant (§ 2). The gate has now raised a real prompt in a real
+window: an `import_media_from_path` call arriving from an agent CLI over MCP was
+held open ~11s until a person answered it, and main's audit log recorded three
+decisions in turn — `allowed · prompt`, then `refused · deny-list` for
+`~/.ssh/id_rsa` (0.02s, no prompt raised), then `allowed · session-folder` for a
+repeat of the granted path (0.02s, no second prompt).
 
 ## What P3 actually grants
 
@@ -289,11 +294,15 @@ not name.
   and silently falls back to `URL.createObjectURL(file)` — a blob URL, which
   previews but is not a path, so ffmpeg and export cannot use it and it dies on
   reload. Neither install declares `File.path` (Cut on Electron 34.5.8, Code on
-  **44.1.0**) and both declare `webUtils.getPathForFile`. *Not observed at
-  runtime — read off the shipped typings.* Verify before relying on it, then
-  expose `getPathForFile` through preload. This is also the gate's own
-  foundation: without a real absolute path there is no gesture to grant consent
-  from.
+  **44.1.0**) and both declare `webUtils.getPathForFile`. **Observed at runtime
+  2026-09-03**, no longer read off the typings: it is exposed through
+  `electron/preload.cjs:138`, and driven under `electron/main.cjs`'s own
+  `webPreferences` a filesystem-backed `File` crossed the context bridge and
+  came back as its absolute path. What was exercised is the picker route —
+  Code's `src/components/sidebar/MediaPanel.tsx:147`; the drop target at `:177`
+  hands the same `bring()` a `FileList` from `dataTransfer` and has **not** been
+  driven by a real drag. This is also the gate's own foundation: without a real
+  absolute path there is no gesture to grant consent from.
 - **No media-pool UI came across in the port.** The 25 ported components are
   inspector, timeline, preview and primitives; `MediaPanel.tsx` is not among
   them, though the store behind it is complete (`mediaPool`, `addMediaAsset`,
