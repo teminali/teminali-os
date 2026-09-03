@@ -14,6 +14,7 @@ import { speakableText } from "../../services/voice";
 import { useGitHubStatus } from "../../hooks/useGitHubStatus";
 import { UsageService } from "../../services/usageService";
 import { AssistantHud } from "../assistant/AssistantHud";
+import { BrandGlyph } from "../ui/BrandGlyph";
 import type { UseAssistantResult } from "../../hooks/useAssistant";
 import type { ChatMessage } from "../../types";
 
@@ -350,12 +351,22 @@ export const StudioChat: React.FC<{
        its chat sits on one unbroken #151515 from the title bar to the composer. */
     <main className="flex-1 min-w-0 flex flex-col bg-frame-mid">
       {isEmpty ? (
-        /* Cursor's empty state is three stacked things and a lot of nothing:
-           the pickers that say what the next turn runs against, the composer,
-           and a row of outline pills. No orbs, no headline, no illustration —
-           the two ambient orbs that used to live here were the single most
-           un-Cursor element in the app. */
+        /* Cursor's empty state is the pickers that say what the next turn runs
+           against, the composer, and a row of outline pills — and above them,
+           where Cursor leaves bare canvas, our mark.
+
+           This is the one deliberate departure. Cursor can afford an anonymous
+           empty screen because you already know whose window you are in; a
+           product still earning that recognition cannot. It is still not an
+           illustration: a 52px mark and the name, one flat stack, no orb, no
+           headline, no gradient. The two ambient orbs that used to live here
+           are not coming back. */
         <div className="flex-1 flex flex-col items-center justify-center gap-2.5 px-8">
+          <div className="flex flex-col items-center gap-2 mb-7 select-none">
+            <BrandGlyph brand="teminali" size={52} className="rounded-xl" />
+            <span className="text-sm text-ink-muted tracking-tight">Teminali Code</span>
+          </div>
+
           <div className="w-full max-w-composerEmpty flex items-center gap-4 text-sm text-ink-muted pl-1">
             <Picker
               label={workspaceName || "Start from scratch"}

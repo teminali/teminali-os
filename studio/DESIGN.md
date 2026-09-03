@@ -161,14 +161,22 @@ StudioTitleBar    traffic lights · sidebar toggle · title · panel tab strip
 │       ├── PRIMARY_NAV    New Chat · Search · Customize
 │       ├── WORKSPACE_NAV  Explorer · Skills
 │       └── view           StudioSidebar (chats) · Explorer · GlobalSearchView · Skills
-├── StudioChat       empty state / transcript · Composer (voice lives here)
-│                    · AssistantHud
+├── StudioChat       empty state (brand mark) / transcript · Composer
+│                    (voice lives here) · AssistantHud
 └── WorkspacePanel   terminal · browser · canvas · side chat · file · guardian
                      · Claude Code · Codex · usage · benchmark · release
 
 AssistantProvider    wraps the shell; one session, reachable from every composer
 AssistantBridge      renders nothing — keeps the tray, hotkey and overlay in step
 ```
+
+The **empty state carries the mark**: `BrandGlyph brand="teminali"` at 52px
+with the product name beneath, stacked above the repository/host pickers, the
+composer and the pill row. Cursor leaves that space bare and can afford to —
+you already know whose window you are in. This one departs on purpose, and
+departs only that far: a flat mark and a line of `text-ink-muted`. No orb, no
+headline, no illustration, no gradient. The two ambient orbs that used to live
+here are not coming back.
 
 There is **no activity rail**. Cursor's agent window has one sidebar holding the
 traffic lights, the nav rows and the chat list, and its right edge is the only
