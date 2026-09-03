@@ -23,52 +23,76 @@ const POLL_INTERVAL_MS = 20_000;
 /* ── Icon ─────────────────────────────────────────────────────────────────── */
 
 /**
- * A microphone: a rounded capsule over a shallow arc, rasterised rather than
- * shipped as a file so the tray has no asset to lose in a packaged build.
+ * The product mark, as the menu bar wants it.
  *
- * As with Guardian's mark, only the alpha channel carries the shape — macOS
- * paints a template image black on a light menu bar and white on a dark one, so
- * one buffer is correct in both themes without a theme listener.
+ * The geometry below is the glyph out of `build/mark.svg` verbatim — the same
+ * 1024-unit viewBox, the same three strokes, the same 76-unit round-capped
+ * pen. Copying the numbers rather than loading the file keeps the promise the
+ * old microphone made: the tray has no asset to lose in a packaged build.
+ *
+ * What the mark loses here is its plate. macOS template images carry shape in
+ * the alpha channel only — the system paints them black on a light menu bar
+ * and white on a dark one — so the black rounded square would render as a
+ * solid block filling the item, and the brand green cannot survive at all. The
+ * glyph alone is what is recognisable at 16 points, and it is correct in both
+ * themes without a theme listener.
  */
 const GLYPH_SIZE = 16;
 
+/** `<`, `_`, `>` — five segments, in mark.svg's coordinate space. */
+const MARK_SEGMENTS = [
+  [210, 388, 322, 512],
+  [322, 512, 210, 636],
+  [392, 636, 632, 636],
+  [814, 388, 702, 512],
+  [702, 512, 814, 636],
+];
+const MARK_STROKE = 76;
+/** The strokes' bounding box, grown by the round caps' half-width. */
+const MARK_BOX = { x: 172, y: 350, width: 680, height: 324 };
+/**
+ * Points of the 16pt box the mark spans. A whole point of margin each side,
+ * not a half: at 1x a half-point inset puts the round caps' edge inside the
+ * outermost pixel, and the mark bleeds into the square's border.
+ */
+const MARK_WIDTH = 14;
+
+/** Distance from a point to a segment, which is what a round-capped pen draws. */
+function distanceToSegment(px, py, x1, y1, x2, y2) {
+  const dx = x2 - x1;
+  const dy = y2 - y1;
+  const lengthSquared = dx * dx + dy * dy;
+  const t = lengthSquared === 0 ? 0 : Math.max(0, Math.min(1, ((px - x1) * dx + (py - y1) * dy) / lengthSquared));
+  return Math.hypot(px - (x1 + t * dx), py - (y1 + t * dy));
+}
+
 function rasteriseGlyph(scale) {
   const size = GLYPH_SIZE * scale;
+  // BGRA, four bytes per pixel, which is what createFromBuffer expects.
   const buffer = Buffer.alloc(size * size * 4, 0);
-  const set = (x, y) => {
-    if (x < 0 || y < 0 || x >= size || y >= size) return;
-    buffer[(y * size + x) * 4 + 3] = 255;
-  };
 
-  const capsuleTop = 3 * scale;
-  const capsuleBottom = 9.5 * scale;
-  const capsuleRadius = 2.2 * scale;
-  const centreX = 8 * scale;
+  // Mark units per device pixel, and where the scaled box sits in the square.
+  const unitsPerPixel = MARK_BOX.width / (MARK_WIDTH * scale);
+  const drawnHeight = (MARK_BOX.height / unitsPerPixel);
+  const originX = ((GLYPH_SIZE - MARK_WIDTH) / 2) * scale;
+  const originY = (size - drawnHeight) / 2;
+  const half = MARK_STROKE / 2;
 
-  // Capsule body, with rounded caps.
-  for (let y = capsuleTop; y < capsuleBottom; y += 1) {
-    let halfWidth = capsuleRadius;
-    const fromTop = y - capsuleTop;
-    const fromBottom = capsuleBottom - 1 - y;
-    const nearest = Math.min(fromTop, fromBottom);
-    if (nearest < capsuleRadius) {
-      halfWidth = Math.sqrt(Math.max(0, capsuleRadius * capsuleRadius - (capsuleRadius - nearest) ** 2));
+  for (let y = 0; y < size; y += 1) {
+    for (let x = 0; x < size; x += 1) {
+      const markX = MARK_BOX.x + (x + 0.5 - originX) * unitsPerPixel;
+      const markY = MARK_BOX.y + (y + 0.5 - originY) * unitsPerPixel;
+
+      let nearest = Infinity;
+      for (const [x1, y1, x2, y2] of MARK_SEGMENTS) {
+        const distance = distanceToSegment(markX, markY, x1, y1, x2, y2);
+        if (distance < nearest) nearest = distance;
+      }
+
+      // One device pixel of feather, so the diagonals are not a staircase.
+      const coverage = Math.max(0, Math.min(1, 0.5 + (half - nearest) / unitsPerPixel));
+      if (coverage > 0) buffer[(y * size + x) * 4 + 3] = Math.round(coverage * 255);
     }
-    for (let x = Math.round(centreX - halfWidth); x < Math.round(centreX + halfWidth); x += 1) set(x, y);
-  }
-
-  // The cradle arc under it, and the stand.
-  const arcRadius = 4.4 * scale;
-  const arcCentreY = 8 * scale;
-  const thickness = Math.max(1, Math.round(0.9 * scale));
-  for (let angle = 0; angle <= 180; angle += 1) {
-    const radians = (angle * Math.PI) / 180;
-    const x = centreX - Math.cos(radians) * arcRadius;
-    const y = arcCentreY + Math.sin(radians) * arcRadius;
-    for (let offset = 0; offset < thickness; offset += 1) set(Math.round(x), Math.round(y) + offset);
-  }
-  for (let y = arcCentreY + arcRadius; y < 14 * scale; y += 1) {
-    for (let offset = 0; offset < thickness; offset += 1) set(Math.round(centreX) + offset, Math.round(y));
   }
 
   return { buffer, size };

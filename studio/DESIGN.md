@@ -338,6 +338,15 @@ together would put the answer to either one a submenu away. Both rasterise their
 glyph into a template image rather than shipping an asset, so a packaged build
 has nothing to lose and one buffer is correct in a light and a dark menu bar.
 
+Guardian draws three telemetry bars. The assistant draws the product mark — the
+`‹ _ ›` out of `build/mark.svg`, its geometry copied into
+`assistant-tray.cjs` rather than loaded, for the same no-asset reason. It sheds
+the mark's black plate and its green on the way in: a template image carries
+shape in alpha alone, so the plate would render as a solid block filling the
+item. `tests/assistant-tray.test.mjs` pins that — colour channels empty, both
+scale factors present, and the glyph mirror-symmetric and inside its margins,
+which is what a mis-scaled copy of those numbers would break.
+
 Both read their data by importing the server module directly rather than calling
 the gateway: the main process is already Node, and a status item that stops
 working whenever the gateway restarts is broken exactly when someone is most
