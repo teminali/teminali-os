@@ -16,6 +16,7 @@
  * corrected afterwards.
  */
 
+import { launchableInventory } from "./apps.ts";
 import type { AssistantMode, Observation, ScreenElement } from "./types.ts";
 
 export interface PromptOptions {
@@ -35,6 +36,7 @@ const SHAPE = `{
     { "kind": "type",   "text": "what to type" },
     { "kind": "key",    "chord": "cmd+s" },
     { "kind": "scroll", "element": "e4", "dy": -300 },
+    { "kind": "launch", "app": "safari", "url": "https://example.com" },
     { "kind": "wait",   "ms": 400 }
   ]
 }`;
@@ -58,6 +60,8 @@ export function systemPrompt(mode: AssistantMode): string {
     shared.push(
       "5. You are in agent mode. You may act, but prefer the smallest number of steps that finishes the job, and stop at the point where the operator would want to look before continuing.",
       "6. Do not act on anything destructive, irreversible, or involving credentials, payment, or someone else's data. Describe it in `say` and let the operator do it.",
+      "7. If what the operator wants is in an application that is not on screen, open it with a `launch` step. `app` must be an id from the list of applications below — never a name that is not on that list, never a path, never a command. Only a browser may be given a `url`, and only an http or https one.",
+      "8. A `launch` must be the last step of the plan. The application it starts has no window yet, so nothing after it could name a real element. Say what you will do next once it is open, and do it on the next turn.",
     );
   }
 
@@ -84,6 +88,13 @@ export function observationBlock(options: PromptOptions): string {
   lines.push(inventory);
   if (observation.truncated) {
     lines.push("", "This list was cut to fit. If what you need is plainly missing rather than absent, say so.");
+  }
+
+  // Only in agent mode: talk mode cannot run a launch, and offering a
+  // capability that will be withheld produces plans that get thrown away.
+  if (options.mode === "agent" && observation.launchable && observation.launchable.length > 0) {
+    lines.push("", "Applications you may open with a `launch` step, and nothing else:");
+    lines.push(launchableInventory(observation.launchable));
   }
 
   return lines.join("\n");

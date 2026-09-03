@@ -25,8 +25,9 @@
  *    been unplugged resolves to nowhere.
  */
 
-import { mkdir, readdir, rm, writeFile } from "node:fs/promises";
+import { mkdir, readdir, rm, stat, writeFile } from "node:fs/promises";
 import { spawn } from "node:child_process";
+import { homedir } from "node:os";
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
 
@@ -54,6 +55,17 @@ export const ASSISTANT_LIMITS = Object.freeze({
   captureTimeoutMs: 8_000,
   visionTimeoutMs: 45_000,
   maxTypeLength: 2_000,
+  /** How long `open` gets to hand the request to LaunchServices. */
+  launchTimeoutMs: 10_000,
+  /**
+   * How long a launched application gets to come to the front before the step
+   * reports that it started but has not appeared yet. Not a deadline the launch
+   * fails on — only the point at which the operator is told "it is opening"
+   * rather than "it is open".
+   */
+  launchSettleMs: 4_000,
+  /** How long the installed-application scan is trusted. */
+  installedTtlMs: 60_000,
   /**
    * Longest edge of the frame handed to the vision model, in pixels.
    *
@@ -110,6 +122,19 @@ export function rememberObservation(observation) {
 export function recallObservation(id) {
   pruneObservations();
   return observations.get(id) ?? null;
+}
+
+/**
+ * Drops one look.
+ *
+ * Called after a launch, because the application that was in front when the
+ * look was taken is not in front any more and every element id in it now
+ * describes a window nobody is looking at. Expiring it deliberately turns a
+ * step planned against the old screen into a clear "take another look" instead
+ * of a click at the right coordinate on the wrong application.
+ */
+export function forgetObservation(id) {
+  return observations.delete(id);
 }
 
 /** Used by the tests and by a "forget what you saw" control in the interface. */
@@ -289,9 +314,237 @@ export async function observe(config, options = {}) {
     sceneDescription,
     frame,
     limits,
+    // What the model may open. Answered from this machine rather than assumed,
+    // so it is offered the browsers this operator actually has.
+    launchable: [...(await installedApplications()).keys()],
   };
 
   return rememberObservation(observation);
+}
+
+/* ── Launching ───────────────────────────────────────────────────────────── */
+
+/**
+ * The applications a `launch` step may start.
+ *
+ * A deliberate copy of `src/services/assistant/apps.ts`. The renderer needs the
+ * catalogue to build the prompt and to validate a plan before running it; this
+ * module needs it because it is the boundary — `/api/assistant/act` is reachable
+ * over HTTP and nothing here may trust that the renderer checked first. The two
+ * cannot be one file: the renderer's copy is TypeScript that only ever runs
+ * through the bundler or Node's type stripping, and this one runs unbundled
+ * inside Electron, where importing a `.ts` file would fail at start-up.
+ *
+ * `tests/assistant-launch.test.mjs` asserts the two lists are identical, field
+ * for field, so the duplication is checked rather than hoped for.
+ */
+export const LAUNCHABLE_APPS = Object.freeze([
+  { id: "safari", name: "Safari", bundleId: "com.apple.Safari", browser: true },
+  { id: "chrome", name: "Google Chrome", bundleId: "com.google.Chrome", browser: true },
+  { id: "edge", name: "Microsoft Edge", bundleId: "com.microsoft.edgemac", browser: true },
+  { id: "firefox", name: "Firefox", bundleId: "org.mozilla.firefox", browser: true },
+  { id: "arc", name: "Arc", bundleId: "company.thebrowser.Browser", browser: true },
+  { id: "brave", name: "Brave Browser", bundleId: "com.brave.Browser", browser: true },
+
+  { id: "finder", name: "Finder", bundleId: "com.apple.finder" },
+  { id: "mail", name: "Mail", bundleId: "com.apple.mail" },
+  { id: "calendar", name: "Calendar", bundleId: "com.apple.iCal" },
+  { id: "notes", name: "Notes", bundleId: "com.apple.Notes" },
+  { id: "reminders", name: "Reminders", bundleId: "com.apple.reminders" },
+  { id: "messages", name: "Messages", bundleId: "com.apple.MobileSMS" },
+  { id: "maps", name: "Maps", bundleId: "com.apple.Maps" },
+  { id: "photos", name: "Photos", bundleId: "com.apple.Photos" },
+  { id: "preview", name: "Preview", bundleId: "com.apple.Preview" },
+  { id: "music", name: "Music", bundleId: "com.apple.Music" },
+  { id: "spotify", name: "Spotify", bundleId: "com.spotify.client" },
+  { id: "appstore", name: "App Store", bundleId: "com.apple.AppStore" },
+  { id: "settings", name: "System Settings", bundleId: "com.apple.systempreferences" },
+
+  { id: "vscode", name: "Visual Studio Code", bundleId: "com.microsoft.VSCode" },
+  { id: "slack", name: "Slack", bundleId: "com.tinyspeck.slackmacgap" },
+  { id: "notion", name: "Notion", bundleId: "notion.id" },
+  { id: "zoom", name: "Zoom", bundleId: "us.zoom.xos" },
+]);
+
+/** Where a `.app` bundle is looked for, in the order macOS itself would. */
+function applicationDirectories() {
+  return [
+    "/Applications",
+    join(homedir(), "Applications"),
+    "/System/Applications",
+    "/System/Applications/Utilities",
+    // Finder lives here and nowhere else.
+    "/System/Library/CoreServices",
+  ];
+}
+
+/**
+ * Which catalogue applications are actually on this machine, and where.
+ *
+ * A directory scan rather than a LaunchServices query, because the answer is
+ * wanted on every observation and `mdfind`/`lsregister` are a spawn and a wait
+ * for something a handful of `stat` calls settle instantly. The cost is that an
+ * application installed somewhere unusual reads as absent; the assistant then
+ * says it is not installed, which is a wrong-but-safe answer rather than a
+ * wrong-and-launching one.
+ *
+ * Cached, because the set changes when somebody installs an application and not
+ * between two sentences.
+ */
+let installedCache = null;
+
+export async function installedApplications({ now = Date.now, ttlMs = ASSISTANT_LIMITS.installedTtlMs } = {}) {
+  if (installedCache && now() - installedCache.at < ttlMs) return installedCache.apps;
+
+  const directories = applicationDirectories();
+  const apps = new Map();
+  await Promise.all(
+    LAUNCHABLE_APPS.map(async (app) => {
+      for (const directory of directories) {
+        const path = join(directory, `${app.name}.app`);
+        try {
+          const entry = await stat(path);
+          if (entry.isDirectory()) {
+            apps.set(app.id, { ...app, path });
+            return;
+          }
+        } catch {
+          /* Not here. Try the next directory. */
+        }
+      }
+    }),
+  );
+
+  installedCache = { at: now(), apps };
+  return apps;
+}
+
+/** Drops the cache. Only the tests need this. */
+export function forgetInstalledApplications() {
+  installedCache = null;
+}
+
+/**
+ * The environment `open` is given.
+ *
+ * `open` hands the calling process's environment to the application it starts,
+ * and the gateway's environment is Electron's: `ELECTRON_RUN_AS_NODE=1` is set,
+ * because that is how this server is running at all. Launch Safari with that
+ * inherited and an Electron-based application starts as a bare Node process and
+ * exits immediately, which looks exactly like a crash. So the child gets a
+ * scrubbed environment and the PATH a Finder launch would have had — the same
+ * rule CLAUDE.md records for running `open` by hand.
+ */
+function launchEnvironment(base = process.env) {
+  const env = { ...base };
+  delete env.ELECTRON_RUN_AS_NODE;
+  delete env.ELECTRON_NO_ATTACH_CONSOLE;
+  delete env.NODE_OPTIONS;
+  env.PATH = "/usr/bin:/bin:/usr/sbin:/sbin";
+  return env;
+}
+
+/**
+ * Starts one catalogue application, optionally at one web address.
+ *
+ * Launched by the path that was found on disk rather than by bundle id, so what
+ * starts is the bundle whose existence was just verified rather than whatever
+ * LaunchServices currently associates with an identifier. Arguments go as an
+ * array — never a shell string — for the reason pointer.js gives: a URL is
+ * operator-influenced text and a `;` in it must stay a semicolon.
+ */
+export async function launchApplication(appId, options = {}) {
+  const {
+    url = null,
+    spawnImpl = spawn,
+    timeoutMs = ASSISTANT_LIMITS.launchTimeoutMs,
+    env = launchEnvironment(),
+  } = options;
+
+  const app = LAUNCHABLE_APPS.find((entry) => entry.id === appId);
+  if (!app) throw new PointerError("APP_NOT_ALLOWED", `"${appId}" is not an application this assistant may open.`);
+
+  if (url !== null) {
+    if (!app.browser) throw new PointerError("APP_NOT_A_BROWSER", `${app.name} cannot be given a web address.`);
+    let parsed;
+    try {
+      parsed = new URL(url);
+    } catch {
+      throw new PointerError("URL_INVALID", "That is not a web address.");
+    }
+    if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+      throw new PointerError("URL_INVALID", "Only http and https addresses can be opened.");
+    }
+    if (parsed.username || parsed.password) throw new PointerError("URL_INVALID", "That address carries credentials.");
+  }
+
+  const installed = await installedApplications();
+  const found = installed.get(app.id);
+  if (!found) throw new PointerError("APP_NOT_INSTALLED", `${app.name} is not installed on this machine.`);
+
+  const args = ["-a", found.path];
+  if (url !== null) args.push(url);
+
+  await new Promise((resolvePromise, rejectPromise) => {
+    let child;
+    try {
+      child = spawnImpl("/usr/bin/open", args, { stdio: ["ignore", "ignore", "pipe"], env });
+    } catch (error) {
+      rejectPromise(new PointerError("LAUNCH_FAILED", error.message));
+      return;
+    }
+
+    let stderr = "";
+    let settled = false;
+    const finish = (error) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      if (error) rejectPromise(error);
+      else resolvePromise();
+    };
+
+    const timer = setTimeout(() => {
+      child.kill("SIGKILL");
+      finish(new PointerError("LAUNCH_TIMEOUT", `${app.name} did not start within ${timeoutMs}ms.`));
+    }, timeoutMs);
+
+    child.stderr?.on("data", (chunk) => {
+      stderr += String(chunk);
+    });
+    child.on("error", (error) => finish(new PointerError("LAUNCH_FAILED", error.message)));
+    child.on("close", (code) => {
+      if (code === 0) finish(null);
+      else finish(new PointerError("LAUNCH_FAILED", stderr.trim().slice(0, 200) || `${app.name} could not be opened.`));
+    });
+  });
+
+  return { app: app.id, name: app.name, bundleId: app.bundleId, path: found.path, url };
+}
+
+/**
+ * Waits for the launched application to come to the front.
+ *
+ * `open` returns as soon as the request is handed to LaunchServices, which is
+ * long before there is a window to look at. Without this the very next
+ * observation would inventory the application the operator was already in and
+ * report, truthfully and uselessly, that the browser is still not there. A
+ * miss is not an error — the caller is told `frontmost: false` and the operator
+ * hears an honest "it is still opening".
+ */
+async function waitForFront(bundleId, { timeoutMs, pollMs = 250, frontmostImpl = pointerFrontmost } = {}) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    try {
+      const front = await frontmostImpl();
+      if (front?.bundleId === bundleId) return true;
+    } catch {
+      // No helper, no answer. The launch still happened.
+      return false;
+    }
+    await new Promise((resolvePromise) => setTimeout(resolvePromise, pollMs));
+  }
+  return false;
 }
 
 /* ── Acting ──────────────────────────────────────────────────────────────── */
@@ -335,6 +588,28 @@ export async function act(observationId, step, options = {}) {
     const ms = Math.min(5_000, Math.max(0, Number(step.ms) || 0));
     await new Promise((resolvePromise) => setTimeout(resolvePromise, ms));
     return { kind, waitedMs: ms };
+  }
+
+  /*
+   * A launch is the one step that is *supposed* to change the frontmost
+   * application, so it is answered above the check that refuses every other
+   * step for doing so. It names no element either: the whole reason it exists
+   * is that what the operator asked for is not on the screen yet.
+   *
+   * It still needs a live observation. Not because a coordinate is resolved
+   * from it — none is — but because that is what proves this call belongs to a
+   * turn the operator started, rather than being a bare POST that opens
+   * applications on somebody's machine.
+   */
+  if (kind === "launch") {
+    const launched = await launchApplication(typeof step.app === "string" ? step.app : "", {
+      url: typeof step.url === "string" && step.url ? step.url : null,
+    });
+    const frontmost = await waitForFront(launched.bundleId, { timeoutMs: ASSISTANT_LIMITS.launchSettleMs });
+    // The screen this observation described is gone now. Saying so here means
+    // the caller cannot keep acting against it by accident.
+    forgetObservation(observation.id);
+    return { kind, ...launched, frontmost };
   }
 
   if (checkFrontmost && observation.application?.pid) {

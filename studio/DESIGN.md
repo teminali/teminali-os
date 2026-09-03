@@ -452,6 +452,71 @@ one and the route dropped it, so every observation fell back to the frontmost
 application whether or not the caller knew better. Omitted still means "whoever
 is in front", which is the right answer nearly always.
 
+### Opening what is not on the screen yet
+
+The assistant's whole vocabulary was `point · click · type · key · scroll ·
+wait`, every one of which needs a control that already exists. Asked to open a
+browser it answered, correctly and uselessly, that it could not see a browser
+button anywhere. **`launch` is the step that starts an application**, and it is
+the only one that names no element, because the entire reason for it is that
+what the operator wants is not on the screen.
+
+`{ "kind": "launch", "app": "safari", "url": "https://youtube.com" }`
+
+**`app` is an id from a catalogue, never a path and never a command.**
+`services/assistant/apps.ts` holds it: browsers first, then the everyday
+applications, each with a display name and a bundle id. An id the model invented
+resolves to nothing and starts nothing, which is the same guarantee `PlanStep`
+makes about coordinates applied to executables — the dangerous shape is not
+representable rather than merely discouraged.
+
+Two absences are deliberate, and `tests/assistant-launch.test.mjs` asserts the
+first of them:
+
+- **No terminal.** Terminal, iTerm and anything else that is a shell prompt stay
+  out, because a shell prompt plus the `type` step is arbitrary code execution
+  wearing an allowlist.
+- **No free-text escape hatch and no setting that appends to the list.** An
+  allowlist an operator can be talked into extending mid-session is not an
+  allowlist. Adding an application is a code change.
+
+Only a browser may be given a `url`, and only an `http` or `https` one. `file:`
+reads the disk, `javascript:` runs in whatever is frontmost, and a custom scheme
+is a message to an application chosen by the URL rather than by the catalogue.
+An address carrying credentials is refused as well. This grants nothing the
+assistant could not already do — it can type into an address bar — and replaces
+a fragile click-type-return dance with one step that either happens or does not.
+
+**A launch is the last step of a plan.** The application it starts has no window
+yet, so anything after it either names an element from the screen being replaced
+or types into whatever finishes appearing first. The validator rejects every
+following step with that reason, the gateway forgets the observation the moment
+the launch succeeds, and the renderer drops its cached look — so the next
+sentence is answered against a fresh one rather than against a screen that is
+gone.
+
+Which applications are actually installed is answered by the machine, not
+assumed: `observe()` scans the five standard application directories and returns
+`launchable`, and the prompt offers the model only those — in agent mode only,
+since talk mode would have the step withheld anyway. An application installed
+somewhere unusual reads as absent and the assistant says so, which is
+wrong-but-safe rather than wrong-and-launching.
+
+The allowlist exists twice on purpose. The renderer needs it to build the prompt
+and validate a plan; `server/assistant.js` needs it because `/api/assistant/act`
+is reachable over HTTP and nothing at the boundary may trust that the renderer
+checked. They cannot be one file — one is TypeScript that only ever runs through
+the bundler, the other runs unbundled inside Electron — so a test asserts the two
+lists are identical field for field.
+
+**`open` is spawned with a scrubbed environment.** It hands its environment to
+the application it starts, and the gateway's environment is Electron's, with
+`ELECTRON_RUN_AS_NODE=1` set — that is how the server is running at all.
+Inherited, a launched Electron application starts as a bare Node process and
+exits instantly, which looks exactly like a crash. The child gets that variable
+removed and the `PATH` a Finder launch would have had. It is the same rule
+`CLAUDE.md` records for running `open` by hand, and the test asserts it.
+
 ### Autonomy is a ladder, and the default sits at the top
 
 `guide` draws and touches nothing, not even the pointer · `confirm` asks before

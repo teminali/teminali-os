@@ -112,7 +112,7 @@ is the complete list.
 | `GET` | `/api/assistant/capabilities` | bearer | What the native helper can do on this machine right now. |
 | `POST` | `/api/assistant/permissions` | bearer | Raises the system Accessibility dialog. Only on an explicit operator action — never on a poll. |
 | `POST` | `/api/assistant/observe` | bearer | Captures one observation of the screen and returns its `observationId`. |
-| `POST` | `/api/assistant/act` | bearer | Acts on a named observation. The gateway re-checks the action against that observation; an expired one is refused. |
+| `POST` | `/api/assistant/act` | bearer | Acts on a named observation. The gateway re-checks the action against that observation; an expired one is refused. A `launch` step opens an application from the fixed catalogue in `server/assistant.js` — never a path or a command — and expires the observation it ran under. |
 
 ### Voice
 

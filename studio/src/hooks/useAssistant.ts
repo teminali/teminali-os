@@ -251,6 +251,9 @@ export function useAssistant(): UseAssistantResult {
         // Pointing is how this assistant answers, so the ring is drawn for
         // every step regardless of whether the step will be executed.
         if ("element" in step) setTargetId(step.element);
+        // A launch replaces the screen the ring was drawn on, so stop drawing it
+        // rather than leaving a highlight over a window that is going away.
+        else if (step.kind === "launch") setTargetId(null);
 
         const mark = (status: StepOutcome["status"], detail?: string) => {
           setTurn((previous) =>
@@ -284,7 +287,16 @@ export function useAssistant(): UseAssistantResult {
         setPhase("acting");
         mark("running");
         try {
-          await AssistantService.act(observationId, step, abortRef.current?.signal);
+          const result = await AssistantService.act(observationId, step, abortRef.current?.signal);
+          if (step.kind === "launch") {
+            // The gateway drops the observation on a launch, because the screen
+            // it described has been replaced. Drop the cached look with it, or
+            // the next sentence would be answered against the application the
+            // operator was in before this step opened a new one.
+            pendingObservation.current = null;
+            mark("done", result?.frontmost === false ? "Opening — it has not come to the front yet" : undefined);
+            continue;
+          }
           mark("done");
         } catch (error) {
           const message = error instanceof Error ? error.message : "The step could not be run.";
@@ -386,7 +398,7 @@ export function useAssistant(): UseAssistantResult {
       }
       if (controller.signal.aborted) return;
 
-      const plan = readPlan(reply, { elements, mode });
+      const plan = readPlan(reply, { elements, mode, launchable: seen.launchable ?? null });
       const outcomes: StepOutcome[] = plan.steps.map((step, index) => ({ index, step, status: "pending" }));
 
       setTurn((previous) =>
@@ -409,7 +421,7 @@ export function useAssistant(): UseAssistantResult {
       if (active.speak && plan.say) {
         setPhase("speaking");
         try {
-          await voiceRef.current?.speakReply(plan.say);
+          await voiceRef.current?.speakAside(plan.say);
         } catch {
           /* A silent answer is still an answer. */
         }

@@ -21,6 +21,7 @@
  * it would" is exactly the kind of thing that must never be discovered later.
  */
 
+import { parseLaunchUrl, resolveLaunchApp } from "./apps.ts";
 import type { AssistantMode, PlanStep, RejectedStep, ScreenElement, ValidatedPlan } from "./types.ts";
 
 export const PLAN_LIMITS = Object.freeze({
@@ -32,7 +33,7 @@ export const PLAN_LIMITS = Object.freeze({
 });
 
 /** Steps that change the world. Everything else only draws. */
-const ACTING: ReadonlySet<string> = new Set(["click", "type", "key", "scroll"]);
+const ACTING: ReadonlySet<string> = new Set(["click", "type", "key", "scroll", "launch"]);
 
 const MODIFIERS = new Set(["cmd", "command", "meta", "shift", "ctrl", "control", "alt", "opt", "option"]);
 
@@ -135,6 +136,15 @@ export interface ValidateOptions {
   elements: ScreenElement[];
   mode: AssistantMode;
   maxSteps?: number;
+  /**
+   * Catalogue ids installed on this machine, from the observation.
+   *
+   * Omitted means "the machine did not say", and then only catalogue
+   * membership is checked here — the gateway refuses a missing application
+   * either way, so this only decides whether the operator hears about it
+   * before the step runs or after.
+   */
+  launchable?: readonly string[] | null;
 }
 
 /**
@@ -170,6 +180,19 @@ export function validatePlan(parsed: unknown, options: ValidateOptions): Validat
     rejected.push({ index, reason, raw: summarise(raw) });
   };
 
+  /**
+   * Set once a launch survives, and it ends the plan.
+   *
+   * Everything after a launch was planned against a screen that does not exist
+   * yet: the application being started has no window, no elements, and no
+   * inventory entry, so every following step either names an element from the
+   * *old* screen or types into whatever happens to be in front when the new one
+   * finishes appearing. Both are the failure this subsystem exists to prevent,
+   * so a launch is the last thing a plan does and the next look starts a new
+   * one.
+   */
+  let launched: string | null = null;
+
   /** Resolves an element reference, or explains why it did not resolve. */
   const resolve = (index: number, step: Record<string, unknown>): ScreenElement | null => {
     const reference = step.element;
@@ -202,6 +225,11 @@ export function validatePlan(parsed: unknown, options: ValidateOptions): Validat
       continue;
     }
     const kind = typeof step.kind === "string" ? step.kind : "";
+
+    if (launched) {
+      reject(index, `${launched} has not opened yet, so this step was planned against a screen that is not there`, step);
+      continue;
+    }
 
     if (ACTING.has(kind) && options.mode !== "agent") {
       // Gated on "is not agent" rather than "is talk": a mode added later is
@@ -276,6 +304,36 @@ export function validatePlan(parsed: unknown, options: ValidateOptions): Validat
         break;
       }
 
+      case "launch": {
+        const app = resolveLaunchApp(step.app);
+        if (!app) {
+          const named = typeof step.app === "string" && step.app.trim() ? `"${step.app.trim().slice(0, 40)}"` : "that";
+          reject(index, `${named} is not an application this assistant may open`, step);
+          break;
+        }
+        if (options.launchable && !options.launchable.includes(app.id)) {
+          reject(index, `${app.name} is not installed on this machine`, step);
+          break;
+        }
+        if (step.url === undefined || step.url === null) {
+          steps.push({ kind: "launch", app: app.id });
+          launched = app.name;
+          break;
+        }
+        if (!app.browser) {
+          reject(index, `${app.name} is not a browser, so it cannot be given an address`, step);
+          break;
+        }
+        const url = parseLaunchUrl(step.url);
+        if (!url.ok) {
+          reject(index, url.reason, step);
+          break;
+        }
+        steps.push({ kind: "launch", app: app.id, url: url.url });
+        launched = app.name;
+        break;
+      }
+
       case "wait": {
         const ms = Number(step.ms);
         if (!Number.isFinite(ms) || ms <= 0) {
@@ -329,6 +387,11 @@ export function describeStep(step: PlanStep, elements: ScreenElement[]): string 
       return `Press ${step.chord}`;
     case "scroll":
       return `Scroll ${name(step.element)} by ${step.dx ?? 0}, ${step.dy ?? 0}`;
+    case "launch": {
+      const app = resolveLaunchApp(step.app);
+      const label = app ? app.name : step.app;
+      return step.url ? `Open ${label} at ${step.url}` : `Open ${label}`;
+    }
     case "wait":
       return `Wait ${step.ms}ms`;
   }

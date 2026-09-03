@@ -98,6 +98,21 @@ function safeCorrelationId(value) {
   return typeof value === "string" && /^[a-zA-Z0-9._-]{1,80}$/.test(value) ? value : randomUUID();
 }
 
+/**
+ * The host of a URL, or nothing.
+ *
+ * Audit lines record that a page was opened and where, never the path or the
+ * query — the same rule that keeps typed text out of the log, since a URL is
+ * just as likely to carry a token or a document id.
+ */
+function safeHost(value) {
+  try {
+    return new URL(value).host || null;
+  } catch {
+    return null;
+  }
+}
+
 function abortContext(request, response, timeoutMs) {
   const controller = new AbortController();
   let completed = false;
@@ -1175,6 +1190,11 @@ export async function createGateway(options = {}) {
             element: typeof actRequest.step.element === "string" ? actRequest.step.element : null,
             // What was typed is never written to the audit log; how much was, is.
             characters: typeof result.characters === "number" ? result.characters : null,
+            // A launch is worth naming: it is the one step that starts something
+            // rather than touching something already running. The address is
+            // recorded as its host, on the same rule that keeps typed text out.
+            app: typeof result.app === "string" ? result.app : null,
+            host: typeof result.url === "string" ? safeHost(result.url) : null,
           });
           replyJson(response, 200, { ok: true, result });
         } catch (error) {

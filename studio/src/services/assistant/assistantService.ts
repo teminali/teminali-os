@@ -10,6 +10,20 @@
 import { GatewayClient } from "../gatewayClient";
 import type { AssistantCapabilities, Observation, PlanStep } from "./types";
 
+/**
+ * What the gateway reports about one executed step.
+ *
+ * Shape varies by kind and only `kind` is guaranteed. A `launch` also carries
+ * `frontmost`, which is false when the application was started but had not come
+ * to the front before the settle budget ran out — worth telling the operator,
+ * because it is the difference between "it is open" and "it is opening".
+ */
+export interface StepResult {
+  kind: string;
+  frontmost?: boolean;
+  [key: string]: unknown;
+}
+
 /** What the gateway returns: an observation, plus what it could not do. */
 export interface ObservationResult extends Observation {
   /** Plain-language notes about a degraded look — a denied permission, mostly. */
@@ -76,12 +90,14 @@ export class AssistantService {
    * gateway resolves the element against that snapshot. Nothing here sends a
    * coordinate, because there is no route that would accept one.
    */
-  public static async act(observationId: string, step: PlanStep, signal?: AbortSignal): Promise<void> {
+  public static async act(observationId: string, step: PlanStep, signal?: AbortSignal): Promise<StepResult | null> {
     const response = await GatewayClient.request("/api/assistant/act", {
       method: "POST",
       signal,
       body: JSON.stringify({ observationId, step }),
     });
     await GatewayClient.expectOk(response);
+    const payload = (await response.json()) as { result?: StepResult };
+    return payload?.result ?? null;
   }
 }

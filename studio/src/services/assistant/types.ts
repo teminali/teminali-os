@@ -70,6 +70,14 @@ export interface Observation {
   sceneDescription: string | null;
   /** Where the frame was written, and how big it is. */
   frame: { path: string; width: number; height: number } | null;
+  /**
+   * Catalogue ids from apps.ts that are actually installed on this machine.
+   *
+   * Answered by the gateway rather than assumed, so the model is offered the
+   * browsers this operator has instead of a list it has to guess against.
+   * Absent on an observation from a build that predates `launch`.
+   */
+  launchable?: string[];
 }
 
 /**
@@ -119,6 +127,16 @@ export type PlanStep =
   | { kind: "type"; text: string }
   | { kind: "key"; chord: string }
   | { kind: "scroll"; element: string; dx?: number; dy?: number }
+  /**
+   * Start an application, optionally at a web address.
+   *
+   * The one step that does not name an element, because the whole point of it
+   * is that the thing it wants is not on the screen yet. `app` is an id from
+   * the catalogue in apps.ts — never a path, never a command — so a model that
+   * asks to start something that is not in that catalogue starts nothing, the
+   * same way an invented element id clicks nothing.
+   */
+  | { kind: "launch"; app: string; url?: string }
   | { kind: "wait"; ms: number };
 
 export type PlanStepKind = PlanStep["kind"];

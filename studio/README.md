@@ -121,8 +121,15 @@ Hold the global shortcut, or press the microphone in any composer. It looks at
 your screen and either explains it or acts on it.
 
 - **Modes:** `dictate` (into the composer) · `talk` (explains and points) ·
-  `agent` (may click, type, scroll).
-- **Autonomy:** `guide` · `confirm` · `auto`. The default is **`confirm`**.
+  `agent` (may click, type, scroll and open applications). The default is
+  **`agent`**.
+- **Autonomy:** `guide` · `confirm` · `auto`. The default is **`auto`**, chosen
+  by the operator on 2026-09-03; the two safer rungs are one switch away.
+- **Opening applications.** A `launch` step starts an application, and a browser
+  may be given an `http`/`https` address. `app` names an id from the catalogue
+  in `src/services/assistant/apps.ts` — never a path, never a command, and no
+  terminal is in it. A launch is always the last step of a plan, because what it
+  opens has no window to plan against yet.
 - **A vision model is never asked where anything is.** The screenshot is
   context; positions come from the macOS accessibility tree via the Swift helper
   in `native/macos/pointer/`. `PlanStep` carries no coordinate field on any
@@ -227,7 +234,7 @@ ollama serve              # local models on 127.0.0.1:11434
 
 ```bash
 npm run typecheck   # tsc --noEmit
-npm test            # 501 tests, 0 failures
+npm test            # 533 tests, 0 failures
 npm run build       # tsc && vite build
 npm run verify:core # all three
 ```
