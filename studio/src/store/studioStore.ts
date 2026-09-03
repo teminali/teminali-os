@@ -263,18 +263,20 @@ export const useStudioStore = create<StudioState>()(
       
       activeWorkspaceId: "teminali",
       workspacePath: "/Users/teminali/Documents/my_projects/teminali/teminaliCode",
+      // Switching workspace moves the root, and nothing else. It used to also
+      // select that workspace's canned demo tab; those tabs are gone, so a
+      // per-workspace activeTabId would only ever name a tab that does not
+      // exist. Open tabs survive the switch, so the selection does too.
       setWorkspace: (ws) => {
         if (ws === "teminali-code-tests") {
           set({
             activeWorkspaceId: "teminali-code-tests",
             workspacePath: "/Users/teminali/Downloads/frontier code tests",
-            activeTabId: "tab-frontier-hypercar",
           });
         } else if (ws === "argus-vpn") {
           set({
             activeWorkspaceId: "argus-vpn",
             workspacePath: "/Users/teminali/Documents/my_projects/argus-vpn-landing",
-            activeTabId: "tab-argus-vpn",
           });
         } else {
           set({
