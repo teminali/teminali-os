@@ -36,8 +36,11 @@ reachable as ordinary utilities:
 | Timestamps | `text-ink-soft` | `#9f9f9f` |
 | Section labels, tool lines | `text-ink-faint` | `#989898` |
 | Placeholders | `text-ink-placeholder` | `#6b6b6b` |
-| Emphasis / send button (achromatic) | `text-accent` / `bg-accent` | `#e8e8e8` |
-| **The Update pill — the only colour** | `bg-action text-action-ink` | `#86aee4` on `#151515` |
+| Emphasis / send button — **the brand** | `text-accent` / `bg-accent` | `#00bf63` |
+| Text on an accent fill | `text-accent-ink` | `#151515` (7.5:1) |
+| Focus ring on the composer | `--lit-accent-top` + `--focus-ring` | `#00bf63` + 14% wash |
+| The Update pill | `bg-action text-action-ink` | `#00bf63` on `#151515` |
+| Links, hostnames — deliberately *not* the brand | `text-info` | `#86aee4` |
 | Chat reading column | `max-w-composer` | `760px` |
 | Empty-state composer | `max-w-composerEmpty` | `608px` |
 
@@ -56,9 +59,10 @@ Motion is one curve — `--ease: cubic-bezier(.2,.7,.2,1)` — at three speeds
 
 ## 1. Zero-Slop Design Principles
 
-**Cursor is achromatic, and flat.** Five greys carry the whole interface, and
-colour appears exactly once — on the Update pill. Internalise these five and the
-rest follows:
+**Cursor is achromatic and flat. We keep the flat, and take back one hue.**
+Five greys carry the whole interface; the DukaBot green — `#00bf63`, the logo
+green from that product's own palette — carries the brand, and nothing else is
+tinted. Internalise these five and the rest follows:
 
 1. **No gradients.** Not on the window, not on the sidebar, not on a button, not
    as a floor glow or a top light. Every surface is one flat fill. A vertical
@@ -68,11 +72,23 @@ rest follows:
    fill it encloses, identical on all four sides. No brighter crown, no inner
    catch, no fade around the corner, no contact shadow. `--lit-*` still exists
    only so the `.lit` classes in `index.css` resolve to that flat hairline.
-3. **No decorative colour.** Green means live, red means destructive, amber
-   means warning — and nothing else is tinted. An emphasised glyph is *brighter*
-   than its neighbours, never a different hue. `--accent` is a near-white for
-   exactly this reason; `--action` is the single blue and belongs to the Update
-   pill alone.
+3. **No decorative colour.** Red means destructive, amber means warning, blue
+   (`--info`) means "this navigates somewhere" — and the brand green means
+   *this is ours and this is live*: the accent, the primary button, the Update
+   pill (`--action`), the composer's focus ring, a usage bar (`--chart`). That
+   is the entire chromatic budget. Everything outside it is grey, and an
+   emphasised glyph that is not one of those roles is *brighter* than its
+   neighbours, never a different hue.
+
+   Two things that look like exceptions and are not. `--accent-code*` stays
+   achromatic: inline code is not a brand surface, and tinting it would make
+   every backtick look like a link. Syntax highlighting reads `--syn-*`, never
+   `--accent` — an operator is code, not chrome.
+
+   `--success` (`#65c466`) remains its own, softer green. It is close to the
+   brand hue and that is a live tension: "exit 0" and "this is Teminali" now
+   rhyme. Left as-is deliberately rather than collapsed into one green, because
+   a run that succeeded and a button you can press are not the same statement.
 4. **A card is recessed, not raised.** Cursor inverts the usual convention: an
    inset card (Getting Started) is *darker* than the sidebar around it, while a
    raised control (composer, message bubble) is lighter than the canvas. Both
@@ -114,9 +130,9 @@ aligns one that does not) and what sits on the right.
 > 5. The only permitted raw hexes are third-party brand marks — the language
 >    colours in `FileTree`'s file glyphs, the git orange, the npm red. They
 >    identify someone else's product and are not ours to re-theme.
-> 6. **Do not reintroduce the ember.** `#ff8a4d` was the previous brand accent.
->    It is gone on purpose: Cursor has no accent in its chrome, and putting one
->    back is the single fastest way to stop looking like Cursor.
+> 6. **Do not reintroduce the ember.** `#ff8a4d` was an earlier brand accent.
+>    It is gone on purpose. The accent is the DukaBot green and only that; a
+>    second brand hue is the single fastest way to look like two products.
 
 ### Legacy palette map
 
@@ -124,7 +140,7 @@ The pre-redesign code is swept onto tokens by role, not by hue:
 
 | Was | Now |
 | --- | --- |
-| `blue` · `sky` · `cyan` · `indigo` · `orange` | `accent` (near-white) |
+| `blue` · `sky` · `cyan` · `indigo` · `orange` | `accent` (the brand green) |
 | `emerald` · `green` · `teal` | `success` |
 | `red` · `rose` | `danger` |
 | `amber` · `yellow` | `warning` |

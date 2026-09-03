@@ -853,7 +853,10 @@ body {
 .token.url,
 .language-css .token.string,
 .style .token.string {
-  color: var(--accent);
+  /* --syn-plain, not --accent: an operator is code, not chrome. When the
+     accent was near-white the two happened to coincide; now that it carries
+     the brand hue, following it would paint every `=` and `=>` green. */
+  color: var(--syn-plain);
 }
 
 .token.atrule,
@@ -1346,14 +1349,23 @@ input:-webkit-autofill:focus {
 .lit-lift  { box-shadow: var(--shadow-lift); }
 .lit-lift-lg { box-shadow: var(--shadow-lift-lg); }
 
-/* Focus and active states brighten the hairline rather than colouring it —
-   Cursor never tints an edge, it only raises its value. */
+/* Focus and active states colour the hairline. Cursor only raises a grey
+   edge's value; we tint it, because on a dark panel one grey ring against
+   another grey ring does not tell the operator which control is live. */
 .lit-accent::before {
   background: var(--lit-accent-top);
 }
 .lit-focus:focus-within::before {
   background: var(--lit-accent-top);
   transition: background var(--dur) var(--ease);
+}
+
+/* The composer, focused: the brand hairline above, plus a flat wash outside
+   it so the whole box reads as live from the corner of the eye. It is a solid
+   3px ring, not a blurred halo — the surfaces stay flat. */
+.lit-focus:focus-within {
+  box-shadow: 0 0 0 3px var(--focus-ring);
+  transition: box-shadow var(--dur) var(--ease);
 }
 
 /* A hairline rule for separating turns. Flat end to end: Cursor draws a rule

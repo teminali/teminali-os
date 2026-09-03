@@ -79,6 +79,9 @@ export default {
           DEFAULT: "var(--accent)",
           hover: "var(--accent-hover)",
           dim: "var(--accent-dim)",
+          // Text on an accent FILL. The accent is a light green, so anything
+          // sitting on it is dark; `text-ink-high` on `bg-accent` is 2.1:1.
+          ink: "var(--accent-ink)",
           code: "var(--accent-code)",
           codeBg: "var(--accent-code-bg)",
           codeBorder: "var(--accent-code-border)",
