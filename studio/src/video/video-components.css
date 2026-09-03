@@ -1082,6 +1082,27 @@
     min-width: 88px;
   }
 
+  /* The transport is centred in its own row — but that row is the flex
+     child to the LEFT of the master meters, so its centre is the bar's
+     centre minus half the meters. The play disc sat ~85px left of the
+     picture it belongs under, which is exactly what it looked like.
+
+     So the bar gets a mirror of the meters on its other side. A `::before`
+     rather than a spacer element, because `> :first-child` and
+     `> :last-child` above still have to mean the transport and the meters,
+     and a pseudo-element is not matched by either — an added <div> would
+     have silently moved the 336px minimum onto the spacer.
+
+     159px is this file's own measured meters width (see the transport-row
+     note above); the mirror shares the meters' shrink and floor so the two
+     narrow together and the centre holds while they do. */
+  .video-workspace .editor-program-transport::before {
+    content: '';
+    width: 159px;
+    flex-shrink: 1;
+    min-width: 88px;
+  }
+
   /* And the transport has to CLAIM that width, or nothing yields: the
      controls are `flex-1 min-w-0`, so they absorb whatever is left over
      and the row is never over-full for the meters to shrink against.
@@ -1097,6 +1118,14 @@
      a 20px stub would read as a broken meter rather than as no meter. */
   .video-workspace[data-tier='sm'] .editor-program-transport > :last-child,
   .video-workspace[data-tier='xs'] .editor-program-transport > :last-child {
+    display: none;
+  }
+
+  /* Nothing to mirror once the meters are gone: the transport is then the
+     only child and centring it needs no help. Leaving the mirror in would
+     push it right by exactly the error it was added to remove. */
+  .video-workspace[data-tier='sm'] .editor-program-transport::before,
+  .video-workspace[data-tier='xs'] .editor-program-transport::before {
     display: none;
   }
 

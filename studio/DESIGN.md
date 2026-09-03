@@ -527,6 +527,18 @@ not to hide it. At `lg` the header is effectively full, so the toggle is drawn
 icon-only wherever the inspector is seated and the format strip beside `Program`
 truncates to pay for it. `tests/responsive-layout.test.mjs` holds the shape.
 
+**The transport is centred on the picture, not on what is left of the row.**
+It is centred within `.editor-transport-row`, but that row is the flex child to
+the *left* of the master meters, so its centre was the bar's centre minus half
+the meters — the play disc sat under the picture's left-of-centre. The bar now
+carries a mirror of the meters on its other side as
+`.editor-program-transport::before`, sharing their width, shrink and 88px floor
+so the pair narrow together. A pseudo-element rather than a spacer `<div>`,
+because `> :first-child` and `> :last-child` in the same layer still have to
+mean the transport and the meters; an added element would have moved the 336px
+minimum onto the spacer. At `sm`/`xs` the meters are `display: none` and so is
+the mirror, or it would push the transport right by the error it removes.
+
 **The track gutter is wider than the tier minimum** — 76 / 120 / 150 / 176px
 across the four tiers. It was cut to the narrowest legible width when the
 folding rules were written, which is the right instinct applied one step too
