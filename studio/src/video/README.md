@@ -15,7 +15,8 @@ pitch-shift. If you re-derive the manifest, non-`.ts` assets are the class of
 file to check for by hand. Import, export and recording did not come across —
 those are the parts that genuinely need the Cut's 80 IPC channels.
 
-Mounted by [VideoPane.tsx](../components/workspace/panels/VideoPane.tsx).
+Mounted by [VideoPane.tsx](../components/workspace/panels/VideoPane.tsx). Driven from the
+chat through [videoToolCalls.ts](../services/videoToolCalls.ts) — see **P2** below.
 
 ## Do not tidy these files up into `src/`
 
@@ -86,12 +87,43 @@ and 1020px; at 452px the pane itself is correct but `PreviewPlayer`'s own
 monitor and transport bars clip, because the Cut never runs that column below
 ~670px. The tab strip's expand button (452 → 736) is the intended answer.
 
+## P2 — the chat edits the timeline
+
+`mcp/toolRegistry.ts` is a **reduction of the Cut's 6,230-line file of the same
+name to three tools**: `describe_timeline`, `patch_clip` and `set_effect_param`.
+Same path, same exports (`KERF_TOOLS`, `getTool`, `executeTool`,
+`getToolManifest`), same Zod schemas — so adding a fourth is a copy-paste out of
+the Cut, and syncing is a diff. It cost one dependency, `zod ^3.24.2`, pinned to
+the range the Cut declares.
+
+Two things the Cut's `executeTool` does are gone, because neither store came
+across: it logs every call to `useMcpStore`, and it calls `followToolCall` so
+the Cut's own UI follows the agent's work. Their absence costs nothing here —
+the tools write to the stores the mounted components render from.
+
+Nothing in this folder knows about the chat. The wiring lives in the host:
+
+| file | what it does |
+|---|---|
+| [`services/videoToolCalls.ts`](../services/videoToolCalls.ts) | the protocol: parse a `video-tool` fence, run the calls, build the observation the model reads next turn. The shell counterpart is `agentCommands.ts` and the two are shaped alike. |
+| [`services/frontierEngine.ts`](../services/frontierEngine.ts) | `EngineCapabilities.videoTools` / `.runVideoTool`. Injected, never imported: the engine must not know a video panel exists. A boundary test enforces that. |
+| [`services/aiService.ts`](../services/aiService.ts) | the host adapter, and the only file that imports this registry. |
+
+**There is no approval gate on these tools**, unlike shell commands. A command
+can delete a file; these three write to two in-memory Zustand stores that
+nothing persists, each call is exactly **one** entry on the undo stack, and the
+panel is on screen while it happens. Import and export are the tools that will
+need a gate, and they are P3/P4.
+
+`aiService` used to intercept every prompt matching
+`/video|timeline|silence|beat|caption|track/` and answer it with one hardcoded
+silence-split against the Cut running on port 3888, reported as "completed and
+verified" whatever had been asked. That intercept is gone. `MCPRemoteSyncService`
+stays — talking to a *separate* Cut is a different feature and still a supported
+one.
+
 ## Still to come
 
-- **P2** — drive the editor from Code's chat. The Cut's 115 `KERF_TOOLS`
-  operate on these Zustand stores in-process, so no bridge, RPC or port is
-  needed now that `timelineStore` lives in this renderer. Start with the
-  handful of generic tools in `teminaliCut/src/mcp/toolRegistry.ts`.
 - **P3** — media import (`dialog:openMedia`, `ffmpeg:process`).
 - **P4** — export (`export:*`, `render:*`). Until then, export stays in
   Teminali Cut, which is why that app is still shipping.

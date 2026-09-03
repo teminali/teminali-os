@@ -27,6 +27,9 @@ test("the model engine imports no host or editor capability", async () => {
   }
   // Nor may it reach into UI.
   assert.equal(imported.some((module) => module.includes("components/")), false, "engine must not import components");
+  // Nor into the ported editor. The engine knows there are tools, not that
+  // they edit video: `videoToolCalls` is a protocol, `src/video/` is the app.
+  assert.equal(imported.some((module) => module.includes("/video/")), false, "engine must not import the editor");
 });
 
 test("the engine receives execution as an injected capability", async () => {
@@ -47,6 +50,15 @@ test("the engine degrades to no-shell rather than assuming one exists", async ()
   assert.match(engine, /if \(capabilities\.runCommand && hasExecutableCommands\(turnText\)/);
 });
 
+test("the engine degrades to no-editor rather than assuming one exists", async () => {
+  const engine = await read("frontierEngine.ts");
+  // A headless caller supplies no capabilities, so the tool branch must be
+  // guarded by the injected executor before anything else.
+  assert.match(engine, /if \(capabilities\.runVideoTool && hasVideoToolCalls\(turnText\)/);
+  // And the prompt must not advertise tools the host did not hand over.
+  assert.match(engine, /if \(capabilities\.videoTools && capabilities\.videoTools\.length > 0\)/);
+});
+
 test("the host adapter supplies capabilities and owns host integrations", async () => {
   const adapter = await read("aiService.ts");
   // The boundary being tested is that the *host* supplies capabilities, not the
@@ -55,7 +67,13 @@ test("the host adapter supplies capabilities and owns host integrations", async 
   // singleton could only ever point at one place.
   assert.match(adapter, /function studioCapabilities\([^)]*\): EngineCapabilities/);
   assert.match(adapter, /runCommand: \(command, options\) =>\s*TerminalService\.run/);
-  assert.match(adapter, /MCPRemoteSyncService/, "MCP is a host integration and belongs here");
+  // The editor is a host integration too, and since P2 it is the one that
+  // matters: the engine is handed an executor, and only the host imports the
+  // tools it runs. Asserted on the import, not on a mention, so a comment
+  // naming the module cannot satisfy it.
+  assert.match(adapter, /^import \{ executeTool, getToolManifest \} from "\.\.\/video\/mcp\/toolRegistry";$/m,
+    "the editor tool registry belongs to the host");
+  assert.match(adapter, /runVideoTool: \(tool, args\) => executeTool/);
   // Model engineering must not have leaked back in.
   assert.equal(/streamFromOllama|resolveModelMode|keep_alive/.test(adapter), false,
     "model streaming must stay in the engine");
