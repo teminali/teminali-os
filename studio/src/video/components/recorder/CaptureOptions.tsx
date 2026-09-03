@@ -19,12 +19,13 @@
    and the real streams are opened at full resolution, so previewing
    costs nothing in the file.
 
-   ── Three groups, not eight ──────────────────────────────────────────
-   The Cut's rail also carries Auto zoom, Tutorial skill, Go live and
-   the cinematic look. None of those modules are ported yet, so none of
-   their settings are remembered by `recorderStore` — and a control that
-   writes to nothing is worse than a missing one. They come back with
-   the code that honours them.
+   ── Four groups, not eight ───────────────────────────────────────────
+   Three describe the CAPTURE and the fourth describes the EDIT the
+   build makes of it. What is still missing from the Cut's rail is the
+   tutorial skill and Go live: the first reads a transcript this app
+   cannot produce, the second has no streaming surface here. A control
+   that writes to nothing is worse than a missing one, so they come
+   back with the code that honours them.
    ═══════════════════════════════════════════════════════════════════ */
 
 import React from 'react';
@@ -33,7 +34,7 @@ import { previewCamera, previewMicrophone } from '../../engine/screenCapture';
 import type { DeviceOption } from '../../engine/screenCapture';
 import type { StickySettings } from '../../store/recorderStore';
 import type { RecorderPermissions } from '../../../types/recorder';
-import { Camera, Mic, MicOff, VideoOff, Monitor, AlertTriangle } from '../ui/icons';
+import { Camera, Mic, MicOff, VideoOff, Monitor, Film, AlertTriangle } from '../ui/icons';
 
 interface Props {
   settings: StickySettings;
@@ -210,6 +211,52 @@ export const CaptureOptions: React.FC<Props> = ({
         checked={settings.hideWindow}
         onChange={(v) => onChange('hideWindow', v)}
         hint="A floating bar stays, and it is kept out of the capture"
+      />
+    </Group>
+
+    {/*
+      The fourth group is the only one that does not describe the file
+      being written. Everything above changes what is RECORDED and is
+      therefore final the moment the take stops; everything here changes
+      what the build makes of it, and can be turned off and the take
+      rebuilt. Worth keeping visibly separate for that reason alone.
+    */}
+    <Group title="Auto edit" icon={Film}>
+      <ToggleRow
+        label="Push in on what you click"
+        checked={settings.autoZoom}
+        onChange={(v) => onChange('autoZoom', v)}
+        hint="Reads the clicks, scrolls and keystrokes, not just the pointer"
+      />
+      <ToggleRow
+        label="Draw the pointer"
+        checked={settings.drawCursor}
+        onChange={(v) => onChange('drawCursor', v)}
+        hint="A macOS screen capture does not contain the cursor"
+      />
+      <ToggleRow
+        label="Blur the zoom moves"
+        checked={settings.motionBlur}
+        onChange={(v) => onChange('motionBlur', v)}
+        hint="Smoother, and slower to scrub. Off when there are no zooms"
+      />
+      <ToggleRow
+        label="Cinematic frame"
+        checked={settings.cinematic}
+        onChange={(v) => onChange('cinematic', v)}
+        hint="Sets the picture on a backdrop, inset and rounded, and fades it up"
+      />
+      <ToggleRow
+        label="Click ticks and whooshes"
+        checked={settings.sound}
+        onChange={(v) => onChange('sound', v)}
+        hint="Rendered into the take folder, on their own audio track"
+      />
+      <ToggleRow
+        label="Mark every moment"
+        checked={settings.markMoments}
+        onChange={(v) => onChange('markMoments', v)}
+        hint="A timeline marker wherever a zoom was placed"
       />
     </Group>
   </div>

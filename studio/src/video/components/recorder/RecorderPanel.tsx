@@ -552,7 +552,7 @@ const Review: React.FC<{ stacked: boolean; onOpened?: () => void }> = ({ stacked
 
       <div className="flex-shrink-0 border-t border-line px-3 py-2 flex items-center gap-2">
         <button
-          onClick={() => { if (store.openOnTimeline()) onOpened?.(); }}
+          onClick={() => { void store.openOnTimeline().then((r) => { if (r) onOpened?.(); }); }}
           className="btn-primary h-8 px-3 text-ui gap-1.5"
           title="Lay the take down as clips and show the timeline"
         >

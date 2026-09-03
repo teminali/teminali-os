@@ -31,7 +31,8 @@ import type { CaptureSettings, DeviceOption, Take } from '../engine/screenCaptur
    them, so the sticky settings take their shape and their defaults from
    there rather than keeping a second copy. */
 import {
-  assembleRecording, RAW_ASSEMBLE, type AssembleOptions, type AssembleReport,
+  assembleRecording, RAW_ASSEMBLE, TUTORIAL_ASSEMBLE,
+  type AssembleOptions, type AssembleReport,
 } from '../engine/recordingProject';
 
 export type RecorderPhase =
@@ -58,6 +59,25 @@ export interface StickySettings {
   detachNarration: boolean;
   cameraSizePct: number;
   cameraCorner: AssembleOptions['cameraCorner'];
+
+  /* ── The auto edit ──────────────────────────────────────────────
+     What the build INTERPRETS, as opposed to what the capture
+     records. Remembered here rather than passed per build, because
+     the answer is a matter of taste and does not change between
+     takes. See `TUTORIAL_ASSEMBLE`.                              */
+
+  /** Push the picture in on what was clicked, scrolled or typed. */
+  autoZoom: boolean;
+  /** Draw the pointer, which a macOS screen capture does not record. */
+  drawCursor: boolean;
+  /** Smear the zoom moves. Costs render time on every frame of the take. */
+  motionBlur: boolean;
+  /** Sit the picture on a backdrop, inset and rounded, and fade it up. */
+  cinematic: boolean;
+  /** Click ticks and zoom whooshes, on their own track. */
+  sound: boolean;
+  /** Drop a timeline marker on every moment the detector found. */
+  markMoments: boolean;
 }
 
 const STORAGE_KEY = 'teminali.recorder.v1';
@@ -77,6 +97,18 @@ const DEFAULT_STICKY: StickySettings = {
   detachNarration: true,
   cameraSizePct: RAW_ASSEMBLE.cameraSizePct,
   cameraCorner: RAW_ASSEMBLE.cameraCorner,
+  /*
+    From `TUTORIAL_ASSEMBLE`, so the auto edit is ON out of the box.
+    That is the product: a take that arrives already cut is the whole
+    reason the detectors exist, and a user who wants the footage
+    untouched has six switches and one build to reach it.
+  */
+  autoZoom: TUTORIAL_ASSEMBLE.autoZoom,
+  drawCursor: TUTORIAL_ASSEMBLE.drawCursor,
+  motionBlur: TUTORIAL_ASSEMBLE.motionBlur,
+  cinematic: TUTORIAL_ASSEMBLE.cinematic,
+  sound: TUTORIAL_ASSEMBLE.sound,
+  markMoments: TUTORIAL_ASSEMBLE.markMoments,
 };
 
 function loadSticky(): StickySettings {
@@ -161,7 +193,7 @@ interface RecorderState {
    * The take is left on disk and the phase is left in `review`, so a
    * build that the user did not like can simply be built again.
    */
-  openOnTimeline: () => AssembleReport | null;
+  openOnTimeline: () => Promise<AssembleReport | null>;
 }
 
 let ticker: number | null = null;
@@ -582,17 +614,32 @@ export const useRecorderStore = create<RecorderState>((set, get) => ({
     publish({ phase: get().phase, elapsedMs: get().elapsedMs, markCount });
   },
 
-  openOnTimeline: () => {
+  /*
+    Async only because of the sound. `prepareSoundKit` renders the ticks
+    and the whooshes offline and writes them into the take directory
+    before the store transaction opens; with `sound` off, nothing in the
+    build awaits anything.
+  */
+  openOnTimeline: async () => {
     const take = get().take;
     if (!take?.screen) return null;
 
     const settings = get().settings;
     try {
-      const report = assembleRecording(take, {
+      const report = await assembleRecording(take, {
         detachNarration: settings.detachNarration,
         cameraSizePct: settings.cameraSizePct,
         cameraCorner: settings.cameraCorner,
         mirrorCamera: settings.mirrorCamera,
+        autoZoom: settings.autoZoom,
+        zoomShape: TUTORIAL_ASSEMBLE.zoomShape,
+        drawCursor: settings.drawCursor,
+        motionBlur: settings.motionBlur,
+        markMoments: settings.markMoments,
+        cinematic: settings.cinematic,
+        look: TUTORIAL_ASSEMBLE.look,
+        sound: settings.sound,
+        soundOptions: TUTORIAL_ASSEMBLE.soundOptions,
       });
       /*
         The notes are the build's own account of what it had to give

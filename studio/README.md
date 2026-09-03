@@ -315,20 +315,36 @@ options) mounted through `src/components/workspace/panels/RecorderPane.tsx`, and
 window and so lives outside `src/video/`, loaded from this same bundle at
 `?window=recorder-bar`.
 
-`src/video/engine/recordingProject.ts` turns a finished take into a project:
-**Open on the timeline** in the review lays the screen, the camera and the
-narration down as separate clips on their own tracks, sized and cornered by
-`pictureInPicture.ts`, in one undoable step. It is a RAW assemble — nothing is
-interpreted — so its options are the four the panel actually offers
-(`detachNarration`, `cameraSizePct`, `cameraCorner`, `mirrorCamera`) rather than
-the Cut's twenty.
+`src/video/engine/recordingProject.ts` turns a finished take into a project.
+**Open on the timeline** in the review builds it in one undoable step, and what
+that build contains is a matter of the six **Auto edit** switches on the capture
+rail. All of them are on out of the box (`TUTORIAL_ASSEMBLE`); turn all six off
+and you get `RAW_ASSEMBLE` — screen, camera and narration as separate clips on
+their own tracks, sized and cornered by `pictureInPicture.ts`, nothing
+interpreted.
 
-**Not yet ported from the Cut:** the auto-edit stack — `cursorZoom`,
-`cursorLayer`, `cinematicLook`, `kineticCaptions`, `sfxEngine`,
-`recordingSound` — and with it the Cut's `TUTORIAL_ASSEMBLE`, which also needs a
-speech model this app does not ship. The capture options the panel offers are
-Camera, Sound and Capture only — Auto zoom, Tutorial skill and Go live belong to
-that stack and are not shown, rather than shown and inert.
+| Switch | What it adds | Engine |
+| --- | --- | --- |
+| Push in on what you click | Zoom moments detected from real clicks, scrolls, keystrokes and marks, keyframed onto the screen clip | `cursorZoom.ts` |
+| Draw the pointer | A shape layer following the cursor track, mapped through the zoom's own transform | `cursorLayer.ts` |
+| Blur the zoom moves | `motionBlur` on the screen clip, and only when zooms were placed | — |
+| Cinematic frame | Backdrop track, the picture inset and rounded on it, fades in and out | `cinematicLook.ts` |
+| Click ticks and whooshes | Ticks and whooshes rendered offline into the take folder, on their own audio track | `sfxEngine.ts`, `recordingSound.ts` |
+| Mark every moment | A timeline marker wherever a zoom was placed | — |
+
+`assembleRecording` is `async` for one reason: the sound is rendered and written
+to disk before the store transaction opens. With that switch off, nothing in the
+build awaits anything.
+
+**Not yet ported from the Cut:** everything decided from the WORDS. The camera
+taking the whole frame during a spoken pause, opening on the face for an
+introduction, and both caption tracks are all read out of a TRANSCRIPT, and this
+app ships no speech model — `Take.transcript` exists and nothing fills it. Those
+are not options that would behave conservatively without one; the Cut's
+`alignToSpeech` returns null on an empty transcript, so `cameraOnPauses` would
+find nothing every time. They are absent from `AssembleOptions` rather than
+present and pinned to `false`, and Tutorial skill and Go live are absent from the
+capture rail rather than shown and inert.
 
 ### File ingestion
 

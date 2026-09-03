@@ -611,13 +611,26 @@ a hard-edged dark square behind the rounded pill. It is a second renderer with
 no access to the store: one `recorder:state` message in, one command out.
 
 **Review promises nothing it cannot do.** It offers **Open on the timeline**,
-which is a RAW assemble and says so: `recordingProject.ts` lays down screen,
-camera and narration as separate clips and stops. Nothing is interpreted, so
-there is nothing to undo piecemeal — the whole build is one history entry.
-The Cut's Tutorial skill, which places zooms on real clicks and captions the
-narration, needs a speech model this app does not ship and the unported
-auto-edit stack besides; Auto zoom, Tutorial skill and Go live are therefore
-absent from the capture options rather than present and inert.
+and what that builds is what the **Auto edit** group on the capture rail says it
+will: zooms pushed in on real clicks, a drawn pointer, a cinematic frame, click
+ticks. Every switch there is honoured by an engine module that ships —
+`cursorZoom`, `cursorLayer`, `cinematicLook`, `sfxEngine`, `recordingSound` —
+and turning all six off leaves `RAW_ASSEMBLE`, which lays down screen, camera
+and narration and stops. Either way the whole build is one history entry, so
+there is nothing to undo piecemeal.
+
+**The fourth group on the rail is the only one that is not final.** Camera,
+Sound and Capture describe the FILE being written and are settled the moment the
+take stops. Auto edit describes what the build makes of that file, which can be
+turned off and rebuilt. That is why it is a separate group rather than more rows
+under Capture.
+
+What Review still cannot offer is everything decided from the WORDS: the camera
+taking the whole frame during a spoken pause, opening on a spoken introduction,
+and captions. All three read a TRANSCRIPT and this app ships no speech model, so
+they are absent from `AssembleOptions` rather than pinned to `false` — the Cut's
+`alignToSpeech` returns null on an empty transcript, so they would be inert, not
+conservative. Tutorial skill and Go live are likewise absent from the rail.
 
 **The panel switch is the pane's decision, not the recorder's.** Everything
 under `src/video/` knows about tracks and clips and nothing about which tabs the
