@@ -34,6 +34,13 @@ files:
 
 icon: build/icon.png
 
+# The MCP shim is spawned as its own process, and nothing can be spawned from
+# inside an asar archive. server/video-mcp.js rewrites the path it hands the
+# agent CLIs to point at this unpacked copy; unpack it or every tool call from
+# the Claude Code and Codex engines fails with ENOENT.
+asarUnpack:
+  - electron/videoMcpStdio.cjs
+
 # server/gateway.js imports "../../gateway/frontier-runner.js" — the one module
 # under server/ that reaches outside this package. From inside the archive that
 # path resolves to <Resources>/gateway/frontier-runner.js, so the directory is

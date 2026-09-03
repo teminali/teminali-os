@@ -17,6 +17,7 @@ import { PANEL_DEFAULTS, usePanelStore, type PanelKind } from "../../store/panel
 import { PanelGlyph } from "../workspace/PanelGlyph";
 import { useStudioStore } from "../../store/studioStore";
 import { PlatformService } from "../../services/platformService";
+import { ACTIVITY_BAR_WIDTH } from "../sidebar/ActivityBar";
 
 /**
  * The window chrome, in three regions that line up with the three panes below:
@@ -72,17 +73,18 @@ export const StudioTitleBar: React.FC<StudioTitleBarProps> = ({
   const canGoForward = sessionHistoryIndex >= 0 && sessionHistoryIndex < sessionHistory.length - 1;
 
   const desktop = isDesktopShell();
-  // The rail is gone, so the title bar's left region is the sidebar and nothing
-  // else. When the sidebar is hidden the region collapses to just enough room
-  // for the traffic lights and the toggle, which then sit over the canvas —
-  // which is what Cursor does too.
-  const railWidth = sidebarCollapsed ? "auto" : `${sidebarWidth}px`;
+  // The left region spans both halves of the dock — the activity bar and the
+  // panel — so this border lands on the same pixel as the panel's own. When the
+  // panel is collapsed the region shrinks to just enough room for the traffic
+  // lights and the toggle, which then sit over the canvas with the rail's
+  // glyphs beneath them.
+  const railWidth = sidebarCollapsed ? "auto" : `${ACTIVITY_BAR_WIDTH + sidebarWidth}px`;
 
   // Administrator-only panels are omitted rather than shown disabled: an
   // operator who is not an admin has no use for a row that always refuses. The
   // routes behind them re-check regardless — this is presentation, not the gate.
   const adminOnly = new Set<PanelKind>(["release", "arena"]);
-  const kinds = (["file", "terminal", "browser", "canvas", "side", "claude", "codex", "usage", "arena", "release", "guardian"] as PanelKind[])
+  const kinds = (["file", "terminal", "browser", "canvas", "video", "side", "claude", "codex", "usage", "arena", "release", "guardian"] as PanelKind[])
     .filter((kind) => !adminOnly.has(kind) || isAdmin);
 
   const addItems: MenuItem[] = kinds.map((kind) => ({
@@ -107,7 +109,12 @@ export const StudioTitleBar: React.FC<StudioTitleBarProps> = ({
     >
       {/* ── Sidebar region ─────────────────────────────────────────────── */}
       <div
-        className="flex items-center gap-3 pl-[11px] pr-2 border-r border-edge-chrome flex-shrink-0"
+        // No border while the panel is collapsed: the region is then wider than
+        // the 48px rail beneath it, and a rule at ~90px would cross the canvas
+        // a finger's width from the rail's own edge. Nothing to divide, no line.
+        className={`flex items-center gap-3 pl-[11px] pr-2 flex-shrink-0 ${
+          sidebarCollapsed ? "" : "border-r border-edge-chrome"
+        }`}
         style={{ width: railWidth, WebkitAppRegion: "no-drag" } as React.CSSProperties}
       >
         {desktop ? (
@@ -186,23 +193,36 @@ export const StudioTitleBar: React.FC<StudioTitleBarProps> = ({
                   onKeyDown={(event) => {
                     if (event.key === "Enter" || event.key === " ") activate(panel.id);
                   }}
-                  className={`group flex items-center gap-2 h-7 px-2.5 rounded-sm cursor-pointer text-xs whitespace-nowrap transition-colors duration-ds ease-ds ${
-                    active ? "bg-surface-tab text-ink-strong" : "text-ink-muted hover:text-ink-dim"
+                  title={panel.label}
+                  aria-label={panel.label}
+                  className={`group flex items-center justify-center h-7 rounded-sm cursor-pointer text-xs whitespace-nowrap transition-all duration-ds ease-ds ${
+                    active
+                      ? "gap-2 px-2 bg-surface-tab text-ink-strong"
+                      : "w-7 text-ink-muted hover:text-ink-dim hover:bg-surface-hover"
                   }`}
                 >
                   <PanelGlyph kind={panel.kind} size={13} />
-                  <span className="max-w-[120px] truncate">{panel.label}</span>
-                  <button
-                    type="button"
-                    aria-label={`Close ${panel.label}`}
-                    onClick={(event) => {
-                      event.stopPropagation();
-                      close(panel.id);
-                    }}
-                    className="opacity-0 group-hover:opacity-60 hover:!opacity-100 transition-opacity duration-ds ease-ds"
-                  >
-                    <X size={12} />
-                  </button>
+                  {/* Square icon tiles, because the strip has to hold a growing
+                      set of tools — the video editor is only the first. Just
+                      the active tile spends width on its label, which is what
+                      keeps three tabs called "File" tellable apart; the rest
+                      carry theirs in the tooltip. */}
+                  {active && (
+                    <>
+                      <span className="max-w-[120px] truncate">{panel.label}</span>
+                      <button
+                        type="button"
+                        aria-label={`Close ${panel.label}`}
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          close(panel.id);
+                        }}
+                        className="opacity-60 hover:opacity-100 transition-opacity duration-ds ease-ds"
+                      >
+                        <X size={12} />
+                      </button>
+                    </>
+                  )}
                 </div>
               );
             })}

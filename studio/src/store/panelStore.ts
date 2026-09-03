@@ -2,9 +2,10 @@
  * Workspace panel model.
  *
  * The redesign replaces the old single-slot split view with a tab strip that
- * holds any number of panels of eleven kinds — terminal, browser, canvas, side
- * chat, file, guardian, the two agent CLIs, usage, benchmark and release (the
- * last of which the tab strip hides for non-administrators). It lives in its
+ * holds any number of panels of twelve kinds — terminal, browser, canvas, side
+ * chat, file, guardian, the two agent CLIs, usage, benchmark, release (the
+ * last of which the tab strip hides for non-administrators) and the video
+ * editor. It lives in its
  * own store rather than inside
  * studioStore because it is pure view state: which panels exist, which one is
  * showing, and how wide the strip is. None of it belongs in the chat/session
@@ -15,7 +16,7 @@
 import { create } from "zustand";
 import { persist, createJSONStorage } from "zustand/middleware";
 
-export type PanelKind = "terminal" | "browser" | "canvas" | "side" | "file" | "guardian" | "claude" | "codex" | "usage" | "release" | "arena";
+export type PanelKind = "terminal" | "browser" | "canvas" | "side" | "file" | "guardian" | "claude" | "codex" | "usage" | "release" | "arena" | "video";
 
 export interface PanelTab {
   id: string;
@@ -48,6 +49,10 @@ export const PANEL_DEFAULTS: Record<PanelKind, { label: string; shortcut: string
   // Administrators only; the tab strip hides it for everyone else.
   release: { label: "Release", shortcut: "⇧⌘R" },
   arena: { label: "Benchmark", shortcut: "⇧⌘N" },
+  // The video editor, ported from Teminali Cut. One at a time: it owns a
+  // timeline and a preview surface, and a second copy would be a second
+  // project competing for the same playback clock.
+  video: { label: "Video Editor", shortcut: "⇧⌘V" },
 };
 
 interface PanelState {

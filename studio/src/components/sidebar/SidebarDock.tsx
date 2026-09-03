@@ -1,22 +1,25 @@
 import React from "react";
 import { ResizeHandle } from "../layout/ResizeHandle";
-import type { SidebarTabId } from "./ActivityBar";
+import { ActivityBar, type SidebarTabId } from "./ActivityBar";
 import { Sidebar } from "./Sidebar";
 import type { UseUpdatesResult } from "../../hooks/useUpdates";
 
 /**
- * The left dock — one panel, flush against the window edge.
+ * The left dock: the activity bar, and the panel it drives.
  *
- * This was a 48px icon rail plus the panel it drove. Cursor's agent window has
- * no rail: a single 259px sidebar carries the traffic lights, the nav rows, the
- * repository list and the account footer, and its right edge is the only
- * structural divider in the shell. Splitting that into rail + panel put two
- * vertical seams where the reference has one, and no amount of recolouring
- * would have made the result read as Cursor.
+ * This was a rail plus a panel, then a single panel with labelled nav rows,
+ * and it is a rail plus a panel again — the operator asked for "the left
+ * sidebar buttons only so it gets thinner", answered as VS Code's shape. The
+ * argument the single-panel version was built on still stands and was traded
+ * away knowingly: Cursor's agent window has one vertical seam, and this has
+ * two. What it buys is that the switch costs 48px instead of 212, that Media,
+ * Skills, Explorer, Search and Chats all fit in it without wrapping, and that
+ * the panel can be dismissed without losing the way back to it.
  *
- * So the dock is now just the panel: one flat `--rail-*` fill, one hairline on
- * the right, and the resize edge. Choosing a view moved into the panel itself,
- * where a nav row does the job the rail's icons used to.
+ * The rail is not hidden when the panel is collapsed. That is the difference
+ * between collapsing and closing: with the glyphs still there, a collapsed
+ * sidebar is one click from being open on any view, and ⌘B stops being the
+ * only way back.
  */
 
 export interface SidebarDockProps {
@@ -51,30 +54,37 @@ export const SidebarDock: React.FC<SidebarDockProps> = ({
   updates,
   onOpenUpdate,
   activeView,
-}) => {
-  if (collapsed) return null;
+}) => (
+  <>
+    <ActivityBar
+      tab={tab}
+      onSelectTab={onSelectTab}
+      collapsed={collapsed}
+      onSetCollapsed={onSetCollapsed}
+      onNewChat={onNewChat}
+      onOpenCustomize={onOpenCustomize}
+      activeView={activeView}
+    />
 
-  return (
-    <>
-      <aside
-        className="flex-shrink-0 flex flex-col min-h-0 border-r border-edge-chrome bg-rail-mid"
-        style={{ width }}
-        aria-label="Sidebar"
-      >
-        <Sidebar
-          tab={tab}
-          onSelectTab={onSelectTab}
-          activeView={activeView}
-          onNewChat={onNewChat}
-          onOpenCustomize={onOpenCustomize}
-          onOpenSettings={onOpenSettings}
-          onConnectGitHub={onConnectGitHub}
-          updates={updates}
-          onOpenUpdate={onOpenUpdate}
-        />
-      </aside>
+    {!collapsed && (
+      <>
+        <aside
+          className="flex-shrink-0 flex flex-col min-h-0 border-r border-edge-chrome bg-rail-mid"
+          style={{ width }}
+          aria-label="Sidebar"
+        >
+          <Sidebar
+            tab={tab}
+            activeView={activeView}
+            onOpenSettings={onOpenSettings}
+            onConnectGitHub={onConnectGitHub}
+            updates={updates}
+            onOpenUpdate={onOpenUpdate}
+          />
+        </aside>
 
-      <ResizeHandle onResize={onResize} onDoubleClick={onResetWidth} orientation="vertical" />
-    </>
-  );
-};
+        <ResizeHandle onResize={onResize} onDoubleClick={onResetWidth} orientation="vertical" />
+      </>
+    )}
+  </>
+);

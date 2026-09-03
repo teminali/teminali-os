@@ -1,0 +1,663 @@
+/* ═══════════════════════════════════════════════════════════════════
+   VIDEO PANEL — PORTED COMPONENT CLASSES
+
+   The editor slice does not dress itself with Tailwind alone. Its
+   components reach for 63 hand-written classes — `.pro-btn`,
+   `.pro-input`, `.editor-clip`, `.editor-track-lane`, `.seg-item`,
+   `.well` — that live in `teminaliCut/src/index.css`. Without them the
+   timeline renders as unstyled divs, so they come across with the TSX.
+
+   MECHANICALLY EXTRACTED, then scoped. Every rule below is the Cut's,
+   with three deliberate changes:
+
+   1. EVERY SELECTOR IS PREFIXED WITH `.video-workspace`. Most of these
+      names are generic enough that Code will plausibly want them one
+      day — `.card`, `.chip`, `.well`, `.glass`, `.kbd`, `.scrim`,
+      `.tab-item`. Today exactly one already collides (`.panel-title`,
+      in Code's own `src/index.css`), and the scope is what keeps that
+      from being a bug. The two exceptions are `.dragging-h` and
+      `.dragging-move`: the slice puts those on `document.body` during
+      a drag, which is outside the pane by definition.
+
+   2. LAUNCHER-ONLY OVERRIDES ARE DROPPED. The Cut re-skins these same
+      classes under `.home-stage`, `.hp-projects-head`, `.kp-top` and
+      `.editor-library`/`.editor-inspector` — scopes that exist on its
+      home screen and side rails, none of which ported.
+
+   3. TWO `@apply`s OF A CUSTOM CLASS ARE INLINED. `.card-interactive`
+      did `@apply card`, and `.num-field` did `@apply pro-input`.
+      Tailwind resolves `@apply card` by looking for a component named
+      exactly `card`; once the definition became `.video-workspace
+      .card` that lookup fails, so those two rules carry the borrowed
+      declarations directly.
+
+   SYNCING WITH THE CUT: this file is derived, not authored. When a
+   rule changes upstream, change it here the same way — the selector
+   bodies are otherwise character-for-character the Cut's, so a diff
+   between the two still reads.
+   ═══════════════════════════════════════════════════════════════════ */
+
+/* Timecode numerals line up. The Cut writes the third selector as
+   `.font-mono`, and it cannot be written that way here: a dozen rules below
+   `@apply font-mono`, and a rule whose selector is `.font-mono` reads to
+   Tailwind as a redefinition of the utility those rules are applying, which
+   it rejects as a circular dependency. `[class~="font-mono"]` matches exactly
+   the same elements without being a class selector, so the cycle never forms.
+   Kept outside `@layer components` for the same reason. */
+.video-workspace .tabular,
+.video-workspace input[type='number'],
+.video-workspace [class~="font-mono"] {
+  font-variant-numeric: tabular-nums;
+}
+
+@layer components {
+  .video-workspace .pro-input :focus-visible,
+  .video-workspace .squircle-input :focus-visible {
+    box-shadow: none;
+  }
+
+  .video-workspace .panel-header {
+    @apply flex items-center justify-between bg-spectrum-panelHeader border-b border-line flex-shrink-0;
+    gap: var(--sp-3);
+    padding: 0 var(--sp-4);
+    height: var(--h-bar);
+  }
+
+  .video-workspace .panel-title {
+    @apply text-spectrum-text truncate;
+    display: inline-flex;
+    align-items: center;
+    gap: var(--sp-2);
+    font-size: var(--text-sm);
+    font-weight: 600;
+    letter-spacing: -0.003em;
+    text-transform: none;
+  }
+
+  .video-workspace .section-label {
+    @apply text-spectrum-textFaint;
+    font-size: var(--text-xs);
+    font-weight: 500;
+    letter-spacing: 0;
+    text-transform: none;
+  }
+
+  .video-workspace .hairline {
+    @apply h-px bg-line w-full;
+  }
+
+  .video-workspace .card,
+  .video-workspace .squircle-card {
+    @apply bg-spectrum-card rounded-squircle-md;
+    border: 1px solid var(--line);
+    transition: background-color var(--t-base) var(--ease), border-color var(--t-base) var(--ease);
+  }
+
+  .video-workspace .card-interactive {
+    @apply bg-spectrum-card rounded-squircle-md cursor-pointer;
+    border: 1px solid var(--line);
+    transition: background-color var(--t-base) var(--ease), border-color var(--t-base) var(--ease);
+  }
+
+  .video-workspace .card-interactive:hover {
+    @apply bg-spectrum-cardHover;
+    border-color: var(--line-strong);
+  }
+
+  .video-workspace .well {
+    @apply bg-spectrum-sunken border border-line rounded-squircle-sm;
+  }
+
+  .video-workspace .row-item {
+    display: flex;
+    align-items: center;
+    gap: var(--sp-3);
+    width: 100%;
+    height: var(--h-row);
+    margin-bottom: 1px;
+    padding: 0 var(--sp-3);
+    border-radius: var(--r-sm);
+    color: var(--text-muted);
+    background: transparent;
+    text-align: left;
+    transition: background-color var(--t-fast) var(--ease), color var(--t-fast) var(--ease);
+  }
+
+  .video-workspace .row-item:hover {
+    background: var(--surface-hover);
+    color: var(--text-bright);
+  }
+
+  .video-workspace .row-item-active {
+    background: var(--surface-active);
+    color: var(--text-bright);
+  }
+
+  .video-workspace .glass {
+    background: var(--surface);
+    border: 1px solid var(--line-popover);
+    box-shadow: var(--lift-float);
+  }
+
+  .video-workspace .pro-btn,
+  .video-workspace .pro-btn-filled,
+  .video-workspace .squircle-btn,
+  .video-workspace .btn-primary,
+  .video-workspace .btn-ghost-danger {
+    transition: background-color var(--t-fast) var(--ease),
+    color var(--t-fast) var(--ease),
+    border-color var(--t-fast) var(--ease),
+    box-shadow var(--t-base) var(--ease),
+    filter var(--t-fast) var(--ease),
+    transform var(--t-base) var(--ease);
+  }
+
+  .video-workspace .pro-btn:active:not(:disabled),
+  .video-workspace .pro-btn-filled:active:not(:disabled),
+  .video-workspace .squircle-btn:active:not(:disabled),
+  .video-workspace .btn-primary:active:not(:disabled),
+  .video-workspace .btn-ghost-danger:active:not(:disabled) {
+    transform: scale(0.975);
+    transition-duration: var(--t-press);
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .video-workspace .pro-btn:active:not(:disabled),
+    .video-workspace .pro-btn-filled:active:not(:disabled),
+    .video-workspace .squircle-btn:active:not(:disabled),
+    .video-workspace .btn-primary:active:not(:disabled),
+    .video-workspace .btn-ghost-danger:active:not(:disabled) {
+      transform: none;
+    }
+  }
+
+  .video-workspace .pro-btn {
+    @apply rounded-squircle-sm text-spectrum-textMuted inline-flex items-center justify-center flex-shrink-0;
+    background-color: transparent;
+    border: 1px solid transparent;
+    gap: var(--sp-2);
+  }
+
+  .video-workspace .pro-btn:hover:not(:disabled) {
+    @apply bg-spectrum-hover text-spectrum-text;
+  }
+
+  .video-workspace .pro-btn:active:not(:disabled) {
+    @apply bg-spectrum-active;
+  }
+
+  .video-workspace .pro-btn:disabled {
+    @apply opacity-25 cursor-not-allowed;
+  }
+
+  .video-workspace .pro-btn-active {
+    background-color: var(--surface-3);
+    color: var(--text-bright);
+    border-color: var(--line-popover);
+  }
+
+  .video-workspace .pro-btn-filled,
+  .video-workspace .squircle-btn {
+    @apply rounded-squircle-sm bg-spectrum-card text-spectrum-textMuted inline-flex items-center justify-center flex-shrink-0;
+    border: 1px solid var(--line);
+    gap: var(--sp-2);
+  }
+
+  .video-workspace .pro-btn-filled:hover:not(:disabled),
+  .video-workspace .squircle-btn:hover:not(:disabled) {
+    @apply bg-spectrum-cardHover text-spectrum-text;
+    border-color: var(--line-strong);
+  }
+
+  .video-workspace .pro-btn-filled:active:not(:disabled),
+  .video-workspace .squircle-btn:active:not(:disabled) {
+    @apply bg-spectrum-active;
+  }
+
+  .video-workspace .pro-btn-filled:disabled,
+  .video-workspace .squircle-btn:disabled {
+    @apply opacity-25 cursor-not-allowed;
+  }
+
+  .video-workspace .btn-primary {
+    @apply rounded-squircle-sm inline-flex items-center justify-center font-semibold flex-shrink-0;
+    gap: var(--sp-2);
+    color: var(--on-accent);
+    background: var(--accent);
+    border: 1px solid transparent;
+  }
+
+  .video-workspace .btn-primary:hover:not(:disabled) {
+    background: var(--accent-hover);
+  }
+
+  .video-workspace .btn-primary:active:not(:disabled) {
+    background: var(--accent-dim);
+  }
+
+  .video-workspace .btn-primary:disabled {
+    @apply opacity-35 cursor-not-allowed;
+  }
+
+  .video-workspace .btn-ghost-danger {
+    @apply rounded-squircle-sm inline-flex items-center justify-center text-spectrum-textDim flex-shrink-0;
+    border: 1px solid transparent;
+    gap: var(--sp-2);
+  }
+
+  .video-workspace .btn-ghost-danger:hover {
+    @apply text-spectrum-red;
+    background-color: rgba(236, 103, 101, 0.12);
+    border-color: rgba(236, 103, 101, 0.30);
+  }
+
+  .video-workspace .seg-group {
+    @apply inline-flex items-center gap-px rounded-squircle-sm bg-spectrum-sunken border border-line;
+    padding: 2px;
+  }
+
+  .video-workspace .seg-item {
+    @apply text-ui-xs font-medium text-spectrum-textDim inline-flex items-center justify-center gap-1 whitespace-nowrap;
+    border-radius: var(--r-xs);
+    padding: 0 7px;
+    height: var(--h-sm);
+    border: 1px solid transparent;
+    transition: background-color var(--t-fast) var(--ease), color var(--t-fast) var(--ease),
+    border-color var(--t-fast) var(--ease), box-shadow var(--t-fast) var(--ease);
+  }
+
+  .video-workspace .seg-item:hover:not(.seg-item-active) {
+    @apply text-spectrum-text;
+    background-color: var(--surface-hover);
+  }
+
+  .video-workspace .seg-item-active {
+    @apply bg-spectrum-cardHover text-spectrum-textBright;
+  }
+
+  .video-workspace .seg-item-on {
+    color: var(--text-bright);
+    background: var(--surface-3);
+    border-color: var(--line-popover);
+  }
+
+  .video-workspace .chip {
+    @apply inline-flex items-center text-micro font-medium bg-spectrum-cardHover text-spectrum-textDim;
+    gap: var(--sp-1);
+    padding: 0 var(--sp-2);
+    border-radius: var(--r-xs);
+    height: var(--h-xs);
+  }
+
+  .video-workspace .tab-strip {
+    @apply relative flex-shrink-0 border-b border-line bg-spectrum-panel;
+  }
+
+  .video-workspace .tab-item {
+    @apply relative flex items-center text-ui-xs whitespace-nowrap text-spectrum-textDim;
+    gap: 5px;
+    padding: 8px 7px;
+    height: 32px;
+    font-weight: 600;
+    border-radius: 8px 8px 0 0;
+    transition: color var(--t-fast) var(--ease), background-color var(--t-fast) var(--ease);
+  }
+
+  .video-workspace .tab-item:hover:not(.tab-item-active) {
+    @apply text-spectrum-textMuted;
+    background-color: rgba(255, 255, 255, 0.03);
+  }
+
+  .video-workspace .tab-item-active {
+    @apply text-spectrum-text;
+  }
+
+  .video-workspace .tab-item-active::after {
+    content: '';
+    position: absolute;
+    left: 4px;
+    right: 4px;
+    bottom: 0;
+    height: 2px;
+    border-radius: 2px 2px 0 0;
+    background: var(--accent);
+  }
+
+  .video-workspace .pro-input,
+  .video-workspace .squircle-input {
+    @apply text-spectrum-textBright border border-line text-ui-sm;
+    background: var(--surface);
+    border-radius: var(--r-sm);
+    outline: none;
+    transition: border-color var(--t-fast) var(--ease), box-shadow var(--t-fast) var(--ease);
+  }
+
+  .video-workspace .pro-input:hover,
+  .video-workspace .squircle-input:hover {
+    @apply border-line-strong;
+  }
+
+  .video-workspace .pro-input:focus,
+  .video-workspace .pro-input:focus-within,
+  .video-workspace .squircle-input:focus,
+  .video-workspace .squircle-input:focus-within {
+    border-color: var(--line-popover);
+    box-shadow: 0 0 0 3px rgba(232, 232, 232, 0.13);
+  }
+
+  .video-workspace .pro-input::placeholder {
+    color: var(--text-placeholder);
+  }
+
+  .video-workspace select.pro-input,
+  .video-workspace select.squircle-input,
+  .video-workspace .pro-input select,
+  .video-workspace select.select-native {
+    color: var(--text);
+    appearance: none;
+    background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='10' height='10' viewBox='0 0 24 24' fill='none' stroke='%236f7887' stroke-width='3' stroke-linecap='round' stroke-linejoin='round'><polyline points='6 9 12 15 18 9'/></svg>");
+    background-repeat: no-repeat;
+    background-position: right 7px center;
+    padding-right: 22px;
+  }
+
+  .video-workspace .num-field {
+    @apply text-spectrum-textBright border border-line text-ui-sm flex items-center gap-1 px-1.5;
+    background: var(--surface);
+    border-radius: var(--r-sm);
+    outline: none;
+    transition: border-color var(--t-fast) var(--ease), box-shadow var(--t-fast) var(--ease);
+    height: var(--h-md);
+  }
+
+  .video-workspace .num-field input {
+    @apply w-full bg-transparent text-right text-ui-sm text-spectrum-text outline-none font-mono min-w-0;
+  }
+
+  .video-workspace .scrub-label {
+    cursor: ew-resize;
+    user-select: none;
+    transition: color var(--t-fast) var(--ease);
+  }
+
+  .video-workspace .scrub-label:hover {
+    color: var(--accent);
+  }
+
+  .video-workspace .prop-label {
+    @apply text-ui-sm text-spectrum-textMuted truncate;
+  }
+
+  .video-workspace .scrim {
+    @apply fixed inset-0 z-[1000] flex items-center justify-center animate-fade-in;
+    background: rgba(4, 6, 10, 0.82);
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
+  }
+
+  .video-workspace .modal-shell {
+    @apply overflow-hidden animate-scale-in;
+    background: var(--chrome);
+    background-image: none;
+    border: 1px solid var(--line-popover);
+    border-radius: var(--r-xl);
+    box-shadow: var(--lift-modal);
+  }
+
+  .video-workspace .kbd {
+    @apply inline-flex items-center justify-center min-w-[18px] h-[18px] px-hair rounded-squircle-2xs bg-spectrum-cardHover border border-line text-micro font-mono text-spectrum-textDim;
+  }
+
+  .video-workspace .pro-badge {
+    position: absolute;
+    top: -4px;
+    right: -4px;
+    display: inline-flex;
+    min-width: 14px;
+    height: 14px;
+    align-items: center;
+    justify-content: center;
+    padding: 0 3px;
+    border-radius: 999px;
+    color: var(--on-accent);
+    background: var(--accent);
+    font-family: var(--font-mono, ui-monospace), monospace;
+    font-size: 9px;
+    font-weight: 700;
+    line-height: 1;
+  }
+
+  .video-workspace .pro-btn-filled:focus-visible,
+  .video-workspace .squircle-btn:focus-visible {
+    box-shadow: var(--focus-ring), var(--lift-1);
+  }
+
+  .video-workspace .seg-item-active:focus-visible {
+    box-shadow: var(--focus-ring), var(--lift-1);
+  }
+
+  .video-workspace .btn-primary:focus-visible {
+    box-shadow: var(--focus-ring), 0 1px 2px rgba(0, 0, 0, 0.4), 0 6px 18px -6px rgba(232, 232, 232, 0.22);
+  }
+
+  .video-workspace input[type='range'].range-accent::-webkit-slider-thumb {
+    background: var(--accent);
+  }
+
+  .video-workspace .scrollbar-none::-webkit-scrollbar {
+    display: none;
+  }
+
+  .video-workspace .stage-bed {
+    background: var(--stage-void);
+  }
+
+  .video-workspace .editor-timeline-inner {
+    background: var(--surface);
+    border-color: rgba(255, 255, 255, 0.095);
+  }
+
+  .video-workspace .editor-program-header {
+    height: 42px;
+    padding-left: 13px;
+    padding-right: 13px;
+    background: var(--surface-2);
+    border-bottom-color: rgba(255, 255, 255, 0.075);
+    box-shadow: 0 8px 20px rgba(0, 0, 0, 0.1);
+  }
+
+  .video-workspace .editor-program-header > div:first-child > span:first-child {
+    height: 27px;
+    display: inline-flex;
+    align-items: center;
+    padding: 0 10px;
+    border: 1px solid rgba(255, 255, 255, 0.07);
+    border-radius: 7px;
+    background: rgba(255, 255, 255, 0.065);
+  }
+
+  .video-workspace .editor-program-inner {
+    background: var(--window);
+    container-type: inline-size;
+  }
+
+  .video-workspace .editor-program-stage {
+    background: var(--stage-void);
+  }
+
+  .video-workspace .editor-program-stage canvas {
+    border-radius: 11px;
+  }
+
+  .video-workspace .editor-program-transport {
+    min-height: 78px;
+    padding-bottom: 10px;
+    border-top-color: rgba(255, 255, 255, 0.105);
+    box-shadow: 0 -12px 28px rgba(0, 0, 0, 0.16);
+  }
+
+  .video-workspace .editor-playback-controls {
+    gap: 5px;
+  }
+
+  .video-workspace .editor-transport-row {
+    display: grid;
+    grid-template-columns: minmax(136px, 1fr) auto minmax(136px, 1fr);
+    column-gap: 12px;
+  }
+
+  .video-workspace .editor-transport-time {
+    justify-self: start;
+    min-height: 20px;
+    column-gap: 8px;
+  }
+
+  .video-workspace .editor-transport-actions {
+    justify-self: end;
+  }
+
+  .video-workspace .editor-align-shelf .glass {
+    border-color: rgba(255, 255, 255, 0.16);
+    background: var(--surface-2);
+    box-shadow: 0 16px 42px rgba(0, 0, 0, 0.52);
+  }
+
+  .video-workspace .editor-timeline-inner {
+    background: var(--chrome);
+    border-top-color: rgba(255, 255, 255, 0.12);
+    box-shadow: 0 -18px 42px rgba(0, 0, 0, 0.2);
+  }
+
+  .video-workspace .editor-timeline-toolbar {
+    background: var(--surface);
+    border-bottom-color: rgba(255, 255, 255, 0.09);
+    box-shadow: 0 10px 24px rgba(0, 0, 0, 0.14);
+  }
+
+  .video-workspace .editor-track-list,
+  .video-workspace .editor-timeline-lanes {
+    background: var(--chrome);
+  }
+
+  .video-workspace .editor-timeline-lanes {
+    margin-left: 2px;
+  }
+
+  .video-workspace .editor-track-list {
+    border-right-color: rgba(255, 255, 255, 0.105);
+    box-shadow: 10px 0 28px rgba(0, 0, 0, 0.14);
+  }
+
+  .video-workspace .editor-track-list-header {
+    background: var(--surface-2);
+    border-bottom-color: rgba(255, 255, 255, 0.1);
+    box-shadow: none;
+  }
+
+  .video-workspace .editor-time-ruler {
+    background: var(--surface-2);
+    box-shadow: none;
+  }
+
+  .video-workspace .editor-marker-strip {
+    background: var(--surface);
+    border-color: rgba(255, 255, 255, 0.075);
+    border-top-width: 0;
+  }
+
+  .video-workspace .editor-track-row,
+  .video-workspace .editor-track-lane {
+    border-bottom-color: rgba(255, 255, 255, 0.062);
+  }
+
+  .video-workspace .editor-track-row {
+    background: rgba(255, 255, 255, 0.012);
+  }
+
+  .video-workspace .editor-track-row:hover {
+    background: rgba(255, 255, 255, 0.045);
+  }
+
+  .video-workspace .editor-track-row.is-active {
+    background: var(--surface-2);
+    box-shadow: inset 2px 0 rgba(232, 232, 232, 0.22);
+  }
+
+  .video-workspace .editor-track-lane {
+    background: rgba(255, 255, 255, 0.008);
+  }
+
+  .video-workspace .editor-track-lane.is-active {
+    background: var(--surface-2);
+  }
+
+  .video-workspace .editor-clip {
+    top: 5px;
+    height: calc(100% - 10px) !important;
+    padding: 5px 8px;
+    border-radius: 8px;
+    box-shadow: 0 6px 16px rgba(0, 0, 0, 0.18);
+    transition: transform var(--t-fast) var(--ease), filter var(--t-fast) var(--ease), box-shadow var(--t-fast) var(--ease);
+  }
+
+  .video-workspace .editor-clip:hover {
+    transform: translateY(-1px) scale(1.005);
+    filter: brightness(1.12);
+  }
+
+  .video-workspace .editor-clip.is-selected {
+    box-shadow: 0 0 0 2px var(--accent), 0 0 0 5px rgba(232, 232, 232, 0.10),
+    0 9px 24px rgba(0, 0, 0, 0.24);
+  }
+
+  .video-workspace .checkerboard {
+    background-color: var(--chrome);
+    background-image:
+    linear-gradient(45deg, var(--surface) 25%, transparent 25%),
+    linear-gradient(-45deg, var(--surface) 25%, transparent 25%),
+    linear-gradient(45deg, transparent 75%, var(--surface) 75%),
+    linear-gradient(-45deg, transparent 75%, var(--surface) 75%);
+    background-size: 16px 16px;
+    background-position: 0 0, 0 8px, 8px -8px, -8px 0;
+  }
+
+  .video-workspace .gizmo-handle {
+    position: absolute;
+    background: #ffffff;
+    border: 1.5px solid var(--accent);
+    border-radius: 2px;
+    box-shadow: 0 1px 4px rgba(0, 0, 0, 0.6);
+    pointer-events: auto;
+    transition: transform var(--t-fast) var(--ease), background-color var(--t-fast) ease;
+  }
+
+  .video-workspace .gizmo-handle:hover {
+    transform: scale(1.3);
+    background: var(--accent);
+  }
+
+  .video-workspace .lane-stripe {
+    background-image: repeating-linear-gradient(
+    90deg,
+    rgba(255, 255, 255, 0.014) 0px,
+    rgba(255, 255, 255, 0.014) 1px,
+    transparent 1px,
+    transparent 48px
+    );
+  }
+
+  .video-workspace .clip-body {
+    background-color: var(--chrome);
+    box-shadow: 0 6px 16px rgba(0, 0, 0, 0.18);
+  }
+
+  .dragging-h,
+  .dragging-h * {
+    cursor: ew-resize !important;
+  }
+
+  .dragging-move,
+  .dragging-move * {
+    cursor: grabbing !important;
+  }
+}

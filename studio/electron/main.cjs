@@ -4,6 +4,9 @@ const fs = require("fs");
 const { attachGuardianTray } = require("./tray.cjs");
 const { attachAssistantTray } = require("./assistant-tray.cjs");
 const { attachAssistantOverlay } = require("./assistant-overlay.cjs");
+const { initVideoToolBridge, setBridgeWindow, videoBridge } = require("./videoToolBridge.cjs");
+const { startVideoRpcServer } = require("./videoRpc.cjs");
+const { resolveRealPath, processWithFfmpeg, formatAuditLine } = require("./mediaAccess.cjs");
 
 const logFile = path.join(app.getPath("userData"), "studio-main.log");
 function log(...args) {
@@ -117,6 +120,7 @@ ipcMain.on("gateway:session-sync", (event) => {
 
 
 let mainWindow = null;
+let videoRpc = null;
 
 const DEV_URL = "http://localhost:3000";
 
@@ -170,6 +174,11 @@ function createWindow() {
     },
   });
 
+  // This is the window an external agent's tool calls are asked of. Set before
+  // the page loads, because the renderer announces its bridge as it boots and
+  // main must already know which window that announcement can come from.
+  setBridgeWindow(mainWindow);
+
   mainWindow.once("ready-to-show", () => {
     log("Window ready to show, displaying mainWindow");
     mainWindow.show();
@@ -212,6 +221,9 @@ function createWindow() {
     // the process alive, so nothing else takes it down. It guides the operator
     // around this app; with no window there is nothing left to guide.
     assistantOverlay?.hide();
+    // The bridge now has nothing to ask, and a request against a destroyed
+    // window should say so rather than wait out its timeout.
+    setBridgeWindow(null);
   });
 
   // Keep the renderer's maximize/restore icon truthful even when the window is
@@ -549,6 +561,26 @@ ipcMain.handle("dialog:open-folder", async (event) => {
   return chooseProjectFolder(BrowserWindow.fromWebContents(event.sender));
 });
 
+/* ── The media approval gate's half in main ───────────────────────────────
+   The gate lives in the renderer and is free of I/O so it stays testable;
+   these are the three things it cannot do there, plus ffmpeg. See
+   `electron/mediaAccess.cjs` and `src/video/P3-import-gate.md`.
+   ────────────────────────────────────────────────────────────────────────── */
+
+// Synchronous, and read once at preload time, because the deny list is
+// consulted on the first tool call and an `await` there would mean a window in
+// which the policy is not loaded yet and every path looks ungranted.
+ipcMain.on("media:paths-sync", (event) => {
+  event.returnValue = { home: app.getPath("home"), userData: app.getPath("userData") };
+});
+
+ipcMain.handle("media:resolve-path", (_event, requested) => resolveRealPath(requested));
+
+// Every decision, in the same log the rest of main writes to.
+ipcMain.on("media:audit", (_event, entry) => log(formatAuditLine(entry)));
+
+ipcMain.handle("media:ffmpeg", (_event, options) => processWithFfmpeg(options ?? {}));
+
 ipcMain.handle("window:minimize", (event) => {
   focusedWindow(event)?.minimize();
 });
@@ -588,6 +620,23 @@ app.whenReady().then(async () => {
     } catch (error) {
       log("Gateway could not be started:", error?.stack || error?.message || error);
     }
+  }
+
+  /*
+    The video panel's MCP bridge, before anything that might use it.
+
+    An agent CLI cannot see this renderer's timeline stores, so it reaches them
+    through this: shim → 127.0.0.1 → main → IPC → renderer. Started even when
+    the panel has never been opened, because the stores are seeded at module
+    load and a tool list that came back empty would leave an agent believing
+    there is no editor here at all. Failure is survivable and deliberately not
+    thrown — Code with no video bridge is still Code.
+  */
+  try {
+    initVideoToolBridge();
+    videoRpc = startVideoRpcServer({ bridge: videoBridge, log });
+  } catch (error) {
+    log("The video MCP bridge could not be started:", error?.message || error);
   }
 
   buildMenu();
@@ -650,6 +699,9 @@ app.on("will-quit", () => {
     log("Could not release global shortcuts:", error.message);
   }
   assistantOverlay?.destroy();
+  // Takes the endpoint file with it, so the next launch's gateway cannot find
+  // credentials for a window that no longer exists.
+  videoRpc?.close();
   // Best effort, and deliberately not awaited: `will-quit` does not wait for a
   // promise, and the listening socket dies with this process regardless.
   try {

@@ -1,24 +1,43 @@
-import { Boxes, Files, MessagesSquare, Search, SlidersHorizontal, SquarePen, type LucideIcon } from "lucide-react";
+import React from "react";
+import {
+  Boxes,
+  Files,
+  FolderOpen,
+  MessagesSquare,
+  Search,
+  SlidersHorizontal,
+  SquarePen,
+  type LucideIcon,
+} from "lucide-react";
 
 /**
- * What the sidebar can show, and how each view names itself.
+ * The activity bar: the 48px column of glyphs that switches the sidebar.
  *
- * This file used to draw a 48px icon rail down the left edge. Cursor's agent
- * window has no rail: one sidebar holds the traffic lights, the nav rows and
- * the chat list, flush against the window edge, and a nav row *is* the view
- * switch. The rail is gone; these definitions are what survived it, and they
- * are now consumed as rows by `Sidebar` rather than as tabs by a rail.
+ * This file has now been written twice, and the second version is the first
+ * one again — so the reasoning is worth keeping. It began as a rail, was folded
+ * into labelled nav rows when the shell was cut to match Cursor's agent window
+ * (one seam, no rail), and is a rail again by the operator's call: *"make the
+ * left sidebar buttons only so it gets thinner"*, answered as **"just like the
+ * VS Code left sidebar"**.
  *
- * The split below is the reason this is a list of two groups rather than one.
- * `PRIMARY_NAV` is Cursor's own four rows, in Cursor's order — that block is a
- * fixed reproduction and nothing should be added to it. `WORKSPACE_NAV` holds
- * the three views this studio has that Cursor's agent window does not. Keeping
- * them below a section label means the top of the sidebar still reads exactly
- * like the reference, and the extras arrive in the same visual grammar instead
- * of diluting it.
+ * What that buys is width. Labelled rows priced the sidebar at 260px because
+ * "Explorer" and "Customize" had to fit inside it; glyphs price the switch at
+ * 48 and let the panel beside them open at 212 — the same 260px of shell as
+ * before, with the labels' width handed back to whatever the panel is showing.
+ * The cost is the second vertical seam the previous version was written to
+ * remove, and it is a deliberate trade: five destinations cannot ride a
+ * horizontal strip without either wrapping or eating the width the change was
+ * made to recover.
+ *
+ * The names did not disappear, they moved into `title` and `aria-label`. A
+ * label one hover away costs no pixels; a label in the layout costs 212 of
+ * them on every view that never needed it.
  */
 
-export type SidebarTabId = "chats" | "files" | "search" | "skills";
+/** The rail's fixed width. The title bar reads this to line its edge up. */
+export const ACTIVITY_BAR_WIDTH = 48;
+
+export type SidebarTabId = "chats" | "files" | "search" | "skills" | "media";
 
 export interface SidebarTabDef {
   id: SidebarTabId;
@@ -28,31 +47,136 @@ export interface SidebarTabDef {
 }
 
 /**
- * Cursor's primary rows, minus the ones this studio has no feature behind.
+ * Every view the sidebar can host, in rail order.
  *
- * Cursor's set includes "Automations". It is not here because nothing in this
- * app schedules recurring work, and a nav row that highlights itself and shows
- * nothing is worse than an absent one — it teaches the operator that rows in
- * this list might not do anything. Add it back the day there is an automations
- * view to open. Do not extend this list for anything else; see WORKSPACE_NAV.
+ * There is one list now, not the `PRIMARY_NAV` / `WORKSPACE_NAV` pair the rows
+ * were split into. That split existed to keep the top of the sidebar reading
+ * exactly like Cursor's four labelled rows while this studio's own views
+ * arrived underneath a section label. A rail of glyphs has no such reading to
+ * protect — the reference for the shape is VS Code's activity bar, where every
+ * destination is one tile in one column — so the two groups collapsed into
+ * this.
+ *
+ * `media` is the newcomer, and it is load-bearing rather than decorative: it
+ * is where the operator's own import gesture lives, and therefore where the
+ * media approval gate takes consent from. See `src/video/P3-import-gate.md`.
  */
-export const PRIMARY_NAV = [
-  { id: "new-chat", label: "New Chat", icon: SquarePen },
-  { id: "search", label: "Search", icon: Search },
-  { id: "customize", label: "Customize", icon: SlidersHorizontal },
-] as const;
-
-export type PrimaryNavId = (typeof PRIMARY_NAV)[number]["id"];
-
-/** This studio's own views, under their own label. */
-export const WORKSPACE_NAV: readonly SidebarTabDef[] = [
-  { id: "files", label: "Explorer", shortcut: "⇧⌘E", icon: Files },
-  { id: "skills", label: "Skills", icon: Boxes },
-] as const;
-
-/** Every view the sidebar can host, for callers that need the whole set. */
 export const SIDEBAR_TABS: readonly SidebarTabDef[] = [
   { id: "chats", label: "Chats", shortcut: "⌘L", icon: MessagesSquare },
+  { id: "files", label: "Explorer", shortcut: "⇧⌘E", icon: Files },
   { id: "search", label: "Search", shortcut: "⇧⌘F", icon: Search },
-  ...WORKSPACE_NAV,
-] as const;
+  { id: "skills", label: "Skills", icon: Boxes },
+  // `FolderOpen` is the Cut's own Media glyph (`SidebarNav.tsx`). Two apps that
+  // will be used side by side for months should not name the same drawer with
+  // two different marks.
+  { id: "media", label: "Media", icon: FolderOpen },
+];
+
+/* ── One tile ─────────────────────────────────────────────────────────────── */
+
+const RailTile: React.FC<{
+  icon: LucideIcon;
+  label: string;
+  shortcut?: string;
+  active?: boolean;
+  onClick: () => void;
+}> = ({ icon: Icon, label, shortcut, active = false, onClick }) => (
+  <button
+    type="button"
+    onClick={onClick}
+    title={shortcut ? `${label} (${shortcut})` : label}
+    aria-label={label}
+    aria-current={active ? "page" : undefined}
+    className={`relative h-11 flex items-center justify-center transition-colors duration-ds ease-ds ${
+      active ? "text-ink-strong" : "text-ink-muted hover:text-ink-high"
+    }`}
+  >
+    {/* Selection is a bar at the window edge, not a fill. That is VS Code's own
+        signal, and at 48px it is the one that survives: a rounded fill behind an
+        18px glyph leaves 4px of breathing room and reads as a button that is
+        stuck down rather than as a place you are. */}
+    <span
+      aria-hidden
+      className={`absolute left-0 top-2 bottom-2 w-0.5 rounded-r-full bg-ink-strong transition-opacity duration-ds ease-ds ${
+        active ? "opacity-100" : "opacity-0"
+      }`}
+    />
+    <Icon size={18} strokeWidth={1.7} />
+  </button>
+);
+
+/* ── The rail ─────────────────────────────────────────────────────────────── */
+
+export interface ActivityBarProps {
+  tab: SidebarTabId;
+  onSelectTab: (tab: SidebarTabId) => void;
+  /** The panel beside the rail. The rail itself is never hidden. */
+  collapsed: boolean;
+  onSetCollapsed: (collapsed: boolean) => void;
+  onNewChat: () => void;
+  onOpenCustomize: () => void;
+  /** Which non-tab view the shell is showing, for the Customize tile. */
+  activeView: string;
+}
+
+export const ActivityBar: React.FC<ActivityBarProps> = ({
+  tab,
+  onSelectTab,
+  collapsed,
+  onSetCollapsed,
+  onNewChat,
+  onOpenCustomize,
+  activeView,
+}) => {
+  /**
+   * VS Code's rule, and the Cut's: the tile you are already on closes the
+   * panel, any other tile opens it. Without the first half a rail is a switch
+   * with no off — the panel could only be dismissed from the title bar, which
+   * is not where you just clicked.
+   */
+  const select = (id: SidebarTabId) => {
+    if (collapsed) {
+      onSelectTab(id);
+      onSetCollapsed(false);
+      return;
+    }
+    if (id === tab) {
+      onSetCollapsed(true);
+      return;
+    }
+    onSelectTab(id);
+  };
+
+  return (
+    <nav
+      className="flex-shrink-0 flex flex-col border-r border-edge-chrome bg-rail-mid py-1.5"
+      style={{ width: ACTIVITY_BAR_WIDTH }}
+      aria-label="Activity bar"
+    >
+      {/* An action, never a destination, so it never lights up — the same rule
+          the labelled rows held it to. The hairline is what says so. */}
+      <RailTile icon={SquarePen} label="New Chat" onClick={onNewChat} />
+      <div className="mx-3.5 my-1.5 h-px bg-edge" aria-hidden />
+
+      {SIDEBAR_TABS.map((item) => (
+        <RailTile
+          key={item.id}
+          icon={item.icon}
+          label={item.label}
+          shortcut={item.shortcut}
+          active={tab === item.id && !collapsed}
+          onClick={() => select(item.id)}
+        />
+      ))}
+
+      <div className="flex-1" />
+
+      <RailTile
+        icon={SlidersHorizontal}
+        label="Customize"
+        active={activeView === "customize"}
+        onClick={onOpenCustomize}
+      />
+    </nav>
+  );
+};

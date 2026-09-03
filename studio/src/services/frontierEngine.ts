@@ -24,12 +24,36 @@ import {
   type CommandExecution,
   type CommandExecutor,
 } from "./agentCommands";
+import {
+  buildVideoToolEvidence,
+  hasVideoToolCalls,
+  runVideoToolCalls,
+  type VideoToolExecutor,
+} from "./videoToolCalls";
 import type { ChatMessage, InferenceTelemetry, ModelModeId, ToolCall } from "../types";
 
 /** What the host lets the engine do. Absent capabilities simply stay unused. */
 export interface EngineCapabilities {
   /** Executes a workspace command and reports its real result. */
   runCommand?: CommandExecutor;
+  /**
+   * The editor tools the host exposes, for the prompt to advertise.
+   *
+   * Injected rather than imported, for the same reason the executor is: the
+   * engine must not know that a video panel exists, only that this host
+   * happens to offer some tools and what to call them.
+   */
+  videoTools?: VideoToolSummary[];
+  /** Runs one editor tool and reports its real result. */
+  runVideoTool?: VideoToolExecutor;
+}
+
+/** One line of the editor tool catalogue, already flattened by the host. */
+export interface VideoToolSummary {
+  name: string;
+  description: string;
+  /** Argument names in declaration order, optional ones suffixed with "?". */
+  parameters: string[];
 }
 
 export interface StreamCallbacks {
@@ -74,8 +98,13 @@ const MAX_AGENT_COMMAND_TURNS = 3;
 // which is already four sequential rounds; budgeting them like generation
 // turns is what forced the model to guess at step three.
 const MAX_INVESTIGATION_TURNS = 8;
+// Editor tool turns are the cheapest of the three: no files are re-emitted and
+// the results are JSON read out of the renderer's own memory. Six because an
+// editing exchange is describe -> edit -> verify, and "make the title bigger
+// and warmer" is already two edits inside that.
+const MAX_EDITOR_TOOL_TURNS = 6;
 // Belt and braces: no combination of the budgets below may loop forever.
-const MAX_TOTAL_TURNS = MAX_AGENT_COMMAND_TURNS + MAX_INVESTIGATION_TURNS + 2;
+const MAX_TOTAL_TURNS = MAX_AGENT_COMMAND_TURNS + MAX_INVESTIGATION_TURNS + MAX_EDITOR_TOOL_TURNS + 2;
 // One self-correction pass by default: on a 9 t/s local model each pass
 // re-emits whole files, so a second costs more wall-clock than it returns.
 const MAX_QUALITY_CORRECTIONS = 1;
@@ -247,11 +276,24 @@ CRITICAL VISUAL DESIGN RULES:
     }
   }
 
+  /*
+    What the model is told about the video panel.
+    Empty when the host exposes no editor tools, so a headless caller and the
+    benchmark arena get the prompt they got before this existed.
+  */
+  let editorInstruction = "";
+  if (capabilities.videoTools && capabilities.videoTools.length > 0) {
+    const toolList = capabilities.videoTools
+      .map((tool) => `- ${tool.name}(${tool.parameters.join(", ")}), ${tool.description}`)
+      .join("\n");
+    editorInstruction = `\n\n[TEMINALI CUT PANEL]\nThe video editor is part of this workspace and you can edit the user's timeline directly. To call an editor tool, emit a \`\`\`video-tool fence holding one JSON object, or an array of them, shaped {"tool":"name","arguments":{...}}; its real result is returned to you before you answer again. A \`\`\`json block is documentation and is never executed. Call describe_timeline before any edit and address clips by the ids it returns, never by an id you invented, and never report an edit whose result is not in the conversation. Times are milliseconds. Every call lands on the timeline the user is watching, and each one is a single undo.\nEDITOR TOOLS:\n${toolList}`;
+  }
+
   const messages = [
     {
       role: "system",
       content: DiligenceEngine.wrapSystemPrompt(CompletenessEngine.wrapSystemPrompt(
-        `You are Teminali ${selection.label}. Be precise, disclose uncertainty, and never claim a tool or test ran unless its result is present in the conversation. When the user asks you to edit workspace files, emit every intended final file as a complete fenced block with path="workspace/relative/path.ext" directly on the code fence tag (e.g. \`\`\`html path="outputs/live-edit-vision-canary.html" or \`\`\`ts path="src/example.ts"). Use one explicit path block per file, never an ambiguous patch fragment, so Teminali can apply, display, and verify the edits safely. To actually run a workspace command, emit it in a \`\`\`frontier-run fence (one command per line); its real output is returned to you before you answer again. A \`\`\`bash or \`\`\`sh block is documentation and is never executed. Read-only checks such as npm test, npx tsc, and git status run automatically; anything that changes state waits for the user, so never assume it ran.${skillInstruction}`,
+        `You are Teminali ${selection.label}. Be precise, disclose uncertainty, and never claim a tool or test ran unless its result is present in the conversation. When the user asks you to edit workspace files, emit every intended final file as a complete fenced block with path="workspace/relative/path.ext" directly on the code fence tag (e.g. \`\`\`html path="outputs/live-edit-vision-canary.html" or \`\`\`ts path="src/example.ts"). Use one explicit path block per file, never an ambiguous patch fragment, so Teminali can apply, display, and verify the edits safely. To actually run a workspace command, emit it in a \`\`\`frontier-run fence (one command per line); its real output is returned to you before you answer again. A \`\`\`bash or \`\`\`sh block is documentation and is never executed. Read-only checks such as npm test, npx tsc, and git status run automatically; anything that changes state waits for the user, so never assume it ran.${skillInstruction}${editorInstruction}`,
       )),
     },
     ...history.slice(-6).map((message) => ({
@@ -345,6 +387,7 @@ CRITICAL VISUAL DESIGN RULES:
     let qualityCorrections = 0;
     let diligenceCorrections = 0;
     let investigationTurns = 0;
+    let editorTurns = 0;
     let correctionTurns = 0;
     let deniedFeedback = 0;
     // Every command run this exchange. The investigation audit needs the whole
@@ -376,6 +419,25 @@ CRITICAL VISUAL DESIGN RULES:
           // that failed and one it never got to try.
           observation = buildCommandEvidence(executions);
           deniedFeedback += 1;
+          investigated = true;
+        }
+      }
+
+      if (capabilities.runVideoTool && hasVideoToolCalls(turnText) && editorTurns < MAX_EDITOR_TOOL_TURNS) {
+        const executions = await runVideoToolCalls(turnText, {
+          execute: capabilities.runVideoTool,
+          signal: controller.signal,
+          onToolCall: callbacks.onToolCall,
+        });
+        if (executions.length > 0) {
+          // Appended, not substituted. A turn may both run a command and edit
+          // the timeline, and dropping either observation leaves the model
+          // repeating the half it was never told the result of.
+          const evidence = buildVideoToolEvidence(executions);
+          observation = observation ? `${observation}\n\n${evidence}` : evidence;
+          editorTurns += 1;
+          // Editor results are real evidence, so they buy an investigation
+          // turn rather than a correction one — the same as a command's output.
           investigated = true;
         }
       }

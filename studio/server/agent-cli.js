@@ -30,6 +30,7 @@
 
 import { spawn } from "node:child_process";
 import { withBinPaths } from "./bin-paths.js";
+import { videoMcpArgs } from "./video-mcp.js";
 import { resolve, sep } from "node:path";
 
 export const AGENT_LIMITS = Object.freeze({
@@ -89,8 +90,21 @@ export function agentEnvironment(source = process.env) {
 }
 
 function argsFor(engine, { prompt, cwd, sessionId, model, permission }) {
+  /*
+    The video panel, when one is open.
+
+    These CLIs run in their own process and cannot see the renderer's stores, so
+    the timeline reaches them over MCP or not at all. Resolved per call rather
+    than once at import: the app the operator is talking to may have been opened
+    after the gateway started, and a spec captured at import would carry a token
+    from an instance that has since quit. Empty when there is no bridge, which
+    is what makes this addition invisible to everyone who never opens the panel.
+  */
+  const mcp = videoMcpArgs(engine);
+
   if (engine === "claude") {
     const args = [
+      ...mcp,
       "-p", prompt,
       "--output-format", "stream-json",
       "--verbose",
@@ -106,7 +120,9 @@ function argsFor(engine, { prompt, cwd, sessionId, model, permission }) {
     return args;
   }
 
-  const args = ["exec", "--json", "--skip-git-repo-check", "--sandbox", permission, "-C", cwd];
+  // `-c` before the subcommand and the positional prompt, both of which must
+  // stay last: `codex exec resume <id> <prompt>` is order-sensitive.
+  const args = [...mcp, "exec", "--json", "--skip-git-repo-check", "--sandbox", permission, "-C", cwd];
   if (model) args.push("--model", model);
   if (sessionId) {
     // `codex exec resume <id>` is a subcommand, so the prompt follows it.

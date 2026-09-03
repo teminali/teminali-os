@@ -1,5 +1,14 @@
 @import "./styles/tokens.css";
 
+/* The ported Teminali Cut editor. Both sheets scope everything they declare
+   to `.video-workspace`, so they are inert until the video panel is open.
+   They are imported HERE rather than from VideoPane.tsx because
+   video-components.css uses `@apply`, and Vite hands each CSS entry to
+   PostCSS separately — `@apply` only resolves in the file that carries the
+   `@tailwind` directives, which is this one. */
+@import "./video/video-tokens.css";
+@import "./video/video-components.css";
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;

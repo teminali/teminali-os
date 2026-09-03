@@ -1,0 +1,141 @@
+/* ═══════════════════════════════════════════════════════════════════
+   VIDEO PANEL — SCOPED TOKEN SHEET
+
+   The ported editor slice comes from Teminali Cut, whose token sheet
+   (`teminaliCut/src/index.css`) declares 84 variables. Code's own
+   `src/styles/tokens.css` already declares 37 of them, with the same
+   values — the two design systems were converged on purpose, and the
+   Cut's config header records that its tokens were "inherited whole
+   from teminaliCode/studio/DESIGN.md".
+
+   This file declares only the 47 the Cut has that Code does not.
+
+   SCOPED TO `.video-workspace`, NEVER `:root`. Several of these names
+   are generic enough to be plausible future additions to Code's own
+   sheet — `--line`, `--edge`, `--chrome`, `--stage` — and a `:root`
+   declaration here would silently win or lose against that later
+   depending on stylesheet order. A class scope makes the blast radius
+   the panel and nothing else.
+
+   WHAT IS DELIBERATELY ABSENT: the 37 shared names are NOT redeclared,
+   so the ported components inherit the HOST's values. That is the
+   agreed rule — the shell wins. Its most visible consequence is radii:
+   Code runs --r-sm 6 / --r-md 8 where the Cut runs 8 / 10, so ported
+   controls render 2px tighter than they do in the Cut. That is
+   accepted; do not "fix" it by overriding Code's radii here.
+   ═══════════════════════════════════════════════════════════════════ */
+
+.video-workspace {
+  /* ── Planes ─────────────────────────────────────────────────────
+     The Cut's editor runs a deeper ramp than a chat shell needs: a
+     void for the program monitor, a sunken well for the timeline bed,
+     and two raised steps above the standard surface for discs and
+     thumbs. */
+  --window: #151515;
+  --stage: #151515;
+  --stage-void: #0f0f0f;
+  --sunken: #131313;
+  --chrome: #181818;
+  --surface-2: #262626;
+  --surface-3: #313131;
+
+  /* ── Hairlines ──────────────────────────────────────────────────
+     Solid, not white-alpha: an alpha hairline tints whatever it
+     crosses, so the same class drew a different line on the canvas
+     than it did on a panel. */
+  --line-soft: #232323;
+  --line-chrome: #282828;
+  --line-popover: #3a3a3a;
+
+  /* One hairline, three strengths — the alpha family, used where an
+     edge sits over media rather than over a known fill. Taken from the
+     Cut's `:root`, not from its `.home-stage` block, which rebinds
+     these to the solid --line ramp for the launcher only. */
+  --edge: rgba(255, 255, 255, 0.045);
+  --edge-hover: rgba(255, 255, 255, 0.085);
+  --edge-faint: rgba(255, 255, 255, 0.028);
+
+  /* ── Accent ─────────────────────────────────────────────────────
+     Achromatic, so it has no hue to collide with a role colour. */
+  --accent-soft: rgba(232, 232, 232, 0.10);
+  --accent-line: rgba(232, 232, 232, 0.28);
+  --accent-ink: #f0f0f0;
+  --on-accent: #151515;
+  --ink-warm: #2b1609;
+
+  --text-dim-cool: #9f9f9f;
+  --text-faint-cool: #8a8a8a;
+
+  /* ── Radii ──────────────────────────────────────────────────────
+     Only the step Code's ramp lacks; every other radius is the host's. */
+  --r-2xs: 4px;
+
+  /* ── The spacing rhythm ─────────────────────────────────────────
+     4 / 6 / 8 / 12 / 16 / 20 / 24. */
+  --sp-1: 4px;
+  --sp-2: 6px;
+  --sp-3: 8px;
+  --sp-4: 12px;
+  --sp-5: 16px;
+  --sp-6: 20px;
+  --sp-7: 24px;
+
+  /* ── Control heights ────────────────────────────────────────────
+     The editor's rows are denser than the shell's, and four of these
+     are read directly out of the slice's TS (not just through
+     Tailwind), so they have to exist by name. */
+  --h-xs: 22px;
+  --h-sm: 26px;
+  --h-md: 30px;
+  --h-row: 30px;
+  --h-lg: 36px;
+  --h-disc: 24px;
+  --h-bar: 40px;
+  --h-title: 48px;
+
+  /* ── Motion ─────────────────────────────────────────────────────
+     Same numbers as the host's --dur-* family, under the Cut's names,
+     because ~40 ported call sites say --t-base. */
+  --t-fast: 100ms;
+  --t-base: 150ms;
+  --t-slow: 200ms;
+  --t-press: 100ms;
+
+  /* ── Elevation ──────────────────────────────────────────────────
+     Flat. `--lift-1` and `--lift-2` resolve to `none` rather than
+     being deleted, because ~30 ported call sites name them and
+     collapsing them centrally is what makes the panel flat in one
+     move instead of thirty. Only things that genuinely float cast. */
+  --lift-1: none;
+  --lift-2: none;
+  --lift-float: 0 12px 32px rgba(0, 0, 0, 0.55);
+  --lift-modal: 0 24px 60px rgba(0, 0, 0, 0.6);
+  --focus-ring: 0 0 0 1px var(--line-popover), 0 0 0 3px rgba(232, 232, 232, 0.16);
+
+  /* feTurbulence, inlined. ~700 bytes and no network. */
+  --grain: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='140' height='140'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='140' height='140' filter='url(%23n)'/%3E%3C/svg%3E");
+
+  /* ── Deliberately ZERO, not the Cut's 78px ──────────────────────
+     In the Cut this is the drag region the macOS traffic lights sit
+     in, and the editor's top chrome insets by it. Here the editor is a
+     PANEL inside Code's window: Code's own titlebar already owns that
+     strip, so any component reading this would inset a second time and
+     open 78px of dead space inside the pane. Kept by name so a ported
+     component that reads it still compiles, set to 0 so it cannot. */
+  --titlebar-inset: 0px;
+}
+
+/* The pane fills its seat and clips its own overflow — the timeline
+   scrolls horizontally and the canvas can overflow while dragging, and
+   neither may push Code's workspace layout around. */
+.video-workspace {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  height: 100%;
+  overflow: hidden;
+  background: var(--stage);
+  color: var(--text);
+  font-family: var(--font-sans);
+}

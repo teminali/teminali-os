@@ -73,9 +73,11 @@ and transcripts are never written to it.
 
 ### The shell
 
-One 260px sidebar (there is no icon rail), the conversation, and a workspace
-panel strip. Sidebar views: **Chats · Explorer · Search · Skills**. The panel
-strip holds any number of tabs of eleven kinds:
+A 48px activity bar, a 212px sidebar panel beside it, the conversation, and a
+workspace panel strip. Sidebar views: **Chats · Explorer · Search · Skills ·
+Media**. The rail stays on screen when the panel is collapsed, so a dismissed
+sidebar is one click from open on any view. The panel strip holds any number of
+tabs of twelve kinds:
 
 | Panel | Shortcut | Panel | Shortcut |
 | --- | --- | --- | --- |
@@ -84,10 +86,14 @@ strip holds any number of tabs of eleven kinds:
 | Browser | `⇧⌘B` | Usage | `⇧⌘U` |
 | Canvas | `⇧⌘A` | Benchmark | `⇧⌘N` |
 | Side chat | `⇧⌘S` | Release *(admin)* | `⇧⌘R` |
-| Guardian | `⇧⌘G` | | |
+| Guardian | `⇧⌘G` | Video Editor | `⇧⌘V` |
+
+Video Editor is the one kind limited to a single tab: it owns a timeline and a
+playback clock, and a second copy would be a second project competing for them.
 
 Plus `⌘B` sidebar · `⌘L` chats · `⇧⌘E` explorer · `⇧⌘F` search · `⌘K`/`⌘P`
-command palette · `⌘,` settings.
+command palette · `⌘,` settings. Skills and Media are reached from the rail; they
+have no shortcut.
 
 ### Engines
 
@@ -192,6 +198,38 @@ include that model's cache reads and writes so the table sums to the headline.
 An unreported cost is `null`, never `$0.00` — Codex bills a subscription and
 returns no figure.
 
+### Video editor
+
+A timeline editor ported from Teminali Cut, in a workspace panel (`⇧⌘V`). The
+panel's own chat edits the project by emitting a ```` ```video-tool ```` fence,
+and the same tools are served over MCP to the agent CLIs — Claude Code and Codex
+get a `cut` server wired into the tab that spawned them, so the CLI already
+running your repo can also cut your timeline.
+
+**The exposed surface is an allowlist**, not the Cut's whole registry. Six tools
+of a fifteen-tool budget: `describe_timeline`, `patch_clip`, `set_effect_param`,
+`list_media_pool`, `import_media_from_path`, `ffmpeg_process`. The ceiling is
+deliberate — the Cut's 115 tool descriptions are ~8.7k tokens on every request
+that advertises the panel, so a name gets added only when someone decides to pay
+for it. `ffmpeg_process`'s `custom` operation, which takes a raw filtergraph,
+is reachable from the panel's own chat and is **not** advertised over MCP.
+
+**Media is a sidebar tab, and importing from it is a grant.** A file you pick or
+drop is a human gesture, so it grants that file and its containing folder for the
+session. Anything else — a path an agent names — raises an approval prompt that
+shows the *resolved* path and offers: allow this file · allow this folder for the
+session · deny. Nothing is persisted, and there is no "always allow".
+
+Two refusals never become a prompt, because their only defensible answer is no:
+a deny list (`~/.ssh`, `~/.aws`, `~/.gnupg`, `~/Library/Keychains`, the app's own
+`userData`, and any dotfile) that overrides every grant, and a per-argument
+extension rule. Unanswered, a prompt settles as a denial after 90 seconds, so a
+blocked call never becomes a wedged CLI. Every decision — allowed or refused —
+is one audit line naming the tool, the agent, the resolved path and *which* grant
+satisfied it.
+
+Design and reasoning: [`src/video/P3-import-gate.md`](src/video/P3-import-gate.md).
+
 ### File ingestion
 
 Dropped files are converted per kind rather than read as bytes: audio/video →
@@ -260,7 +298,7 @@ ollama serve              # local models on 127.0.0.1:11434
 
 ```bash
 npm run typecheck   # tsc --noEmit
-npm test            # 549 tests, 0 failures
+npm test            # 586 tests, 0 failures
 npm run build       # tsc && vite build
 npm run verify:core # all three
 ```
@@ -369,6 +407,8 @@ Non-loopback values are rejected at startup rather than accepted and ignored.
 - [`docs/DILIGENCE_TEST_PLAN.md`](docs/DILIGENCE_TEST_PLAN.md) — the manual plan
   that proves it.
 - [`docs/VOICE_SIDECAR.md`](docs/VOICE_SIDECAR.md) — the VibeVoice contract.
+- [`src/video/P3-import-gate.md`](src/video/P3-import-gate.md) — what the media
+  approval gate grants, and why reading a path is the capability it guards.
 
 ## Licence
 

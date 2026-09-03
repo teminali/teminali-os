@@ -1,4 +1,4 @@
-const { contextBridge, ipcRenderer } = require("electron");
+const { contextBridge, ipcRenderer, webUtils } = require("electron");
 
 /**
  * Deliberately narrow bridge.
@@ -27,6 +27,20 @@ try {
   gatewaySession = ipcRenderer.sendSync("gateway:session-sync") ?? null;
 } catch {
   gatewaySession = null;
+}
+
+/**
+ * The anchors the media deny list is written against.
+ *
+ * Read here for the same reason the gateway session is: the gate consults the
+ * policy on the FIRST tool call, and an async read would leave a window in
+ * which there is no home directory to judge `~/.ssh` against.
+ */
+let mediaPaths = null;
+try {
+  mediaPaths = ipcRenderer.sendSync("media:paths-sync") ?? null;
+} catch {
+  mediaPaths = null;
 }
 
 contextBridge.exposeInMainWorld("teminali", {
@@ -80,6 +94,59 @@ contextBridge.exposeInMainWorld("teminali", {
   updates: {
     install: (filePath) => ipcRenderer.invoke("updates:install", filePath),
     restart: () => ipcRenderer.invoke("updates:restart"),
+  },
+  /**
+   * The video panel's MCP bridge.
+   *
+   * Four verbs and no passthrough: main pushes a tool call in, the renderer
+   * pushes one answer back. Nothing here lets the page choose a channel, and
+   * nothing lets it read main's state — the reason it exists at all is that an
+   * agent CLI in another process cannot reach the timeline stores in this one.
+   */
+  videoBridge: {
+    onListTools: (listener) => {
+      ipcRenderer.on("video-bridge:list-tools", (_event, message) => listener(message?.id));
+    },
+    onCallTool: (listener) => {
+      ipcRenderer.on("video-bridge:call-tool", (_event, message) => {
+        listener(message?.id, message?.payload?.name, message?.payload?.args ?? {});
+      });
+    },
+    respond: (payload) => ipcRenderer.send("video-bridge:response", payload),
+    /** Announces that the two listeners above are installed. */
+    ready: () => ipcRenderer.send("video-bridge:ready"),
+  },
+  /**
+   * Media: the approval gate's window on the filesystem.
+   *
+   * Four verbs, none of which reads or writes a file the renderer names
+   * freely. `getPathForFile` exists because `File.path` was removed from
+   * Electron and a blob URL is not a path — without it there is no absolute
+   * path for a human gesture to grant consent from, which is the gate's own
+   * foundation. `ffmpeg` takes named options and a filter string, never argv.
+   */
+  media: {
+    /** `{ home, userData }` — what the deny list is anchored to. */
+    paths: mediaPaths,
+    /**
+     * The absolute path behind a dropped or picked `File`.
+     *
+     * `File.path` is gone in Electron 44 (and in the Cut's 34), and the old
+     * fallback — `URL.createObjectURL(file)` — previews but is not a path, so
+     * ffmpeg and export cannot use it and it dies on reload.
+     */
+    getPathForFile: (file) => {
+      try {
+        return webUtils.getPathForFile(file) || null;
+      } catch {
+        return null;
+      }
+    },
+    /** `..` collapsed and symlinks followed, in a process that has `fs`. */
+    resolvePath: (requested) => ipcRenderer.invoke("media:resolve-path", requested),
+    /** One line per decision, in main's log. */
+    audit: (entry) => ipcRenderer.send("media:audit", entry),
+    ffmpeg: (options) => ipcRenderer.invoke("media:ffmpeg", options),
   },
   /**
    * The screen assistant.
