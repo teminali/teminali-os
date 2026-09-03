@@ -51,6 +51,7 @@ export const StudioChat: React.FC<{
   const { status: github } = useGitHubStatus();
   const openPanel = usePanelStore((state) => state.open);
   const focusOrOpen = usePanelStore((state) => state.focusOrOpen);
+  const panelExpanded = usePanelStore((state) => state.isExpanded && state.isOpen);
   const agentSelection = useStudioStore((state) => state.agentSelection);
   const agentPermission = useStudioStore((state) => state.agentPermission);
   const chatDraft = useStudioStore((state) => state.chatDraft);
@@ -349,7 +350,16 @@ export const StudioChat: React.FC<{
     /* Flat. The canvas carried a warm floor wash and a cool top light, which is
        what a designed dark theme does and what Cursor conspicuously does not —
        its chat sits on one unbroken #151515 from the title bar to the composer. */
-    <main className="flex-1 min-w-0 flex flex-col bg-frame-mid">
+    /* `min-w-0` let the chat absorb every pixel a widening panel took, down
+       to a 160px slot with a wrapped composer. It has a floor now; past it
+       the panel stops. Expanding the panel is the one gesture that may
+       take the whole column, and it hides the chat rather than crushing
+       it — the conversation stays mounted, so nothing is lost. */
+    <main
+      className={`flex-1 min-w-[var(--chat-min-w)] flex-col bg-frame-mid ${
+        panelExpanded ? "hidden" : "flex"
+      }`}
+    >
       {isEmpty ? (
         /* Cursor's empty state is the pickers that say what the next turn runs
            against, the composer, and a row of outline pills — and above them,

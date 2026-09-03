@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useState } from "react";
 import { MacCloseButton } from "./components/ui";
 import { StudioTitleBar } from "./components/layout/StudioTitleBar";
 import { SidebarDock } from "./components/sidebar/SidebarDock";
+import { ACTIVITY_BAR_WIDTH } from "./components/sidebar/ActivityBar";
 import type { SidebarTabId } from "./components/sidebar/ActivityBar";
 import { StudioChat } from "./components/chat/StudioChat";
 import { WorkspacePanel } from "./components/workspace/WorkspacePanel";
@@ -97,6 +98,19 @@ export default function App() {
   useEffect(() => {
     localStorage.setItem(SIDEBAR_WIDTH_KEY, String(sidebarWidth));
   }, [sidebarWidth]);
+
+  /* ── Where the shell's content actually starts ────────────────────────────
+     The rail and the sidebar are the only things left of the conversation, and
+     three separate places need to know how wide they add up to: the stylesheet
+     (a fully expanded panel reaches the sidebar's edge, not an arbitrary
+     736px), the panel store (a drag may not squeeze the chat below its
+     minimum), and the title bar (its tab strip lines up with the panel). It is
+     published once, on the document element so plain CSS and the store can
+     both read it, rather than being derived three times and drifting. */
+  useEffect(() => {
+    const inset = ACTIVITY_BAR_WIDTH + (sidebarCollapsed ? 0 : sidebarWidth);
+    document.documentElement.style.setProperty("--shell-left-inset", `${inset}px`);
+  }, [sidebarWidth, sidebarCollapsed]);
 
   useEffect(() => {
     localStorage.setItem(SIDEBAR_COLLAPSED_KEY, String(sidebarCollapsed));

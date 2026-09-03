@@ -220,7 +220,16 @@
   --rail-w-max: 480px;
   --rail-w-collapsed: 0px;          /* Cursor's agent window has no icon rail */
   --panel-w: 452px;
-  --panel-w-expanded: 736px;
+  /* Expanded means EXPANDED: the panel takes everything the conversation was
+     using, out to the sidebar's edge. It was a flat 736px, which is most of a
+     1280px window and a third of a 5K one — the same gesture meaning "most of
+     the screen" and "a corner of it". `--shell-left-inset` is published by
+     `App.tsx` and follows the sidebar as it is dragged or collapsed. */
+  --panel-w-expanded: calc(100vw - var(--shell-left-inset, 260px));
+  /* The conversation's floor. Below this the composer's affordances wrap and
+     the transcript stops being a reading column; a drag that would go past it
+     moves the panel's edge no further. */
+  --chat-min-w: 420px;
   --composer-max: 760px;            /* measured: the chat reading column */
   /* Cursor gives the empty state a *narrower* composer than the conversation
      one — 608 against 760. It reads as a place to start rather than as the

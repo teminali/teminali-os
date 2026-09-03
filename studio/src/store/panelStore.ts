@@ -174,10 +174,21 @@ export const usePanelStore = create<PanelState>()(
 
       setWidth: (width) =>
         set(() => {
-          const available = typeof window !== "undefined" ? window.innerWidth : 1440;
-          // Always leave room for the chat column; a panel that eats the whole
-          // window is a bug, not a feature.
-          return { width: Math.max(MIN_WIDTH, Math.min(width, available - 420)) };
+          if (typeof window === "undefined") return { width };
+          /* The old clamp reserved 420px OF THE WINDOW for the chat and then
+             let the sidebar spend 260 of it, so the conversation was squeezed
+             to ~160px — the defect this replaces. The room the chat actually
+             gets is the window minus the rail and sidebar, and both numbers
+             are read from the shell rather than assumed, so the clamp follows
+             the sidebar as it is dragged or collapsed. */
+          const css = getComputedStyle(document.documentElement);
+          const px = (name: string, fallback: number) => {
+            const value = parseFloat(css.getPropertyValue(name));
+            return Number.isFinite(value) ? value : fallback;
+          };
+          const room =
+            window.innerWidth - px("--shell-left-inset", 260) - px("--chat-min-w", 420);
+          return { width: Math.max(MIN_WIDTH, Math.min(width, Math.max(MIN_WIDTH, room))) };
         }),
 
       setAddMenuOpen: (open) => set({ isAddMenuOpen: open }),
