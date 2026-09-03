@@ -35,6 +35,16 @@ interface TeminaliBridge {
     showOverlay: (state: Record<string, unknown>) => Promise<boolean>;
     hideOverlay: () => Promise<boolean>;
     overlayState: () => Promise<Record<string, unknown>>;
+    /**
+     * Open the Screen Recording list and reveal the bundle to drag into it.
+     * Not a request for the permission: macOS has no prompt for this one.
+     */
+    revealForScreenRecording: () => Promise<{
+      ok: boolean;
+      bundlePath?: string;
+      isDevelopmentBundle?: boolean;
+      reason?: string;
+    }>;
     onOverlay: (listener: (state: Record<string, unknown>) => void) => () => void;
   };
 }

@@ -555,6 +555,28 @@ touch anything on it. A single "grant access" would say neither. The observation
 degrades rather than fails, and `limits` carries the sentence the interface
 shows. `npm run assistant:doctor` reports the whole path on the screen as it is.
 
+Accessibility has a prompt an application may raise, so the offer there is
+"Ask macOS". **Screen Recording has none** — no API, no entitlement, nothing
+that puts a row in that list except a person dragging the bundle into it. The
+interface therefore stops pretending a link is help and does the two things it
+actually can: it opens the Screen Recording page and reveals the bundle in
+Finder, so the thing to drag and the place to drop it are both on screen
+(`server/screen-recording.js`, offered from the tray and the settings panel).
+
+Dragging is not a clumsier way to flip the switch. Every ad-hoc build carries a
+fresh code identity, so a reinstall leaves a row macOS no longer matches to the
+application now running: **the switch reads as on and the screen stays black.**
+Dropping the current bundle onto the list replaces that stale row; toggling it
+does not. That is the failure this exists to end, and it is why the copy names
+the possibility instead of assuming a first-time grant.
+
+Finder is revealed **after** the pane, never before — System Settings takes
+focus as it opens, so a window revealed first is covered by it. In a
+development run the bundle is Electron.app, which is genuinely the identity
+macOS is being asked to trust; it is revealed and *labelled as such*, because
+an operator dragging something called Electron with no explanation reasonably
+concludes the feature is broken.
+
 ### The native helper
 
 `native/macos/pointer/main.swift`, compiled by `npm run build:pointer`. Swift

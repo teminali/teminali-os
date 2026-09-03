@@ -287,6 +287,27 @@ ipcMain.handle("assistant:overlay-minimised", () => Boolean(assistantOverlay?.is
 // which is before React has subscribed to anything.
 ipcMain.handle("assistant:overlay-state", () => assistantOverlay?.getState() ?? { visible: false });
 
+let screenRecordingModule = null;
+const loadScreenRecording = () =>
+  screenRecordingModule
+    ?? (screenRecordingModule = import(require("url").pathToFileURL(path.join(__dirname, "..", "server", "screen-recording.js")).href));
+
+/* Screen Recording cannot be granted by asking. macOS has no prompt an app can
+   raise for it, so the only working move is to open the list and put the
+   bundle the operator has to drag in front of them. See server/screen-recording.js
+   for why dragging beats flipping the switch on a rebuilt app. */
+ipcMain.handle("assistant:reveal-for-screen-recording", async () => {
+  const { revealForScreenRecording } = await loadScreenRecording();
+  return revealForScreenRecording({
+    execPath: app.getPath("exe"),
+    packaged: app.isPackaged,
+    platform: process.platform,
+    resolvePath: path.resolve,
+    openPane: (url) => shell.openExternal(url),
+    revealInFinder: (target) => shell.showItemInFolder(target),
+  });
+});
+
 /* ── Updates ────────────────────────────────────────────────────────────────
    This build is ad-hoc signed, so an update is a whole new artifact rather than
    an in-place patch — Squirrel will not apply an update to a binary it cannot

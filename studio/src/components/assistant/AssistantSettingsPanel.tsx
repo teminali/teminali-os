@@ -21,6 +21,23 @@ import type { AssistantHotkeyStatus } from "../layout/WindowControls";
  * flip — so the honest offer is the system's own prompt and a link to the pane.
  */
 
+/** What {@link Window.electronBridge} reports back from a reveal attempt. */
+interface ScreenRecordingReveal {
+  ok: boolean;
+  bundlePath?: string;
+  isDevelopmentBundle?: boolean;
+  reason?: string;
+}
+
+/**
+ * The bundle's own name, for telling the operator which icon to drag.
+ * Falls back to a generic phrase rather than rendering an empty code span.
+ */
+function bundleName(bundlePath?: string): string {
+  const leaf = bundlePath?.split("/").filter(Boolean).pop();
+  return leaf || "the app";
+}
+
 const MODES: Array<{ id: AssistantMode; label: string; detail: string }> = [
   { id: "dictate", label: "Dictate", detail: "What you say goes into the composer, cleaned up and shown to you first." },
   { id: "talk", label: "Talk", detail: "It looks at your screen, answers out loud, and points at what it means." },
@@ -44,26 +61,47 @@ const FRONTIER_MODES: AssistantFrontierMode[] = ["flash", "auto", "max"];
 export const AssistantSettingsPanel: React.FC<{ assistant: UseAssistantResult }> = ({ assistant }) => {
   const { settings, capabilities, update } = assistant;
   const [hotkey, setHotkey] = useState<AssistantHotkeyStatus | null>(null);
+  /* Absent in a browser build, which is why every use of it is guarded. */
+  const bridge = window.teminali?.assistant;
 
   useEffect(() => {
-    const bridge = window.teminali?.assistant;
     if (!bridge) return;
     bridge.hotkeyStatus().then(setHotkey).catch(() => setHotkey(null));
-  }, [settings.hotkey]);
+  }, [settings.hotkey, bridge]);
 
   useEffect(() => {
     void assistant.refreshCapabilities();
   }, [assistant]);
 
+  /**
+   * What the last "Show me both" did. Kept so the panel can name the bundle it
+   * revealed: "drag me in" is only actionable once the operator knows which
+   * icon is me, and in a development run that icon says Electron.
+   */
+  const [reveal, setReveal] = useState<ScreenRecordingReveal | null>(null);
+
+  async function showScreenRecordingList() {
+    if (!bridge?.revealForScreenRecording) return;
+    try {
+      setReveal(await bridge.revealForScreenRecording());
+    } catch {
+      // The bridge is there and it still failed, so the pane may not have
+      // opened either. Say so rather than leaving the button looking inert.
+      setReveal({ ok: false, reason: "I could not open the Screen Recording list." });
+    }
+  }
+
   const permissionRows = capabilities?.supported && capabilities.helperBuilt
     ? [
         {
+          id: "screen" as const,
           granted: capabilities.screenRecordingGranted,
           label: "Screen Recording",
           lost: "Without it the assistant cannot see your screen at all.",
           pane: "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture",
         },
         {
+          id: "accessibility" as const,
           granted: capabilities.accessibilityTrusted,
           label: "Accessibility",
           lost: "Without it the assistant can describe your screen but cannot point at or touch anything on it.",
@@ -97,35 +135,85 @@ export const AssistantSettingsPanel: React.FC<{ assistant: UseAssistantResult }>
         ) : (
           <div className="rounded-xl border border-edge divide-y divide-edge overflow-hidden">
             {permissionRows.map((row) => (
-              <div key={row.label} className="flex items-start gap-3 p-3">
-                <span className="mt-0.5">
-                  {row.granted ? <Check size={14} className="text-success" /> : <StatusDot tone="warning" />}
-                </span>
-                <div className="flex-1 min-w-0">
-                  <p className="text-sm text-ink-high">
-                    {row.label} — {row.granted ? "granted" : "not granted"}
-                  </p>
-                  {!row.granted && <p className="text-2xs text-ink-faint mt-0.5 leading-relaxed">{row.lost}</p>}
+              <div key={row.label} className="p-3">
+                <div className="flex items-start gap-3">
+                  <span className="mt-0.5">
+                    {row.granted ? <Check size={14} className="text-success" /> : <StatusDot tone="warning" />}
+                  </span>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm text-ink-high">
+                      {row.label} — {row.granted ? "granted" : "not granted"}
+                    </p>
+                    {!row.granted && <p className="text-2xs text-ink-faint mt-0.5 leading-relaxed">{row.lost}</p>}
+                  </div>
+                  {!row.granted && (
+                    <div className="flex items-center gap-1.5 flex-shrink-0">
+                      {row.id === "accessibility" && (
+                        <Button variant="secondary" size="xs" onClick={() => void assistant.requestPermissions()}>
+                          Ask macOS
+                        </Button>
+                      )}
+                      {/* Screen Recording has no prompt to ask with, so the
+                          offer is the list and the thing to drag into it. The
+                          browser build has no bridge and falls back to the
+                          link, which is all it can honestly do. */}
+                      {row.id === "screen" && bridge?.revealForScreenRecording ? (
+                        <Button variant="secondary" size="xs" onClick={() => void showScreenRecordingList()}>
+                          Show me both
+                        </Button>
+                      ) : (
+                        <Button
+                          variant="ghost"
+                          size="xs"
+                          icon={<ExternalLink size={11} />}
+                          // Not "_self": that would navigate the studio itself to
+                          // an x-apple.systempreferences: URL and leave a blank
+                          // window. A plain window.open goes through the shell's
+                          // open handler, which hands it to the operating system.
+                          onClick={() => window.open(row.pane)}
+                        >
+                          Settings
+                        </Button>
+                      )}
+                    </div>
+                  )}
                 </div>
-                {!row.granted && (
-                  <div className="flex items-center gap-1.5 flex-shrink-0">
-                    {row.label === "Accessibility" && (
-                      <Button variant="secondary" size="xs" onClick={() => void assistant.requestPermissions()}>
-                        Ask macOS
-                      </Button>
+
+                {row.id === "screen" && !row.granted && bridge?.revealForScreenRecording && (
+                  <div className="mt-2.5 ml-[26px] rounded-lg border border-edge bg-surface-sunken p-2.5 space-y-1.5">
+                    <p className="text-2xs text-ink-muted leading-relaxed">
+                      macOS will not let me add myself to this list — no application can. Open it and drag me in.
+                    </p>
+                    <p className="text-2xs text-ink-faint leading-relaxed">
+                      If you have installed me before, there is already an older me in that list under a code identity
+                      this build no longer has. Dropping me on top of it replaces that row. Flipping its switch does
+                      not, which is why the permission can read as granted while the screen stays black.
+                    </p>
+                    {reveal && (
+                      <p className="text-2xs leading-relaxed pt-0.5" role="status">
+                        {reveal.ok ? (
+                          <span className="text-ink-muted">
+                            Opened the list, and revealed{" "}
+                            <code className="text-ink-dim">{bundleName(reveal.bundlePath)}</code> in Finder. Drag it in,
+                            then recheck.
+                            {reveal.isDevelopmentBundle && (
+                              <>
+                                {" "}
+                                This is a development run, so the bundle is the Electron shell rather than Teminali Code
+                                — that is the one macOS is being asked to trust here.
+                              </>
+                            )}
+                          </span>
+                        ) : (
+                          <span className="text-warning">{reveal.reason}</span>
+                        )}
+                      </p>
                     )}
-                    <Button
-                      variant="ghost"
-                      size="xs"
-                      icon={<ExternalLink size={11} />}
-                      // Not "_self": that would navigate the studio itself to
-                      // an x-apple.systempreferences: URL and leave a blank
-                      // window. A plain window.open goes through the shell's
-                      // open handler, which hands it to the operating system.
-                      onClick={() => window.open(row.pane)}
-                    >
-                      Settings
-                    </Button>
+                    <div className="flex items-center gap-1.5 pt-0.5">
+                      <Button variant="ghost" size="xs" onClick={() => void assistant.refreshCapabilities()}>
+                        Recheck
+                      </Button>
+                    </div>
                   </div>
                 )}
               </div>

@@ -106,6 +106,7 @@ contextBridge.exposeInMainWorld("teminali", {
     hideOverlay: () => ipcRenderer.invoke("assistant:hide-overlay"),
     /** Overlay window only: the current drawing, pulled on mount. */
     overlayState: () => ipcRenderer.invoke("assistant:overlay-state"),
+    revealForScreenRecording: () => ipcRenderer.invoke("assistant:reveal-for-screen-recording"),
     /** Overlay window only: what to draw. Returns an unsubscribe function. */
     onOverlay: (listener) => {
       const handler = (_event, state) => listener(state ?? { visible: false });

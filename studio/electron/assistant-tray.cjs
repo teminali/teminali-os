@@ -246,16 +246,23 @@ function attachAssistantTray({
         click: () => void requestAccessibility(),
       });
     }
-    if (!permissions.screenRecordingGranted || !permissions.accessibilityTrusted) {
+    if (!permissions.screenRecordingGranted) {
+      items.push({
+        // Not "Open Privacy & Security…". Screen Recording has no prompt an
+        // application can raise, so the pane on its own asks the operator to
+        // find a bundle in Finder themselves — and after a reinstall, to
+        // notice that the row already there is a stale identity. Revealing the
+        // bundle is the half of the job that a link cannot do.
+        label: "Show me in Finder, and open the Screen Recording list…",
+        click: () => void revealForScreenRecording(),
+      });
+    }
+    if (!permissions.accessibilityTrusted) {
       items.push({
         label: "Open Privacy & Security…",
         click: () => {
           const { shell } = require("electron");
-          void shell.openExternal(
-            permissions.screenRecordingGranted
-              ? "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility"
-              : "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture",
-          );
+          void shell.openExternal("x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility");
         },
       });
     }
@@ -395,6 +402,7 @@ function attachAssistantTray({
   }
 
   let assistantModule = null;
+  let screenRecordingModule = null;
 
   async function refresh() {
     if (!pointer) return;
@@ -404,6 +412,23 @@ function attachAssistantTray({
       applyMenu();
     } catch (error) {
       log("Assistant tray permission check failed:", error && error.message ? error.message : String(error));
+    }
+  }
+
+  async function revealForScreenRecording() {
+    if (!screenRecordingModule) return;
+    const { app, shell } = require("electron");
+    try {
+      await screenRecordingModule.revealForScreenRecording({
+        execPath: app.getPath("exe"),
+        packaged: app.isPackaged,
+        platform: process.platform,
+        resolvePath: path.resolve,
+        openPane: (url) => shell.openExternal(url),
+        revealInFinder: (target) => shell.showItemInFolder(target),
+      });
+    } catch (error) {
+      log("Could not open the Screen Recording list:", error && error.message ? error.message : String(error));
     }
   }
 
@@ -424,10 +449,12 @@ function attachAssistantTray({
   Promise.all([
     import(pathToFileURL(path.join(__dirname, "..", "server", "pointer.js")).href),
     import(pathToFileURL(path.join(__dirname, "..", "server", "assistant.js")).href),
+    import(pathToFileURL(path.join(__dirname, "..", "server", "screen-recording.js")).href),
   ])
-    .then(([pointerModule, assistant]) => {
+    .then(([pointerModule, assistant, screenRecording]) => {
       pointer = pointerModule;
       assistantModule = assistant;
+      screenRecordingModule = screenRecording;
       void refresh();
       timer = setInterval(() => void refresh(), POLL_INTERVAL_MS);
     })
