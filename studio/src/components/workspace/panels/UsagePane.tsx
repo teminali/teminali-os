@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useState } from "react";
 import { LoaderCircle, RefreshCw } from "lucide-react";
-import { UsageService, type UsageSummary } from "../../../services/usageService";
+import { UsageService, type PlanAccount, type PlanSummary, type UsageSummary } from "../../../services/usageService";
 import { EmptyState, IconButton } from "../../ui";
 
 /**
@@ -23,6 +23,12 @@ import { EmptyState, IconButton } from "../../ui";
  * identity, so a categorical palette would be inventing a distinction the data
  * does not have. Text stays on the ink tokens — the bar beside a label carries
  * the value, the label never wears the data colour.
+ *
+ * Above all of that sits a fourth question the ledger cannot answer — "how much
+ * of my plan is left" — read from server/plan.js. It leads because it is the
+ * one with a deadline attached: spend is history, headroom is a constraint on
+ * the next hour. It breaks the one-hue rule deliberately and only at the top of
+ * a window's range, where the bar stops reporting magnitude and starts warning.
  */
 
 const nf = new Intl.NumberFormat();
@@ -46,6 +52,90 @@ function weekday(day: string): string {
   return Number.isNaN(date.getTime()) ? day.slice(5) : date.toLocaleDateString([], { weekday: "short" });
 }
 
+/**
+ * The CLI names its windows, it does not label them. The two every subscription
+ * has are named here to match what Claude Code calls them; anything else the
+ * account carries is derived from its id rather than dropped, because a window
+ * we have no label for is still a window the operator is being limited by.
+ */
+const WINDOW_LABELS: Record<string, string> = {
+  five_hour: "Session (5hr)",
+  seven_day: "Weekly (7 day)",
+  seven_day_overage_included: "Weekly (incl. overage)",
+};
+
+function windowLabel(id: string): string {
+  const known = WINDOW_LABELS[id];
+  if (known) return known;
+  const rest = (suffix: string) => id.slice(suffix.length).replace(/_/g, " ");
+  if (id.startsWith("seven_day_")) return `Weekly ${rest("seven_day_")}`;
+  if (id.startsWith("five_hour_")) return `Session ${rest("five_hour_")}`;
+  return id.replace(/_/g, " ");
+}
+
+/** "Resets in 28m" — a deadline is easier to act on than a timestamp. */
+function resetsIn(resetsAt: number | null): string | null {
+  if (resetsAt === null) return null;
+  const seconds = resetsAt - Date.now() / 1000;
+  if (seconds <= 0) return "Resetting now";
+  const minutes = Math.round(seconds / 60);
+  if (minutes < 60) return `Resets in ${minutes}m`;
+  const hours = Math.round(minutes / 60);
+  if (hours < 24) return `Resets in ${hours}h`;
+  return `Resets in ${Math.round(hours / 24)}d`;
+}
+
+/** "as of 14:32" — these windows move only on a turn. See server/plan.js. */
+function observedAt(iso: string): string {
+  const at = new Date(iso);
+  if (Number.isNaN(at.getTime())) return "";
+  const sameDay = at.toDateString() === new Date().toDateString();
+  return sameDay
+    ? at.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
+    : at.toLocaleDateString([], { month: "short", day: "numeric" });
+}
+
+/**
+ * One window. The track carries the whole plan, the fill carries what is gone.
+ *
+ * The fill leaves `--chart` for `--danger` at 90%, which is the one place in
+ * this pane where colour means something other than magnitude: past that point
+ * the number has stopped being a measurement the operator reads and started
+ * being a limit that is about to interrupt them.
+ */
+const Meter: React.FC<{ label: string; utilization: number; detail?: string | null }> = ({ label, utilization, detail }) => {
+  const percent = Math.min(100, Math.max(0, Math.round(utilization * 100)));
+  return (
+    <div>
+      <div className="flex items-baseline justify-between gap-2">
+        <span className="text-2xs text-ink-body truncate">{label}</span>
+        <span className="text-2xs text-ink-bright tabular-nums flex-shrink-0">{percent}%</span>
+      </div>
+      <div className="h-1.5 mt-1.5 rounded-full bg-chart-track overflow-hidden">
+        <div
+          className={`h-full rounded-full transition-all duration-slow ease-ds ${percent >= 90 ? "bg-danger" : "bg-chart"}`}
+          style={{ width: `${Math.max(1, percent)}%` }}
+        />
+      </div>
+      {detail && <div className="text-3xs text-ink-soft mt-1">{detail}</div>}
+    </div>
+  );
+};
+
+/** The identity line. Says which CLI, so two logins are never confused. */
+const AccountLine: React.FC<{ engine: string; account: PlanAccount }> = ({ engine, account }) => {
+  const identity = account.email || account.detail || (account.loggedIn ? "Signed in" : "Not signed in");
+  return (
+    <div className="flex items-baseline justify-between gap-2">
+      <span className="text-2xs text-ink-muted flex-shrink-0">{engine}</span>
+      <span className="text-2xs text-ink-body truncate text-right" title={account.organization ?? undefined}>
+        {identity}
+        {account.plan && <span className="text-ink-soft"> · {account.plan}</span>}
+      </span>
+    </div>
+  );
+};
+
 const Tile: React.FC<{ label: string; value: string; detail?: string }> = ({ label, value, detail }) => (
   <div className="flex-1 min-w-0 rounded-lg bg-surface-sunken border border-edge px-3 py-2.5">
     <div className="text-2xs text-ink-muted truncate">{label}</div>
@@ -56,15 +146,23 @@ const Tile: React.FC<{ label: string; value: string; detail?: string }> = ({ lab
 
 export const UsagePane: React.FC = () => {
   const [summary, setSummary] = useState<UsageSummary | null>(null);
+  const [plan, setPlan] = useState<PlanSummary | null>(null);
   const [loading, setLoading] = useState(true);
   const [unreachable, setUnreachable] = useState(false);
 
   const load = useCallback(async (signal?: AbortSignal) => {
     setLoading(true);
-    const next = await UsageService.summary(7, signal);
+    // Fetched together so one refresh answers both questions. The plan half is
+    // allowed to be null — an API-key login has no plan — and only the ledger
+    // decides whether the gateway is reachable at all.
+    const [nextSummary, nextPlan] = await Promise.all([
+      UsageService.summary(7, signal),
+      UsageService.plan(signal),
+    ]);
     if (signal?.aborted) return;
-    setSummary(next);
-    setUnreachable(next === null);
+    setSummary(nextSummary);
+    setPlan(nextPlan);
+    setUnreachable(nextSummary === null);
     setLoading(false);
   }, []);
 
@@ -86,6 +184,8 @@ export const UsagePane: React.FC = () => {
     );
   }
 
+  const accounts = Object.entries(plan?.accounts ?? {}).filter(([, account]) => account);
+  const planLimits = plan?.limits?.claude ?? null;
   const peak = Math.max(1, ...summary.daily.map((day) => day.tokens));
   const biggestModel = Math.max(1, ...summary.models.map((model) => model.tokens));
   const nothingYet = summary.totals.turns === 0;
@@ -100,6 +200,49 @@ export const UsagePane: React.FC = () => {
       </header>
 
       <div className="flex-1 min-h-0 overflow-y-auto px-3 pb-4 space-y-4">
+        {/* ── Plan headroom ─────────────────────────────────────────────────
+            Ahead of the ledger, and ahead of the no-turns empty state: an
+            operator who has run nothing here still has a plan and an identity,
+            and both are worth showing. */}
+        {(accounts.length > 0 || planLimits) && (
+          <section className="rounded-lg bg-surface-sunken border border-edge px-3 py-2.5 space-y-2.5">
+            {accounts.length > 0 && (
+              <div className="space-y-1">
+                {accounts.map(([engine, account]) => (
+                  <AccountLine key={engine} engine={engine === "claude" ? "Claude Code" : "Codex"} account={account!} />
+                ))}
+              </div>
+            )}
+
+            {planLimits ? (
+              <>
+                <div className="space-y-2.5 pt-0.5">
+                  {planLimits.windows.map((window) => (
+                    <Meter
+                      key={window.id}
+                      label={windowLabel(window.id)}
+                      utilization={window.utilization}
+                      detail={resetsIn(window.resetsAt)}
+                    />
+                  ))}
+                </div>
+                {/* Not decoration. These windows move only when a turn runs, so
+                    a reading without its timestamp would claim to be live. */}
+                <p className="text-3xs text-ink-disabled">
+                  As reported by Claude Code at {observedAt(planLimits.observedAt)}
+                  {planLimits.isUsingOverage && " · using overage"}
+                </p>
+              </>
+            ) : (
+              <p className="text-3xs text-ink-disabled leading-relaxed">
+                {plan?.accounts?.claude?.authMethod === "claude.ai"
+                  ? "Plan limits appear after the next Claude Code turn — the CLI reports them with the turn, not on request."
+                  : "Plan limits are reported only for a Claude subscription login."}
+              </p>
+            )}
+          </section>
+        )}
+
         {nothingYet ? (
           <EmptyState title="No turns yet" detail="Usage appears here as soon as a model runs." />
         ) : (

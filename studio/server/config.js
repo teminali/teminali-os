@@ -67,6 +67,9 @@ export function createConfig(environment = process.env, overrides = {}) {
     assistantFramePath: resolve(environment.TEMINALI_ASSISTANT_FRAMES || resolve(process.cwd(), "benchmark-results", "assistant-frames")),
     // Append-only record of what every turn cost, read back by the usage panel.
     usageLedgerPath: resolve(environment.TEMINALI_USAGE_LEDGER || resolve(process.cwd(), "benchmark-results", "usage-ledger.jsonl")),
+    // The plan windows the agent CLI last reported. One file, not one per
+    // workspace: the headroom belongs to the account, not to the project.
+    planStorePath: resolve(environment.TEMINALI_PLAN_STORE || resolve(process.cwd(), "benchmark-results", "plan-limits.json")),
     // Who may run privileged tools. TEMINALI_ADMINS additionally pins logins
     // that no API call can remove.
     adminStorePath: resolve(environment.TEMINALI_ADMIN_STORE || resolve(process.cwd(), "benchmark-results", "admins.json")),

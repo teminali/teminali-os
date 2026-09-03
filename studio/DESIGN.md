@@ -256,7 +256,11 @@ canvas and the workspace panel, under the modal layer — and the version string
 itself is the button. That placement is deliberate: "which build is this" is
 asked from wherever you happen to be, and on an ad-hoc signed application it is
 the first question worth asking when the assistant stops seeing the screen,
-because every update clears its permission grants.
+because every update clears its permission grants. Floating chrome has to answer
+for what is under it: the video editor's timeline is the one pane that draws
+content into that corner, so it reserves the 30px strip the control occupies
+(`video/components/timeline/Timeline.tsx`) rather than letting a lane render
+beneath it. Move the offset and that reservation moves with it.
 
 Behind it: **Update to X** (which opens `UpdateModal`, where the release notes
 are), **Check for updates**, and **exactly one** previous release to roll back
@@ -334,6 +338,42 @@ Three properties carry the whole thing:
 
 The admin gate is enforced in the gateway, not the renderer — `requireAdmin`
 guards every `/api/arena/*` route. Hiding the panel is a courtesy.
+
+### Plan headroom (`server/plan.js`, `panels/UsagePane.tsx`)
+
+A different question from the ledger below, so a different source. The ledger is
+what this machine has spent; this is what the account has left — a number only
+the provider knows.
+
+Both halves come from the CLI rather than from the provider's API, because the
+CLI already holds the operator's credentials and this process has no business
+borrowing them out of their keychain entry:
+
+- **Windows ride the turn.** `claude -p --output-format stream-json` emits a
+  `rate_limit_event` carrying `unifiedWindows`; `normaliseClaude` lifts it into
+  a `limits` event, and the gateway records it while streaming the turn. It
+  costs no extra request, because that stream was already being parsed.
+- **The account** is `claude auth status --json`, cached for a minute because it
+  is a process spawn rather than a read.
+
+Three things the panel has to say out loud rather than imply:
+
+1. **A reading is stamped, never presented as live.** These windows move only
+   when a turn runs, so the panel prints "as reported at 14:32". A bar with no
+   timestamp claims a freshness it does not have.
+2. **An empty meter is explained.** No windows means either "no turn yet" or
+   "this login has no plan behind it" — an API-key turn emits nothing. Those are
+   different states with different fixes, and the panel distinguishes them.
+3. **Codex reports an account and no headroom.** `codex exec --json` emits no
+   rate-limit event; its limits travel over the `codex app-server` protocol,
+   which the studio does not speak. Drawing an empty Codex meter would read as
+   "nothing used" rather than as "not knowable here", so none is drawn. (Its
+   `login status` also prints to stderr with an empty stdout — observed, not
+   assumed.)
+
+This is the one place in the panel where colour stops meaning magnitude: past
+90% a window's fill leaves `--chart` for `--danger`, because at that point the
+number is no longer a measurement being read but a limit about to interrupt.
 
 ### Usage (`server/usage-ledger.js`, `panels/UsagePane.tsx`)
 

@@ -146,6 +146,7 @@ is the complete list.
 | --- | --- | --- | --- |
 | `GET` | `/api/usage` | bearer | The ledger, `?days=` clamped to 1–90, default 7. |
 | `POST` | `/api/usage` | bearer | Records a turn the gateway cannot observe for itself — a local turn is counted in the renderer. |
+| `GET` | `/api/plan` | bearer | Who each agent CLI is signed in as, and the plan windows it last reported. `limits` is `{}` until a subscription turn runs. |
 
 ### Benchmarks and arena
 
@@ -270,6 +271,7 @@ State files, all defaulting under `benchmark-results/` in the working directory:
 | `TEMINALI_AGENT_MODEL_STORE` | `agent-models.json` |
 | `TEMINALI_ADMIN_STORE` | `admins.json` |
 | `TEMINALI_USAGE_LEDGER` | `usage-ledger.jsonl` |
+| `TEMINALI_PLAN_STORE` | `plan-limits.json` — the plan windows the agent CLI last reported |
 | `TEMINALI_ARENA_HISTORY` | `arena-runs.jsonl` |
 | `TEMINALI_ASSISTANT_FRAMES` | `assistant-frames/` — screenshots the assistant looked at, pruned to the last handful |
 

@@ -91,6 +91,10 @@ type AgentEvent =
   | { type: "result"; ok: boolean; durationMs: number | null; costUsd: number | null; sessionId: string | null; usage: AgentUsage | null; text: string | null; permissionDenials: unknown[] }
   | { type: "error"; code: string; message: string }
   | { type: "notice"; text: string }
+  // Recorded by the gateway into the plan store, not consumed here — the pane
+  // shows a turn, and plan headroom outlives any one turn. Listed so the switch
+  // below is exhaustive over what the stream can actually carry.
+  | { type: "limits"; status: string | null; isUsingOverage: boolean; windows: { id: string; utilization: number; resetsAt: number | null }[] }
   | { type: "done"; sessionId: string | null; durationMs: number; truncated: boolean; reason: string | null; stderr: string };
 
 export class AgentCliService {
@@ -216,6 +220,7 @@ export class AgentCliService {
           failure = new Error(event.message);
           break;
         case "notice":
+        case "limits":
           break;
         case "done":
           if (event.reason && !failure && ok && !text) {

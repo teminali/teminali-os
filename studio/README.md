@@ -58,7 +58,7 @@ route requires it. Roughly sixty routes across:
 | Voice | `/api/voice/{status,transcribe,speak}` |
 | Guardian | `/api/guardian/{snapshot,unload,governor,storage}` |
 | Benchmark arena | `/api/arena/{sandbox,measure,measure/stream,history,cleanup}` |
-| Usage, files, device | `/api/usage` · `/api/files/{capabilities,ingest}` · `/api/system/device` |
+| Usage, files, device | `/api/usage` · `/api/plan` · `/api/files/{capabilities,ingest}` · `/api/system/device` |
 | GitHub, admin | `/api/github/{status,repos,token,clone}` · `/api/me` · `/api/admin/*` |
 | Updates & releases | `/api/updates/{check,releases,download,publish}` |
 | Upstream proxies | `/api/ollama/*` · `/api/anthropic/v1/messages` · `/api/mcp` |
@@ -326,7 +326,7 @@ ollama serve              # local models on 127.0.0.1:11434
 
 ```bash
 npm run typecheck   # tsc --noEmit
-npm test            # 603 tests, 0 failures
+npm test            # 610 tests, 0 failures
 npm run build       # tsc && vite build
 npm run verify:core # all three
 ```

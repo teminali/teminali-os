@@ -17,6 +17,7 @@ import { act, assistantCapabilities, observe, requestAccessibility } from "./ass
 import { AGENTS, AGENT_LIMITS, agentAvailability, isAgentEngine, runAgentTurn } from "./agent-cli.js";
 import { agentModels, recordResolution } from "./agent-models.js";
 import { appendUsage, summariseUsage, usageRecord } from "./usage-ledger.js";
+import { agentAccounts, readPlanLimits, recordPlanLimits } from "./plan.js";
 import { isValidLogin, readAdmins, requireAdmin, whoami, writeAdmins } from "./admin.js";
 import { appendRun, createSandbox, measureSandbox, readRuns, removeRun } from "./arena.js";
 import { currentVersion, publishRelease, validateNextVersion } from "./releases.js";
@@ -1532,6 +1533,16 @@ export async function createGateway(options = {}) {
         return;
       }
 
+      if (request.method === "GET" && route === "/api/plan") {
+        // Two different questions in one answer, because the panel asks them
+        // together: who am I signed in as, and how much of that plan is left.
+        replyJson(response, 200, {
+          accounts: await agentAccounts(),
+          limits: await readPlanLimits(config.planStorePath),
+        });
+        return;
+      }
+
       if (request.method === "GET" && route === "/api/agents/models") {
         replyJson(response, 200, await agentModels({ storePath: config.agentModelStorePath }));
         return;
@@ -1577,6 +1588,12 @@ export async function createGateway(options = {}) {
           }
           // Recorded here rather than from the renderer: the gateway sees every
           // turn, including one whose window was closed before it finished.
+          // Plan headroom rides the turn rather than costing a request of its
+          // own — see server/plan.js. Recorded here for the same reason usage
+          // is: the gateway sees turns whose window has since been closed.
+          if (event?.type === "limits") {
+            void recordPlanLimits(config.planStorePath, engine, event);
+          }
           if (event?.type === "result") {
             void appendUsage(
               config.usageLedgerPath,
