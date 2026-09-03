@@ -184,7 +184,8 @@ StudioTitleBar    traffic lights · sidebar toggle · title · panel tab strip
 │                    (voice lives here) · AssistantHud
 └── WorkspacePanel   terminal · browser · canvas · side chat · file · guardian
                      · Claude Code · Codex · usage · benchmark · release
-                     · video editor · screen recorder
+                     · video editor
+RecorderModal        the screen recorder, app-level — a dialog, not a panel
 
 AssistantProvider    wraps the shell; one session, reachable from every composer
 AssistantBridge      renders nothing — keeps the tray, hotkey and overlay in step
@@ -582,36 +583,64 @@ a failed analysis reported success by saying nothing. `video/components/ui/Overl
 renders both, and it renders them *inside* `.video-workspace` because the classes
 they wear are scoped to it.
 
-### Screen recorder (`panels/RecorderPane.tsx`, `src/video/components/recorder/**`)
+### Screen recorder (`modals/RecorderModal.tsx`, `src/video/components/recorder/**`)
 
-The thirteenth panel kind, and the second one limited to a single tab: it owns
-the take, and a second copy would offer to stop a recording the first is
-holding. Reachable from **File → Record Screen…** (`⇧⌘8`), the **Record Screen**
-pill on the empty-chat screen, and the add-panel menu — all three land on
-`focusOrOpen({ kind: "recorder" })`. `⇧⌘8` in `PANEL_DEFAULTS` is display-only,
-but it is not a decoration: it is the File menu's real accelerator for this
-panel, so the row and the menu agree. The pill it replaced advertised `⇧Tab`,
-which nothing in the app bound.
+**Not a panel kind — a dialog**, and the change is the design. A workspace
+panel is somewhere you *leave the app*: it persists into the next session, it
+holds a slot in the tab strip, and it splits the window with a conversation
+you are not reading while you choose a display. Recording is none of those. It
+is started, watched and finished, and then it is over. So `panelStore` no
+longer has a `recorder` kind, `PanelKind` is twelve rather than thirteen, and
+the persisted-state `migrate` at version 2 drops a `recorder` tab left in a
+stored session — without it that tab falls through `WorkspacePanel`'s default
+case and opens an empty *file* pane wearing the label "Record Screen".
 
-`RecorderPane` is the same wrapper `VideoPane` is, and for the same reason: the
+Open state lives in `store/recorderDialogStore.ts`, one boolean, deliberately
+**not persisted**: a modal is something you are doing, and restoring a session
+straight into one nobody asked for is the failure the panel had. It is a store
+rather than `App` state only because the two openers are far apart in the tree
+— the File-menu listener in `App.tsx` and the pill in `StudioChat.tsx`.
+
+Reachable two ways: **File → Record Screen…** and the **Record Screen** pill on
+the empty-chat screen. `⇧⌘8` is the menu item's accelerator and the only
+binding — a native accelerator fires whatever has focus, where a renderer key
+handler is swallowed by a terminal, a webview or a text field. (It was
+previously a `PANEL_DEFAULTS` label with *nothing* bound to it; the menu item
+that was supposed to own it did not exist. Both halves are real now.) `open()`
+is idempotent, because the accelerator can fire over a dialog already holding
+a running take. The pill it replaced advertised `⇧Tab`, which nothing bound.
+
+`RecorderModal` is the same wrapper `VideoPane` is, and for the same reason: the
 ported UI wears `.video-workspace`-scoped classes, and the recorder store's
 fault watchdog — the one warning that can save a take recording nothing —
 pushes to the video `uiStore`, whose toast surface only renders inside that
-scope. Outside it the panel is not slightly off; it is unstyled and silent.
+scope. Outside it the recorder is not slightly off; it is unstyled and silent.
 
-**A panel opens at 452px, and that drove the layout.** The Cut's shape puts the
-source grid beside a fixed 288px options rail, which needs 568px before either
-half works. So the rail is *seated* at ≥568px and *summoned* below it, reusing
-`VideoPane`'s own `editor-side-overlay is-right` and `editor-overlay-scrim`
-rather than inventing a second overlay mechanism. The review rail (320px)
-stacks under 600px instead of overlaying — a summary reads fine stacked.
+**The dialog is what finally gives the layout its width.** The Cut's shape puts
+the source grid beside a fixed 288px options rail, which needs 568px before
+either half works, and the panel opened at 452px — so the recorder's most
+common surface summoned its rail as an overlay. At `size="xl"` the rail seats.
+Both paths are kept and still measured rather than assumed (`max-w-5xl` is a
+ceiling, and a narrow window is narrower than it): seated at ≥568px, summoned
+below it through `VideoPane`'s own `editor-side-overlay is-right` and
+`editor-overlay-scrim` rather than a second overlay mechanism. The review rail
+(320px) stacks under 600px instead of overlaying — a summary reads fine
+stacked. The dialog is given a fixed `h-[78vh]` so the surface does not resize
+as the phase changes, which would move the Start button under the cursor.
+
+`Modal` gained one prop for this: `bodyClassName`, replacing rather than
+extending the default padded scroll box. The recorder owns its whole surface
+and lays out its own footers; 16px of modal padding and an outer scrollbar put
+a second scroll region around it.
 
 **Mount is `open()`, and it is guarded.** `open()` resets the phase and clears
 the take, which is right when opening to record and catastrophic mid-take: a
-recording started from the File menu with the panel shut would be forgotten by
-the one surface that can stop it. So the panel calls `open()` only when
-`phase === 'setup' && !take`. Unmount calls `close()`, which itself refuses
-while a take is running.
+recording started from the File menu and then dismissed with Escape would be
+forgotten by the one surface that can stop it. So the recorder calls `open()`
+only when `phase === 'setup' && !take`. Unmount calls `close()`, which itself
+refuses while a take is running — which is what makes dismissing the dialog
+mid-take safe rather than destructive, with the floating bar carrying the stop
+control while the main window is hidden.
 
 **The floating bar is the one recorder file outside `src/video/`.**
 `components/recorder/RecorderBar.tsx` renders in its own transparent,
@@ -650,7 +679,8 @@ conservative. Tutorial skill and Go live are likewise absent from the rail.
 **The panel switch is the pane's decision, not the recorder's.** Everything
 under `src/video/` knows about tracks and clips and nothing about which tabs the
 shell has open, so `RecorderPanel` takes an `onOpenedOnTimeline` callback and
-`RecorderPane` — app-side already — is what calls `focusOrOpen({ kind: "video" })`.
+`RecorderModal` — app-side already — is what closes itself and calls
+`focusOrOpen({ kind: "video" })`.
 Reaching for `panelStore` from inside `src/video/` would have been that
 boundary's first exception.
 

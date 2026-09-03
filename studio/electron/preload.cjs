@@ -87,6 +87,7 @@ contextBridge.exposeInMainWorld("teminali", {
         "menu:toggle-terminal",
         "menu:command-palette",
         "menu:open-guardian",
+        "menu:record-screen",
       ]);
       if (!allowed.has(channel)) return () => {};
       const handler = (_event, payload) => listener(payload);

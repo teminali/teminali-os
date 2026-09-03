@@ -77,7 +77,7 @@ A 48px activity bar, a 212px sidebar panel beside it, the conversation, and a
 workspace panel strip. Sidebar views: **Chats · Explorer · Search · Skills**.
 The rail stays on screen when the panel is collapsed, so a dismissed
 sidebar is one click from open on any view. The panel strip holds any number of
-tabs of thirteen kinds:
+tabs of twelve kinds:
 
 | Panel | Shortcut | Panel | Shortcut |
 | --- | --- | --- | --- |
@@ -87,14 +87,17 @@ tabs of thirteen kinds:
 | Canvas | `⇧⌘A` | Benchmark | `⇧⌘N` |
 | Side chat | `⇧⌘S` | Release *(admin)* | `⇧⌘R` |
 | Guardian | `⇧⌘G` | Video Editor | `⇧⌘V` |
-| Record Screen | `⇧⌘8` | | |
 
-Video Editor and Record Screen are the two kinds limited to a single tab. The
-editor owns a timeline and a playback clock, and a second copy would be a
-second project competing for them; the recorder owns the take, and a second
-copy would offer to stop a recording the first one is holding. `⇧⌘8` is the
-File menu's own accelerator — the recorder has no separate binding of its
-own, and the menu item is the shortcut.
+Video Editor is the one kind limited to a single tab: it owns a timeline and a
+playback clock, and a second copy would be a second project competing for them.
+
+**Screen recording is not a panel.** It is a dialog (`⇧⌘8`), and the reason is
+that a panel is somewhere you leave the app while recording is something you
+do: a panel persists into the next session, sits in the tab strip, and splits
+the window with the conversation you are not looking at while you pick a
+display. It also wanted width the panel did not have — 568px before the
+options rail can be a column, against the panel's 452px default. See
+[Screen recording](#screen-recording).
 
 Plus `⌘B` sidebar · `⌘L` chats · `⇧⌘E` explorer · `⇧⌘F` search · `⌘K`/`⌘P`
 command palette · `⌘,` settings. Skills is reached from the rail; it has no
@@ -279,9 +282,21 @@ Design and reasoning: [`src/video/P3-import-gate.md`](src/video/P3-import-gate.m
 
 ### Screen recording
 
-Reachable three ways: **File → Record Screen…** (`⇧⌘8`), the **Record Screen**
-pill on the empty-chat screen, and the add-panel menu in the title bar. All
-three open the same single recorder panel.
+A **dialog**, not a workspace panel — see the panel table above for why.
+Reachable two ways: **File → Record Screen…** and the **Record Screen** pill on
+the empty-chat screen. There is no tab and no add-panel entry.
+
+`⇧⌘8` is the File menu item's own accelerator, and it is the only binding: a
+native menu accelerator fires whatever has focus — a terminal, a webview, a
+text field — where a renderer key handler would be swallowed by all three.
+Both entry points are idempotent, because pressing the accelerator twice must
+not remount a recorder that is holding a running take
+(`src/store/recorderDialogStore.ts`).
+
+Dismissing the dialog mid-take does not abandon the take:
+`recorderStore.close()` refuses while recording, and the floating bar — its own
+`BrowserWindow`, fed by `recorder:publishState` — is what stops it while the
+main window is hidden.
 
 Recording is split across the process boundary because it has to be. A renderer
 is the only place a `MediaStream` can live, and main is the only place the four
@@ -323,8 +338,9 @@ accident.
 
 The renderer half is `src/video/engine/screenCapture.ts` (the capture engine),
 `src/video/store/recorderStore.ts` (phases, sticky settings, the fault
-watchdog), `src/video/components/recorder/` (the panel, source grid and capture
-options) mounted through `src/components/workspace/panels/RecorderPane.tsx`, and
+watchdog), `src/video/components/recorder/` (the recorder surface, source grid
+and capture options) mounted through
+`src/components/modals/RecorderModal.tsx`, and
 `src/components/recorder/RecorderBar.tsx` — the floating bar, which is its own
 window and so lives outside `src/video/`, loaded from this same bundle at
 `?window=recorder-bar`.

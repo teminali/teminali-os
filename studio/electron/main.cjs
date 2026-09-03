@@ -515,6 +515,17 @@ function buildMenu() {
           click: () => target()?.webContents.send("menu:save"),
         },
         { type: "separator" },
+        {
+          // The only way in, now that the recorder is a dialog rather than a
+          // workspace panel: there is no tab to click and no add-panel entry.
+          // The accelerator lives here rather than in a renderer key handler
+          // because a native menu owns it whatever has focus — a terminal, a
+          // webview, a text field — and none of those swallow it.
+          label: "Record Screen…",
+          accelerator: "Shift+CmdOrCtrl+8",
+          click: () => target()?.webContents.send("menu:record-screen"),
+        },
+        { type: "separator" },
         isMac ? { role: "close" } : { role: "quit" },
       ],
     },

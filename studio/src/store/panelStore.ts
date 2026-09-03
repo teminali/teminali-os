@@ -2,10 +2,12 @@
  * Workspace panel model.
  *
  * The redesign replaces the old single-slot split view with a tab strip that
- * holds any number of panels of thirteen kinds — terminal, browser, canvas,
+ * holds any number of panels of twelve kinds — terminal, browser, canvas,
  * side chat, file, guardian, the two agent CLIs, usage, benchmark, release (the
- * last of which the tab strip hides for non-administrators), the video editor
- * and the screen recorder. It lives in its
+ * last of which the tab strip hides for non-administrators) and the video
+ * editor. The screen recorder is NOT among them: it is a dialog, because it is
+ * something you do rather than somewhere you leave the app. See
+ * `recorderDialogStore`. It lives in its
  * own store rather than inside
  * studioStore because it is pure view state: which panels exist, which one is
  * showing, and how wide the strip is. None of it belongs in the chat/session
@@ -16,7 +18,7 @@
 import { create } from "zustand";
 import { persist, createJSONStorage } from "zustand/middleware";
 
-export type PanelKind = "terminal" | "browser" | "canvas" | "side" | "file" | "guardian" | "claude" | "codex" | "usage" | "release" | "arena" | "video" | "recorder";
+export type PanelKind = "terminal" | "browser" | "canvas" | "side" | "file" | "guardian" | "claude" | "codex" | "usage" | "release" | "arena" | "video";
 
 export interface PanelTab {
   id: string;
@@ -53,9 +55,6 @@ export const PANEL_DEFAULTS: Record<PanelKind, { label: string; shortcut: string
   // timeline and a preview surface, and a second copy would be a second
   // project competing for the same playback clock.
   video: { label: "Video Editor", shortcut: "⇧⌘V" },
-  // The screen recorder. One at a time as well, and for a harder reason than
-  // the editor's: a second copy would offer to stop a take the first one owns.
-  recorder: { label: "Record Screen", shortcut: "⇧⌘8" },
 };
 
 interface PanelState {
@@ -222,6 +221,33 @@ export const usePanelStore = create<PanelState>()(
     {
       name: "teminali-panels-v1",
       storage: createJSONStorage(() => localStorage),
+      /*
+        A stored session can hold a tab of a kind this build no longer has —
+        "recorder", now that the recorder is a dialog. Left alone it does not
+        crash: `WorkspacePanel` falls through to the file pane and the tab
+        strip draws a document glyph, so the operator gets a tab labelled
+        "Record Screen" that opens an empty file view. Dropping it is the
+        only honest answer, and it has to happen on the way OUT of storage
+        rather than in the reducers, because nothing ever calls a reducer
+        for a panel that was simply restored.
+      */
+      version: 2,
+      migrate: (persisted) => {
+        const state = persisted as { panels?: { id: string; kind: string }[]; activePanelId?: string | null };
+        if (!state?.panels) return state;
+        const panels = state.panels.filter((panel) => panel.kind !== "recorder");
+        const kept = new Set(panels.map((panel) => panel.id));
+        return {
+          ...state,
+          panels,
+          activePanelId:
+            state.activePanelId && kept.has(state.activePanelId)
+              ? state.activePanelId
+              : panels.length > 0
+                ? panels[panels.length - 1].id
+                : null,
+        };
+      },
       partialize: (state) => ({
         panels: state.panels,
         activePanelId: state.activePanelId,

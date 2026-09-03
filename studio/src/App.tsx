@@ -10,6 +10,8 @@ import { CursorSettingsModal } from "./components/modals/CursorSettingsModal";
 import { CommandPaletteModal } from "./components/modals/CommandPaletteModal";
 import { SkillsModal } from "./components/modals/SkillsModal";
 import { MediaConsentModal } from "./components/modals/MediaConsentModal";
+import { RecorderModal } from "./components/modals/RecorderModal";
+import { useRecorderDialogStore } from "./store/recorderDialogStore";
 import { DiffInspectorModal } from "./components/diff/DiffInspectorModal";
 import { BenchmarkGapAnalyzer } from "./components/benchmark/BenchmarkGapAnalyzer";
 import { CopilotLiveEditController } from "./components/editor/CopilotLiveEditController";
@@ -73,6 +75,7 @@ export default function App() {
   } = useStudioStore();
 
   const { open: openPanel, focusOrOpen, toggleOpen: togglePanels } = usePanelStore();
+  const openRecorder = useRecorderDialogStore((state) => state.open);
 
   /**
    * The one screen assistant.
@@ -248,14 +251,15 @@ export default function App() {
     return bridge.menu.on("menu:open-guardian", () => focusOrOpen({ kind: "guardian" }));
   }, [focusOrOpen]);
 
-  // "Record Screen…" (⇧⌘8) only asks for the panel; the take is started by a
-  // person choosing a source. focusOrOpen rather than open, because a second
-  // recorder panel would offer to stop a take the first one owns.
+  // "Record Screen…" (⇧⌘8) only asks for the dialog; the take is started by a
+  // person choosing a source. `open` is idempotent, because the accelerator
+  // fires whatever has focus and pressing it twice must not remount a
+  // recorder that is already holding a running take.
   useEffect(() => {
     const bridge = window.teminali;
     if (!bridge) return;
-    return bridge.menu.on("menu:record-screen", () => focusOrOpen({ kind: "recorder" }));
-  }, [focusOrOpen]);
+    return bridge.menu.on("menu:record-screen", () => openRecorder());
+  }, [openRecorder]);
 
   /* ── Sidebar geometry ──────────────────────────────────────────────────── */
 
@@ -356,6 +360,10 @@ export default function App() {
           module load and serves agent CLIs whether or not a video panel is
           open, so the question it asks has to have somewhere to be asked. */}
       <MediaConsentModal />
+      {/* App-level for the same reason as the consent gate: the File menu can
+          ask for it from anywhere, and there is no longer a panel to hang it
+          off. It renders nothing until asked. */}
+      <RecorderModal />
 
       {isBenchmarkModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4">

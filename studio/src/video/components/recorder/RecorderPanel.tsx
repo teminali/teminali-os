@@ -45,7 +45,7 @@ const REVIEW_RAIL_W = 320;
 const REVIEW_COLUMN_MIN_W = REVIEW_RAIL_W + GRID_MIN_W;
 
 interface Props {
-  /** The measured width of the panel. `RecorderPane` supplies it. */
+  /** The measured width of the surface. `RecorderModal` supplies it. */
   width?: number;
   /**
    * Show the take that was just laid down.
@@ -53,7 +53,7 @@ interface Props {
    * A callback rather than a `panelStore` import, because everything
    * under `src/video/` is workspace-agnostic and reaching for the
    * workspace's panel list from in here would be the first exception.
-   * `RecorderPane` — which is app-side already — supplies it.
+   * `RecorderModal` — which is app-side already — supplies it.
    */
   onOpenedOnTimeline?: () => void;
 }
@@ -66,13 +66,17 @@ export const RecorderPanel: React.FC<Props> = ({
   const phase = store.phase;
 
   /*
-    Opening is the panel MOUNTING, not a menu item, so it happens here —
-    and it is guarded. `open()` resets the phase to setup and clears the
-    take, which is right when the panel is being opened to record and
-    catastrophic when a take is already running: a recording started
-    from the File menu with the panel shut would be forgotten by the one
-    surface that can stop it. So a panel that arrives mid-take only
-    announces itself.
+    Opening is this component MOUNTING, not a menu item, so it happens
+    here — and it is guarded. `open()` resets the phase to setup and
+    clears the take, which is right when the recorder is being opened to
+    record and catastrophic when a take is already running: a recording
+    started from the File menu and then dismissed with Escape would be
+    forgotten by the one surface that can stop it. So a mount that
+    arrives mid-take only announces itself.
+
+    The dialog makes that path ordinary rather than exotic: closing it
+    unmounts this component, and the floating `RecorderBar` is what the
+    operator stops the take from meanwhile.
   */
   React.useEffect(() => {
     const state = useRecorderStore.getState();

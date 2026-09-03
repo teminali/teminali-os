@@ -3,6 +3,7 @@ import { ChevronDown, Laptop } from "lucide-react";
 import { AIService } from "../../services/aiService";
 import { useStudioStore, PROFILES_LIST } from "../../store/studioStore";
 import { usePanelStore } from "../../store/panelStore";
+import { useRecorderDialogStore } from "../../store/recorderDialogStore";
 import { useVoice } from "../../hooks/useVoice";
 import { useAttachments } from "../../hooks/useAttachments";
 import { composePrompt } from "../../services/fileService";
@@ -51,6 +52,7 @@ export const StudioChat: React.FC<{
   const { status: github } = useGitHubStatus();
   const openPanel = usePanelStore((state) => state.open);
   const focusOrOpen = usePanelStore((state) => state.focusOrOpen);
+  const openRecorder = useRecorderDialogStore((state) => state.open);
   const panelExpanded = usePanelStore((state) => state.isExpanded && state.isOpen);
   const agentSelection = useStudioStore((state) => state.agentSelection);
   const agentPermission = useStudioStore((state) => state.agentPermission);
@@ -410,9 +412,9 @@ export const StudioChat: React.FC<{
 
           <div className="w-full max-w-composerEmpty flex items-center gap-2 pl-1">
             {/* The shortcut is ⇧⌘8 because that is the File menu accelerator
-                that opens this exact panel. The pill it replaced advertised
+                that opens this exact dialog. The pill it replaced advertised
                 ⇧Tab, which nothing in the app has ever bound. */}
-            <Pill onClick={() => focusOrOpen({ kind: "recorder" })} shortcut="⇧⌘8">
+            <Pill onClick={openRecorder} shortcut="⇧⌘8">
               Record Screen
             </Pill>
             <Pill onClick={onConnectGitHub}>
