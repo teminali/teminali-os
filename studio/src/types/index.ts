@@ -19,6 +19,13 @@ export interface SpecialistSkill {
   icon: string;
   description: string;
   starterPrompts: string[];
+  /**
+   * Which half of the app the skill belongs to. There is one catalogue now —
+   * the IDE skills and the video skills are one list, grouped by this — so a
+   * skill has to say which group it falls in rather than being implied by
+   * which surface happened to be showing it.
+   */
+  category: "code" | "video";
 }
 
 export interface FileItem {

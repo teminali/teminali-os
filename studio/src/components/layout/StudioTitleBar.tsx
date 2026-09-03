@@ -17,6 +17,7 @@ import { PANEL_DEFAULTS, usePanelStore, type PanelKind } from "../../store/panel
 import { PanelGlyph } from "../workspace/PanelGlyph";
 import { useStudioStore } from "../../store/studioStore";
 import { PlatformService } from "../../services/platformService";
+import { ACTIVITY_BAR_WIDTH } from "../sidebar/ActivityBar";
 
 /**
  * The window chrome, in three regions that line up with the three panes below:
@@ -72,11 +73,12 @@ export const StudioTitleBar: React.FC<StudioTitleBarProps> = ({
   const canGoForward = sessionHistoryIndex >= 0 && sessionHistoryIndex < sessionHistory.length - 1;
 
   const desktop = isDesktopShell();
-  // The rail is gone, so the title bar's left region is the sidebar and nothing
-  // else. When the sidebar is hidden the region collapses to just enough room
-  // for the traffic lights and the toggle, which then sit over the canvas —
-  // which is what Cursor does too.
-  const railWidth = sidebarCollapsed ? "auto" : `${sidebarWidth}px`;
+  // The left region spans both halves of the dock — the activity bar and the
+  // panel — so this border lands on the same pixel as the panel's own. When the
+  // panel is collapsed the region shrinks to just enough room for the traffic
+  // lights and the toggle, which then sit over the canvas with the rail's
+  // glyphs beneath them.
+  const railWidth = sidebarCollapsed ? "auto" : `${ACTIVITY_BAR_WIDTH + sidebarWidth}px`;
 
   // Administrator-only panels are omitted rather than shown disabled: an
   // operator who is not an admin has no use for a row that always refuses. The
@@ -107,7 +109,12 @@ export const StudioTitleBar: React.FC<StudioTitleBarProps> = ({
     >
       {/* ── Sidebar region ─────────────────────────────────────────────── */}
       <div
-        className="flex items-center gap-3 pl-[11px] pr-2 border-r border-edge-chrome flex-shrink-0"
+        // No border while the panel is collapsed: the region is then wider than
+        // the 48px rail beneath it, and a rule at ~90px would cross the canvas
+        // a finger's width from the rail's own edge. Nothing to divide, no line.
+        className={`flex items-center gap-3 pl-[11px] pr-2 flex-shrink-0 ${
+          sidebarCollapsed ? "" : "border-r border-edge-chrome"
+        }`}
         style={{ width: railWidth, WebkitAppRegion: "no-drag" } as React.CSSProperties}
       >
         {desktop ? (

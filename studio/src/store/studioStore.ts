@@ -46,9 +46,22 @@ export const PROFILES_LIST: ModelProfile[] = [
   },
 ];
 
+/**
+ * The one skill catalogue: IDE/code skills and video skills in a single list,
+ * split into groups by `category` where they are shown.
+ *
+ * The Cut's own bundled skills (`teminaliCut/skills/*` — Beat Montage,
+ * Tutorial) are deliberately NOT copied in here. They are recipes over tools
+ * that this app does not have: the ported registry defines exactly three
+ * (`describe_timeline`, `patch_clip`, `set_effect_param`), and a catalogue row
+ * whose first tool call cannot resolve teaches the operator that rows in this
+ * list might not work. They arrive when the tools do — see
+ * `src/video/P3-import-gate.md`.
+ */
 export const SKILLS_LIST: SpecialistSkill[] = [
   {
     id: "website-builder",
+    category: "code",
     name: "Website Builder",
     tagline: "Modern responsive web apps & design systems",
     icon: "Layout",
@@ -62,6 +75,7 @@ export const SKILLS_LIST: SpecialistSkill[] = [
   },
   {
     id: "teminali-cut-copilot",
+    category: "video",
     name: "Teminali Cut Video Copilot",
     tagline: "Timeline editing & audio beat sync via MCP",
     icon: "Film",
@@ -75,6 +89,7 @@ export const SKILLS_LIST: SpecialistSkill[] = [
   },
   {
     id: "qa-verifier",
+    category: "code",
     name: "QA & Test Verifier",
     tagline: "Autonomous test runner & regression preventer",
     icon: "ShieldCheck",
@@ -87,6 +102,7 @@ export const SKILLS_LIST: SpecialistSkill[] = [
   },
   {
     id: "screenshot-to-code",
+    category: "code",
     name: "Screenshot to Code (UI Cloner)",
     tagline: "Instant visual-to-code compiler & design reverse-engineer",
     icon: "Camera",
@@ -100,6 +116,7 @@ export const SKILLS_LIST: SpecialistSkill[] = [
   },
   {
     id: "visual-verification-tester",
+    category: "code",
     name: "E2E Visual Verification Tester",
     tagline: "Autonomous screenshot & visual regression self-healer",
     icon: "ScanEye",

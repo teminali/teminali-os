@@ -3,26 +3,27 @@ import { Boxes, Check, LoaderCircle, RefreshCw, Search as SearchIcon } from "luc
 import { SKILLS_LIST, useStudioStore } from "../../store/studioStore";
 import { WorkspaceService } from "../../services/workspaceService";
 import { GlobalSearchView } from "../search/GlobalSearchView";
-import { EmptyState, IconButton, Input, SectionLabel, SidebarRow } from "../ui";
+import { EmptyState, IconButton, Input, SectionLabel } from "../ui";
 import { FileTreeItem } from "./FileTree";
 import { StudioSidebar } from "./StudioSidebar";
 import { SidebarFooter } from "./SidebarFooter";
 import type { UseUpdatesResult } from "../../hooks/useUpdates";
-import { PRIMARY_NAV, WORKSPACE_NAV, type SidebarTabId } from "./ActivityBar";
+import type { SpecialistSkill } from "../../types";
+import { MediaPanel } from "./MediaPanel";
+import type { SidebarTabId } from "./ActivityBar";
 
 /**
- * The sidebar panel: nav rows on top, the chosen view below, the account at the
- * foot. All three are always on screen.
+ * The sidebar panel: the chosen view, with the account at its foot.
  *
- * The nav used to belong to the chats view alone, because the rail beside it
- * was doing the switching. With the rail folded away the rows *are* the switch,
- * so they were hoisted here — which is also what Cursor does: New Chat, Search,
- * Automations and Customize stay put no matter which view is open, and only the
- * region under them changes. A view that scrolled the nav off the top would
- * strand anyone who opened Explorer and wanted back out.
+ * The nav rows that used to sit on top are gone — the switch moved back out to
+ * `ActivityBar`, which is a rail of glyphs again by the operator's call. What
+ * that leaves here is a panel that shows one view and nothing else, which is
+ * the whole point of the change: nothing in this file has to be narrow enough
+ * to sit beside a label any more, so the panel opens 48px thinner than it did.
  *
  * Each tab is a view that already existed somewhere in the shell; this file
  * does not re-implement any of them, it only decides which one is on screen.
+ * `media` is the exception and the reason for the change — see `MediaPanel`.
  */
 
 /* ── Shared panel head ────────────────────────────────────────────────────── */
@@ -155,41 +156,71 @@ const ExplorerPanel: React.FC = () => {
 /* ── Skills ───────────────────────────────────────────────────────────────── */
 
 /**
- * The same skill packs the modal mounts, in a column. Clicking the mounted one
- * unmounts it — in a panel that stays open there has to be a way back out, and
- * the store already models "no skill" as null.
+ * The skill catalogue, in a column: one list, not two.
+ *
+ * The IDE skills and the video skills were separate ideas until the operator
+ * asked for them combined, and combining them is not cosmetic — "which skills
+ * do I have" should be one question with one answer no matter which half of
+ * the app you are standing in. They are grouped by the `category` each entry
+ * carries rather than interleaved, because a section label is cheaper to skim
+ * than a badge repeated on every row.
+ *
+ * Clicking the mounted one unmounts it — in a panel that stays open there has
+ * to be a way back out, and the store already models "no skill" as null.
  */
+
+const SKILL_GROUPS: readonly { id: SpecialistSkill["category"]; label: string }[] = [
+  { id: "code", label: "Code" },
+  { id: "video", label: "Video" },
+];
+
 const SkillsPanel: React.FC = () => {
   const { activeSkill, setSkill } = useStudioStore();
 
   return (
     <div className="flex-1 min-h-0 flex flex-col">
       <PanelHeader title="Skills" />
-      <div className="flex-1 min-h-0 overflow-y-auto p-2 space-y-1.5">
-        {SKILLS_LIST.map((skill) => {
-          const isActive = activeSkill?.id === skill.id;
+      <div className="flex-1 min-h-0 overflow-y-auto pb-2">
+        {SKILL_GROUPS.map((group) => {
+          const skills = SKILLS_LIST.filter((skill) => skill.category === group.id);
+          // A label over nothing teaches that a group can be empty. Drop it.
+          if (skills.length === 0) return null;
+
           return (
-            <button
-              key={skill.id}
-              type="button"
-              onClick={() => setSkill(isActive ? null : skill)}
-              aria-pressed={isActive}
-              className={`lit lit-inner w-full text-left rounded-lg p-2.5 flex flex-col gap-1.5 transition-colors duration-ds ease-ds ${
-                isActive ? "bg-reason/10" : "bg-surface-sunken hover:bg-surface"
-              }`}
-            >
-              <span className="flex items-center gap-2">
-                <Boxes size={14} className={isActive ? "text-reason flex-shrink-0" : "text-ink-muted flex-shrink-0"} />
-                <span className="flex-1 min-w-0 truncate text-xs text-ink-high">{skill.name}</span>
-                {isActive && (
-                  <span className="flex items-center gap-1 font-mono text-3xs uppercase tracking-wider text-reason flex-shrink-0">
-                    <Check size={11} />
-                    Mounted
-                  </span>
-                )}
-              </span>
-              <span className="block text-2xs text-ink-muted leading-relaxed">{skill.tagline}</span>
-            </button>
+            <section key={group.id}>
+              <SectionLabel>{group.label}</SectionLabel>
+              <div className="px-2 pb-1 space-y-1.5">
+                {skills.map((skill) => {
+                  const isActive = activeSkill?.id === skill.id;
+                  return (
+                    <button
+                      key={skill.id}
+                      type="button"
+                      onClick={() => setSkill(isActive ? null : skill)}
+                      aria-pressed={isActive}
+                      className={`lit lit-inner w-full text-left rounded-lg p-2.5 flex flex-col gap-1.5 transition-colors duration-ds ease-ds ${
+                        isActive ? "bg-reason/10" : "bg-surface-sunken hover:bg-surface"
+                      }`}
+                    >
+                      <span className="flex items-center gap-2">
+                        <Boxes
+                          size={14}
+                          className={isActive ? "text-reason flex-shrink-0" : "text-ink-muted flex-shrink-0"}
+                        />
+                        <span className="flex-1 min-w-0 truncate text-xs text-ink-high">{skill.name}</span>
+                        {isActive && (
+                          <span className="flex items-center gap-1 font-mono text-3xs uppercase tracking-wider text-reason flex-shrink-0">
+                            <Check size={11} />
+                            Mounted
+                          </span>
+                        )}
+                      </span>
+                      <span className="block text-2xs text-ink-muted leading-relaxed">{skill.tagline}</span>
+                    </button>
+                  );
+                })}
+              </div>
+            </section>
           );
         })}
       </div>
@@ -201,11 +232,8 @@ const SkillsPanel: React.FC = () => {
 
 export interface SidebarProps {
   tab: SidebarTabId;
-  onSelectTab: (tab: SidebarTabId) => void;
-  /** Which non-tab view the shell is showing, for nav highlighting. */
+  /** Which non-tab view the shell is showing. Read by the chats view. */
   activeView: string;
-  onNewChat: () => void;
-  onOpenCustomize: () => void;
   onOpenSettings: () => void;
   onConnectGitHub: () => void;
   updates: UseUpdatesResult;
@@ -214,33 +242,12 @@ export interface SidebarProps {
 
 export const Sidebar: React.FC<SidebarProps> = ({
   tab,
-  onSelectTab,
   activeView,
-  onNewChat,
-  onOpenCustomize,
   onOpenSettings,
   onConnectGitHub,
   updates,
   onOpenUpdate,
 }) => {
-  const primaryAction: Record<string, () => void> = {
-    "new-chat": () => {
-      onNewChat();
-      onSelectTab("chats");
-    },
-    // One action, not two. This used to select the search view *and* open the
-    // command palette over it, so the view was covered the moment it appeared.
-    search: () => onSelectTab("search"),
-    customize: onOpenCustomize,
-  };
-
-  // "New Chat" is an action, never a destination, so it never lights up.
-  const primaryActive: Record<string, boolean> = {
-    "new-chat": false,
-    search: tab === "search",
-    customize: activeView === "customize",
-  };
-
   const view = () => {
     switch (tab) {
       case "files":
@@ -253,6 +260,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
         );
       case "skills":
         return <SkillsPanel />;
+      case "media":
+        return <MediaPanel />;
       case "chats":
       default:
         return <StudioSidebar activeView={activeView} />;
@@ -261,40 +270,9 @@ export const Sidebar: React.FC<SidebarProps> = ({
 
   return (
     <div className="flex-1 min-h-0 flex flex-col">
-      {/* ── Nav ──────────────────────────────────────────────────────────
-          Cursor's four, then this studio's three. The gap between the groups
-          is the only thing separating them; a rule here would be the first
-          horizontal line in a sidebar that has none. */}
-      <nav className="flex-shrink-0 flex flex-col gap-px pt-1.5" aria-label="Views">
-        {PRIMARY_NAV.map((item) => (
-          <SidebarRow
-            key={item.id}
-            icon={<item.icon size={16} strokeWidth={1.7} />}
-            active={primaryActive[item.id]}
-            onClick={primaryAction[item.id]}
-          >
-            {item.label}
-          </SidebarRow>
-        ))}
-
-        <div className="mt-4">
-          <SectionLabel>Workspace</SectionLabel>
-        </div>
-        {WORKSPACE_NAV.map((item) => (
-          <SidebarRow
-            key={item.id}
-            icon={<item.icon size={16} strokeWidth={1.7} />}
-            active={tab === item.id}
-            title={item.shortcut ? `${item.label} (${item.shortcut})` : item.label}
-            onClick={() => onSelectTab(item.id)}
-          >
-            {item.label}
-          </SidebarRow>
-        ))}
-      </nav>
-
-      {/* ── The chosen view ──────────────────────────────────────────── */}
-      <div className="flex-1 min-h-0 flex flex-col mt-4">{view()}</div>
+      {/* The view starts at the top now. There is no nav above it to scroll
+          past, and the rail beside it is what says which one this is. */}
+      <div className="flex-1 min-h-0 flex flex-col pt-1.5">{view()}</div>
 
       <SidebarFooter
         onConnectGitHub={onConnectGitHub}

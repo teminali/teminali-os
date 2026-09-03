@@ -2,6 +2,7 @@ import React from "react";
 import { Boxes, Camera, Check, Film, Layout, ScanEye, ShieldCheck } from "lucide-react";
 import { Modal } from "../ui";
 import { SKILLS_LIST, useStudioStore } from "../../store/studioStore";
+import type { SpecialistSkill } from "../../types";
 
 /**
  * Skill packs, as a list you pick from.
@@ -28,6 +29,11 @@ const GLYPHS: Record<string, React.ElementType> = {
   "visual-verification-tester": ScanEye,
 };
 
+const SKILL_GROUPS: readonly { id: SpecialistSkill["category"]; label: string }[] = [
+  { id: "code", label: "Code" },
+  { id: "video", label: "Video" },
+];
+
 export const SkillsModal: React.FC = () => {
   const { isSkillsModalOpen, setSkillsModalOpen, activeSkill, setSkill } = useStudioStore();
 
@@ -40,7 +46,17 @@ export const SkillsModal: React.FC = () => {
       size="md"
     >
       <div className="flex flex-col gap-0.5">
-        {SKILLS_LIST.map((skill) => {
+        {/* Grouped, and by the same `category` the sidebar's Skills tab groups
+            by. Two surfaces over one list may not disagree about what that list
+            contains or how it is divided — that disagreement is precisely what
+            "one catalogue" was asked for to end. */}
+        {SKILL_GROUPS.map((group) => {
+        const skills = SKILLS_LIST.filter((skill) => skill.category === group.id);
+        if (skills.length === 0) return null;
+        return (
+        <section key={group.id}>
+        <p className="px-3 pt-2.5 pb-1 text-2xs text-ink-soft">{group.label}</p>
+        {skills.map((skill) => {
           const isActive = activeSkill?.id === skill.id;
           const Glyph = GLYPHS[skill.id] ?? Boxes;
           return (
@@ -84,6 +100,9 @@ export const SkillsModal: React.FC = () => {
               )}
             </button>
           );
+        })}
+        </section>
+        );
         })}
       </div>
     </Modal>

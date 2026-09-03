@@ -30,10 +30,18 @@ import { usePanelStore } from "./store/panelStore";
  * region that draws it.
  */
 
-const SIDEBAR_WIDTH_KEY = "frontier_sidebar_width";
+// Bumped when the activity bar came back: a width saved under the old key was
+// chosen for a panel that had to fit "Customize" in it, and restoring 260px
+// beside a 48px rail would hand the operator a *wider* dock than the one they
+// asked to make thinner. A new key re-baselines everyone once and keeps the
+// preference honest from there.
+const SIDEBAR_WIDTH_KEY = "frontier_sidebar_width_v2";
 const SIDEBAR_COLLAPSED_KEY = "frontier_sidebar_collapsed";
 const SIDEBAR_TAB_KEY = "frontier_sidebar_tab";
-const DEFAULT_SIDEBAR_WIDTH = 260; // measured: 259px of panel + its 1px divider
+// 212 of panel + its 1px divider, beside the 48px rail: the same 260px of
+// shell the labelled sidebar took, with the labels' width given back to the
+// view. See `components/sidebar/ActivityBar.tsx`.
+const DEFAULT_SIDEBAR_WIDTH = 212;
 
 export default function App() {
   const [activeView, setActiveView] = useState("agent");
@@ -231,12 +239,15 @@ export default function App() {
       const next = previous + delta;
       // Dragging past the floor collapses rather than clamping, which is what
       // makes the handle feel like a real edge.
-      if (next < 130) {
+      if (next < 120) {
         setSidebarCollapsed(true);
         return DEFAULT_SIDEBAR_WIDTH;
       }
       setSidebarCollapsed(false);
-      return Math.min(480, Math.max(200, next));
+      // The floor came down with the default. A panel that can no longer be
+      // dragged narrower than its own opening width is not resizable, it is
+      // just draggable wider.
+      return Math.min(480, Math.max(172, next));
     });
   }, []);
 
