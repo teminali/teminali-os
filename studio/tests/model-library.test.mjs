@@ -104,9 +104,13 @@ test("speed tracks bandwidth divided by model size", () => {
   const small = estimateTokensPerSecond(find("llama3.2:3b"), M4_PRO_24);
   const large = estimateTokensPerSecond(find("qwen2.5-coder:32b"), M4_PRO_24);
   assert.ok(small > large * 5, "a 2GB model must be far faster than a 20GB one");
-  // Measured qwen2.5-coder:14b on an M4 Pro is roughly 18-22 tok/s.
+  // Re-measured on an M4 Pro (273 GB/s, 100% GPU, q8_0 KV): qwen2.5-coder:14b
+  // decodes at 13.9 tok/s, not the 18-22 this previously asserted. The old
+  // range was what a 0.7 bandwidth efficiency predicted rather than what the
+  // machine did; BANDWIDTH_EFFICIENCY now carries the three decodes it is
+  // fitted to.
   const flagship = estimateTokensPerSecond(find("qwen2.5-coder:14b"), M4_PRO_24);
-  assert.ok(flagship >= 15 && flagship <= 30, `expected 15-30 tok/s, got ${flagship}`);
+  assert.ok(flagship >= 11 && flagship <= 18, `expected 11-18 tok/s, got ${flagship}`);
 });
 
 test("the same model is slower on a lower-bandwidth machine", () => {

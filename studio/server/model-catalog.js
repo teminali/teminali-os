@@ -35,12 +35,58 @@ const RUNTIME_OVERHEAD_BYTES = 600 * MB;
  */
 export const PRACTICAL_CONTEXT_TOKENS = 16384;
 
-/** Fraction of a decode step that is memory-bandwidth bound, on a GPU backend. */
-const BANDWIDTH_EFFICIENCY = 0.7;
+/**
+ * Fraction of a decode step that is memory-bandwidth bound, on a GPU backend.
+ *
+ * Measured, not assumed. Three decodes on one M4 Pro (273 GB/s, 100% GPU):
+ *
+ *   qwen2.5-coder:14b   8.4 GB   13.9 tok/s   implies 0.47
+ *   devstral:24b       14.1 GB    6.0 tok/s   implies 0.31
+ *   gpt-oss:20b        (sparse)  29.4 tok/s   see `activeBytes` below
+ *
+ * Efficiency is not actually constant — it falls as a model grows, because more
+ * layers mean more kernel launches and more attention work per byte streamed —
+ * but three points is not enough to fit a curve, so this is the single value
+ * that lands closest across them, and it errs high on the largest. The earlier
+ * 0.7 was optimistic by roughly 2x at the top of the range, which matters now
+ * that `planRouting` refuses a heavy lane below MIN_HEAVY_TOKENS_PER_SECOND:
+ * an inflated estimate waves through a model nobody will sit through.
+ */
+const BANDWIDTH_EFFICIENCY = 0.45;
 /** CPU-only inference achieves far less of theoretical bandwidth. */
 const CPU_BANDWIDTH_EFFICIENCY = 0.25;
 /** Assumed DDR bandwidth when the host has no known accelerator, GB/s. */
 const ASSUMED_CPU_BANDWIDTH = 50;
+
+/**
+ * The slowest the heavy lane is allowed to be, in tokens per second.
+ *
+ * Ten is where `speedBand` stops calling a model "steady" and starts calling it
+ * "slow". An agent turn that emits several hundred tokens crosses a minute
+ * below this, which is long enough that the stronger answer stops being worth
+ * waiting for. The lane picks the strongest model that clears the bar rather
+ * than the strongest model outright.
+ */
+const MIN_HEAVY_TOKENS_PER_SECOND = 10;
+
+/**
+ * Bytes per parameter across the Q4-family quantisations most local builds ship
+ * in. Only used to rank a model whose parameter count is unknown — a hand-pulled
+ * tag that matches no catalogue entry and whose Ollama metadata omits
+ * `parameter_size`. Ranking those at zero would bury a 24B under a 3B.
+ */
+const ASSUMED_BYTES_PER_PARAM = 0.55;
+
+/**
+ * How strong a model is, for lane ranking: its parameter count, falling back to
+ * what its file size implies. Deliberately not bytes — quantisation moves bytes
+ * without moving capability, so an IQ3_M 27B would otherwise rank below a
+ * Q4_K_M 24B despite being the larger model.
+ */
+function strengthOf(model) {
+  if (model.params) return model.params;
+  return (model.bytes ?? 0) / ASSUMED_BYTES_PER_PARAM;
+}
 
 /**
  * KV cache cost per token, in bytes, at fp16.
@@ -48,6 +94,16 @@ const ASSUMED_CPU_BANDWIDTH = 50;
  * Stored per entry because grouped-query attention makes it impossible to infer
  * from parameter count alone — an 8B model with 8 KV heads and a 14B model with
  * 8 KV heads cost almost the same per token.
+ *
+ * `activeBytes` is the optional companion for mixture-of-experts entries: the
+ * bytes a single decode step actually reads, which is what bounds speed. It is
+ * measured, not computed. The naive share — active params / total params x file
+ * size — puts GPT-OSS 20B at 2.2 GB, but every token also reads the full
+ * attention stack and the router on top of its 4 of 32 experts. Measured at
+ * 29.4 tok/s on an M4 Pro (273 GB/s, 20GB wired limit, 32k context, q8_0 KV,
+ * 100% GPU), it back-solves through this formula to 4.2 GB: nearly double the
+ * naive figure, and a third of the 13 GB the file occupies. Re-measure if the
+ * entry is ever repointed at a different quantisation.
  */
 
 /** @typedef {"code"|"reasoning"|"vision"|"general"|"embedding"|"autocomplete"} Capability */
@@ -87,6 +143,13 @@ export const CATALOG = Object.freeze([
   { tag: "mistral:7b", name: "Mistral 7B", family: "Mistral", params: 7.2e9, bytes: 4.1 * GB, kvPerToken: 128 * 1024, context: 32768, capabilities: ["general"], useCase: "General instruction following.", tier: "small" },
   { tag: "mistral-nemo:12b", name: "Mistral Nemo 12B", family: "Mistral", params: 12.2e9, bytes: 7.1 * GB, kvPerToken: 160 * 1024, context: 131072, capabilities: ["general", "code"], useCase: "Long-context general work.", tier: "medium" },
   { tag: "mistral-small:24b", name: "Mistral Small 24B", family: "Mistral", params: 23.6e9, bytes: 14 * GB, kvPerToken: 160 * 1024, context: 32768, capabilities: ["general", "code", "reasoning"], useCase: "Near-flagship quality that still fits 32GB.", tier: "large" },
+
+  /* ── Mixture-of-experts ─────────────────────────────────────────────────
+     Sparse models: memory is set by the total parameter count, speed by the
+     handful of experts each token actually routes through. They are the only
+     way a 24GB machine runs anything in this weight class at a usable rate, so
+     `activeBytes` exists to stop the speed estimate reading them as dense.     */
+  { tag: "gpt-oss:20b", name: "GPT-OSS 20B", family: "OpenAI", params: 20.9e9, bytes: 13 * GB, activeBytes: 4.2 * GB, kvPerToken: 48 * 1024, context: 131072, capabilities: ["code", "reasoning", "general"], useCase: "Agentic coding and reasoning at 4x the speed of a dense model its size.", tier: "large", flagship: true },
 
   /* ── Llama ──────────────────────────────────────────────────────────── */
   { tag: "llama3.2:1b", name: "Llama 3.2 1B", family: "Llama", params: 1.2e9, bytes: 1.3 * GB, kvPerToken: 32 * 1024, context: 131072, capabilities: ["general"], useCase: "Smallest usable assistant; summarising and routing.", tier: "tiny" },
@@ -148,14 +211,20 @@ export function memoryRequirement(model, contextTokens) {
  * not a pure streaming read. This lands within roughly 15% of measured figures
  * on Apple Silicon, which is close enough to set expectations and is always
  * labelled as an estimate in the interface.
+ *
+ * A mixture-of-experts model breaks the premise: it routes each token through a
+ * few of its experts and leaves the rest untouched, so the read set per token is
+ * far smaller than the file. Those entries carry `activeBytes`, and it is used
+ * here in place of `bytes` — memory still budgets the whole file, because every
+ * expert has to be resident even though only some are read.
  */
 export function estimateTokensPerSecond(model, device) {
   const gpu = device.accelerator === "apple-unified" || device.accelerator === "cuda";
   const bandwidth = device.bandwidthGBs ?? ASSUMED_CPU_BANDWIDTH;
   const efficiency = gpu ? BANDWIDTH_EFFICIENCY : CPU_BANDWIDTH_EFFICIENCY;
-  const modelGiB = model.bytes / GB;
-  if (modelGiB <= 0) return null;
-  return Math.round((bandwidth / modelGiB) * efficiency);
+  const readGiB = (model.activeBytes ?? model.bytes) / GB;
+  if (readGiB <= 0) return null;
+  return Math.round((bandwidth / readGiB) * efficiency);
 }
 
 /**
@@ -345,12 +414,25 @@ export function planRouting(library) {
   const generals = [...candidates].sort((a, b) => a.bytes - b.bytes);
   const light = coders[0] ?? generals[0] ?? null;
 
-  // Heaviest that still fits comfortably, preferring a coding model over a
+  // Strongest that still fits comfortably, preferring a coding model over a
   // general one at equal weight.
-  const heavyPool = [...(coders.length ? coders : candidates)].sort((a, b) => {
+  //
+  // Strength is parameter count, not file size. Quantisation moves bytes without
+  // moving what a model knows — a 27B at IQ3_M is smaller on disk than a 24B at
+  // Q4_K_M — and a mixture-of-experts model reads a fraction of its file per
+  // token, so ranking by bytes puts a dense 24B above a sparse 21B that answers
+  // four times faster.
+  //
+  // Speed is a floor rather than a ranking term: the heavy lane is where the
+  // slow models live by design, but a model too slow to sit through is not the
+  // stronger choice however many parameters it has. If nothing clears the bar,
+  // the lane collapses onto `light`, which is the honest answer — this machine
+  // has no model that is both stronger and usable.
+  const fastEnough = (model) => (model.fit.tokensPerSecond ?? 0) >= MIN_HEAVY_TOKENS_PER_SECOND;
+  const heavyPool = [...(coders.length ? coders : candidates)].filter(fastEnough).sort((a, b) => {
     const codeDelta = Number(b.capabilities.includes("code")) - Number(a.capabilities.includes("code"));
-    if (codeDelta !== 0 && Math.abs(a.bytes - b.bytes) < 2 * GB) return codeDelta;
-    return b.bytes - a.bytes;
+    if (codeDelta !== 0 && Math.abs(strengthOf(a) - strengthOf(b)) < 2e9) return codeDelta;
+    return strengthOf(b) - strengthOf(a);
   });
   const heavy = heavyPool[0] ?? light;
 
