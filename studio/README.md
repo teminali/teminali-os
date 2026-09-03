@@ -226,12 +226,26 @@ and the inspector are three columns; at `md` the library visits as an overlay;
 below 576px both visit, and on the tightest tier the inspector arrives as a
 bottom sheet so the monitor keeps the room. Nothing is removed at any width —
 the 12 timeline tools that exist at 1200px all exist at 400px, folding into an
-overflow menu that carries their labels and shortcuts. Labels on the bar appear
+overflow menu that carries their labels and shortcuts. The alignment shelf that
+floats over the stage follows the same rule: it is eight icons rather than
+fourteen, with the four *transform* actions on it — both flips, fit-to-frame and
+reset — behind a single `⋯`. Labels on the bar appear
 at `lg` only; the controls themselves get *larger* at `xs`, not smaller. A drag
 handle between the monitor and the timeline sets the split (arrow keys move it,
 double-click resets it).
 
-**The transport has keys.** `Space` plays and pauses — and replays, when the
+**The panel expands to the edge, and the inspector can always be put away.** The
+tab strip's expand button runs the editor out to the vertical tab rail —
+`--panel-w-expanded` is `calc(100vw - var(--shell-left-inset))`, not the flat
+736px it was — and while expanded the conversation is hidden rather than crushed,
+staying mounted. Dragged short of that, the chat keeps a 420px floor. `Edit` is
+drawn at every tier, and only the mechanism behind it changes: where the
+inspector is seated it minimises that column, where the inspector is summoned it
+opens the overlay. One control, so there is no width at which the 296px rail
+cannot be given back to the picture.
+
+**The transport has keys**, and its play disc is centred on the picture rather
+than on what is left of the row. `Space` plays and pauses — and replays, when the
 playhead is parked at the end — `Home` / `End` jump to the in and out points,
 `←` / `→` step a frame (hold to scrub), `M` drops a marker, `I` sets or clears
 the in point, and `L` toggles loop. They are live only while the editor is the
