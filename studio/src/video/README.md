@@ -203,6 +203,9 @@ running app.
 
 ## Still to come
 
-- **P3** — media import (`dialog:openMedia`, `ffmpeg:process`).
+- **P3** — media import. Designed but not built: the approval gate, the
+  staging order, and three findings that change its scope are in
+  [P3-import-gate.md](./P3-import-gate.md). No tool touches the disk until
+  that gate exists.
 - **P4** — export (`export:*`, `render:*`). Until then, export stays in
   Teminali Cut, which is why that app is still shipping.
