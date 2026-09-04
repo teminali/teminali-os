@@ -29,7 +29,7 @@
     "gemini:diagnose": "zsh scripts/diagnose-gemini.zsh",
     "gemini:diagnose-direct": "zsh scripts/diagnose-gemini-direct.zsh",
     "gateway:start": "node gateway/start-gateway.js",
-    "test": "node --test calculator.test.js gateway/*.test.js",
+    "test": "node --test calculator.test.js gateway/*.test.js billing/tests/*.test.mjs",
     "benchmark:003:score": "node benchmarks/website-builder-saas-launch-003/oracle/score.mjs",
     "teminali": "node bin/frontier.js",
     "frontier": "node bin/frontier.js",

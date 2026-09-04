@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useState } from "react";
 import { LoaderCircle, RefreshCw } from "lucide-react";
 import { UsageService, type PlanAccount, type PlanSummary, type UsageSummary } from "../../../services/usageService";
+import { EntitlementSection } from "./EntitlementSection";
 import { EmptyState, IconButton } from "../../ui";
 
 /**
@@ -29,6 +30,13 @@ import { EmptyState, IconButton } from "../../ui";
  * one with a deadline attached: spend is history, headroom is a constraint on
  * the next hour. It breaks the one-hue rule deliberately and only at the top of
  * a window's range, where the bar stops reporting magnitude and starts warning.
+ *
+ * And above THAT, a fifth question that is about us rather than about the
+ * agents — "what may this machine do, and how do I get more" — in
+ * EntitlementSection. It comes first because it is the only one the operator
+ * can act on immediately, and because everything below it describes agent
+ * subscriptions bought elsewhere; leaving the Teminali plan lower down invited
+ * the reading that upgrading here would raise a Claude Code limit.
  */
 
 const nf = new Intl.NumberFormat();
@@ -200,6 +208,11 @@ export const UsagePane: React.FC = () => {
       </header>
 
       <div className="flex-1 min-h-0 overflow-y-auto px-3 pb-4 space-y-4">
+        {/* ── The Teminali plan ─────────────────────────────────────────────
+            Renders itself to nothing when the entitlement cannot be read, so
+            no guard is needed here. */}
+        <EntitlementSection />
+
         {/* ── Plan headroom ─────────────────────────────────────────────────
             Ahead of the ledger, and ahead of the no-turns empty state: an
             operator who has run nothing here still has a plan and an identity,

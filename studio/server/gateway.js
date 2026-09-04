@@ -12,12 +12,26 @@ import { BoundedAuditLog } from "./audit-log.js";
 import { createConfig } from "./config.js";
 import { listWorkspaceTree, readWorkspaceFile, searchWorkspace, writeWorkspaceFile } from "./workspace.js";
 import { TERMINAL_LIMITS, runWorkspaceCommand } from "./terminal.js";
-import { readBounded, speak, transcribe, voiceStatus } from "./voice.js";
+import { forgetVoiceStatus, readBounded, speak, transcribe, voiceStatus } from "./voice.js";
 import { act, assistantCapabilities, observe, requestAccessibility } from "./assistant.js";
 import { AGENTS, AGENT_LIMITS, agentAvailability, isAgentEngine, runAgentTurn } from "./agent-cli.js";
 import { agentModels, recordResolution } from "./agent-models.js";
 import { appendUsage, summariseUsage, usageRecord } from "./usage-ledger.js";
 import { agentAccounts, readPlanLimits, recordPlanLimits } from "./plan.js";
+import {
+  grants,
+  listPlans,
+  pollSignIn,
+  profileAllowed,
+  readEntitlement,
+  readOrder,
+  refreshLicence,
+  refusal,
+  signOut,
+  startCheckout,
+  startSignIn,
+} from "./licence.js";
+import { CAPABILITIES, PLANS, PROFILE_CAPABILITY } from "../../licence/entitlements.js";
 import { isValidLogin, readAdmins, requireAdmin, whoami, writeAdmins } from "./admin.js";
 import { appendRun, createSandbox, measureSandbox, readRuns, removeRun } from "./arena.js";
 import { currentVersion, publishRelease, validateNextVersion } from "./releases.js";
@@ -310,6 +324,16 @@ export async function createGateway(options = {}) {
   const modeResolver = options.resolveFrontierMode || resolveFrontierMode;
   if (typeof fetchImpl !== "function") throw new Error("A Fetch-compatible implementation is required.");
 
+  /**
+   * May this machine use the VibeVoice tier?
+   *
+   * Read per request rather than cached with the gateway, because the licence
+   * file changes underneath a running process — a sign-in, a refresh, or a
+   * sign-out all rewrite it — and an entitlement pinned at startup would mean
+   * the user has to restart the app to get what they just paid for.
+   */
+  const voiceTierEntitled = async () => grants(await readEntitlement(config.licenceStorePath), "voice.vibevoice");
+
   const sessionToken = options.sessionToken || randomBytes(32).toString("base64url");
   const tokenFingerprint = createHash("sha256").update(sessionToken).digest("hex").slice(0, 12);
   const audit = options.audit || new BoundedAuditLog(config.auditPath, {
@@ -317,6 +341,34 @@ export async function createGateway(options = {}) {
     maxFiles: config.auditMaxFiles,
   });
   await audit.initialize();
+
+  /**
+   * The entitlement, as the UI needs it.
+   *
+   * It carries the catalogue as well as the state, because an upgrade screen
+   * has to name what Pro adds, and the only honest source for that is the same
+   * registry the gates read. A hand-written feature list in a component is a
+   * list that silently stops matching what the product actually does.
+   */
+  const entitlementPayload = async (known = null) => {
+    const entitlement = known ?? (await readEntitlement(config.licenceStorePath));
+    return {
+      plan: entitlement.plan,
+      planLabel: PLANS[entitlement.plan]?.label ?? PLANS.free.label,
+      capabilities: entitlement.capabilities,
+      state: entitlement.state,
+      reason: entitlement.reason,
+      expiresAt: entitlement.expiresAt,
+      refreshAfter: entitlement.refreshAfter,
+      signedIn: entitlement.signedIn,
+      // Null means this build was never pointed at a billing service, which is
+      // a legitimate configuration — the free lanes need no account — and the
+      // UI must offer no upgrade button rather than a broken one.
+      billingConfigured: Boolean(config.billingBaseUrl),
+      catalog: CAPABILITIES,
+      plans: Object.values(PLANS).map((plan) => ({ id: plan.id, label: plan.label, capabilities: [...plan.capabilities] })),
+    };
+  };
 
   const health = async () => {
     const [ollama, cutMcp] = await Promise.all([
@@ -409,6 +461,32 @@ export async function createGateway(options = {}) {
           throw new GatewayError(409, "MODEL_MODE_LOCKED", "Max is locked until its exact local model path passes qualification.");
         }
         const selection = modeResolver(mode, prompt, expertQualified);
+
+        // The entitlement gate. It sits AFTER resolution rather than before it
+        // because only the resolver knows which profile a mode lands on: Auto
+        // is free when it stays local and Pro when it escalates, and asking
+        // before resolving would either over-block Auto or let escalation
+        // through. Resolving first costs nothing — it is a pure function of the
+        // mode and the prompt, with no upstream call.
+        const entitlement = await readEntitlement(config.licenceStorePath);
+        if (!profileAllowed(selection.profile, entitlement.capabilities)) {
+          const denial = refusal(PROFILE_CAPABILITY[selection.profile], entitlement);
+          await audit.write({
+            event: "model-mode-refused",
+            correlationId,
+            method: request.method,
+            route,
+            mode: selection.mode,
+            profile: selection.profile,
+            capability: denial.capability,
+            plan: entitlement.plan,
+          });
+          // 402 rather than 403: this is not "you may never", it is "not on
+          // this plan", and the client renders an upgrade path from the code.
+          throw new GatewayError(402, denial.code, denial.message, {
+            details: { capability: denial.capability, plan: denial.plan, stale: denial.stale },
+          });
+        }
         await audit.write({
           event: "model-mode-resolved",
           correlationId,
@@ -1064,19 +1142,164 @@ export async function createGateway(options = {}) {
         return;
       }
 
+      /* ── Entitlement ──────────────────────────────────────────────────────
+         What this machine may do, and how it comes to be allowed more.
+
+         The gates themselves live at the routes they guard — escalation at
+         /api/frontier/resolve-mode, the speech tier at the voice routes. These
+         routes exist so the UI can show the state and act on it without
+         inferring the plan from a refusal it happened to receive.
+
+         Sign-in is a device-code flow because a desktop app has no redirect
+         URI worth trusting; see server/licence.js for why.
+         ------------------------------------------------------------------ */
+
+      if (request.method === "GET" && route === "/api/entitlement") {
+        replyJson(response, 200, await entitlementPayload());
+        return;
+      }
+
+      if (request.method === "POST" && route === "/api/entitlement/refresh") {
+        const entitlement = await refreshLicence(config.licenceStorePath, { baseUrl: config.billingBaseUrl });
+        // The voice probe caches per entitlement, and the entitlement just
+        // changed. Without this the user waits out a TTL for the tier they own.
+        forgetVoiceStatus();
+        await audit.write({ event: "licence-refreshed", correlationId, method: request.method, route, plan: entitlement.plan, state: entitlement.state });
+        replyJson(response, 200, await entitlementPayload(entitlement));
+        return;
+      }
+
+      if (request.method === "POST" && route === "/api/entitlement/sign-in") {
+        const body = await readJson(request, config.maxJsonBytes).catch(() => ({}));
+        try {
+          const started = await startSignIn({
+            baseUrl: config.billingBaseUrl,
+            deviceName: typeof body?.deviceName === "string" ? body.deviceName.slice(0, 120) : null,
+            // Passed through so a future account screen can offer Google
+            // beside GitHub; omitted, the client sends its own default rather
+            // than letting the service pick.
+            ...(typeof body?.provider === "string" ? { provider: body.provider } : {}),
+          });
+          await audit.write({ event: "licence-sign-in-started", correlationId, method: request.method, route });
+          replyJson(response, 200, started);
+        } catch (error) {
+          throw new GatewayError(error.status || 502, error.code || "SIGN_IN_FAILED", error.message);
+        }
+        return;
+      }
+
+      if (request.method === "POST" && route === "/api/entitlement/sign-in/poll") {
+        const body = await readJson(request, config.maxJsonBytes);
+        try {
+          const result = await pollSignIn(config.licenceStorePath, {
+            baseUrl: config.billingBaseUrl,
+            deviceCode: typeof body?.deviceCode === "string" ? body.deviceCode : null,
+          });
+          if (result.status !== "granted") {
+            replyJson(response, 200, { status: result.status });
+            return;
+          }
+          forgetVoiceStatus();
+          await audit.write({ event: "licence-signed-in", correlationId, method: request.method, route, plan: result.entitlement.plan });
+          replyJson(response, 200, { status: "granted", ...(await entitlementPayload(result.entitlement)) });
+        } catch (error) {
+          throw new GatewayError(error.status || 502, error.code || "SIGN_IN_FAILED", error.message);
+        }
+        return;
+      }
+
+      if (request.method === "POST" && route === "/api/entitlement/sign-out") {
+        // Revoke at the service before forgetting locally — see signOut in
+        // server/licence.js. The local half happens either way, so this route
+        // cannot fail; `revoked` records whether the server half got through.
+        const goodbye = await signOut(config.licenceStorePath, { baseUrl: config.billingBaseUrl });
+        forgetVoiceStatus();
+        await audit.write({
+          event: "licence-signed-out",
+          correlationId,
+          method: request.method,
+          route,
+          revoked: goodbye.revoked,
+          reason: goodbye.reason,
+        });
+        replyJson(response, 200, await entitlementPayload());
+        return;
+      }
+
+      /* ── Upgrade ──────────────────────────────────────────────────────────
+         The three routes between "I want Pro" and a licence that says so.
+
+         All three are thin proxies. The gateway holds the session token and
+         the service address; the renderer holds neither, and must not, because
+         a token reachable from the page is a token reachable from anything the
+         page ever renders.
+
+         Nothing here decides what a plan costs or what it unlocks. The prices
+         come from the service, the capabilities from licence/entitlements.js
+         via the service, and the licence itself only ever arrives through
+         /api/entitlement/refresh where it is verified before it is stored. */
+
+      if (request.method === "GET" && route === "/api/entitlement/plans") {
+        try {
+          replyJson(response, 200, await listPlans({ baseUrl: config.billingBaseUrl }));
+        } catch (error) {
+          throw new GatewayError(error.status || 502, error.code || "PLANS_UNAVAILABLE", error.message);
+        }
+        return;
+      }
+
+      if (request.method === "POST" && route === "/api/entitlement/checkout") {
+        const body = await readJson(request, config.maxJsonBytes);
+        try {
+          const started = await startCheckout(config.licenceStorePath, {
+            baseUrl: config.billingBaseUrl,
+            rail: typeof body?.rail === "string" ? body.rail : null,
+            priceId: typeof body?.priceId === "string" ? body.priceId : null,
+            // Sent only when the user typed one. The service falls back to the
+            // number already on the account, and an empty string here would
+            // override a good number with a bad one.
+            msisdn: typeof body?.msisdn === "string" && body.msisdn.trim() ? body.msisdn.trim() : null,
+          });
+          // The amount is not logged. An audit trail that records what someone
+          // paid is a financial record, and this file is a debugging aid.
+          await audit.write({ event: "checkout-started", correlationId, method: request.method, route, rail: body?.rail ?? null });
+          replyJson(response, 200, started);
+        } catch (error) {
+          throw new GatewayError(error.status || 502, error.code || "CHECKOUT_FAILED", error.message);
+        }
+        return;
+      }
+
+      const orderMatch = route.match(/^\/api\/entitlement\/order\/([A-Za-z0-9_-]{1,120})$/);
+      if (request.method === "GET" && orderMatch) {
+        try {
+          replyJson(response, 200, await readOrder(config.licenceStorePath, { baseUrl: config.billingBaseUrl, orderId: orderMatch[1] }));
+        } catch (error) {
+          throw new GatewayError(error.status || 502, error.code || "ORDER_UNAVAILABLE", error.message);
+        }
+        return;
+      }
+
       /* ── Voice ────────────────────────────────────────────────────────────
          Three routes in front of an optional local speech sidecar. Every one
          of them treats "no sidecar" as a normal answer, because the studio is
          designed to fall back to the browser engine rather than lose voice.
+
+         The entitlement enters here as a tier, not as a gate: `voice.vibevoice`
+         is Pro, and a free caller is routed to the local engines rather than
+         refused. Compare /api/frontier/resolve-mode, which does refuse — the
+         difference is that escalation has a per-turn cost and no local
+         substitute, while the sidecar has neither.
          ------------------------------------------------------------------ */
 
       if (request.method === "GET" && route === "/api/voice/status") {
-        replyJson(response, 200, await voiceStatus(config));
+        replyJson(response, 200, await voiceStatus(config, { allowVibeVoice: await voiceTierEntitled() }));
         return;
       }
 
       if (request.method === "POST" && route === "/api/voice/transcribe") {
-        const status = await voiceStatus(config);
+        const allowVibeVoice = await voiceTierEntitled();
+        const status = await voiceStatus(config, { allowVibeVoice });
         if (!status.available || !status.asr) {
           throw new GatewayError(503, "VOICE_ASR_UNAVAILABLE", status.detail || "No speech recogniser is running.");
         }
@@ -1092,7 +1315,7 @@ export async function createGateway(options = {}) {
         }
         try {
           const language = /name="language"[\s\S]{0,120}?\r\n\r\n([^\r]+)/.exec(audio.toString("latin1"))?.[1]?.trim() ?? "auto";
-          const result = await transcribe(config, { body: audio, contentType, language });
+          const result = await transcribe(config, { body: audio, contentType, language, allowVibeVoice });
           await audit.write({
             event: "voice-transcribed",
             correlationId,
@@ -1111,7 +1334,8 @@ export async function createGateway(options = {}) {
       }
 
       if (request.method === "POST" && route === "/api/voice/speak") {
-        const status = await voiceStatus(config);
+        const allowVibeVoice = await voiceTierEntitled();
+        const status = await voiceStatus(config, { allowVibeVoice });
         if (!status.available || !status.tts) {
           throw new GatewayError(503, "VOICE_TTS_UNAVAILABLE", status.detail || "No speech synthesiser is running.");
         }
@@ -1128,7 +1352,7 @@ export async function createGateway(options = {}) {
             language: typeof speakRequest.language === "string" ? speakRequest.language : "en-US",
             voice: typeof speakRequest.voice === "string" ? speakRequest.voice : null,
             rate: Number.isFinite(speakRequest.rate) ? speakRequest.rate : 1,
-          });
+          }, { allowVibeVoice });
           response.writeHead(200, {
             "content-type": audio.contentType,
             "content-length": audio.body.length,

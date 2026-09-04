@@ -50,6 +50,7 @@ route requires it. Roughly sixty routes across:
 | --- | --- |
 | Health, session, audit | `/health` · `/api/session` · `/api/audit` |
 | Model mode & routing | `/api/frontier/status` · `/api/frontier/resolve-mode` · `/api/models/*` |
+| Entitlement | `/api/entitlement` · `/api/entitlement/{refresh,sign-in,sign-in/poll,sign-out}` · `/api/entitlement/{plans,checkout}` · `/api/entitlement/order/:id` |
 | Hosted providers | `/api/providers` · `/api/providers/key` · `/api/providers/lanes` |
 | Workspace | `/api/workspace/{tree,file,write,search,open,projects}`, `/api/workspace/projects/{remember,forget}` |
 | Terminal | `/api/terminal/exec` |
@@ -479,7 +480,7 @@ ollama serve              # local models on 127.0.0.1:11434
 
 ```bash
 npm run typecheck   # tsc --noEmit
-npm test            # 661 tests, 0 failures
+npm test            # 712 tests, 0 failures
 npm run build       # tsc && vite build
 npm run verify:core # all three
 ```
@@ -541,6 +542,13 @@ extending it, so omitting it drops the runner from macOS builds alone.
 to start the gateway. `electron/main.cjs` now starts it in-process — the gateway
 is ESM inside an asar, which Node can import but cannot execute as a script.
 
+Two top-level directories ship as `extraResources` because `server/` imports
+them from outside this package: `gateway/` (the runner) and `licence/` (the
+licence format and the plan registry). `licence/` holds only the verifying
+half — `billing/`, which signs licences and talks to the payment rails, is a
+separately deployed service and is never packaged, so no build of this app
+carries the code that mints entitlements.
+
 It prefers port 4310 and falls back to an ephemeral port rather than dying on
 `EADDRINUSE` when a development gateway already holds it; the renderer is told
 the address either way.
@@ -576,8 +584,65 @@ Everything is optional; every default is loopback.
 | `TEMINALI_RELEASE_REPO` | `teminali/teminalicode` |
 | `TEMINALI_RUNTIME_MODE` | `local` (or `api`) |
 | `FRONTIER_AUDIT_PATH` | `benchmark-results/gateway-audit.jsonl`; `userData/gateway/` in a packaged app |
+| `TEMINALI_LICENCE_STORE` | `benchmark-results/licence.json` (written `0600`) |
+| `TEMINALI_BILLING_URL` | unset — no billing service, so the app runs as free |
+| `TEMINALI_LICENCE_PUBLIC_KEYS` | unset — JSON `{"kid": "<PEM>"}`, staging and tests only |
 
 Non-loopback values are rejected at startup rather than accepted and ignored.
+
+### The Pro entitlement
+
+`TEMINALI_BILLING_URL` being unset is the ordinary state for a development
+checkout, and it resolves to the **free** plan rather than to an error. Free
+carries the local lanes — Flash, Max and the built-in voice — so a machine that
+has never seen a billing service is a working editor, not a locked one.
+
+Pro carries two capabilities, and they behave differently on purpose:
+
+| Capability | What it unlocks | Without it |
+| --- | --- | --- |
+| `frontier.escalation` | Frontier Auto's escalation to Claude Sonnet, and the `claude-sonnet` / `claude-opus` profiles | **Refused.** `POST /api/frontier/resolve-mode` answers `402 PLAN_UPGRADE_REQUIRED` with the capability and plan in `details` |
+| `voice.vibevoice` | The VibeVoice sidecar tier for speech | **Downgraded.** The voice routes serve the built-in engines instead and report `gated: "voice.vibevoice"` in `/api/voice/status` |
+
+The difference is the cost, not the policy. Escalation spends money per turn
+against a hosted API and has no local substitute, so a free caller is refused.
+The sidecar runs on the user's own machine and whisper.cpp plus the system
+voices sit underneath it, so a free caller is served the ordinary tier rather
+than losing their microphone. `frontier.max` stays free for the same economic
+reason the local lanes do: it burns the user's own electricity.
+
+Sign-in is a device-code flow — a desktop app has no redirect URI worth
+trusting. `POST /api/entitlement/sign-in` returns a code to type on another
+device, `POST /api/entitlement/sign-in/poll` waits for it to be claimed, and
+`GET /api/entitlement` reports the current plan together with the capability
+catalogue the upgrade screen renders from.
+
+All of that surfaces in the **Usage panel**, above the agent-CLI plan headroom
+and labelled apart from it: the two answer different questions, and a reader
+who conflates them would think upgrading here raised a Claude Code limit. The
+section lists every capability with a tick or a lock, offers sign-in when there
+is no session, and offers the price list when — and only when — some plan on
+sale carries a capability this licence lacks. That test is on capabilities, not
+on the plan name, so adding a tier needs no edit to the component. A card price
+opens Stripe in a browser; a mobile-money price takes a phone number, pushes a
+prompt to the handset and polls the order until it settles, then refreshes the
+licence itself. A build with no `TEMINALI_BILLING_URL` shows the capability
+list and says so, rather than offering a button that cannot work.
+
+The licence is an Ed25519 token verified locally against a key baked into the
+build, so Pro survives with no network: it is refreshed well before expiry, and
+honoured for a grace window past expiry (`licence/format.js` — 7-day token,
+14-day grace). Past grace it silently becomes free. The plan/capability
+registry is `licence/entitlements.js`, and adding a capability to a plan is an
+edit to that one file.
+
+The service on the other end is [`billing/`](../billing/README.md) — a
+Cloudflare Worker with a D1 database, deployed separately and never packaged.
+It runs the device flow, takes money on two rails (Stripe for cards, Lipia for
+mobile money) and signs the licence. It is not deployed yet, and until its
+public key is pasted into `BAKED_PUBLIC_KEYS` in `server/licence.js` — still
+empty in this checkout — no build honours any licence and every machine
+resolves to free.
 
 ## Further reading
 
@@ -590,6 +655,8 @@ Non-loopback values are rejected at startup rather than accepted and ignored.
 - [`docs/VOICE_SIDECAR.md`](docs/VOICE_SIDECAR.md) — the VibeVoice contract.
 - [`src/video/P3-import-gate.md`](src/video/P3-import-gate.md) — what the media
   approval gate grants, and why reading a path is the capability it guards.
+- [`../billing/README.md`](../billing/README.md) — the billing Worker: routes,
+  the two payment rails, and how to stand one up.
 
 ## Licence
 

@@ -207,7 +207,20 @@ reads only the local gateway access token from the environment. The original
 
 ## Explicit non-goals for the MVP
 
-- No billing system or public multi-tenant deployment.
+- No public multi-tenant deployment.
+- **Entitlements, not billing, are in the gateway.** The gateway refuses a
+  profile the current plan does not carry — `POST /api/frontier/resolve-mode`
+  answers `402 PLAN_UPGRADE_REQUIRED` when a resolved profile needs a
+  capability the signed licence does not grant. It never talks to a payment
+  provider, holds no card data and issues no licence; it reads a locally
+  verified Ed25519 token and enforces what that token says. Signing and the
+  payment rails live in `billing/`, a separate deployable service, which the
+  `/api/entitlement/*` routes relay device-code sign-in and licence refresh to
+  — a relay, not a rail: no amount, instrument or card ever passes through the
+  gateway. Not every gate refuses: `voice.vibevoice` is Pro, and a caller
+  without it is served the built-in speech engines rather than a 402, because
+  the sidecar it gates runs locally and has a free substitute. See
+  `licence/entitlements.js` for the plan/capability registry.
 - No browser dashboard.
 - No automatic account creation or credential acquisition.
 - No pooling of credentials without each owner's explicit authorization.

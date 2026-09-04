@@ -70,6 +70,14 @@ export function createConfig(environment = process.env, overrides = {}) {
     // The plan windows the agent CLI last reported. One file, not one per
     // workspace: the headroom belongs to the account, not to the project.
     planStorePath: resolve(environment.TEMINALI_PLAN_STORE || resolve(process.cwd(), "benchmark-results", "plan-limits.json")),
+    // The signed Pro licence, and where it is renewed from. One file for the
+    // same reason the plan windows are one file: the subscription belongs to
+    // the account, not to the project. Written 0600 — see server/licence.js.
+    licenceStorePath: resolve(environment.TEMINALI_LICENCE_STORE || resolve(process.cwd(), "benchmark-results", "licence.json")),
+    // Empty by default: a checkout that has never been pointed at a billing
+    // service runs as free rather than failing, which is what makes the free
+    // lanes work with no account at all.
+    billingBaseUrl: environment.TEMINALI_BILLING_URL || null,
     // Who may run privileged tools. TEMINALI_ADMINS additionally pins logins
     // that no API call can remove.
     adminStorePath: resolve(environment.TEMINALI_ADMIN_STORE || resolve(process.cwd(), "benchmark-results", "admins.json")),

@@ -1,0 +1,66 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "teminali-billing",
+
+  // The same Cloudflare account as kerf-store (teminaliCut). Named because
+  // more than one account sits on this OAuth token and wrangler will not
+  // choose for you. Not a secret — an account id appears in every wrangler
+  // config in the wild; it identifies, it does not authorise.
+  "account_id": "9fbd2f7e0457951a680bce2f6d34bb09",
+
+  "main": "src/worker/index.js",
+  "compatibility_date": "2026-09-01",
+
+  // The Worker itself uses only WebCrypto and fetch. `nodejs_compat` is here
+  // for the shared imports from `licence/`, which are written for Node first
+  // because the desktop app is their other consumer.
+  "compatibility_flags": ["nodejs_compat"],
+
+  "observability": { "enabled": true },
+
+  // Every two minutes. The window that matters is between someone approving a
+  // mobile-money prompt and the webhook failing its last retry — anything
+  // slower and they have already concluded the purchase failed. The same tick
+  // renews Lipia subscriptions and expires lapsed ones; all three are cheap
+  // queries against indexed columns.
+  "triggers": { "crons": ["*/2 * * * *"] },
+
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "teminali-billing",
+      // Filled in by `wrangler d1 create teminali-billing`. Empty here so a
+      // deploy against an unprovisioned account fails loudly at deploy time
+      // rather than at the first request.
+      "database_id": ""
+    }
+  ],
+
+  "vars": {
+    "LIPIA_API_URL": "https://pay.mhasibudigital.com",
+
+    // Which signing key the licences this deployment issues are stamped with.
+    // The app carries public keys BY ID, so rotating means: publish the new
+    // public key in a release, then change this. Never the other way round —
+    // a licence stamped with a key id no build has yet is a licence nobody can
+    // verify.
+    "LICENCE_KEY_ID": "dev-1",
+
+    // Where Stripe sends the customer back to. Deep links into the desktop
+    // app are not reliable across platforms, so these are ordinary web pages
+    // that tell the user to return to the app, which is already polling.
+    "CHECKOUT_SUCCESS_URL": "https://teminali.com/billing/thanks",
+    "CHECKOUT_CANCEL_URL": "https://teminali.com/billing/cancelled",
+
+    // Public OAuth client ids are not secrets; they are here so a fresh clone
+    // shows exactly what has to be filled in.
+    "GITHUB_CLIENT_ID": "",
+    "GOOGLE_CLIENT_ID": ""
+  }
+
+  // Secrets — `wrangler secret put <NAME>`, never in this file:
+  //   LICENCE_SIGNING_KEY   PKCS8 PEM, the private half of LICENCE_KEY_ID
+  //   GITHUB_CLIENT_SECRET  GOOGLE_CLIENT_SECRET
+  //   STRIPE_SECRET_KEY     STRIPE_WEBHOOK_SECRET
+  //   LIPIA_PUBLIC_KEY      LIPIA_SECRET      LIPIA_WEBHOOK_SECRET
+}
