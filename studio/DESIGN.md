@@ -174,7 +174,7 @@ The pre-redesign code is swept onto tokens by role, not by hue:
 ## 3. Shell architecture (`studio/src/`)
 
 ```
-StudioTitleBar    traffic lights · sidebar toggle · title · panel tab strip
+StudioTitleBar    traffic lights · sidebar toggle · title · IDE · Video Editor · panel tab strip
 ├── SidebarDock      ActivityBar (48px, always) + one 212px panel
 │   ├── ActivityBar    New Chat · SIDEBAR_TABS glyphs · Customize
 │   └── Sidebar        the selected view · SidebarFooter
@@ -210,6 +210,13 @@ rows priced the sidebar at 260px because the switch had to fit the word
 shell, with the labels' width handed back to whatever the panel is showing. Five
 destinations fit the switch without wrapping; Media was the fifth until it
 moved into the video editor's rail (below), and four fit with room to spare.
+
+**`IDE` and `Video Editor` sit together in the title bar's right group**
+because they are the same verb — take this conversation somewhere it can be
+worked on. They differ in where they go, and say so: the IDE leaves for another
+application and wears the external-link arrow, the editor opens a panel here and
+wears that panel's own glyph and accelerator (`⇧⌘V`). It calls `focusOrOpen`, so
+pressing it twice focuses the editor already open rather than stacking a second.
 
 One list, `SIDEBAR_TABS` in `sidebar/ActivityBar.tsx`, not the old
 `PRIMARY_NAV` / `WORKSPACE_NAV` pair: Chats (⌘L) · Explorer (⇧⌘E) · Search

@@ -154,6 +154,24 @@ export const StudioTitleBar: React.FC<StudioTitleBarProps> = ({
           className="flex items-center gap-3 font-mono text-xs text-ink-muted"
           style={{ WebkitAppRegion: "no-drag" } as React.CSSProperties}
         >
+          {/*
+            The editor sits beside the IDE because the two are the same kind of
+            verb — "take this conversation somewhere it can be worked on". The
+            IDE leaves for another application and says so with its arrow; this
+            one opens a panel here, so it wears the panel's own glyph and its
+            accelerator instead. `focusOrOpen` means a second press focuses the
+            editor already open rather than stacking a second one.
+          */}
+          <button
+            type="button"
+            onClick={() => focusOrOpen({ kind: "video" })}
+            title={`${PANEL_DEFAULTS.video.label} (${PANEL_DEFAULTS.video.shortcut})`}
+            aria-label={PANEL_DEFAULTS.video.label}
+            className="flex items-center gap-1.5 hover:text-ink-high transition-colors duration-ds ease-ds"
+          >
+            <PanelGlyph kind="video" size={12} />
+            {PANEL_DEFAULTS.video.label}
+          </button>
           <button
             type="button"
             onClick={onOpenIde}
