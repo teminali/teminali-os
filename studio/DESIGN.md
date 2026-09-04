@@ -348,6 +348,47 @@ Three properties carry the whole thing:
 The admin gate is enforced in the gateway, not the renderer — `requireAdmin`
 guards every `/api/arena/*` route. Hiding the panel is a courtesy.
 
+### The Teminali plan (`server/licence.js`, `panels/EntitlementSection.tsx`)
+
+Top of the Usage panel, above the agent-CLI headroom, and labelled apart from
+it. The two are adjacent because both are "what am I allowed", and separated
+because they are bought from different people: this one is what the operator
+bought from us, the one below is what is left of a subscription bought from
+Anthropic. Stacked without labels, the obvious reading is that upgrading here
+raises a Claude Code limit.
+
+Three rules hold the component together, and each of them exists because a
+paid-feature gate is exactly the code that rots into a lie:
+
+1. **The feature list is never written in the component.** The capability
+   catalogue arrives on `GET /api/entitlement`, which reads it from
+   `licence/entitlements.js` — the same registry the gates enforce. A list
+   typed into JSX is a list that silently stops matching the product. The test
+   in `tests/entitlement.test.mjs` fails the file if a capability label appears
+   in it as a string literal.
+2. **Whether to offer an upgrade is a capability question, never a plan name.**
+   The section offers a paid plan exactly when some plan on sale carries a
+   capability this licence lacks. Adding a tier — Team, a trial, lifetime —
+   needs no edit here, and a user who already holds everything a plan offers is
+   never shown an upsell for it.
+3. **A failure is never an upgrade prompt.** Every read fails to null and the
+   whole section renders nothing. Telling an offline subscriber they are on Free
+   is worse than telling them nothing.
+
+The two rails answer in different shapes, and the difference is surfaced rather
+than smoothed over, because it decides what the user does next: a card price
+opens Stripe's hosted checkout in a browser and the panel says to come back and
+refresh; a mobile-money price takes a phone number, pushes a prompt to the
+handset, and polls the order every four seconds until it settles — then
+refreshes the licence itself, because the money landing *is* the moment the
+entitlement changed. Sign-in is the device-code flow: a code to type elsewhere,
+polled at the interval the service asked for and never faster than 2s.
+
+A build with no `TEMINALI_BILLING_URL` still draws the capability list and says
+plainly that it has no billing service, rather than offering a button that
+would fail. That is the ordinary state of a development checkout, and the free
+lanes need no account.
+
 ### Plan headroom (`server/plan.js`, `panels/UsagePane.tsx`)
 
 A different question from the ledger below, so a different source. The ledger is
@@ -623,13 +664,34 @@ rather than `App` state only because the two openers are far apart in the tree
 — the File-menu listener in `App.tsx` and the pill in `StudioChat.tsx`.
 
 Reachable two ways: **File → Record Screen…** and the **Record Screen** pill on
-the empty-chat screen. `⇧⌘8` is the menu item's accelerator and the only
+the empty-chat screen, which carries a filled record dot in `--danger` — the
+one red in the palette, and what makes it readable as the recorder beside a
+neighbour that is only words. `⇧⌘8` is the menu item's accelerator and the only
 binding — a native accelerator fires whatever has focus, where a renderer key
 handler is swallowed by a terminal, a webview or a text field. (It was
 previously a `PANEL_DEFAULTS` label with *nothing* bound to it; the menu item
 that was supposed to own it did not exist. Both halves are real now.) `open()`
 is idempotent, because the accelerator can fire over a dialog already holding
 a running take. The pill it replaced advertised `⇧Tab`, which nothing bound.
+
+**The bridge the whole recorder runs on had never been published.**
+`electron/screenRecorder.cjs` registers fifteen `recorder:*` handlers and owns
+the capture, the vault, the remux and the floating bar — and nothing in
+`electron/main.cjs` required it, while `electron/preload.cjs` put no `recorder`
+key on `window.teminali`. `bridge()` in `src/video/engine/screenCapture.ts`
+reads exactly that key, so in the packaged app it returned `undefined` and the
+recorder took the browser fallback: one synthetic `web:screen` source named
+"Browser Display / Window / Tab", and **`Windows (0)` on a desktop full of
+windows**. `main.cjs` now calls `initScreenRecorder(() => mainWindow)` after
+`createWindow` and `shutdownScreenRecorder()` on `will-quit`; the preload
+exposes the verbs and the two pushes (`recorder:command`, `recorder:state`).
+`tests/recorder-bridge.test.mjs` asserts the three files agree — every handler
+reachable, every push heard, every verb typed — because each was individually
+correct while the feature was dead.
+
+An empty **Windows** tab in a browser now says so, rather than "No other
+windows are open." A browser cannot enumerate windows at all; its own picker
+offers them when the take starts.
 
 `RecorderModal` is the same wrapper `VideoPane` is, and for the same reason: the
 ported UI wears `.video-workspace`-scoped classes, and the recorder store's
@@ -644,7 +706,25 @@ common surface summoned its rail as an overlay. At `size="xl"` the rail seats.
 Both paths are kept and still measured rather than assumed (`max-w-5xl` is a
 ceiling, and a narrow window is narrower than it): seated at ≥568px, summoned
 below it through `VideoPane`'s own `editor-side-overlay is-right` and
-`editor-overlay-scrim` rather than a second overlay mechanism. The review rail
+`editor-overlay-scrim` rather than a second overlay mechanism.
+
+**That paragraph was true of the layout and false of the app**, for as long as
+the dialog existed. `RecorderModal` returns `null` while it is shut, so the box
+`useMeasure` was told to watch did not exist when the hook mounted — and the
+hook attached its `ResizeObserver` in a mount-only effect. It measured nothing,
+kept `0×0` for the life of the component, and the width every rule above reads
+was zero. Measured on the running app: dialog 1024px, pane 1024px, density tier
+`xs`, rail **not** seated, capture options behind the summon button with room
+for them four times over. That is the shape the report described as "the webcam
+options are so hidden".
+
+The fix is in the hook, not the dialog: the observing effect now runs after
+every render and re-attaches when `ref.current` changes hands, guarded by an
+`observed` ref so the per-render cost is one comparison. Re-measured: pane 1024,
+tier `lg`, rail seated, `Options` button gone. `PreviewPlayer` and `VideoPane`
+use the same hook and were never wrong only because their boxes exist at mount
+— the guard is in `tests/responsive-layout.test.mjs`, and it was confirmed to
+fail against a mount-only effect. The review rail
 (320px) stacks under 600px instead of overlaying — a summary reads fine
 stacked. The dialog is given a fixed `h-[78vh]` so the surface does not resize
 as the phase changes, which would move the Start button under the cursor.
@@ -763,6 +843,19 @@ that fights you:
 The model picker spans three groups, so it derives one flat row list in render
 order and each group renders against that index. Building it any other way makes
 the arrows disagree with what the eye sees.
+
+**Its height is measured, not a `vh` fraction.** The menu is `bottom-11` off the
+composer and grows upwards from that fixed edge, so a viewport fraction cannot
+know how much room is above it: on the empty chat the composer is vertically
+centred, and `max-h-[62vh]` put the first rows — Frontier Flash and the group
+above them — off the *top* of the window, where scrolling cannot reach them
+because the scroll container itself has gone off screen. `maxHeight` is now read
+from the menu's own `getBoundingClientRect().bottom` after layout, less 16px of
+air, and re-read on `resize`. The bottom edge does not move when the height
+changes, so a single reading is stable.
+
+Rows are 24px on 20px group headers in a 284px column — the density a menu of
+this length needs to be read rather than scrolled.
 
 ### Composer triggers
 

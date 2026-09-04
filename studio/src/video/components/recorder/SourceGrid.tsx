@@ -31,6 +31,10 @@ type Tab = 'screen' | 'window';
 export const SourceGrid: React.FC<Props> = ({ sources, loading, selectedId, onSelect, onRefresh }) => {
   const [tab, setTab] = React.useState<Tab>('screen');
 
+  /* The one source `recorderStore` invents when there is no Electron
+     bridge to ask. Its presence is what tells this grid it is in a browser. */
+  const webOnly = sources.length === 1 && sources[0].id === 'web:screen';
+
   const screens = sources.filter((s) => s.kind === 'screen');
   const windows = sources.filter((s) => s.kind === 'window');
   const shown = tab === 'screen' ? screens : windows;
@@ -77,7 +81,14 @@ export const SourceGrid: React.FC<Props> = ({ sources, loading, selectedId, onSe
           <div className="h-full flex items-center justify-center text-center px-6">
             <p className="text-ui-sm text-spectrum-textDim leading-relaxed">
               {tab === 'window'
-                ? 'No other windows are open.'
+                /* The browser build cannot enumerate anything: it has one
+                   synthetic source and the OS picker decides the rest. Saying
+                   "no other windows are open" there is a lie that reads as a
+                   broken recorder — which is exactly how it was reported. */
+                ? (webOnly
+                    ? 'Running in a browser, so windows cannot be listed here. The browser\'s own '
+                      + 'picker offers them when the take starts. The desktop app lists them.'
+                    : 'No other windows are open.')
                 /* Not "you have not allowed it yet". The commonest reason
                    for zero displays on a machine that HAS allowed it is
                    that the grant went stale when Teminali Code updated, and

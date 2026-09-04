@@ -7,6 +7,7 @@ const { attachAssistantOverlay } = require("./assistant-overlay.cjs");
 const { initVideoToolBridge, setBridgeWindow, videoBridge } = require("./videoToolBridge.cjs");
 const { startVideoRpcServer } = require("./videoRpc.cjs");
 const { resolveRealPath, processWithFfmpeg, formatAuditLine } = require("./mediaAccess.cjs");
+const { initScreenRecorder, shutdownScreenRecorder } = require("./screenRecorder.cjs");
 
 const logFile = path.join(app.getPath("userData"), "studio-main.log");
 function log(...args) {
@@ -668,6 +669,22 @@ app.whenReady().then(async () => {
   buildMenu();
   createWindow();
 
+  /*
+    The recorder's fifteen `recorder:*` handlers, and the window getter they
+    hide and restore around a take. Registered after `createWindow` so that
+    `initScreenRecorder` finds a live window and can attach its did-finish-load
+    reconciliation straight away rather than deferring a tick.
+
+    Nothing else in main requires this module, so until it is called here the
+    handlers do not exist — and `window.teminali.recorder` in the preload has
+    nothing to invoke.
+  */
+  try {
+    initScreenRecorder(() => mainWindow);
+  } catch (error) {
+    log("The screen recorder could not be started:", error?.message || error);
+  }
+
   // The status item is a nice-to-have, not a dependency: a platform without a
   // tray must still get a window, so its own failure never reaches this far.
   try {
@@ -723,6 +740,14 @@ app.on("will-quit", () => {
     globalShortcut.unregisterAll();
   } catch (error) {
     log("Could not release global shortcuts:", error.message);
+  }
+  // Releases the recorder's own global shortcuts, closes the floating bar and
+  // ends any half-written take file. Its shortcuts are registered per session,
+  // so `unregisterAll` above has already taken them; this is for the streams.
+  try {
+    shutdownScreenRecorder();
+  } catch (error) {
+    log("Could not shut the screen recorder down:", error.message);
   }
   assistantOverlay?.destroy();
   // Takes the endpoint file with it, so the next launch's gateway cannot find

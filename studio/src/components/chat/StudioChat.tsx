@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ChevronDown, Laptop } from "lucide-react";
+import { ChevronDown, Circle, Laptop } from "lucide-react";
 import { AIService } from "../../services/aiService";
 import { useStudioStore, PROFILES_LIST } from "../../store/studioStore";
 import { usePanelStore } from "../../store/panelStore";
@@ -414,7 +414,15 @@ export const StudioChat: React.FC<{
             {/* The shortcut is ⇧⌘8 because that is the File menu accelerator
                 that opens this exact dialog. The pill it replaced advertised
                 ⇧Tab, which nothing in the app has ever bound. */}
-            <Pill onClick={openRecorder} shortcut="⇧⌘8">
+            <Pill
+              onClick={openRecorder}
+              shortcut="⇧⌘8"
+              /* The record dot, in `--danger` — the one red in the palette, and
+                 the same red the take's own controls use. It is what makes this
+                 pill readable as the recorder at a glance, next to a neighbour
+                 that is only words. */
+              icon={<Circle className="w-2.5 h-2.5 fill-current text-danger" />}
+            >
               Record Screen
             </Pill>
             <Pill onClick={onConnectGitHub}>
@@ -525,13 +533,15 @@ const Picker: React.FC<{ label: string; icon?: React.ReactNode; onSelect?: () =>
 const Pill: React.FC<{
   children: React.ReactNode;
   shortcut?: string;
+  icon?: React.ReactNode;
   onClick?: () => void;
-}> = ({ children, shortcut, onClick }) => (
+}> = ({ children, shortcut, icon, onClick }) => (
   <button
     type="button"
     onClick={onClick}
     className="h-7 px-3 rounded-full border border-edge-strong text-sm text-ink-muted flex items-center gap-1.5 hover:text-ink-high hover:bg-surface-hover transition-colors duration-ds ease-ds"
   >
+    {icon && <span className="flex-shrink-0 flex items-center">{icon}</span>}
     {children}
     {shortcut && <span className="text-ink-placeholder">{shortcut}</span>}
   </button>

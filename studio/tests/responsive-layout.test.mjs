@@ -232,3 +232,34 @@ test("the play disc sits under the centre of the picture, and the meters go wher
     /\.editor-program-transport\[data-narrow\] > :last-child,\s*\.video-workspace \.editor-program-transport\[data-narrow\]::before \{\s*display: none;/
   );
 });
+
+/* ── Measuring a surface that is not there yet ──────────────────────────────
+   Everything above gates on a MEASURED width, which makes `useMeasure` the
+   floor the whole responsive scheme stands on — and it had a hole. The
+   observing effect ran once on mount, so any consumer that renders `null`
+   before it renders the box measured nothing and kept 0×0 for good.
+
+   `RecorderModal` is that shape: it returns `null` while the dialog is shut,
+   and its pane therefore reported width 0 on a 1024px dialog. Density read
+   `xs`, the 288px capture rail — the camera preview and the microphone meter —
+   never seated, and both sat behind a summon button with room for them four
+   times over. Measured after the fix: pane 1024, tier `lg`, rail seated.
+   ──────────────────────────────────────────────────────────────────────── */
+test("useMeasure re-attaches when the element appears after mount", async () => {
+  const hook = await readFile(new URL("../src/video/hooks/useMeasure.ts", import.meta.url), "utf8");
+
+  // The bookkeeping that makes a per-render effect cheap: observe only when
+  // the node is genuinely a different one.
+  assert.match(hook, /const observed = useRef<T \| null>\(null\);/);
+  assert.match(hook, /if \(el === observed\.current\) return;/);
+
+  // And the effect that must NOT be mount-only. A `, []` closing this block is
+  // the exact regression: it pins the size at 0×0 for a late-arriving element.
+  assert.match(hook, /next\.observe\(el\);\s*observer\.current = next;\s*\}\);/);
+  assert.doesNotMatch(hook, /next\.observe\(el\);\s*observer\.current = next;\s*\},\s*\[\]\);/);
+
+  // The consumer that proves why. If this stops rendering null the hook is
+  // still right, but the reason recorded above stops being true.
+  const modal = await readFile(new URL("../src/components/modals/RecorderModal.tsx", import.meta.url), "utf8");
+  assert.match(modal, /if \(!isOpen\) return null;/);
+});

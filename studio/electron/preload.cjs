@@ -107,6 +107,55 @@ contextBridge.exposeInMainWorld("teminali", {
     restart: () => ipcRenderer.invoke("updates:restart"),
   },
   /**
+   * The screen recorder.
+   *
+   * Every verb here answers one `recorder:*` handler in screenRecorder.cjs, and
+   * the shape of each is the `RecorderBridge` contract in
+   * `src/types/recorder.ts`. Without this key `window.teminali.recorder` is
+   * undefined, and the renderer's `bridge()` falls through to the browser path
+   * that can enumerate neither displays nor windows — which is exactly what a
+   * missing bridge looked like from the outside: "Displays (1), Windows (0)".
+   *
+   * `onCommand` and `onState` are the only two pushes. The bar window is a
+   * second renderer with no recorder of its own, so its buttons arrive here as
+   * commands and its labels leave as state.
+   */
+  recorder: {
+    sources: (thumbWidth) => ipcRenderer.invoke("recorder:sources", { thumbWidth }),
+    permissions: () => ipcRenderer.invoke("recorder:permissions"),
+    requestPermission: (kind) => ipcRenderer.invoke("recorder:requestPermission", { kind }),
+    resetScreenPermission: () => ipcRenderer.invoke("recorder:resetScreenPermission"),
+    relaunch: () => ipcRenderer.invoke("recorder:relaunch"),
+
+    begin: (options) => ipcRenderer.invoke("recorder:begin", options),
+    chunk: (sessionId, stream, bytes) =>
+      ipcRenderer.invoke("recorder:chunk", { sessionId, stream, bytes }),
+    pause: (sessionId, paused) => ipcRenderer.invoke("recorder:pause", { sessionId, paused }),
+    finish: (sessionId, copyable) => ipcRenderer.invoke("recorder:finish", { sessionId, copyable }),
+    cancel: (sessionId, discard) => ipcRenderer.invoke("recorder:cancel", { sessionId, discard }),
+
+    writeTakeAsset: (dir, name, bytes) =>
+      ipcRenderer.invoke("recorder:writeTakeAsset", { dir, name, bytes }),
+    readManifest: (dir) => ipcRenderer.invoke("recorder:readManifest", { dir }),
+    reveal: (path) => ipcRenderer.invoke("recorder:reveal", { path }),
+
+    publishState: (state) => ipcRenderer.invoke("recorder:publishState", state),
+    barCommand: (action) => ipcRenderer.invoke("recorder:barCommand", { action }),
+
+    /** Stop/pause/mark, from the floating bar or a global shortcut. */
+    onCommand: (listener) => {
+      const handler = (_event, command) => listener(command);
+      ipcRenderer.on("recorder:command", handler);
+      return () => ipcRenderer.removeListener("recorder:command", handler);
+    },
+    /** Bar window only: what the main renderer says the take is doing. */
+    onState: (listener) => {
+      const handler = (_event, state) => listener(state);
+      ipcRenderer.on("recorder:state", handler);
+      return () => ipcRenderer.removeListener("recorder:state", handler);
+    },
+  },
+  /**
    * The video panel's MCP bridge.
    *
    * Four verbs and no passthrough: main pushes a tool call in, the renderer
