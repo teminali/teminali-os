@@ -135,6 +135,10 @@ jobs:
           APPLE_ID: ${{ secrets.APPLE_ID }}
           APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        # bash on every runner, including Windows, which defaults to PowerShell
+        # and cannot parse the guard below — that is a build this workflow has
+        # already lost once. Git Bash ships on the Windows image.
+        shell: bash
         # `unset`, not `: "${VAR:=}"`. electron-builder distinguishes an empty
         # certificate path from an absent one and only the absent one takes the
         # ad-hoc path, so the variables have to leave this shell's environment

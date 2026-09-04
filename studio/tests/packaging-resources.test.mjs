@@ -141,4 +141,12 @@ test("the release workflow unsets empty signing variables before packaging", () 
   const guard = workflow.indexOf("unset CSC_LINK");
   const build = workflow.indexOf("npx electron-builder");
   assert.ok(guard !== -1 && build !== -1 && guard < build, "the unset must precede the build");
+
+  // ...and worthless if the runner cannot parse it. Windows defaults to
+  // PowerShell, which reads `if [ -z ... ]` as a syntax error and fails the
+  // job before electron-builder starts. That cost the third v1.2.0 build.
+  assert.match(
+    workflow.slice(0, build), /shell: bash/,
+    "the packaging step must pin bash, or the guard is a parse error on Windows",
+  );
 });

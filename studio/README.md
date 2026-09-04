@@ -555,8 +555,10 @@ path against the project directory, and packaging dies with
 `<projectDir> not a file`. This failed the v1.2.0 macOS build twice, on a
 public tag, before it was understood. The packaging step therefore `unset`s
 both pairs when they arrive empty, and only then does electron-builder take
-the ad-hoc path and skip notarization. `tests/packaging-resources.test.mjs`
-asserts the guard is still there and still runs before the build.
+the ad-hoc path and skip notarization. The step pins `shell: bash`, because
+Windows runners default to PowerShell and read the guard as a syntax error.
+`tests/packaging-resources.test.mjs` asserts the guard is still there, still
+runs before the build, and still has a shell that can parse it.
 
 **Adding the secrets in repository settings is the whole switch-over; no file
 changes** — non-empty values make the `unset` a no-op. The macOS variables are
