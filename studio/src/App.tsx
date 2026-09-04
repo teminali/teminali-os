@@ -24,6 +24,7 @@ import { VersionControl } from "./components/updates/VersionControl";
 import { GitHubModal } from "./components/github/GitHubModal";
 import { useStudioStore } from "./store/studioStore";
 import { usePanelStore } from "./store/panelStore";
+import { openVideoProject, saveVideoProject } from "./video/project/io";
 
 /**
  * The studio shell.
@@ -260,6 +261,27 @@ export default function App() {
     if (!bridge) return;
     return bridge.menu.on("menu:record-screen", () => openRecorder());
   }, [openRecorder]);
+
+  // "Open Video Project…" (⌥⌘O) and "Save Video Project…" (⌥⌘S).
+  //
+  // The panel is focused BEFORE the verb runs, and not as a courtesy: both
+  // report through the video editor's own toasts, which render inside
+  // `VideoPane`. A save refused for unsaveable media with the pane closed
+  // would be a silent failure.
+  useEffect(() => {
+    const bridge = window.teminali;
+    if (!bridge) return;
+    const run = (verb: () => Promise<void>) => {
+      focusOrOpen({ kind: "video" });
+      void verb();
+    };
+    const offOpen = bridge.menu.on("menu:open-video-project", () => run(openVideoProject));
+    const offSave = bridge.menu.on("menu:save-video-project", () => run(saveVideoProject));
+    return () => {
+      offOpen();
+      offSave();
+    };
+  }, [focusOrOpen]);
 
   /* ── Sidebar geometry ──────────────────────────────────────────────────── */
 

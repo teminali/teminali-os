@@ -88,6 +88,8 @@ contextBridge.exposeInMainWorld("teminali", {
         "menu:command-palette",
         "menu:open-guardian",
         "menu:record-screen",
+        "menu:open-video-project",
+        "menu:save-video-project",
       ]);
       if (!allowed.has(channel)) return () => {};
       const handler = (_event, payload) => listener(payload);
@@ -154,6 +156,35 @@ contextBridge.exposeInMainWorld("teminali", {
       ipcRenderer.on("recorder:state", handler);
       return () => ipcRenderer.removeListener("recorder:state", handler);
     },
+    /** How far through the remux, while `finish` is still awaiting. */
+    onConvert: (listener) => {
+      const handler = (_event, progress) => listener(progress);
+      ipcRenderer.on("recorder:convert", handler);
+      return () => ipcRenderer.removeListener("recorder:convert", handler);
+    },
+  },
+
+  /**
+   * Saving and opening a video project.
+   *
+   * Every verb here answers one `videoProject:*` handler in videoProjects.cjs,
+   * and the typed shape the renderer programs against is `src/types/videoProjects.ts`.
+   * Without this key `window.teminali.videoProjects` is undefined and the
+   * editor has no save at all — which is exactly how the recorder shipped
+   * dead, so `tests/video-project-bridge.test.mjs` reads all three files and
+   * asserts they agree.
+   *
+   * `json` crosses as a STRING in both directions. The renderer owns the
+   * format; main writes bytes. Serialising here would put a second copy of
+   * the format on the wrong side of the boundary.
+   */
+  videoProjects: {
+    chooseSaveDir: (suggestedName) =>
+      ipcRenderer.invoke("videoProject:chooseSaveDir", { suggestedName }),
+    chooseOpenDir: () => ipcRenderer.invoke("videoProject:chooseOpenDir"),
+    save: (dir, json) => ipcRenderer.invoke("videoProject:save", { dir, json }),
+    read: (dir) => ipcRenderer.invoke("videoProject:read", { dir }),
+    reveal: (path) => ipcRenderer.invoke("videoProject:reveal", { path }),
   },
   /**
    * The video panel's MCP bridge.

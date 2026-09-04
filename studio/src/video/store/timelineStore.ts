@@ -510,7 +510,7 @@ export interface TimelineActions {
   cancelTransaction: () => void;
 
   /* project io */
-  loadProject: (tracks: Track[], markers: TimelineMarker[]) => void;
+  loadProject: (tracks: Track[], markers: TimelineMarker[], mediaPool?: MediaAsset[]) => void;
 }
 
 export type TimelineStore = TimelineState & TimelineActions;
@@ -2938,7 +2938,14 @@ export const useTimelineStore = create<TimelineStore>()(
 
     /* ══ project io ══ */
 
-    loadProject: (tracks, markers) => {
+    /*
+      `mediaPool` is optional but a caller restoring a saved project must pass
+      it. Undo history covers tracks and markers only, so the pool is not part
+      of the snapshot — which means a load that omitted it would leave the
+      clips playing (each carries its own `mediaUrl`) over a library that still
+      holds whatever the last project put there.
+    */
+    loadProject: (tracks, markers, mediaPool) => {
       const initial: HistoryEntry = {
         ...snapshot({ tracks, markers }),
         label: 'Load project',
@@ -2947,6 +2954,7 @@ export const useTimelineStore = create<TimelineStore>()(
       set((s) => {
         s.tracks = tracks;
         s.markers = markers;
+        if (mediaPool) s.mediaPool = mediaPool;
         s.selectedClipIds = [];
         s.playheadMs = 0;
         s.history = [initial];

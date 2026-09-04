@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from "react";
 
 import type { RecorderBridge } from "../../types/recorder";
+import type { VideoProjectsBridge } from "../../types/videoProjects";
 
 interface TeminaliBridge {
   isElectron: boolean;
@@ -31,6 +32,12 @@ interface TeminaliBridge {
    * floating bar and the global shortcuts exist.
    */
   recorder?: RecorderBridge;
+  /**
+   * Saving and opening a video project. Optional for the same reason as the
+   * recorder: a browser build has no folder dialog and cannot write outside
+   * the page, so the editor offers no save there rather than one that fails.
+   */
+  videoProjects?: VideoProjectsBridge;
   /**
    * The screen assistant. Optional because a browser build has no bridge at
    * all, and the assistant degrades to the in-window panel rather than

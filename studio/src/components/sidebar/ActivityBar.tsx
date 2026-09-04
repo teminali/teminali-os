@@ -2,6 +2,7 @@ import React from "react";
 import {
   Boxes,
   Files,
+  FolderGit2,
   MessagesSquare,
   Search,
   SlidersHorizontal,
@@ -36,7 +37,7 @@ import {
 /** The rail's fixed width. The title bar reads this to line its edge up. */
 export const ACTIVITY_BAR_WIDTH = 48;
 
-export type SidebarTabId = "chats" | "files" | "search" | "skills";
+export type SidebarTabId = "chats" | "files" | "search" | "projects" | "skills";
 
 export interface SidebarTabDef {
   id: SidebarTabId;
@@ -66,6 +67,11 @@ export const SIDEBAR_TABS: readonly SidebarTabDef[] = [
   { id: "chats", label: "Chats", shortcut: "⌘L", icon: MessagesSquare },
   { id: "files", label: "Explorer", shortcut: "⇧⌘E", icon: Files },
   { id: "search", label: "Search", shortcut: "⇧⌘F", icon: Search },
+  // Between Search and Skills, not at the end: it is a destination — the
+  // things you have worked on — and Skills is a catalogue of what the app can
+  // do. Grouping the two would put a library of code beside a library of
+  // capabilities and call them the same kind of thing.
+  { id: "projects", label: "My Projects", icon: FolderGit2 },
   { id: "skills", label: "Skills", icon: Boxes },
 ];
 

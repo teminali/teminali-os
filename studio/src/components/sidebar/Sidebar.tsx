@@ -5,6 +5,7 @@ import { WorkspaceService } from "../../services/workspaceService";
 import { GlobalSearchView } from "../search/GlobalSearchView";
 import { EmptyState, IconButton, Input, SectionLabel } from "../ui";
 import { FileTreeItem } from "./FileTree";
+import { ProjectsPanel } from "./ProjectsPanel";
 import { StudioSidebar } from "./StudioSidebar";
 import { SidebarFooter } from "./SidebarFooter";
 import type { UseUpdatesResult } from "../../hooks/useUpdates";
@@ -53,6 +54,7 @@ const ViewHost: React.FC<{ children: React.ReactNode }> = ({ children }) => (
 
 const ExplorerPanel: React.FC = () => {
   const { files, setFiles } = useStudioStore();
+  const workspacePath = useStudioStore((state) => state.workspacePath);
   const [rootName, setRootName] = useState("workspace");
   const [filter, setFilter] = useState("");
   const [error, setError] = useState("");
@@ -80,11 +82,15 @@ const ExplorerPanel: React.FC = () => {
     [setFiles],
   );
 
+  // `workspacePath` is a dependency and not decoration: the tree route reads
+  // whatever root the gateway is bound to, so opening a project from My
+  // Projects changes what `listFiles` returns without changing this component.
+  // Without it the Explorer keeps drawing the previous repository.
   useEffect(() => {
     const controller = new AbortController();
     void refresh(controller.signal);
     return () => controller.abort();
-  }, [refresh]);
+  }, [refresh, workspacePath]);
 
   const visibleFiles = useMemo(() => {
     const query = filter.trim().toLowerCase();
@@ -258,6 +264,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
             <GlobalSearchView />
           </ViewHost>
         );
+      case "projects":
+        return <ProjectsPanel />;
       case "skills":
         return <SkillsPanel />;
       case "chats":

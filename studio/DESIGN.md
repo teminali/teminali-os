@@ -222,7 +222,7 @@ pressing it twice focuses the editor already open rather than stacking a second.
 
 One list, `SIDEBAR_TABS` in `sidebar/ActivityBar.tsx`, not the old
 `PRIMARY_NAV` / `WORKSPACE_NAV` pair: Chats (⌘L) · Explorer (⇧⌘E) · Search
-(⇧⌘F) · Skills. New Chat sits above it and Customize below, both
+(⇧⌘F) · My Projects · Skills. New Chat sits above it and Customize below, both
 gestures rather than destinations. `ACTIVITY_BAR_WIDTH` is exported because the
 title bar lines its edge up with the rail; `DEFAULT_SIDEBAR_WIDTH` is 212 in
 `App.tsx`, under `frontier_sidebar_width_v2` — the key is bumped because a 260
@@ -237,6 +237,29 @@ schedules recurring work, and a tab that highlights itself and shows nothing
 teaches the operator that tabs in this list might not do anything. **A glyph
 earns its place by having a view behind it**; at 48px the label is one hover
 away, which costs no pixels, where a label in the layout costs 212 of them.
+
+**My Projects is one list of two kinds** (`sidebar/ProjectsPanel.tsx`, and the
+capped four-pill row under the empty composer in `chat/StudioChat.tsx`; both
+read `hooks/useProjectLibrary.ts`). Two lists side by side was the alternative
+and it was rejected: an operator looking for the thing they had open on Tuesday
+does not remember which of the two editors it belonged to, so a split makes
+them guess before they can look. The glyph carries the kind and the *click* is
+what differs — a repository goes through `/api/workspace/open`, which rebinds
+the root every workspace and terminal route reads; a video project goes through
+`/api/workspace/projects/remember`, which rebinds nothing, because a timeline
+is not a workspace and opening one must not repoint the file tree at the folder
+that holds it. The kind itself is never stored: the gateway re-classifies each
+directory from its marker file on every read, so a folder that stops being a
+video project stops being offered as one.
+
+`⌥⌘S` / `⌥⌘O` save and open a video project, in the **native File menu** rather
+than in the video pane's chrome, for the reason the recorder's `⇧⌘8` gives: a
+native menu owns its accelerator whatever has focus, and this pane hands focus
+to a canvas, a timeline and a row of numeric fields. `⌥` and not `⇧` is a
+correctness constraint, not taste — `⇧⌘S` and `⇧⌘O` are already the side chat
+and Codex in `App.tsx`'s shortcut handler, and a key the menu takes is a key
+the page stops hearing, with no error anywhere.
+`tests/video-project-bridge.test.mjs` asserts that collision cannot come back.
 
 **Media is no longer a sidebar tab.** It was one, and this document argued at
 length that it had to stay: a workspace panel is mounted only while it is open,
@@ -796,6 +819,57 @@ shell has open, so `RecorderPanel` takes an `onOpenedOnTimeline` callback and
 `focusOrOpen({ kind: "video" })`.
 Reaching for `panelStore` from inside `src/video/` would have been that
 boundary's first exception.
+
+**The convert step reports itself.** `RecorderPanel`'s `processing` phase was a
+spinner and a paragraph, which is a promise that something is happening with no
+claim about how much — and on a take that finishes in five seconds, a motionless
+screen for five seconds reads as a hang. Measured on a real 6m18s, 397MB take
+from this machine: the probe is 0.07s and the stream copy is 5.0s, so the
+complaint was never the remux's speed, it was the silence.
+
+Three things changed, and only the third is cosmetic:
+
+- **`convertProgress.cjs`** is a pure parser for `ffmpeg -progress pipe:1
+  -nostats`, sitting beside `remuxPlan.cjs` for the same reason — the failures
+  here are silent ones. `out_time_ms` is ffmpeg's own misnomer and holds
+  MICROseconds, and a progress block arrives in whatever pieces the pipe felt
+  like, so the reader carries the whole open block forward rather than the
+  trailing half-line. `recorder-convert-progress.test.mjs` proves both,
+  including at every byte boundary of a block.
+- **The two streams convert in parallel.** `recorder:finish` looped `await
+  toMp4(...)` over screen and camera one after the other, which doubled the wait
+  on a two-source take for no reason anybody watching a spinner could have
+  guessed. They are independent files.
+- **A real bar**, fed by `recorder:convert` — a send channel, not a sixteenth
+  handler — through `preload`'s `onConvert` and `screenCapture.onConvertProgress`
+  into `recorderStore.convert`. It is ffmpeg's own position in the take, it is
+  capped at 99% while `+faststart` rewrites the file (a pass that reports
+  nothing, and a full bar that has stopped moving reads as hung), it says
+  *Copying* or *Re-encoding* because those have very different costs, and when
+  the duration is unknown it stays indeterminate rather than inventing a number.
+  The explanatory paragraph stays: it is the part that says why there is a wait.
+
+**The handover to the editor says what landed.** Pressing *Open on the timeline*
+on the review screen builds the project, closes the dialog and focuses the video
+panel — three things that, done silently, are indistinguishable from nothing
+happening, because the panel the operator is left looking at is one that may
+already have been open. `recorderStore.openOnTimeline` now calls `announce`,
+which pushes a success toast built from the `AssembleReport` (`6:18 ·
+1920x1080 · 3 clips`, plus zooms, sound clips and a split narration when the
+build produced them) followed by at most two of the build's notes.
+
+The toasts go through the shared `uiStore` rather than the dialog's own overlay,
+which is what lets them outlive the dialog: the same store backs `<Toasts />` in
+`RecorderModal` and in `VideoPane`, so a toast pushed while the dialog is
+closing finishes its life inside the editor — beside the timeline it is
+describing. Two notes and not all of them, because a stack of advisories buries
+the one line that says the take arrived; the rest stay on the recorder's
+`warnings` for the next review screen.
+
+The click itself was kept. Making the build automatic on finish would have
+removed the review screen, and with it the discard button and the per-take
+assemble settings — a real loss to fix a problem that was only ever silence.
+teminaliCut keeps the same click for the same reason.
 
 ### Two menu bar items
 

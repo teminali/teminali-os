@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ChevronDown, Circle, Laptop } from "lucide-react";
+import { ChevronDown, Circle, Clapperboard, FolderGit2, Laptop } from "lucide-react";
 import { AIService } from "../../services/aiService";
 import { useStudioStore, PROFILES_LIST } from "../../store/studioStore";
 import { usePanelStore } from "../../store/panelStore";
@@ -13,6 +13,7 @@ import { Composer } from "./Composer";
 import { MessageBlock } from "./MessageBlock";
 import { speakableText } from "../../services/voice";
 import { useGitHubStatus } from "../../hooks/useGitHubStatus";
+import { useProjectLibrary } from "../../hooks/useProjectLibrary";
 import { UsageService } from "../../services/usageService";
 import { AssistantHud } from "../assistant/AssistantHud";
 import { BrandGlyph } from "../ui/BrandGlyph";
@@ -50,6 +51,10 @@ export const StudioChat: React.FC<{
   } = useStudioStore();
 
   const { status: github } = useGitHubStatus();
+  const { recent, openEntry } = useProjectLibrary();
+  // Four is what fits one row beside the two suggestion pills above it
+  // without wrapping at the composer's width.
+  const recentProjects = useMemo(() => recent.slice(0, 4), [recent]);
   const openPanel = usePanelStore((state) => state.open);
   const focusOrOpen = usePanelStore((state) => state.focusOrOpen);
   const openRecorder = useRecorderDialogStore((state) => state.open);
@@ -429,6 +434,39 @@ export const StudioChat: React.FC<{
               {github?.connected ? "Open a Repository" : "Connect Your Repos"}
             </Pill>
           </div>
+
+          {/* Recent projects — one list, both kinds.
+
+              Here and nowhere else: this is the screen with room for it, and
+              the conversation view is already the answer to "which project am
+              I in". A code project and a video project sit side by side
+              because that is what the operator has been working on; the glyph
+              is the only thing that separates them, and the click is what
+              actually differs. */}
+          {recentProjects.length > 0 && (
+            <div className="w-full max-w-composerEmpty flex items-center gap-2 pl-1 flex-wrap">
+              {recentProjects.map((entry) => (
+                <Pill
+                  key={entry.path}
+                  onClick={() => {
+                    // The editor has to be on screen before the load runs: it
+                    // reports through the video pane's own toasts.
+                    if (entry.kind === "video") focusOrOpen({ kind: "video" });
+                    void openEntry(entry);
+                  }}
+                  icon={
+                    entry.kind === "video" ? (
+                      <Clapperboard size={13} strokeWidth={1.7} />
+                    ) : (
+                      <FolderGit2 size={13} strokeWidth={1.7} />
+                    )
+                  }
+                >
+                  <span className="max-w-[13ch] truncate">{entry.name}</span>
+                </Pill>
+              ))}
+            </div>
+          )}
         </div>
       ) : (
         <>
