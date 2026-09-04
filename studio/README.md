@@ -7,10 +7,10 @@ understanding and agents all run locally by default. Hosted providers are
 available and never required. Everything the renderer can reach goes through one
 loopback gateway that never binds off `127.0.0.1`.
 
-- Package: `@teminali/code` · version **1.1.1** · app id `code.teminali.app`
+- Package: `@teminali/code` · version **1.2.8** · app id `code.teminali.app`
 - Ships as `Teminali-Code-<version>-macOS-Apple-Silicon.dmg` / `-Intel.dmg`,
   a Windows NSIS installer, and a Linux AppImage, from
-  [`teminali/teminalicode`](https://github.com/teminali/teminalicode/releases).
+  [`teminali/releases`](https://github.com/teminali/releases/releases).
 
 ---
 
@@ -639,7 +639,7 @@ Everything is optional; every default is loopback.
 | `TEMINALI_VOICE_URL` | `http://127.0.0.1:8321` |
 | `TEMINALI_CUT_MCP_URL` | `http://127.0.0.1:3888` |
 | `FRONTIER_WORKSPACE_ROOT` | the repository root |
-| `TEMINALI_RELEASE_REPO` | `teminali/teminalicode` |
+| `TEMINALI_RELEASE_REPO` | `teminali/releases` |
 | `TEMINALI_RUNTIME_MODE` | `local` (or `api`) |
 | `FRONTIER_AUDIT_PATH` | `benchmark-results/gateway-audit.jsonl`; `userData/gateway/` in a packaged app |
 | `TEMINALI_LICENCE_STORE` | `benchmark-results/licence.json` (written `0600`) |

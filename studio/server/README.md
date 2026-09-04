@@ -285,7 +285,7 @@ startup.
 | `FRONTIER_AUDIT_MAX_BYTES` | 2 MiB per file |
 | `FRONTIER_AUDIT_MAX_FILES` | `3` rotated files |
 | `TEMINALI_RUNTIME_MODE` | `local`; `api` routes to a hosted provider instead |
-| `TEMINALI_RELEASE_REPO` | `teminali/teminalicode` |
+| `TEMINALI_RELEASE_REPO` | `teminali/releases` |
 | `TEMINALI_APP_ROOT` | the working directory |
 | `TEMINALI_ADMINS` | unset; comma-separated logins pinned as administrators |
 

@@ -75,7 +75,7 @@ extraResources:
 publish:
   provider: github
   owner: teminali
-  repo: teminalicode
+  repo: releases
   releaseType: release
 
 # ── macOS ──────────────────────────────────────────────────────────

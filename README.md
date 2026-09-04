@@ -7,8 +7,8 @@ and edits what it recorded: a screen recorder that hands its take to a timeline
 already cut, and an exporter that renders that timeline back out to a file.
 
 The product ships as a desktop application from
-[`teminali/teminalicode`](https://github.com/teminali/teminalicode/releases)
-(currently **v1.2.3**). Everything below is how it is built.
+[`teminali/releases`](https://github.com/teminali/releases/releases)
+(currently **v1.2.8**). Everything below is how it is built.
 
 > The repository directory is `teminaliCode`, under `my_projects/teminali/`, and
 > the internal package is `@teminali/core`. "Frontier" survives as the name of
@@ -51,11 +51,11 @@ assistant hotkey and the screen overlay — run `npm start` inside `studio/`.
 
 ```bash
 npm test            # root gateway/runner/licence/billing suite — 143 tests
-npm run studio:test # application suite — 856 tests
+npm run studio:test # application suite — 863 tests
 npm run verify:all  # both, plus the studio typecheck and production build
 ```
 
-Both suites are green: 143/143 and 855/855, no skips.
+Both suites are green: 143/143 and 863/863, no skips.
 
 ## Product modes
 

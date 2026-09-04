@@ -84,7 +84,7 @@ export function createConfig(environment = process.env, overrides = {}) {
     // The studio ships itself: `appRoot` is this package (the thing that gets
     // built), `releaseRepo` is where its releases live.
     appRoot: resolve(environment.TEMINALI_APP_ROOT || process.cwd()),
-    releaseRepo: environment.TEMINALI_RELEASE_REPO || "teminali/teminalicode",
+    releaseRepo: environment.TEMINALI_RELEASE_REPO || "teminali/releases",
     // Every benchmark that has been run. Diffs are not kept; see arena.js.
     arenaHistoryPath: resolve(environment.TEMINALI_ARENA_HISTORY || resolve(process.cwd(), "benchmark-results", "arena-runs.jsonl")),
     // "local" runs Ollama models; "api" routes to a hosted provider.
