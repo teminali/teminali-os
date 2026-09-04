@@ -518,7 +518,7 @@ ollama serve              # local models on 127.0.0.1:11434
 
 ```bash
 npm run typecheck   # tsc --noEmit
-npm test            # 828 tests, 0 failures
+npm test            # 831 tests, 0 failures
 npm run build       # tsc && vite build
 npm run verify:core # all three
 ```
@@ -586,6 +586,16 @@ licence format and the plan registry). `licence/` holds only the verifying
 half — `billing/`, which signs licences and talks to the payment rails, is a
 separately deployed service and is never packaged, so no build of this app
 carries the code that mints entitlements.
+
+Each entry must carry its own `to:`. An import of `../../gateway/x.js` resolves
+to `<Resources>/gateway/x.js` inside the asar, and only `to:` puts it there —
+without one the directory's *contents* are copied to the resources root and the
+import fails. This is not hypothetical: v1.2.0 was cut with a second entry
+written above the first entry's `to:` and `filter:`, YAML read them as the
+second's own, and the macOS build failed during packaging while Windows and
+Linux published artifacts whose gateway could not load. `tests/packaging-resources.test.mjs`
+now asserts that every entry names a destination and that every cross-package
+import under `server/` has one.
 
 It prefers port 4310 and falls back to an ephemeral port rather than dying on
 `EADDRINUSE` when a development gateway already holds it; the renderer is told

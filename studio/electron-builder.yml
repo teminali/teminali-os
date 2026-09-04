@@ -48,12 +48,23 @@ asarUnpack:
 # collects paths under the app directory.
 extraResources:
   - from: ../gateway
+    to: gateway
+    filter:
+      - "**/*.js"
+      - "**/*.json"
+      - "!**/*.test.js"
+      - "!fixtures/**"
   # server/licence.js imports "../../licence/format.js" for the same reason and
   # by the same route. Only the verifying half lives there — the signer stays in
   # billing/, which is deployed to a server and never packaged, so no build of
   # this app carries the code that mints entitlements.
+  #
+  # `to:` is not optional and is not decoration. Each entry needs its own, and
+  # an entry written above another one's `to:` silently takes it: that is how
+  # the gateway came to be copied to the resources root with no filter while
+  # the licence landed on top of the path the gateway is imported from.
   - from: ../licence
-    to: gateway
+    to: licence
     filter:
       - "**/*.js"
       - "**/*.json"
