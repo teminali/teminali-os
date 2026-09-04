@@ -126,33 +126,45 @@ export const UpdateModal: React.FC<UpdateModalProps> = ({ updates, isOpen, onClo
           <Button variant="secondary" size="sm" onClick={updates.cancel} icon={<Loader2 size={13} className="animate-spin" />}>
             Cancel
           </Button>
+        ) : phase === "opening" ? (
+          <Button variant="primary" size="sm" disabled icon={<Loader2 size={13} className="animate-spin" />}>
+            {isMac ? "Installing into Applications…" : "Opening Installer…"}
+          </Button>
         ) : phase === "ready" ? (
           <Button variant="primary" size="sm" onClick={() => void updates.install()} icon={<ArrowDownToLine size={13} />}>
             {isMac ? "Install the update" : "Open the installer"}
           </Button>
-        ) : awaitingRestart ? (
-          /* The label promises both, and both are attempted: the relaunch is
-             queued and then the app quits. If macOS declines to relaunch a
-             bundle that was replaced a moment ago, the app has still closed —
-             the half the operator was told to expect, and one they can finish
-             themselves. It never leaves anyone waiting for a window that is not
-             coming. */
+        ) : phase === "installed" || awaitingRestart ? (
           <Button variant="primary" size="sm" onClick={() => void updates.restart()} icon={<RotateCw size={13} />}>
-            Close and Reopen
-          </Button>
-        ) : phase === "installed" ? (
-          <Button variant="primary" size="sm" onClick={() => void updates.restart()} icon={<RotateCw size={13} />}>
-            Close and Reopen
+            Restart Teminali Code
           </Button>
         ) : asset && desktop ? (
-          <Button variant="primary" size="sm" onClick={() => void updates.download()} icon={<Download size={13} />}>
-            Download {asset.size ? megabytes(asset.size) : ""}
+          <Button
+            variant="primary"
+            size="sm"
+            onClick={() => void updates.apply(asset, latest?.tag)}
+            icon={<Download size={13} />}
+          >
+            Update Now {asset.size ? `(${megabytes(asset.size)})` : ""}
           </Button>
-        ) : latest?.url ? (
-          <Button variant="secondary" size="sm" onClick={() => window.open(latest.url ?? "", "_blank", "noopener,noreferrer")}>
-            Open on GitHub
-          </Button>
-        ) : null}
+        ) : (
+          <>
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={() => void updates.check()}
+              disabled={updates.checking}
+              icon={updates.checking ? <Loader2 size={13} className="animate-spin" /> : <RotateCw size={13} />}
+            >
+              {updates.checking ? "Checking…" : "Check Again"}
+            </Button>
+            {latest?.url && (
+              <Button variant="secondary" size="sm" onClick={() => window.open(latest.url ?? "", "_blank", "noopener,noreferrer")}>
+                Open on GitHub
+              </Button>
+            )}
+          </>
+        )}
       </div>
 
       {phase === "ready" && (

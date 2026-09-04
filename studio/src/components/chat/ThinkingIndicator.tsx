@@ -122,12 +122,12 @@ export const ThinkingIndicator: React.FC<ThinkingIndicatorProps> = ({
  */
 const Shimmer: React.FC<{ children: React.ReactNode }> = ({ children }) => (
   <span
-    className="text-sm font-medium bg-clip-text text-transparent"
+    className="text-sm font-semibold bg-clip-text text-transparent"
     style={{
       backgroundImage:
-        "linear-gradient(90deg, var(--text-placeholder) 0%, var(--text-bright) 45%, var(--text-placeholder) 90%)",
+        "linear-gradient(90deg, #38bdf8 0%, #c084fc 35%, #fbbf24 70%, #38bdf8 100%)",
       backgroundSize: "220% 100%",
-      animation: "shimmer 2.6s linear infinite",
+      animation: "shimmer 2.4s linear infinite",
     }}
   >
     {children}

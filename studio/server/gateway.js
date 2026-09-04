@@ -10,7 +10,7 @@ import {
 } from "../../gateway/frontier-runner.js";
 import { BoundedAuditLog } from "./audit-log.js";
 import { createConfig } from "./config.js";
-import { listWorkspaceTree, readWorkspaceFile, searchWorkspace, writeWorkspaceFile } from "./workspace.js";
+import { createWorkspaceDirectory, listWorkspaceTree, readWorkspaceFile, searchWorkspace, writeWorkspaceFile } from "./workspace.js";
 import { TERMINAL_LIMITS, runWorkspaceCommand } from "./terminal.js";
 import { forgetVoiceStatus, readBounded, speak, transcribe, voiceStatus } from "./voice.js";
 import { act, assistantCapabilities, observe, requestAccessibility } from "./assistant.js";
@@ -1136,6 +1136,21 @@ export async function createGateway(options = {}) {
           });
           await audit.write({ event: "workspace-file-written", correlationId, method: request.method, route, path: written.path, bytes: written.size });
           replyJson(response, 200, written);
+        } catch (error) {
+          throw workspaceError(error);
+        }
+        return;
+      }
+
+      if (request.method === "POST" && route === "/api/workspace/mkdir") {
+        const dirRequest = await readJson(request, config.maxJsonBytes);
+        if (typeof dirRequest?.path !== "string" || dirRequest.path.length > 2_048) {
+          throw new GatewayError(400, "INVALID_WORKSPACE_PATH", "A bounded workspace-relative directory path is required.");
+        }
+        try {
+          const created = await createWorkspaceDirectory(config.workspaceRoot, dirRequest.path);
+          await audit.write({ event: "workspace-directory-created", correlationId, method: request.method, route, path: created.path });
+          replyJson(response, 200, created);
         } catch (error) {
           throw workspaceError(error);
         }

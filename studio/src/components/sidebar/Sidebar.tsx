@@ -1,6 +1,7 @@
-import React, { useCallback, useEffect, useMemo, useState } from "react";
-import { Boxes, Check, LoaderCircle, RefreshCw, Search as SearchIcon } from "lucide-react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Boxes, Check, FilePlus, Folder, FolderOpen, FolderPlus, LoaderCircle, RefreshCw, Search as SearchIcon, X } from "lucide-react";
 import { SKILLS_LIST, useStudioStore } from "../../store/studioStore";
+import { usePanelStore } from "../../store/panelStore";
 import { WorkspaceService } from "../../services/workspaceService";
 import { GlobalSearchView } from "../search/GlobalSearchView";
 import { EmptyState, IconButton, Input, SectionLabel } from "../ui";
@@ -53,14 +54,26 @@ const ViewHost: React.FC<{ children: React.ReactNode }> = ({ children }) => (
 /* ── Explorer ─────────────────────────────────────────────────────────────── */
 
 const ExplorerPanel: React.FC = () => {
-  const { files, setFiles } = useStudioStore();
+  const { files, setFiles, openFile, setWorkspacePath } = useStudioStore();
   const workspacePath = useStudioStore((state) => state.workspacePath);
+  const focusOrOpen = usePanelStore((state) => state.focusOrOpen);
   const [rootName, setRootName] = useState("workspace");
   const [filter, setFilter] = useState("");
   const [error, setError] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const [entryCount, setEntryCount] = useState(0);
   const [isTruncated, setIsTruncated] = useState(false);
+
+  const [creationKind, setCreationKind] = useState<"file" | "folder" | null>(null);
+  const [creationName, setCreationName] = useState("");
+  const [isSubmittingCreation, setIsSubmittingCreation] = useState(false);
+  const creationInputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    if (creationKind) {
+      setTimeout(() => creationInputRef.current?.focus(), 50);
+    }
+  }, [creationKind]);
 
   const refresh = useCallback(
     async (signal?: AbortSignal) => {
@@ -92,6 +105,55 @@ const ExplorerPanel: React.FC = () => {
     return () => controller.abort();
   }, [refresh, workspacePath]);
 
+  const handleChooseFolder = async () => {
+    try {
+      const bridge = window.teminali?.projects;
+      if (bridge?.chooseFolder) {
+        const chosen = await bridge.chooseFolder();
+        if (chosen) {
+          const response = await WorkspaceService.openProject(chosen);
+          setWorkspacePath(response.current.path);
+          await refresh();
+        }
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not open folder.");
+    }
+  };
+
+  const handleCommitCreation = async () => {
+    const target = creationName.trim();
+    if (!target) {
+      setCreationKind(null);
+      return;
+    }
+    setIsSubmittingCreation(true);
+    setError("");
+    try {
+      if (creationKind === "file") {
+        const written = await WorkspaceService.writeFile(target, "");
+        setCreationKind(null);
+        setCreationName("");
+        await refresh();
+        openFile({
+          path: written.path,
+          name: written.name,
+          content: "",
+        });
+        focusOrOpen({ kind: "file" });
+      } else {
+        await WorkspaceService.createDirectory(target);
+        setCreationKind(null);
+        setCreationName("");
+        await refresh();
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Creation failed.");
+    } finally {
+      setIsSubmittingCreation(false);
+    }
+  };
+
   const visibleFiles = useMemo(() => {
     const query = filter.trim().toLowerCase();
     if (!query) return files;
@@ -107,19 +169,51 @@ const ExplorerPanel: React.FC = () => {
       <PanelHeader
         title="Explorer"
         trailing={
-          <IconButton
-            onClick={() => void refresh()}
-            disabled={isLoading}
-            title="Refresh workspace"
-            aria-label="Refresh workspace"
-            size={24}
-          >
-            {isLoading ? <LoaderCircle size={14} className="animate-spin" /> : <RefreshCw size={14} />}
-          </IconButton>
+          <>
+            <IconButton
+              onClick={() => {
+                setCreationKind("file");
+                setCreationName("");
+              }}
+              title="New File (⌘N)"
+              aria-label="New File"
+              size={24}
+            >
+              <FilePlus size={13} strokeWidth={1.8} />
+            </IconButton>
+            <IconButton
+              onClick={() => {
+                setCreationKind("folder");
+                setCreationName("");
+              }}
+              title="New Folder"
+              aria-label="New Folder"
+              size={24}
+            >
+              <FolderPlus size={13} strokeWidth={1.8} />
+            </IconButton>
+            <IconButton
+              onClick={() => void handleChooseFolder()}
+              title="Open Folder…"
+              aria-label="Open Folder"
+              size={24}
+            >
+              <FolderOpen size={13} strokeWidth={1.8} />
+            </IconButton>
+            <IconButton
+              onClick={() => void refresh()}
+              disabled={isLoading}
+              title="Refresh workspace"
+              aria-label="Refresh workspace"
+              size={24}
+            >
+              {isLoading ? <LoaderCircle size={13} className="animate-spin" /> : <RefreshCw size={13} strokeWidth={1.8} />}
+            </IconButton>
+          </>
         }
       />
 
-      <div className="px-2 pt-2">
+      <div className="px-2 pt-1 pb-1">
         <Input
           value={filter}
           onChange={(event) => setFilter(event.target.value)}
@@ -131,25 +225,89 @@ const ExplorerPanel: React.FC = () => {
         />
       </div>
 
-      {/* The root reads as a label rather than a row: it is not clickable, and
-          the count is the honest measure of what the tree below is showing. */}
-      <div className="flex items-center justify-between gap-2 px-4 pt-2.5 pb-1.5">
-        <span className="font-mono text-3xs uppercase tracking-wider text-ink-faint truncate">{rootName}</span>
-        <span className="font-mono text-3xs text-ink-disabled flex-shrink-0">
+      {/* Prominently displayed active project root with live item count */}
+      <div
+        className="flex items-center justify-between gap-2 px-3 pt-2 pb-1.5 border-b border-edge/30 select-none"
+        title={workspacePath || rootName}
+      >
+        <div className="flex items-center gap-1.5 min-w-0">
+          <Folder size={12} className="text-accent flex-shrink-0" />
+          <span className="font-mono text-2xs font-semibold tracking-wide text-ink-bright truncate">
+            {rootName}
+          </span>
+        </div>
+        <span className="font-mono text-3xs text-ink-faint flex-shrink-0 bg-surface-sunken px-1.5 py-0.5 rounded border border-edge/40">
           {entryCount}
-          {isTruncated ? "+" : ""} entries · read only
+          {isTruncated ? "+" : ""} files
         </span>
       </div>
 
+      {/* Inline File / Folder Creation Row */}
+      {creationKind && (
+        <div className="mx-2 my-1.5 p-1.5 rounded-lg border border-accent/40 bg-surface-sunken flex items-center gap-2 shadow-sm">
+          {creationKind === "file" ? (
+            <FilePlus size={13} className="text-accent flex-shrink-0 ml-0.5" />
+          ) : (
+            <FolderPlus size={13} className="text-warning flex-shrink-0 ml-0.5" />
+          )}
+          <input
+            ref={creationInputRef}
+            type="text"
+            value={creationName}
+            onChange={(e) => setCreationName(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") void handleCommitCreation();
+              else if (e.key === "Escape") setCreationKind(null);
+            }}
+            placeholder={creationKind === "file" ? "filename.ts or dir/file.ts" : "folder-name"}
+            className="flex-1 bg-transparent text-xs text-ink-bright placeholder:text-ink-disabled outline-none"
+            disabled={isSubmittingCreation}
+          />
+          {isSubmittingCreation ? (
+            <LoaderCircle size={12} className="animate-spin text-ink-faint mr-0.5" />
+          ) : (
+            <button
+              type="button"
+              onClick={() => setCreationKind(null)}
+              className="text-ink-faint hover:text-ink-high p-0.5"
+              title="Cancel (Esc)"
+            >
+              <X size={12} />
+            </button>
+          )}
+        </div>
+      )}
+
       {error && (
-        <p className="mx-2 mb-2 rounded-md bg-surface-sunken px-3 py-2 text-2xs text-danger leading-relaxed" role="alert">
+        <p className="mx-2 my-1.5 rounded-md bg-surface-sunken px-3 py-2 text-2xs text-danger leading-relaxed" role="alert">
           {error}
         </p>
       )}
 
       <div className="flex-1 min-h-0 overflow-y-auto pb-2 pr-1" aria-label={`${rootName} files`}>
         {!isLoading && visibleFiles.length === 0 && !error && (
-          <EmptyState title="Nothing here" detail="No supported files match this filter." />
+          <div className="px-4 py-8 text-center space-y-3">
+            <p className="text-xs text-ink-muted">No files match this filter.</p>
+            <div className="flex flex-col gap-2 pt-1">
+              <button
+                type="button"
+                onClick={() => void handleChooseFolder()}
+                className="w-full py-1.5 px-3 rounded-lg border border-edge bg-surface-sunken hover:border-accent/40 text-xs text-ink-bright transition-colors"
+              >
+                Open Project Folder…
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setCreationKind("file");
+                  setCreationName("");
+                }}
+                className="w-full py-1.5 px-3 rounded-lg border border-edge bg-surface-sunken hover:border-accent/40 text-xs text-ink-bright transition-colors"
+              >
+                + Create New File
+              </button>
+            </div>
+          </div>
         )}
         {visibleFiles.map((item) => (
           <FileTreeItem key={item.id} item={item} filter={filter} onError={setError} />

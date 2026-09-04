@@ -4,6 +4,7 @@ import { CursorMarkdownRenderer } from "./CursorMarkdownRenderer";
 import { FileActionCard } from "./FileActionCard";
 import { ThinkingIndicator } from "./ThinkingIndicator";
 import { WorkTimeline } from "./WorkTimeline";
+import { ProcessWatcher } from "./ProcessWatcher";
 import { AttachmentStrip } from "./AttachmentStrip";
 import { segment } from "../../utils/segment";
 import type { ChatMessage } from "../../types";
@@ -58,13 +59,9 @@ export const MessageBlock: React.FC<{
 
   if (message.role === "user") {
     return (
-      /* Cursor's user turn fills the reading column. It is not a right-aligned
-         chat bubble and it is not capped at a fraction of the width — it is a
-         full-width card that happens to be lighter than the canvas, which is
-         what keeps a long prompt from ragging into a narrow ribbon down the
-         right-hand side. #212121 behind a flat #313131 hairline, 12px corner. */
+      /* User turn: clean, rounded full-width card with subtle border highlight */
       <div className={compact ? "pt-3 pb-2" : "pt-1 pb-4"}>
-        <div className={`lit w-full rounded-xl bg-surface whitespace-pre-wrap break-words ${compact ? "px-3 py-2 text-xs" : "px-3.5 py-2.5 text-md"} text-ink-bright`}>
+        <div className={`lit w-full rounded-2xl border border-white/10 bg-gradient-to-br from-surface to-surface-sunken whitespace-pre-wrap break-words shadow-sm ${compact ? "px-3 py-2 text-xs" : "px-4 py-3 text-md"} text-ink-bright`}>
           {message.content}
         </div>
       </div>
@@ -80,9 +77,25 @@ export const MessageBlock: React.FC<{
 
   return (
     <div className={`group/turn flex flex-col ${compact ? "gap-2 pb-2" : "gap-3 pb-4"}`}>
-      {calls.length > 0 && <WorkTimeline calls={calls} />}
+      {/* The Watcher & Stepwise Process Inspector (Antigravity Style) */}
+      {(calls.length > 0 || message.isStreaming) && (
+        <ProcessWatcher
+          engine={message.engineUsed}
+          mode={message.mode}
+          toolCalls={calls}
+          isStreaming={message.isStreaming}
+          charCount={message.content.length}
+          tokensCount={message.tokensCount}
+          durationSec={message.durationSec}
+          onJumpToFile={onJumpToFile}
+          compact={compact}
+        />
+      )}
 
-      {(awaitingFirstToken || message.isStreaming) && (
+      {/* Fallback compact timeline if finished with calls */}
+      {!message.isStreaming && calls.length > 0 && false && <WorkTimeline calls={calls} />}
+
+      {(awaitingFirstToken || (message.isStreaming && calls.length === 0)) && (
         <ThinkingIndicator
           active
           charCount={message.content.length}
@@ -110,15 +123,20 @@ export const MessageBlock: React.FC<{
       )}
 
       {message.isStreaming && message.content.trim() && (
-        <span className="inline-block w-1.5 h-4 bg-ink-code animate-caret" />
+        <span className="inline-block w-2 h-4 ml-1 rounded-sm bg-gradient-to-t from-cyan-400 via-sky-300 to-purple-400 shadow-[0_0_10px_rgba(56,189,248,0.8)] animate-pulse" />
       )}
 
       {!message.isStreaming && message.content && (
-        <div className="flex items-center gap-3 font-mono text-2xs pt-0.5">
+        <div className="flex items-center gap-2.5 font-mono text-2xs pt-1 border-t border-edge/30">
             <span className="text-ink-soft">{clockOf(message.timestamp)}</span>
+            {message.engineUsed && (
+              <span className="px-2 py-0.5 rounded-full bg-cyan-500/10 text-cyan-400 border border-cyan-500/20 text-3xs font-semibold uppercase tracking-wider">
+                {message.engineUsed}
+              </span>
+            )}
             {typeof message.tokensCount === "number" && message.tokensCount > 0 && (
-              <span className="flex items-center gap-1.5 text-ink-muted bg-surface-chip rounded-lg px-2 py-1">
-                {message.tokensCount} tokens
+              <span className="flex items-center gap-1 text-ink-muted bg-surface-chip rounded-md px-2 py-0.5 border border-edge/40">
+                ⚡ {message.tokensCount.toLocaleString()} tokens
               </span>
             )}
             <span className="text-ink-soft">{message.costLabel ?? "$0.00 local"}</span>

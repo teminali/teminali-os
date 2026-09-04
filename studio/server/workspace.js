@@ -1,4 +1,4 @@
-import { lstat, readdir, readFile, realpath, rename, unlink, writeFile } from "node:fs/promises";
+import { lstat, mkdir, readdir, readFile, realpath, rename, unlink, writeFile } from "node:fs/promises";
 import { randomUUID } from "node:crypto";
 import { basename, dirname, extname, relative, resolve, sep } from "node:path";
 
@@ -102,6 +102,7 @@ export async function writeWorkspaceFile(root, requestedPath, content, options =
   if (!TEXT_EXTENSIONS.has(extension)) throw new Error("WORKSPACE_FILE_UNSUPPORTED");
 
   const parentPath = dirname(absolutePath);
+  await mkdir(parentPath, { recursive: true });
   const [realRoot, realParent] = await Promise.all([realpath(workspaceRoot), realpath(parentPath)]);
   if (realParent !== realRoot && !realParent.startsWith(`${realRoot}${sep}`)) throw new Error("WORKSPACE_PATH_ESCAPE");
 
@@ -130,6 +131,17 @@ export async function writeWorkspaceFile(root, requestedPath, content, options =
   }
 
   return readWorkspaceFile(workspaceRoot, requestedPath, { maxFileBytes });
+}
+
+export async function createWorkspaceDirectory(root, requestedPath) {
+  if (typeof requestedPath !== "string" || !requestedPath.trim()) throw new Error("INVALID_WORKSPACE_PATH");
+  const workspaceRoot = resolve(root);
+  const absolutePath = resolveWorkspacePath(workspaceRoot, requestedPath);
+  const realRoot = await realpath(workspaceRoot);
+  await mkdir(absolutePath, { recursive: true });
+  const realDir = await realpath(absolutePath);
+  if (realDir !== realRoot && !realDir.startsWith(`${realRoot}${sep}`)) throw new Error("WORKSPACE_PATH_ESCAPE");
+  return { path: publicPath(workspaceRoot, absolutePath) };
 }
 
 /**

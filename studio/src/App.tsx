@@ -24,6 +24,7 @@ import { VersionControl } from "./components/updates/VersionControl";
 import { GitHubModal } from "./components/github/GitHubModal";
 import { useStudioStore } from "./store/studioStore";
 import { usePanelStore } from "./store/panelStore";
+import { WorkspaceService } from "./services/workspaceService";
 import { openVideoProject, saveVideoProject } from "./video/project/io";
 import { useProjectStore } from "./video/store/projectStore";
 
@@ -291,6 +292,38 @@ export default function App() {
       offExport();
     };
   }, [focusOrOpen]);
+
+  // "Open Folder…" (⌘O) from native menu bar.
+  // Rebinds workspace root, updates store, expands explorer, and focuses editor.
+  useEffect(() => {
+    const bridge = window.teminali;
+    if (!bridge) return;
+    return bridge.menu.on("menu:open-project", async (payload: unknown) => {
+      const projectPath = typeof payload === "string" ? payload : "";
+      if (!projectPath) return;
+      try {
+        const response = await WorkspaceService.openProject(projectPath);
+        useStudioStore.getState().setWorkspacePath(response.current.path);
+        setSidebarTab("files");
+        setSidebarCollapsed(false);
+        focusOrOpen({ kind: "file" });
+      } catch (err) {
+        console.error("Failed to open project from menu:", err);
+      }
+    });
+  }, [focusOrOpen, setSidebarTab, setSidebarCollapsed]);
+
+  // "New File" (⌘N) from native menu bar.
+  useEffect(() => {
+    const bridge = window.teminali;
+    if (!bridge) return;
+    return bridge.menu.on("menu:new-file", () => {
+      setSidebarTab("files");
+      setSidebarCollapsed(false);
+      focusOrOpen({ kind: "file" });
+      useStudioStore.getState().addUntitledTab();
+    });
+  }, [focusOrOpen, setSidebarTab, setSidebarCollapsed]);
 
   /* ── Sidebar geometry ──────────────────────────────────────────────────── */
 
