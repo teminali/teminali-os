@@ -90,3 +90,7 @@ than the transcript as ground truth.
 [`studio/DESIGN.md`](studio/DESIGN.md) is the canonical design contract for the
 whole suite — the token sheet, the component primitives, the shell architecture,
 the screen assistant and voice. Read it before changing any interface.
+
+## Support
+
+If this saved you time, [a coffee's worth of crypto](DONATE.md) is a good way to say so. It stays free either way.
