@@ -172,6 +172,10 @@ export const StudioTitleBar: React.FC<StudioTitleBarProps> = ({
             <PanelGlyph kind="video" size={12} />
             {PANEL_DEFAULTS.video.label}
           </button>
+          {/* The two are neighbours, not a pair: one opens a panel here, the
+              other leaves for another application. A hairline says so without
+              spending a label on it. */}
+          <span className="w-px h-3 bg-edge-strong flex-shrink-0" aria-hidden="true" />
           <button
             type="button"
             onClick={onOpenIde}

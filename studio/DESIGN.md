@@ -211,11 +211,13 @@ shell, with the labels' width handed back to whatever the panel is showing. Five
 destinations fit the switch without wrapping; Media was the fifth until it
 moved into the video editor's rail (below), and four fit with room to spare.
 
-**`IDE` and `Video Editor` sit together in the title bar's right group**
+**`IDE` and `Video Editor` sit together in the title bar's right group**, split
+by a 1px `bg-edge-strong` hairline —
 because they are the same verb — take this conversation somewhere it can be
 worked on. They differ in where they go, and say so: the IDE leaves for another
 application and wears the external-link arrow, the editor opens a panel here and
-wears that panel's own glyph and accelerator (`⇧⌘V`). It calls `focusOrOpen`, so
+wears that panel's own glyph and accelerator (`⇧⌘V`), and the rule is a divider
+rather than a label. It calls `focusOrOpen`, so
 pressing it twice focuses the editor already open rather than stacking a second.
 
 One list, `SIDEBAR_TABS` in `sidebar/ActivityBar.tsx`, not the old
@@ -389,7 +391,10 @@ refresh; a mobile-money price takes a phone number, pushes a prompt to the
 handset, and polls the order every four seconds until it settles — then
 refreshes the licence itself, because the money landing *is* the moment the
 entitlement changed. Sign-in is the device-code flow: a code to type elsewhere,
-polled at the interval the service asked for and never faster than 2s.
+polled at the interval the service asked for and never faster than 2s. That
+poll stops on the first definite answer — granted, denied, expired, or a code
+the service no longer knows — and keeps going only for the failures that a
+later tick could plausibly fix.
 
 A build with no `TEMINALI_BILLING_URL` still draws the capability list and says
 plainly that it has no billing service, rather than offering a button that
