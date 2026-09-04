@@ -90,6 +90,7 @@ contextBridge.exposeInMainWorld("teminali", {
         "menu:record-screen",
         "menu:open-video-project",
         "menu:save-video-project",
+        "menu:export-video",
       ]);
       if (!allowed.has(channel)) return () => {};
       const handler = (_event, payload) => listener(payload);
@@ -185,6 +186,27 @@ contextBridge.exposeInMainWorld("teminali", {
     save: (dir, json) => ipcRenderer.invoke("videoProject:save", { dir, json }),
     read: (dir) => ipcRenderer.invoke("videoProject:read", { dir }),
     reveal: (path) => ipcRenderer.invoke("videoProject:reveal", { path }),
+  },
+  /**
+   * The exporter.
+   *
+   * A session, then one call per frame, then a finish that returns where the
+   * file went. The frame bytes cross as a `Uint8Array` in the structured
+   * clone — not base64, not a data URL: a 4K JPEG is around a megabyte and
+   * base64 would add a third to that on every one of several thousand frames.
+   *
+   * `cancel` is deliberately fire-and-forget. It is called from a beforeunload
+   * and from an abort the operator has already committed to, neither of which
+   * has anywhere to put a rejected promise.
+   */
+  exporter: {
+    choose: (suggestedName, codec) => ipcRenderer.invoke("export:choose", suggestedName, codec),
+    start: (options) => ipcRenderer.invoke("export:start", options),
+    frame: (sessionId, jpeg, frames) => ipcRenderer.invoke("export:frame", sessionId, jpeg, frames),
+    materialize: (sessionId, bytes, extension) =>
+      ipcRenderer.invoke("export:material", sessionId, bytes, extension),
+    finish: (sessionId, audioClips) => ipcRenderer.invoke("export:finish", sessionId, audioClips),
+    cancel: (sessionId) => ipcRenderer.invoke("export:cancel", sessionId),
   },
   /**
    * The video panel's MCP bridge.

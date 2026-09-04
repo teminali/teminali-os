@@ -4,6 +4,19 @@ import { create } from 'zustand';
 
 export type ToastKind = 'success' | 'error' | 'info' | 'progress';
 
+/**
+ * One button on a toast, and at most one.
+ *
+ * A toast is the only surface an operator has for something that finished
+ * while they were looking elsewhere — an export runs with its dialog
+ * hidden, and the notice is the only place left to say where the file
+ * went. Selecting it dismisses the toast: the offer is taken.
+ */
+export interface ToastAction {
+  label: string;
+  onSelect: () => void;
+}
+
 export interface Toast {
   id: string;
   kind: ToastKind;
@@ -13,6 +26,7 @@ export interface Toast {
   progress?: number;
   /** ms before auto-dismiss; 0 keeps it until removed explicitly. */
   ttl?: number;
+  action?: ToastAction;
   createdAt: number;
 }
 
@@ -101,9 +115,24 @@ export const useUiStore = create<UiState>((set, get) => ({
   closeContextMenu: () => set({ contextMenu: null }),
 }));
 
-/** Convenience wrapper used across engines that don't want the hook. */
+/**
+ * Convenience wrapper used across engines that don't want the hook.
+ *
+ * `options` is third and optional so every existing two-argument call
+ * still reads the same. A toast carrying an action usually wants a
+ * longer `ttl` too — 3.2 seconds is enough to read a sentence and not
+ * enough to decide to press something.
+ */
+interface ToastOptions {
+  action?: ToastAction;
+  ttl?: number;
+}
+
 export const toast = {
-  success: (title: string, detail?: string) => useUiStore.getState().pushToast({ kind: 'success', title, detail }),
-  error: (title: string, detail?: string) => useUiStore.getState().pushToast({ kind: 'error', title, detail }),
-  info: (title: string, detail?: string) => useUiStore.getState().pushToast({ kind: 'info', title, detail }),
+  success: (title: string, detail?: string, options?: ToastOptions) =>
+    useUiStore.getState().pushToast({ kind: 'success', title, detail, ...options }),
+  error: (title: string, detail?: string, options?: ToastOptions) =>
+    useUiStore.getState().pushToast({ kind: 'error', title, detail, ...options }),
+  info: (title: string, detail?: string, options?: ToastOptions) =>
+    useUiStore.getState().pushToast({ kind: 'info', title, detail, ...options }),
 };

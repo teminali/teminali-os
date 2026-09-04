@@ -2,6 +2,7 @@ import React, { useEffect, useState } from "react";
 
 import type { RecorderBridge } from "../../types/recorder";
 import type { VideoProjectsBridge } from "../../types/videoProjects";
+import type { ExporterBridge } from "../../types/exporter";
 
 interface TeminaliBridge {
   isElectron: boolean;
@@ -38,6 +39,12 @@ interface TeminaliBridge {
    * the page, so the editor offers no save there rather than one that fails.
    */
   videoProjects?: VideoProjectsBridge;
+  /**
+   * Rendering the sequence to a file. Optional for the same reason again: a
+   * browser has no ffmpeg and nowhere to write, so the editor offers no
+   * Export button there rather than one that opens a dialog and fails.
+   */
+  exporter?: ExporterBridge;
   /**
    * The screen assistant. Optional because a browser build has no bridge at
    * all, and the assistant degrades to the in-window panel rather than

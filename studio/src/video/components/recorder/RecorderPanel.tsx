@@ -30,6 +30,7 @@ import { SourceGrid } from './SourceGrid';
 import { CaptureOptions } from './CaptureOptions';
 import { BuildOptions } from './BuildOptions';
 import { formatDuration, formatFileSize } from '../../utils/time';
+import type { RecorderConvertProgress } from '../../../types/recorder';
 import {
   Record, Pause, Play, Square, Loader2, AlertTriangle, CheckCircle2, X,
   FolderOpen, CursorClick, Camera, Monitor, Mic, Trash2, Sliders, Film,
@@ -161,16 +162,7 @@ export const RecorderPanel: React.FC<Props> = ({
 
       {(phase === 'recording' || phase === 'paused') && <Running />}
 
-      {phase === 'processing' && (
-        <div className="flex-1 flex flex-col items-center justify-center gap-3 px-6">
-          <Loader2 className="w-6 h-6 text-spectrum-accent animate-spin" />
-          <p className="text-ui-xl text-spectrum-text">Converting the take</p>
-          <p className="text-ui-sm text-spectrum-textDim max-w-[380px] text-center leading-relaxed">
-            A raw capture carries no duration and no seek index, so it is remuxed before it
-            can be scrubbed. Long takes take a moment.
-          </p>
-        </div>
-      )}
+      {phase === 'processing' && <Converting progress={store.convert} />}
 
       {phase === 'review' && store.take && (
         <Review stacked={width < REVIEW_COLUMN_MIN_W} onOpened={onOpenedOnTimeline} />
@@ -311,6 +303,69 @@ const SetupFooter: React.FC<{
   from `countdown` starts nothing and writes nothing — there is no take
   yet to throw away.
 */
+/*
+  The convert screen.
+
+  It used to be a spinner and a paragraph, and a spinner is a promise
+  that something is happening without any claim about how much. On a
+  six-minute take the remux is a stream copy that takes about five
+  seconds — but five seconds of a motionless screen is long enough to
+  believe the app has hung, which is the complaint this answers.
+
+  The bar is real. It is ffmpeg's own position in the take, not a timer
+  dressed up as one, and when the duration is unknown it says so by
+  staying indeterminate rather than inventing a number.
+
+  The paragraph stays. It is the part that explains WHY there is a wait
+  at all, and losing it to make room for a bar would trade one kind of
+  confusion for another.
+*/
+const Converting: React.FC<{ progress: RecorderConvertProgress | null }> = ({ progress }) => {
+  const percent = progress?.percent ?? null;
+  const finalising = progress?.phase === 'finalising';
+
+  return (
+    <div className="flex-1 flex flex-col items-center justify-center gap-3 px-6">
+      <Loader2 className="w-6 h-6 text-spectrum-accent animate-spin" />
+      <p className="text-ui-xl text-spectrum-text">Converting the take</p>
+
+      <div className="w-full max-w-[380px] flex flex-col gap-1.5">
+        <div
+          className="h-1.5 w-full rounded-full bg-spectrum-sunken overflow-hidden border border-line"
+          role="progressbar"
+          aria-label="Converting the take"
+          {...(percent === null
+            ? {}
+            : { 'aria-valuenow': percent, 'aria-valuemin': 0, 'aria-valuemax': 100 })}
+        >
+          <div
+            className={`h-full rounded-full bg-spectrum-accent ${
+              percent === null ? 'w-1/3 animate-pulse' : 'transition-[width] duration-300'
+            }`}
+            {...(percent === null ? {} : { style: { width: `${percent}%` } })}
+          />
+        </div>
+
+        <div className="flex items-baseline justify-between text-ui-xs text-spectrum-textDim">
+          <span>
+            {finalising
+              ? 'Writing the seek index'
+              : progress?.pass === 'encode'
+                ? 'Re-encoding — this take was not in a format MP4 can hold'
+                : 'Copying the video stream'}
+          </span>
+          {percent !== null && !finalising && <span className="tabular-nums">{percent}%</span>}
+        </div>
+      </div>
+
+      <p className="text-ui-sm text-spectrum-textDim max-w-[380px] text-center leading-relaxed">
+        A raw capture carries no duration and no seek index, so it is remuxed before it
+        can be scrubbed. Long takes take a moment.
+      </p>
+    </div>
+  );
+};
+
 const Countdown: React.FC<{ seconds: number }> = ({ seconds }) => {
   const discard = useRecorderStore((s) => s.discard);
   return (

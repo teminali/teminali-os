@@ -260,6 +260,61 @@ correctness constraint, not taste — `⇧⌘S` and `⇧⌘O` are already the si
 and Codex in `App.tsx`'s shortcut handler, and a key the menu takes is a key
 the page stops hearing, with no error anywhere.
 `tests/video-project-bridge.test.mjs` asserts that collision cannot come back.
+`⌥⌘E` joins them for **Export Video…**, in the same menu and for the same
+reason, and it opens the dialog rather than starting a render: the menu cannot
+know whether the sequence has anything in it, and an accelerator that spawns
+ffmpeg on a keypress is one nobody can undo.
+
+**The export dialog is scoped to the pane, not to the window.** It draws its
+scrim inside `VideoPane` and sets `aria-modal="false"`, because the render is a
+question about the video and blacking out the terminal and the agent to ask it
+would stop the work the export is part of. Hiding it leaves the render running,
+which is why the program header's Export button wears the percentage while one
+is: a running render with nowhere on screen is one nobody cancels. The whole of
+its state — progress, phase, telemetry, the cancel handler — lives in
+`useProjectStore`, so an export an agent started is shown and cancelled by the
+same dialog as one a person started.
+
+**A render takes the video elements, it does not share them.**
+`seekVideosForFrame` parks the same `<video>` cache the monitor draws from, so
+`useProgramLoop` yields while `isExporting` is set exactly as it yields to the
+fullscreen player, and the loop hands the thread back through
+`requestAnimationFrame` every 12ms. The editor this was ported from owns a
+window and may freeze for the length of a render; this one is a panel, and a
+frozen panel is a frozen IDE.
+
+**An export lifts background throttling, and puts it back.** Chromium clamps a
+backgrounded page to roughly one task per second, and `canvas.toBlob` returns
+its encoded frame through one of those tasks. Measured on a 1664x1080 frame:
+**12ms with the window in front, 1023ms behind it** — the render is unchanged,
+the callback is simply held. That is the ordinary case rather than the edge
+one, because the dialog itself says hiding it leaves the export running. So
+`export:start` calls `setBackgroundThrottling(false)` on the webContents that
+asked, and finish and cancel alike put it back, refcounted on `sessions.size`
+beside the power lock that was already there. An IDE idling behind another
+window should still be throttled; an IDE rendering should not. With the lock
+in place a 741-frame export measured 7.6 fps occluded against 7.4 fps focused
+— the gap is gone, and what remains is the per-frame IPC, not the window state.
+
+**A finished export ends on the file, not on the settings it was started
+from.** The dialog kept its result in one grey line at the foot of the form —
+"Last export · reveal" — which is where an exported file goes missing: the
+operator never chose the destination, "your Videos folder" is not a path, and
+the notice that names it lasts 3.2 seconds. So a completed export now holds the
+dialog: a green tick, the whole path wrapped rather than truncated, and
+**Show in Finder** / **Show in Explorer** / **Show in folder** — named for the
+platform, because "Finder" on Windows is a button nobody presses. *Export
+again* returns to the form, *Done* closes.
+
+The result is read from `useProjectStore` rather than from the call that
+started it, so an export an AGENT ran ends the same way, and so does one that
+finished while the dialog was hidden — reopening shows it. It reveals through
+`videoProject:reveal`, the transport's existing `shell.showItemInFolder`,
+because an export is one more file on disk and does not need a channel of its
+own. The finish toast carries the same button (`Toast.action`, at most one, and
+taking it dismisses the toast) on a 9-second life rather than the default 3.2:
+with the dialog hidden the toast is the only surface the export ever gets, and
+a notice that expires before it can be pressed is a taunt.
 
 **Media is no longer a sidebar tab.** It was one, and this document argued at
 length that it had to stay: a workspace panel is mounted only while it is open,
@@ -708,6 +763,27 @@ previously a `PANEL_DEFAULTS` label with *nothing* bound to it; the menu item
 that was supposed to own it did not exist. Both halves are real now.) `open()`
 is idempotent, because the accelerator can fire over a dialog already holding
 a running take. The pill it replaced advertised `⇧Tab`, which nothing bound.
+
+**A stop that never returns wedges the recorder for the life of the page.**
+Reported from the running app: nothing recorded at all, and every attempt
+answered *"This take is already being finished"* on a screen headed *"The
+recording did not start"*. One session explains all of it. `stopCapture` marks
+the session `finishing` before it awaits the recorders and only reaches
+`session = null` after, so any await that does not end strands it — and two
+did: `MediaRecorder.onstop` never fires for a recorder whose source track has
+already ended (the captured window closed, the display slept), and `stop()` on
+one the browser has torn down throws instead, from inside the promise
+executor. With the session stranded `isRecording()` stays true, so the toggle
+routes every later press to stop, stop reports the take is already finishing,
+and start reports one is already running. Only *Back to setup* — which calls
+`cancelCapture` — or a reload gives it back.
+
+Both doors are now shut. `stopped()` races `onstop` against `STOP_TIMEOUT_MS`
+(4s) and treats a throwing `stop()` as a stop that finished; `recorderStore`'s
+`stop` catches anything out of `stopCapture` and calls `cancelCapture(false)`,
+which releases the session and **keeps the files** — a failed finish must not
+also delete what was recorded. What a fired timeout costs is the last chunk of
+one track; what it saves is every recording after this one.
 
 **The bridge the whole recorder runs on had never been published.**
 `electron/screenRecorder.cjs` registers fifteen `recorder:*` handlers and owns

@@ -26,7 +26,7 @@ import { useAnchoredMenu } from '../ui/Overlays';
 import { audioEngine } from '../../engine/audioEngine';
 import type { ContextMenuItem } from '../../store/uiStore';
 import {
-  Grid3x3, Ratio, Film, Magnet, ZoomIn, ZoomOut, Maximize2, Gauge, Eye,
+  Grid3x3, Ratio, Film, Magnet, ZoomIn, ZoomOut, Maximize2, Gauge, Eye, Download,
 } from '../ui/icons';
 
 const ZOOM_STEPS = [0.25, 0.5, 0.75, 1, 1.5, 2, 3, 4];
@@ -70,6 +70,9 @@ export const PreviewPlayer: React.FC<{ headerNav?: React.ReactNode }> = ({ heade
 
   const project = useProjectStore((s) => s.project);
   const setDurationMs = useProjectStore((s) => s.setDurationMs);
+  const isExporting = useProjectStore((s) => s.isExporting);
+  const exportProgress = useProjectStore((s) => s.exportProgress);
+  const setExportModalOpen = useProjectStore((s) => s.setExportModalOpen);
 
   const {
     showSafeAreas, showRuleOfThirds, showCinemaLetterbox, showScopes,
@@ -138,11 +141,17 @@ export const PreviewPlayer: React.FC<{ headerNav?: React.ReactNode }> = ({ heade
      Owned by `useProgramLoop`, and yielded while the fullscreen
      Player is open. The loop drives the audio graph and every <video>
      element as well as the canvas, so exactly one of the two may run:
-     two would sync the same media twice per frame from two callers. */
+     two would sync the same media twice per frame from two callers.
+
+     An export is the third claimant and takes the same yield.
+     `seekVideosForFrame` parks those very elements on the frame it is
+     encoding, so a preview still running beside it would scrub them
+     back to the playhead between frames — and the file would come out
+     holding whichever of the two wrote last. */
   useProgramLoop({
     canvasRef,
     project,
-    active: !isPlayerOpen,
+    active: !isPlayerOpen && !isExporting,
     onMeters: setMeters,
   });
 
@@ -298,6 +307,20 @@ export const PreviewPlayer: React.FC<{ headerNav?: React.ReactNode }> = ({ heade
               </button>
             )}
           </div>
+
+          {/* The one control that leaves the editor with a file. It keeps
+              its place while a render is running and wears the percentage,
+              because the dialog can be dismissed and the export cannot: a
+              running render with nowhere on screen is one nobody cancels. */}
+          <button
+            onClick={() => setExportModalOpen(true)}
+            className={`pro-btn editor-tool-btn relative ${isExporting ? 'pro-btn-active' : ''}`}
+            title={isExporting ? `Exporting · ${Math.round(exportProgress)}%` : 'Export video'}
+            aria-label={isExporting ? `Exporting, ${Math.round(exportProgress)} percent` : 'Export video'}
+          >
+            <Download className="w-3.5 h-3.5" />
+            {isExporting && <span className="pro-badge">{Math.round(exportProgress)}</span>}
+          </button>
 
           <button
             onClick={openPlayer}

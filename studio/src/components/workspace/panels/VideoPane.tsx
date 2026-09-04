@@ -7,6 +7,7 @@ import { PreviewPlayer } from "../../../video/components/preview/PreviewPlayer";
 import { InspectorPanel } from "../../../video/components/inspector/InspectorPanel";
 import { Timeline } from "../../../video/components/timeline/Timeline";
 import { ContextMenu, Toasts } from "../../../video/components/ui/Overlays";
+import { ExportDialog } from "../../../video/components/preview/ExportDialog";
 import { FolderOpen, Sliders, X } from "../../../video/components/ui/icons";
 import { MediaPanel } from "../../sidebar/MediaPanel";
 
@@ -347,6 +348,10 @@ export const VideoPane: React.FC = () => {
             they wear are scoped to `.video-workspace`. */}
         <ContextMenu />
         <Toasts />
+        {/* Inside the pane, not over the window: a render is a question
+            about the video, and blacking out the terminal and the agent to
+            ask it would stop the work the export is part of. */}
+        <ExportDialog />
       </div>
     </DensityProvider>
   );

@@ -46,11 +46,12 @@ const {
 const fs = require("fs");
 const os = require("os");
 const path = require("path");
-const { execFile } = require("child_process");
+const { execFile, spawn } = require("child_process");
 
-const { findFfmpeg } = require("./mediaAccess.cjs");
+const { findFfmpeg, ffmpegInstallHint } = require("./mediaAccess.cjs");
 const { writeSealed, readMaybeSealed, makePrivateDir } = require("./recorderVault.cjs");
 const { canStreamCopy, videoCodecFromFfmpeg } = require("./remuxPlan.cjs");
+const { readProgress, aggregatePercent } = require("./convertProgress.cjs");
 const {
   startInputCapture, probeInputCapture, shutdownInputCapture,
 } = require("./inputEvents.cjs");
@@ -296,6 +297,62 @@ function runFfmpeg(bin, args) {
 }
 
 /**
+ * The same, but watched — and the reason the convert screen can draw a bar.
+ *
+ * `execFile` buffers a process and hands it over once it is dead, which
+ * is precisely the wrong shape for a step whose whole complaint is that
+ * it says nothing while it runs. So the converting invocations spawn
+ * instead, and `-progress pipe:1 -nostats` gives a machine-readable
+ * position on stdout roughly twice a second.
+ *
+ * `onProgress` is called with the parsed samples; nothing here decides
+ * what a percentage is, because that belongs to `convertProgress.cjs`
+ * where it can be tested.
+ *
+ * The timeout is kept from the buffered version, and it has to be
+ * enforced by hand: `spawn` has no `timeout` of its own that also
+ * reaps the child.
+ */
+function runFfmpegWatched(bin, args, onProgress) {
+  return new Promise((resolve) => {
+    const child = spawn(bin, ["-progress", "pipe:1", "-nostats", ...args], {
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+
+    let carry = "";
+    child.stdout.setEncoding("utf8");
+    child.stdout.on("data", (chunk) => {
+      const read = readProgress(carry, chunk);
+      carry = read.rest;
+      for (const sample of read.samples) {
+        try { onProgress(sample); } catch { /* a bar is never worth the take */ }
+      }
+    });
+
+    /* Capped rather than unbounded: only the last couple of lines are
+       ever read out of it, and a failing convert can be talkative. */
+    let stderr = "";
+    child.stderr.setEncoding("utf8");
+    child.stderr.on("data", (chunk) => {
+      stderr = (stderr + chunk).slice(-64 * 1024);
+    });
+
+    let timedOut = false;
+    const timer = setTimeout(() => {
+      timedOut = true;
+      try { child.kill("SIGKILL"); } catch { /* already gone */ }
+    }, 20 * 60_000);
+
+    const finish = (ok) => {
+      clearTimeout(timer);
+      resolve({ ok: ok && !timedOut, stderr: stderr.trim() });
+    };
+    child.on("error", () => finish(false));
+    child.on("close", (code) => finish(code === 0));
+  });
+}
+
+/**
  * The video codec a finished file actually holds, as ffmpeg names it.
  *
  * `ffmpeg -i <file>` with no output exits non-zero and prints the stream
@@ -324,7 +381,7 @@ async function videoCodecOf(bin, input) {
  * the copy is not available (VP8/VP9 cannot go into MP4) the transcode is
  * the fallback rather than the default.
  */
-async function toMp4(input, tryCopy) {
+async function toMp4(input, tryCopy, watch) {
   const bin = findFfmpeg();
   if (!bin) {
     return {
@@ -332,7 +389,7 @@ async function toMp4(input, tryCopy) {
       path: input,
       raw: true,
       error:
-        "FFmpeg was not found, so the take is still a .webm. Install ffmpeg (brew install ffmpeg) "
+        `FFmpeg was not found, so the take is still a .webm. Install ffmpeg (${ffmpegInstallHint()}) `
         + "and re-import the file to scrub it on the timeline.",
     };
   }
@@ -356,22 +413,30 @@ async function toMp4(input, tryCopy) {
   if (tryCopy) {
     const codec = await videoCodecOf(bin, input);
     if (canStreamCopy(tryCopy, codec)) {
-      const copied = await runFfmpeg(bin, [...base, "-c:v", "copy", ...tail]);
+      const copied = await runFfmpegWatched(
+        bin,
+        [...base, "-c:v", "copy", ...tail],
+        (sample) => watch?.({ ...sample, pass: "copy" }),
+      );
       if (copied.ok && fs.existsSync(output) && fs.statSync(output).size > 0) {
         return { ok: true, path: output, raw: false };
       }
     }
   }
 
-  const encoded = await runFfmpeg(bin, [
-    ...base,
-    "-c:v", "libx264",
-    "-crf", "18",
-    "-preset", "veryfast",
-    "-pix_fmt", "yuv420p",
-    "-fps_mode", "cfr",
-    ...tail,
-  ]);
+  const encoded = await runFfmpegWatched(
+    bin,
+    [
+      ...base,
+      "-c:v", "libx264",
+      "-crf", "18",
+      "-preset", "veryfast",
+      "-pix_fmt", "yuv420p",
+      "-fps_mode", "cfr",
+      ...tail,
+    ],
+    (sample) => watch?.({ ...sample, pass: "encode" }),
+  );
   if (encoded.ok && fs.existsSync(output) && fs.statSync(output).size > 0) {
     return { ok: true, path: output, raw: false };
   }
@@ -794,7 +859,7 @@ function initScreenRecorder(mainWindowGetter) {
     return true;
   });
 
-  ipcMain.handle("recorder:finish", async (_event, p) => {
+  ipcMain.handle("recorder:finish", async (event, p) => {
     const session = sessions.get(p.sessionId);
     if (!session) return { ok: false, error: "That recording session is not open." };
 
@@ -803,29 +868,73 @@ function initScreenRecorder(mainWindowGetter) {
     await closeStreams(session);
 
     const files = {};
+
+    /*
+      A file that failed a write is still remuxed and still returned: a
+      WebM truncated at the point the disk filled up usually plays up
+      to that point, and half a take is worth more than none. What must
+      not happen is finishing quietly, so the error rides along with it.
+    */
+    const wroteOf = (out) => (out.writeError
+      ? `Part of the ${out.name} take could not be written to disk (${out.writeError}), `
+        + "so it may end early."
+      : null);
+
+    const pending = [];
     for (const out of session.streams.values()) {
-      /*
-        A file that failed a write is still remuxed and still returned: a
-        WebM truncated at the point the disk filled up usually plays up
-        to that point, and half a take is worth more than none. What must
-        not happen is finishing quietly, so the error rides along with it.
-      */
-      const wrote = out.writeError
-        ? `Part of the ${out.name} take could not be written to disk (${out.writeError}), `
-          + "so it may end early."
-        : null;
       if (out.bytes === 0) {
         files[out.name] = {
           path: out.filePath,
           url: "",
           bytes: 0,
           raw: true,
-          error: wrote ?? "Nothing was written for this source.",
+          error: wroteOf(out) ?? "Nothing was written for this source.",
         };
         continue;
       }
-      const result = await toMp4(out.filePath, p.copyable);
-      const error = [wrote, result.error].filter(Boolean).join(" ");
+      pending.push(out);
+    }
+
+    /*
+      One bar over however many files are converting.
+
+      `converted` holds each stream's position rather than accumulating,
+      so a copy that falls back to a re-encode simply restarts its own
+      clock; `floor` is what stops the shared bar retreating when it
+      does. Sent only when the drawn number changes — ffmpeg reports
+      about twice a second per stream, and an IPC message that redraws
+      nothing is a message not worth sending.
+    */
+    const converted = {};
+    const ended = new Set();
+    let floor = 0;
+    let last = null;
+    const report = (name, sample) => {
+      converted[name] = sample.outTimeMs ?? 0;
+      if (sample.done) ended.add(name); else ended.delete(name);
+
+      const percent = aggregatePercent(converted, durationMs, pending.length, floor);
+      if (percent !== null) floor = percent;
+      const phase = ended.size === pending.length ? "finalising" : "converting";
+
+      const line = `${percent}|${phase}|${sample.pass}`;
+      if (line === last) return;
+      last = line;
+      if (!event.sender.isDestroyed()) {
+        event.sender.send("recorder:convert", {
+          percent, phase, pass: sample.pass, speed: sample.speed ?? null,
+        });
+      }
+    };
+
+    /*
+      In parallel, because screen and camera are two independent files
+      and converting them one after the other doubled the wait for no
+      reason anybody watching the spinner could have guessed.
+    */
+    await Promise.all(pending.map(async (out) => {
+      const result = await toMp4(out.filePath, p.copyable, (sample) => report(out.name, sample));
+      const error = [wroteOf(out), result.error].filter(Boolean).join(" ");
       files[out.name] = {
         path: result.path,
         url: fileUrl(result.path),
@@ -839,7 +948,7 @@ function initScreenRecorder(mainWindowGetter) {
       if (!result.raw && result.path !== out.filePath) {
         try { fs.unlinkSync(out.filePath); } catch { /* keep going */ }
       }
-    }
+    }));
 
     /*
       The sidecar is SEALED, and it is the one part of a take that is.

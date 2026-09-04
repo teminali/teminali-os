@@ -41,7 +41,8 @@
    ═══════════════════════════════════════════════════════════════════ */
 
 import type {
-  CursorSample, InputEvent, InputCaptureStatus, RecordingResult, SpeechCue,
+  CursorSample, InputEvent, InputCaptureStatus, RecorderConvertProgress,
+  RecordingResult, SpeechCue,
 } from '../../types/recorder';
 
 /* ── What the user chose ────────────────────────────────────────── */
@@ -141,6 +142,20 @@ function pickMime(): { mime: string; copyable: boolean } {
 /** The recorder bridge, or undefined in a browser build. */
 function bridge() {
   return typeof window === 'undefined' ? undefined : window.teminali?.recorder;
+}
+
+/**
+ * Watch the convert step.
+ *
+ * Lives here rather than in the store because this module owns the
+ * bridge, and returns an unsubscribe so the listener is only alive for
+ * the one convert it was opened for. In a browser there is no main
+ * process and no remux at all, so the unsubscribe is all there is.
+ */
+export function onConvertProgress(
+  listener: (progress: RecorderConvertProgress) => void,
+): () => void {
+  return bridge()?.onConvert(listener) ?? (() => {});
 }
 
 /**
@@ -474,6 +489,16 @@ export function isRecording(): boolean {
 
 /** Milliseconds a chunk covers. Fewer round trips, still bounded memory. */
 const TIMESLICE_MS = 3000;
+
+/**
+ * How long a `stop()` may go unanswered before the take is finished anyway.
+ *
+ * Long enough that a healthy recorder always beats it — `onstop` follows
+ * `stop()` within a frame — and short enough that a wedged one does not
+ * strand the operator. What it costs when it fires is the last chunk of
+ * that track; what it saves is every recording after this one.
+ */
+const STOP_TIMEOUT_MS = 4000;
 
 /**
  * How long a recorder may produce nothing before it is called dead.
@@ -961,8 +986,33 @@ export async function pauseCapture(paused: boolean): Promise<void> {
 function stopped(entry: Recorder): Promise<void> {
   return new Promise((resolve) => {
     if (entry.recorder.state === 'inactive') { resolve(); return; }
-    entry.recorder.onstop = () => resolve();
-    entry.recorder.stop();
+    /*
+      This await must end, and twice it did not.
+
+      A recorder whose source track has already ended — the captured
+      window closed, the display slept, the stream torn down under it —
+      never fires `onstop`, and `stop()` on one the browser has already
+      finished throws instead. Either way `stopCapture` never reaches
+      `session = null`, and the module-level session is left `finishing`
+      for the life of the page: stop then answers "This take is already
+      being finished", start answers "A recording is already running",
+      and because `isRecording()` is true the toggle routes every press
+      to stop. The recorder is wedged until the window is reloaded.
+    */
+    let settled = false;
+    const done = (): void => {
+      if (settled) return;
+      settled = true;
+      window.clearTimeout(timer);
+      resolve();
+    };
+    const timer = window.setTimeout(done, STOP_TIMEOUT_MS);
+    entry.recorder.onstop = done;
+    try {
+      entry.recorder.stop();
+    } catch {
+      done();
+    }
   });
 }
 

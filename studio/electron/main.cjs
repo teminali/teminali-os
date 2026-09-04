@@ -9,6 +9,7 @@ const { startVideoRpcServer } = require("./videoRpc.cjs");
 const { resolveRealPath, processWithFfmpeg, formatAuditLine } = require("./mediaAccess.cjs");
 const { initScreenRecorder, shutdownScreenRecorder } = require("./screenRecorder.cjs");
 const { initVideoProjects, shutdownVideoProjects } = require("./videoProjects.cjs");
+const { initVideoExport, shutdownVideoExport } = require("./videoExport.cjs");
 
 const logFile = path.join(app.getPath("userData"), "studio-main.log");
 function log(...args) {
@@ -548,6 +549,14 @@ function buildMenu() {
           accelerator: "Alt+CmdOrCtrl+S",
           click: () => target()?.webContents.send("menu:save-video-project"),
         },
+        {
+          // The renderer decides whether an export can start — only it knows
+          // whether the sequence has anything in it and whether the media
+          // decodes — so this opens the dialog rather than beginning a render.
+          label: "Export Video…",
+          accelerator: "Alt+CmdOrCtrl+E",
+          click: () => target()?.webContents.send("menu:export-video"),
+        },
         { type: "separator" },
         {
           // The only way in, now that the recorder is a dialog rather than a
@@ -731,6 +740,18 @@ app.whenReady().then(async () => {
     log("The video project transport could not be started:", error?.message || error);
   }
 
+  /*
+    The exporter's four `export:*` handlers. Registered here for the same
+    reason as the two above and asserted by `tests/video-export.test.mjs`:
+    the renderer's export driver is a long loop that only discovers a missing
+    handler on the frame after it has already started encoding.
+  */
+  try {
+    initVideoExport();
+  } catch (error) {
+    log("The video exporter could not be started:", error?.message || error);
+  }
+
   // The status item is a nice-to-have, not a dependency: a platform without a
   // tray must still get a window, so its own failure never reaches this far.
   try {
@@ -799,6 +820,12 @@ app.on("will-quit", () => {
     shutdownVideoProjects();
   } catch (error) {
     log("Could not shut the video project transport down:", error.message);
+  }
+  // Kills any ffmpeg still encoding, so it cannot outlive the app.
+  try {
+    shutdownVideoExport();
+  } catch (error) {
+    log("Could not shut the video exporter down:", error.message);
   }
   assistantOverlay?.destroy();
   // Takes the endpoint file with it, so the next launch's gateway cannot find

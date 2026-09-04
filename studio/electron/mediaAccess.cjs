@@ -69,29 +69,87 @@ function ffmpegSource(mediaUrl) {
   }
 }
 
+/** `ffmpeg.exe` on Windows, `ffmpeg` everywhere else. */
+const FFMPEG_BINARY = process.platform === "win32" ? "ffmpeg.exe" : "ffmpeg";
+
+/**
+ * The install locations worth trying before PATH, per platform.
+ *
+ * These come FIRST and not as a fallback, because the whole reason they are
+ * listed is that PATH is the thing that is missing: see `findFfmpeg`. On
+ * Windows the four package managers people actually install ffmpeg with each
+ * put it somewhere different, and only winget's Links directory is reliably
+ * on a GUI process's PATH.
+ */
+function fixedFfmpegDirs() {
+  const env = process.env;
+  if (process.platform === "win32") {
+    const programFiles = env.ProgramFiles || "C:\\Program Files";
+    const home = env.USERPROFILE || "";
+    return [
+      "C:\\ffmpeg\\bin",
+      path.join(programFiles, "ffmpeg", "bin"),
+      // Chocolatey shims, then Scoop's, then winget's.
+      path.join(env.ChocolateyInstall || "C:\\ProgramData\\chocolatey", "bin"),
+      home ? path.join(home, "scoop", "shims") : null,
+      env.LOCALAPPDATA ? path.join(env.LOCALAPPDATA, "Microsoft", "WinGet", "Links") : null,
+    ].filter(Boolean);
+  }
+  if (process.platform === "darwin") {
+    // Homebrew on Apple silicon, Homebrew on Intel, MacPorts, the system.
+    return ["/opt/homebrew/bin", "/usr/local/bin", "/opt/local/bin", "/usr/bin"];
+  }
+  return ["/usr/local/bin", "/usr/bin", "/bin", "/snap/bin"];
+}
+
 /**
  * Where ffmpeg is, if it is anywhere.
  *
  * A packaged app launched from Finder inherits launchd's PATH, which has none
  * of the places Homebrew or MacPorts install into — the same landmine the
- * gateway's `bin-paths.js` documents. Looked up once and cached: the answer
- * does not change within a session, and a miss costs a `statSync` per candidate.
+ * gateway's `bin-paths.js` documents. Windows has the same problem with a
+ * different shape: an app started from the Start menu gets the PATH that
+ * existed when Explorer started, so an ffmpeg installed since then is
+ * invisible until the operator logs out.
+ *
+ * So: the explicit override, then the known install directories, then PATH
+ * as the catch-all for a custom install. PATH is searched LAST on purpose —
+ * the fixed list is ordered by preference (Homebrew's build over the system's)
+ * and putting PATH first would let an arbitrary earlier entry win.
+ *
+ * Looked up once and cached: the answer does not change within a session, and
+ * a miss costs a `statSync` per candidate.
  */
 let ffmpegPath;
 function findFfmpeg() {
   if (ffmpegPath !== undefined) return ffmpegPath;
+
+  const fromPath = String(process.env.PATH || "")
+    .split(path.delimiter)
+    .filter(Boolean);
+
   const candidates = [
     process.env.FFMPEG_PATH,
-    "/opt/homebrew/bin/ffmpeg",
-    "/usr/local/bin/ffmpeg",
-    "/opt/local/bin/ffmpeg",
-    "/usr/bin/ffmpeg",
+    ...fixedFfmpegDirs().map((dir) => path.join(dir, FFMPEG_BINARY)),
+    ...fromPath.map((dir) => path.join(dir, FFMPEG_BINARY)),
   ].filter(Boolean);
 
   ffmpegPath = candidates.find((candidate) => {
     try { return fs.statSync(candidate).isFile(); } catch { return false; }
   }) ?? null;
   return ffmpegPath;
+}
+
+/**
+ * What to tell an operator who has not got ffmpeg.
+ *
+ * Naming the wrong package manager is worse than naming none: it sends
+ * somebody to a command that does not exist on their machine.
+ */
+function ffmpegInstallHint() {
+  if (process.platform === "win32") return "winget install Gyan.FFmpeg";
+  if (process.platform === "darwin") return "brew install ffmpeg";
+  return "apt install ffmpeg";
 }
 
 /**
@@ -106,7 +164,7 @@ function processWithFfmpeg(options = {}) {
   if (!binary) {
     return Promise.resolve({
       ok: false,
-      error: "ffmpeg was not found. Install it (`brew install ffmpeg`) or set FFMPEG_PATH.",
+      error: `ffmpeg was not found. Install it (\`${ffmpegInstallHint()}\`) or set FFMPEG_PATH.`,
     });
   }
 
@@ -165,4 +223,7 @@ function formatAuditLine(entry = {}) {
   return `[media] ${verdict} ${entry.tool ?? "?"} · ${entry.agentName ?? "?"} · ${entry.reason ?? "?"} · ${entry.path ?? "?"}`;
 }
 
-module.exports = { resolveRealPath, ffmpegSource, findFfmpeg, processWithFfmpeg, formatAuditLine };
+module.exports = {
+  resolveRealPath, ffmpegSource, findFfmpeg, ffmpegInstallHint, fixedFfmpegDirs,
+  processWithFfmpeg, formatAuditLine,
+};

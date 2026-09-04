@@ -265,7 +265,7 @@ because `⇧⌘S` and `⇧⌘O` are already the side chat and Codex, and a menu
 accelerator silently takes the key away from the page. The commands live in the
 native File menu for the recorder's reason: it owns its accelerator whatever
 has focus, and this panel hands focus to a canvas, a timeline and a row of
-numeric fields.
+numeric fields. `⌥⌘E` exports the sequence to a file, from the same menu.
 
 Two limits are in the format rather than discovered later. **A saved project is
 machine-local** — clips reference media by absolute `file://` path and nothing
@@ -518,7 +518,7 @@ ollama serve              # local models on 127.0.0.1:11434
 
 ```bash
 npm run typecheck   # tsc --noEmit
-npm test            # 775 tests, 0 failures
+npm test            # 828 tests, 0 failures
 npm run build       # tsc && vite build
 npm run verify:core # all three
 ```
@@ -650,13 +650,55 @@ would let an arbitrary earlier entry outrank a deliberate one.
 to have (`brew`, `winget`, `apt`), because sending a Windows operator to
 Homebrew is worse than saying nothing.
 
-### Exporting video — pipeline built, no UI yet
+### Exporting video
 
-The encode path exists in the main process and is reachable over the bridge as
-`window.teminali.exporter`, but **nothing in the interface calls it yet**:
-there is no Export button and no renderer driver, so an operator cannot start
-an export from the app. What follows describes the contract that is in place,
-not a feature that has shipped.
+The Export button sits in the program monitor's header, beside the fullscreen
+control, and **File → Export Video…** (`⌥⌘E`) opens the same dialog. It offers
+three presets (YouTube, TikTok / Reels, Master), a resolution — the preset
+names the SHORT edge, so 1080p on a vertical sequence is 1080 wide — a codec
+(H.264, HEVC, ProRes), a GPU-encoder switch, and a range toggle that appears
+only when the timeline has an in or out point. The save dialog is the OS one,
+so it owns the overwrite question; declining to choose puts the file in the
+Videos folder.
+
+`src/video/engine/exportPipeline.ts` drives it, and does two things the
+window-shaped editor this was ported from does not have to:
+
+- **The preview stands down.** `seekVideosForFrame` parks the same `<video>`
+  elements the program monitor draws from, so `useProgramLoop` yields while
+  `isExporting` is set, exactly as it yields to the fullscreen player. Two
+  callers and the file holds whichever wrote last.
+- **The loop yields to paint.** It spends at most 12ms between frames before
+  handing the thread back through `requestAnimationFrame`, raced against a
+  60ms timer because a minimised or occluded window stops animating. A render
+  that froze the thread would freeze the terminal and the agent beside it, not
+  just the editor — the editor is a panel in this app, not the app.
+
+Preflight refuses two things outright rather than encoding them: media that
+tainted the canvas (`toBlob` throws several thousand frames in) and sources
+that will not decode, which the compositor draws as a grey gradient that would
+land in the file looking like a deliberate shot.
+
+`src/video/engine/exportPlan.ts` holds the arithmetic — output size, the
+render window, the audio collection with its solo, mute and range rules — with
+type-only imports, so `tests/video-export-driver.test.mjs` runs it under plain
+`node --test`. The solo gate is `audioEngine`'s and not the compositor's:
+solo is counted over audio tracks and then applied to every track, so soloing
+a narration track silences a screen recording's own audio in the export as it
+does on playback.
+
+Progress, cancellation and the dialog all live in `useProjectStore`, so an
+export an agent started shows in the same dialog, with the same working Cancel
+button, as one a person started. Hiding the dialog does not stop the render;
+the header button keeps the percentage while it runs.
+
+When it finishes, the dialog says so and stays: a tick, the full path, and
+**Show in Finder** (**Show in Explorer** on Windows, **Show in folder**
+elsewhere), with *Export again* to return to the form. The same button rides
+the finish toast, for the case where the dialog was hidden. Both reveal
+through `videoProject:reveal`. Because the result is read from the store, an
+export an agent ran — or one that finished while the dialog was closed — ends
+on the same screen.
 
 `electron/videoExport.cjs` keeps one ffmpeg per export with `image2pipe` on
 its stdin. The renderer draws each frame to an off-DOM canvas and sends it as
@@ -665,10 +707,17 @@ markers, so a partial write corrupts the stream from that point on.
 
 | Channel | Does |
 | --- | --- |
+| `export:choose` | The OS save dialog, which owns the overwrite question |
 | `export:start` | Opens a session; returns `{sessionId}` or `{error}` |
 | `export:frame` | Writes one JPEG; waits only when the pipe is full |
+| `export:material` | Writes `blob:`/`data:` bytes into the session's temp dir |
 | `export:finish` | Mixes audio, muxes, returns where the file went |
 | `export:cancel` | Kills ffmpeg and removes the temp directory |
+
+`export:material` is not an edge case: a take opened straight from the
+recorder is made of `blob:` URLs, which exist only in the renderer's memory
+and which ffmpeg cannot open. The copies go in the session's own working
+directory, so `finish` and `cancel` already delete them.
 
 Audio never goes down the frame pipe. `export:finish` mixes it in a second
 ffmpeg pass straight from the source files, so audio already on disk is not

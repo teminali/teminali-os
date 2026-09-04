@@ -55,7 +55,7 @@ it. That duplication is what drifted last time.
 
 ```bash
 npm test              # root gateway/runner/licence/billing suite — 143 tests
-npm run studio:test   # application suite — 775 tests
+npm run studio:test   # application suite — 828 tests
 npm run verify:all    # both, plus studio typecheck and production build
 ```
 

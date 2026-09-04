@@ -161,6 +161,20 @@ export const Toasts: React.FC = () => {
                 </div>
               )}
             </div>
+            {t.action && (
+              /* Taking the offer dismisses the toast, because the thing it
+                 offered has happened and a notice that outlives its own
+                 button is just clutter over the timeline. */
+              <button
+                onClick={() => {
+                  t.action?.onSelect();
+                  dismiss(t.id);
+                }}
+                className="pro-btn px-2 h-6 flex-shrink-0 text-ui-xs whitespace-nowrap"
+              >
+                {t.action.label}
+              </button>
+            )}
             <button
               onClick={() => dismiss(t.id)}
               className="pro-btn w-5 h-5 flex-shrink-0"

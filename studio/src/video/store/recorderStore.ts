@@ -29,11 +29,15 @@
 
 import { create } from 'zustand';
 import { useUiStore } from './uiStore';
-import type { RecorderSource, RecorderPermissions } from '../../types/recorder';
+import type {
+  RecorderSource, RecorderPermissions, RecorderConvertProgress,
+} from '../../types/recorder';
 import {
   startCapture, stopCapture, pauseCapture, cancelCapture, listDevices, isRecording,
+  onConvertProgress,
 } from '../engine/screenCapture';
 import type { CaptureSettings, DeviceOption, Take } from '../engine/screenCapture';
+import { formatDuration } from '../utils/time';
 /* The corner and the inset size belong to the assemble that acts on
    them, so the sticky settings take their shape and their defaults from
    there rather than keeping a second copy. */
@@ -203,6 +207,13 @@ interface RecorderState {
   take: Take | null;
   error: string | null;
   warnings: string[];
+  /**
+   * How far through the remux, or null when nothing is converting.
+   *
+   * Only ever set while the phase is `processing`; the review screen
+   * has a take to talk about and does not need a bar.
+   */
+  convert: RecorderConvertProgress | null;
 
   open: () => void;
   close: () => void;
@@ -280,11 +291,12 @@ export const useRecorderStore = create<RecorderState>((set, get) => ({
   take: null,
   error: null,
   warnings: [],
+  convert: null,
 
   open: () => {
     set({
       isOpen: true, phase: 'setup', take: null, error: null,
-      warnings: [], elapsedMs: 0, markCount: 0, fault: null,
+      warnings: [], elapsedMs: 0, markCount: 0, fault: null, convert: null,
     });
     void get().refreshPermissions();
     void get().refreshSources();
@@ -592,12 +604,40 @@ export const useRecorderStore = create<RecorderState>((set, get) => ({
        to press one thing, and `processing` is already the answer. */
     if (get().phase === 'processing') return;
     if (ticker !== null) { window.clearInterval(ticker); ticker = null; }
-    set({ phase: 'processing', isOpen: true });
+    set({ phase: 'processing', convert: null, isOpen: true });
     publish({ phase: 'processing', elapsedMs: get().elapsedMs, markCount: get().markCount });
 
-    const result = await stopCapture();
+    /*
+      Subscribed for exactly as long as the convert lasts, and released
+      in a `finally` so a take that fails does not leave a listener
+      writing progress into the next recording's panel.
+    */
+    const unwatch = onConvertProgress((convert) => {
+      if (get().phase === 'processing') set({ convert });
+    });
+
+    let result: Awaited<ReturnType<typeof stopCapture>>;
+    try {
+      result = await stopCapture();
+    } catch (err) {
+      /*
+        The other door onto the same wedge. A throw out of the stop path
+        leaves the capture session `finishing` and non-null, and from
+        there nothing records again until the window is reloaded —
+        start says one is already running, stop says this one is already
+        finishing. `cancelCapture(false)` is what gives the session back;
+        `false` keeps the files, because the take on disk is the take the
+        operator recorded and losing it is not the price of a failed
+        finish.
+      */
+      await cancelCapture(false).catch(() => undefined);
+      result = { ok: false, error: (err as Error).message || 'The take could not be finished.' };
+    } finally {
+      unwatch();
+    }
+
     if (!result.ok) {
-      set({ phase: 'error', error: result.error });
+      set({ phase: 'error', error: result.error, convert: null });
       return;
     }
     set({
@@ -605,6 +645,7 @@ export const useRecorderStore = create<RecorderState>((set, get) => ({
       take: result.take,
       warnings: result.take.warnings,
       elapsedMs: result.take.durationMs,
+      convert: null,
     });
   },
 
@@ -699,6 +740,7 @@ export const useRecorderStore = create<RecorderState>((set, get) => ({
         review has already shown.
       */
       set({ warnings: report.notes });
+      announce(report);
       return report;
     } catch (error) {
       useUiStore.getState().pushToast({
@@ -711,6 +753,41 @@ export const useRecorderStore = create<RecorderState>((set, get) => ({
     }
   },
 }));
+
+/* ── Saying what landed ─────────────────────────────────────────────
+   The build is the moment the recorder hands over and disappears: the
+   dialog closes and the video editor takes the screen. Without a word
+   about it, an operator who was watching the review screen sees the
+   panel they already had, and cannot tell a take that landed from one
+   that quietly did nothing.
+
+   The toasts go through the shared ui store rather than the dialog's
+   own overlay, so they outlive the dialog and finish rendering inside
+   the editor — which is where the thing they describe now is.        */
+
+function announce(report: AssembleReport): void {
+  const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? '' : 's'}`;
+
+  const bits = [
+    `${formatDuration(report.durationMs)} · ${report.width}x${report.height}`,
+    plural(report.clips, 'clip'),
+  ];
+  if (report.zoomMoments > 0) bits.push(plural(report.zoomMoments, 'zoom'));
+  if (report.soundClips > 0) bits.push(plural(report.soundClips, 'sound'));
+  if (report.narrationDetached) bits.push('narration split off');
+
+  const toast = useUiStore.getState().pushToast;
+  toast({ kind: 'success', title: 'Take is on the timeline', detail: bits.join(' · ') });
+
+  /*
+    Two, not all of them. The notes are advisory and a stack of them
+    would bury the success line that says the take arrived; the rest
+    stay on the recorder's warnings for the next review screen.
+  */
+  for (const note of report.notes.slice(0, 2)) {
+    toast({ kind: 'info', title: 'About this take', detail: note, ttl: 9000 });
+  }
+}
 
 /* ── The other three ways a take can be controlled ──────────────────
    The floating bar and the global shortcuts both arrive as one event,

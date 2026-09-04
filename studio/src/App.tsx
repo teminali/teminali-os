@@ -25,6 +25,7 @@ import { GitHubModal } from "./components/github/GitHubModal";
 import { useStudioStore } from "./store/studioStore";
 import { usePanelStore } from "./store/panelStore";
 import { openVideoProject, saveVideoProject } from "./video/project/io";
+import { useProjectStore } from "./video/store/projectStore";
 
 /**
  * The studio shell.
@@ -277,9 +278,17 @@ export default function App() {
     };
     const offOpen = bridge.menu.on("menu:open-video-project", () => run(openVideoProject));
     const offSave = bridge.menu.on("menu:save-video-project", () => run(saveVideoProject));
+    /* "Export Video…" (⌥⌘E) opens the dialog rather than starting a render.
+       The menu cannot know whether the sequence has anything in it, and an
+       accelerator that spawns ffmpeg on a keypress is one nobody can undo. */
+    const offExport = bridge.menu.on("menu:export-video", () => {
+      focusOrOpen({ kind: "video" });
+      useProjectStore.getState().setExportModalOpen(true);
+    });
     return () => {
       offOpen();
       offSave();
+      offExport();
     };
   }, [focusOrOpen]);
 
