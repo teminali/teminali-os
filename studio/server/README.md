@@ -87,8 +87,9 @@ is the complete list.
 | `POST` | `/api/workspace/file` | bearer | Reads one file. Paths over 2,048 characters are rejected. |
 | `POST` | `/api/workspace/write` | bearer | Writes one file. |
 | `POST` | `/api/workspace/search` | bearer | Searches the workspace. |
-| `GET` | `/api/workspace/projects` | bearer | The current project plus the remembered recents. |
+| `GET` | `/api/workspace/projects` | bearer | The current project plus the remembered recents. A recent whose directory is gone is filtered out of the response but kept in the store, so a project on an unmounted volume comes back when the volume does. |
 | `POST` | `/api/workspace/open` | bearer | Opens a project and rebinds the workspace root. An unopenable or over-broad root is refused. |
+| `POST` | `/api/workspace/projects/remember` | bearer | Records a project in the recents **without** rebinding the workspace root. What a video project uses, so opening a timeline does not repoint the file tree, search and terminals at the folder holding it. |
 | `POST` | `/api/workspace/projects/forget` | bearer | Drops one project from the recents. |
 
 ### Terminal

@@ -51,7 +51,7 @@ route requires it. Roughly sixty routes across:
 | Health, session, audit | `/health` · `/api/session` · `/api/audit` |
 | Model mode & routing | `/api/frontier/status` · `/api/frontier/resolve-mode` · `/api/models/*` |
 | Hosted providers | `/api/providers` · `/api/providers/key` · `/api/providers/lanes` |
-| Workspace | `/api/workspace/{tree,file,write,search,open,projects}` |
+| Workspace | `/api/workspace/{tree,file,write,search,open,projects}`, `/api/workspace/projects/{remember,forget}` |
 | Terminal | `/api/terminal/exec` |
 | Agent CLIs | `/api/agents` · `/api/agents/models` · `/api/agents/run` |
 | Screen assistant | `/api/assistant/{capabilities,permissions,observe,act}` |
@@ -74,7 +74,7 @@ and transcripts are never written to it.
 ### The shell
 
 A 48px activity bar, a 212px sidebar panel beside it, the conversation, and a
-workspace panel strip. Sidebar views: **Chats · Explorer · Search · Skills**.
+workspace panel strip. Sidebar views: **Chats · Explorer · Search · My Projects · Skills**.
 The rail stays on screen when the panel is collapsed, so a dismissed
 sidebar is one click from open on any view. The panel strip holds any number of
 tabs of twelve kinds:
@@ -100,8 +100,18 @@ options rail can be a column, against the panel's 452px default. See
 [Screen recording](#screen-recording).
 
 Plus `⌘B` sidebar · `⌘L` chats · `⇧⌘E` explorer · `⇧⌘F` search · `⌘K`/`⌘P`
-command palette · `⌘,` settings. Skills is reached from the rail; it has no
-shortcut. The media pool lives in the video editor's own rail.
+command palette · `⌘,` settings. My Projects and Skills are reached from the
+rail; neither has a shortcut. The media pool lives in the video editor's own
+rail.
+
+**My Projects** is one list of both kinds — repositories and saved video
+projects, newest first, with the current root marked. The gateway classifies
+each directory from the marker file on every read, so the glyph is what the
+folder is right now rather than what it was when it was last opened. Clicking
+one opens it *by its kind*: a repository rebinds the workspace root every
+workspace and terminal route reads, and a video project loads into the editor
+without touching the root. The same list, capped at four, sits under the
+composer on the empty chat screen.
 
 ### Engines
 
@@ -246,6 +256,23 @@ drawn at every tier, and only the mechanism behind it changes: where the
 inspector is seated it minimises that column, where the inspector is summoned it
 opens the overlay. One control, so there is no width at which the 296px rail
 cannot be given back to the picture.
+
+**A project is a directory**, and saving is a File-menu command. `⌥⌘S` writes
+`project.json` — settings, tracks, markers and the media pool — into a folder
+you name once and it reuses after that; `⌥⌘O` opens one back. `⌥` and not `⇧`
+because `⇧⌘S` and `⇧⌘O` are already the side chat and Codex, and a menu
+accelerator silently takes the key away from the page. The commands live in the
+native File menu for the recorder's reason: it owns its accelerator whatever
+has focus, and this panel hands focus to a canvas, a timeline and a row of
+numeric fields.
+
+Two limits are in the format rather than discovered later. **A saved project is
+machine-local** — clips reference media by absolute `file://` path and nothing
+copies the bytes, so the folder moved to another machine opens with its clips
+pointing at nothing. And **a take recorded in a browser tab cannot be saved at
+all**: its `blob:` URL dies with the page, so the save refuses by name instead
+of writing a file that is already broken. A successful save or open records the
+folder in My Projects without rebinding the workspace root.
 
 **The transport has keys**, and its play disc is centred on the picture rather
 than on what is left of the row. `Space` plays and pauses — and replays, when the
@@ -452,7 +479,7 @@ ollama serve              # local models on 127.0.0.1:11434
 
 ```bash
 npm run typecheck   # tsc --noEmit
-npm test            # 631 tests, 0 failures
+npm test            # 661 tests, 0 failures
 npm run build       # tsc && vite build
 npm run verify:core # all three
 ```
