@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useSyncExternalStore } from "react";
 import { useStudioStore } from "../../store/studioStore";
 import { LiveEditService } from "../../services/liveEditService";
+import { useChangeStore } from "../../store/changeStore";
 
 function languageForPath(path: string) {
   const extension = path.split(".").pop()?.toLowerCase();
@@ -22,6 +23,24 @@ export const CopilotLiveEditController: React.FC = () => {
     : undefined;
   const activeTab = tabs.find((tab) => tab.id === activeTabId);
   const dirtyPaths = tabs.filter((tab) => tab.isDirty && !tab.path.startsWith("untitled:")).map((tab) => tab.path);
+
+  /* Every committed edit becomes a reviewable change. Registered here rather
+     than inside the service so the service keeps no store dependency, and once
+     — this controller is mounted for the life of the shell. */
+  useEffect(
+    () =>
+      LiveEditService.onCommit((edit) =>
+        useChangeStore.getState().record({
+          path: edit.path,
+          before: edit.before,
+          after: edit.after,
+          existedBefore: edit.existedBefore,
+          origin: "live-edit",
+          requestId: edit.requestId,
+        }),
+      ),
+    [],
+  );
 
   useEffect(() => {
     if (!latestAssistant) return;

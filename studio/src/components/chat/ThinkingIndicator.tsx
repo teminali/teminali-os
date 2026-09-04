@@ -2,40 +2,39 @@ import React, { useEffect, useMemo, useRef, useState } from "react";
 import { Square } from "lucide-react";
 
 /**
- * The "it is working" line.
+ * The "it is working" line, for the gap before anything else exists.
  *
- * A local model can take several seconds before its first token arrives, and in
- * that gap an empty message reads as a broken app. This fills it with three
- * things that are all true and all useful: a word that changes so the interface
- * is visibly alive, a timer so a slow turn is legible rather than worrying, and
- * a token count once tokens start arriving.
+ * A local model can take several seconds before its first token, and in that
+ * gap an empty message reads as a broken app. This fills it with three things
+ * that are all true: a word that changes so the interface is visibly alive, a
+ * timer so a slow turn is legible rather than worrying, and a token count once
+ * tokens start arriving.
  *
- * The word rotation is cosmetic and says so — it is not a description of an
- * internal state we do not have. What it does communicate honestly is *phase*:
- * the vocabulary shifts once tokens start flowing, so "still waiting" and
+ * The word rotation is cosmetic and says so. What it does communicate honestly
+ * is *phase*: the vocabulary shifts once tokens flow, so "still waiting" and
  * "actively writing" never look the same.
+ *
+ * The sweep across it is one grey moving through a lighter grey. It used to be
+ * a cyan-violet-amber gradient, which was the single loudest thing in a window
+ * whose whole palette is five greys — a spinner should not be the brightest
+ * object on the screen.
  */
 
 /** Before the first token. The model is loading or prefilling. */
 const WAITING_WORDS = [
-  "Teminaling", "Warming up", "Spinning up", "Gathering", "Considering",
-  "Pondering", "Sizing it up", "Reading the room", "Loading weights",
-  "Getting oriented", "Thinking it through", "Lining things up",
-  "Turning it over", "Settling in", "Consulting the tea leaves",
+  "Warming up", "Spinning up", "Gathering", "Considering", "Pondering",
+  "Sizing it up", "Loading weights", "Getting oriented", "Thinking it through",
+  "Lining things up", "Turning it over", "Settling in",
 ];
 
 /** After tokens begin. Now it is genuinely producing. */
 const WRITING_WORDS = [
-  "Teminaling", "Composing", "Drafting", "Writing", "Assembling",
-  "Working through it", "Putting it together", "Filling in the details",
-  "Threading it together", "Shaping it up", "Building the answer",
+  "Composing", "Drafting", "Writing", "Assembling", "Working through it",
+  "Putting it together", "Filling in the details", "Shaping it up",
 ];
 
 /** While a tool is mid-flight. */
-const TOOL_WORDS = [
-  "Running it", "Checking", "Digging in", "Poking around", "Reading files",
-  "Following the trail", "Verifying", "Cross-checking",
-];
+const TOOL_WORDS = ["Running it", "Checking", "Digging in", "Reading files", "Following the trail", "Verifying"];
 
 const ROTATE_MS = 2400;
 
@@ -69,7 +68,7 @@ export const ThinkingIndicator: React.FC<ThinkingIndicatorProps> = ({
 
   useEffect(() => {
     if (!active) return;
-    const tick = window.setInterval(() => setElapsed(Date.now() - startedAt.current), 100);
+    const tick = window.setInterval(() => setElapsed(Date.now() - startedAt.current), 250);
     const rotate = window.setInterval(() => setIndex((previous) => previous + 1), ROTATE_MS);
     return () => {
       window.clearInterval(tick);
@@ -83,53 +82,31 @@ export const ThinkingIndicator: React.FC<ThinkingIndicatorProps> = ({
   if (!active) return null;
 
   const seconds = elapsed / 1000;
-  // Approximate: four characters to a token is close enough for a live counter
-  // and avoids a tokeniser on the render path.
+  // Four characters to a token is close enough for a live counter, and avoids
+  // running a tokeniser on the render path.
   const tokens = Math.max(0, Math.round(charCount / 4));
 
   return (
-    <div className="flex items-center gap-2.5 py-1 select-none" aria-live="polite">
-      <Shimmer>{toolLabel ? `${word} — ${toolLabel}` : word}…</Shimmer>
+    <div className="h-6 flex items-center gap-2 select-none" aria-live="polite">
+      <span className="text-shimmer text-xs">{toolLabel ? `${word} — ${toolLabel}` : word}…</span>
 
-      <span className="font-mono text-2xs text-ink-faint tabular-nums">
+      <span className="font-mono text-2xs text-ink-disabled tabular-nums">
         {seconds < 60 ? `${seconds.toFixed(0)}s` : `${Math.floor(seconds / 60)}m ${Math.round(seconds % 60)}s`}
       </span>
 
-      {tokens > 0 && (
-        <span className="font-mono text-2xs text-ink-disabled tabular-nums">
-          {tokens.toLocaleString()} tokens
-        </span>
-      )}
+      {tokens > 0 && <span className="font-mono text-2xs text-ink-disabled tabular-nums">{tokens.toLocaleString()} tokens</span>}
 
       {onStop && (
         <button
           type="button"
           onClick={onStop}
-          className="ml-1 inline-flex items-center gap-1 text-2xs text-ink-faint hover:text-danger transition-colors duration-ds ease-ds"
+          className="inline-flex items-center gap-1 text-2xs text-ink-disabled hover:text-danger transition-colors duration-ds ease-ds"
           title="Stop generating (Esc)"
         >
-          <Square size={8} fill="currentColor" />
+          <Square size={7} fill="currentColor" />
           stop
         </button>
       )}
     </div>
   );
 };
-
-/**
- * A light sweep across the word. The motion is what signals "alive" — a static
- * label at 30 seconds looks identical to a hung process.
- */
-const Shimmer: React.FC<{ children: React.ReactNode }> = ({ children }) => (
-  <span
-    className="text-sm font-semibold bg-clip-text text-transparent"
-    style={{
-      backgroundImage:
-        "linear-gradient(90deg, #38bdf8 0%, #c084fc 35%, #fbbf24 70%, #38bdf8 100%)",
-      backgroundSize: "220% 100%",
-      animation: "shimmer 2.4s linear infinite",
-    }}
-  >
-    {children}
-  </span>
-);

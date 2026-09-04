@@ -1306,14 +1306,41 @@ input:-webkit-autofill:focus {
   caret-color: var(--text-high);
 }
 
-/* The sweep behind the thinking indicator's word. Pure decoration, but the
-   motion is what distinguishes "working" from "hung" at a glance. */
+/* The sweep behind a "working" word. Pure decoration, but the motion is what
+   distinguishes "working" from "hung" at a glance.
+
+   One grey travelling through a lighter grey — NOT a colour gradient. The
+   window's whole palette is five greys and one accent; a spinner that runs
+   cyan → violet → amber is the brightest object on the screen, which is the
+   opposite of what a background process should be. */
 @keyframes shimmer {
   0%   { background-position: 180% 0; }
   100% { background-position: -80% 0; }
 }
+
+.text-shimmer {
+  font-weight: 500;
+  background-image: linear-gradient(
+    90deg,
+    var(--text-soft) 0%,
+    var(--text-soft) 38%,
+    var(--text-bright) 50%,
+    var(--text-soft) 62%,
+    var(--text-soft) 100%
+  );
+  background-size: 220% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  animation: shimmer 2.4s linear infinite;
+}
+
 @media (prefers-reduced-motion: reduce) {
-  [style*="shimmer"] { animation: none !important; }
+  .text-shimmer {
+    animation: none;
+    background-image: none;
+    -webkit-text-fill-color: var(--text-muted);
+  }
 }
 
 /* ==========================================================================

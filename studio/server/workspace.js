@@ -250,3 +250,32 @@ export async function searchWorkspace(root, query, options = {}) {
   await walk(workspaceRoot, 0);
   return { query, files, totalMatches: matches, filesScanned: scanned, truncated };
 }
+
+/**
+ * Remove a file the assistant created.
+ *
+ * The narrow companion to `writeWorkspaceFile`, and it exists for exactly one
+ * caller: rejecting a proposed change to a file that did not exist before the
+ * turn. Restoring "what was there before" means removing it, and truncating it
+ * to zero bytes instead would leave litter the operator never asked for.
+ *
+ * Same guards as the write path — inside the root, a real file rather than a
+ * symlink or a directory, and a text extension — because a delete is the one
+ * operation where a path escape cannot be undone.
+ */
+export async function deleteWorkspaceFile(root, requestedPath) {
+  const workspaceRoot = resolve(root);
+  const absolutePath = resolveWorkspacePath(workspaceRoot, requestedPath);
+  const extension = extname(absolutePath).toLowerCase();
+  if (!TEXT_EXTENSIONS.has(extension)) throw new Error("WORKSPACE_FILE_UNSUPPORTED");
+
+  const realParent = await realpath(dirname(absolutePath));
+  const realRoot = await realpath(workspaceRoot);
+  if (realParent !== realRoot && !realParent.startsWith(`${realRoot}${sep}`)) throw new Error("WORKSPACE_PATH_ESCAPE");
+
+  const existing = await lstat(absolutePath);
+  if (!existing.isFile() || existing.isSymbolicLink()) throw new Error("WORKSPACE_FILE_REQUIRED");
+
+  await unlink(absolutePath);
+  return { path: publicPath(workspaceRoot, absolutePath), deleted: true };
+}

@@ -3,19 +3,21 @@ import { Check, Copy, RotateCcw } from "lucide-react";
 import { CursorMarkdownRenderer } from "./CursorMarkdownRenderer";
 import { FileActionCard } from "./FileActionCard";
 import { ThinkingIndicator } from "./ThinkingIndicator";
-import { WorkTimeline } from "./WorkTimeline";
 import { ProcessWatcher } from "./ProcessWatcher";
-import { AttachmentStrip } from "./AttachmentStrip";
 import { segment } from "../../utils/segment";
 import type { ChatMessage } from "../../types";
-import type { Attachment } from "../../services/fileService";
 
 /**
  * One turn, rendered.
  *
- * Shared by the main conversation and by side chats so a improvement to how a
+ * Shared by the main conversation and by side chats so an improvement to how a
  * reply reads lands in both at once — the two surfaces differ in width and
  * density, never in what a message is.
+ *
+ * The reading order is fixed and deliberate: what it did (the process strip),
+ * then what it said (prose and code), then — only when you hover it — what it
+ * cost. Telemetry used to sit under every reply at full contrast, six fields
+ * wide; it is real, and it is not what anyone is reading.
  */
 
 const SHELL_LANGUAGES = new Set(["bash", "sh", "zsh", "shell", "console"]);
@@ -36,14 +38,13 @@ function clockOf(timestamp: string): string {
 
 export const MessageBlock: React.FC<{
   message: ChatMessage;
-  previousRole?: "user" | "assistant" | "system" | null;
   onJumpToFile: (path: string, code: string) => void;
   onRun: () => void;
   onStop?: () => void;
   onRetry?: () => void;
   /** `compact` tightens spacing for the narrow side-chat column. */
   density?: "comfortable" | "compact";
-}> = ({ message, previousRole, onJumpToFile, onRun, onStop, onRetry, density = "comfortable" }) => {
+}> = ({ message, onJumpToFile, onRun, onStop, onRetry, density = "comfortable" }) => {
   const compact = density === "compact";
   const [copied, setCopied] = useState(false);
 
@@ -59,11 +60,31 @@ export const MessageBlock: React.FC<{
 
   if (message.role === "user") {
     return (
-      /* User turn: clean, rounded full-width card with subtle background */
-      <div className={compact ? "pt-2 pb-1.5" : "pt-1 pb-3"}>
-        <div className={`w-full rounded-xl bg-surface-sunken/70 border border-edge/30 whitespace-pre-wrap break-words ${compact ? "px-3 py-2 text-xs" : "px-3.5 py-2.5 text-sm"} text-ink-bright leading-relaxed`}>
+      /* The prompt, quoted back. A filled box one step off the canvas with a
+         flat hairline — the same object as the composer it was typed into, so
+         the eye reads "this is mine" without a label saying so. Its ink is
+         `--text-dim`, not white: what you asked is context for the answer, and
+         the answer is the thing to read. */
+      <div className={compact ? "pt-2.5 pb-2" : "pt-4 pb-3"}>
+        <div
+          className={`w-full rounded-lg bg-surface/70 border border-edge/60 whitespace-pre-wrap break-words text-ink-dim ${
+            compact ? "px-2.5 py-2 text-xs" : "px-3 py-2.5 text-sm"
+          } leading-relaxed`}
+        >
           {message.content}
         </div>
+        {message.images && message.images.length > 0 && (
+          <div className="flex flex-wrap gap-1.5 pt-1.5">
+            {message.images.map((image, index) => (
+              <img
+                key={index}
+                src={image.startsWith("data:") ? image : `data:image/png;base64,${image}`}
+                alt=""
+                className="h-14 w-auto rounded-md border border-edge/60 object-cover"
+              />
+            ))}
+          </div>
+        )}
       </div>
     );
   }
@@ -71,13 +92,10 @@ export const MessageBlock: React.FC<{
   const segments = segment(message.content);
   const calls = message.toolCalls ?? [];
   const runningCall = calls.find((call) => call.status === "running");
-  // Nothing written yet and nothing to show: the turn is still in its opening
-  // gap, which is exactly where an empty bubble reads as a hung app.
-  const awaitingFirstToken = Boolean(message.isStreaming) && !message.content.trim();
+  const settled = !message.isStreaming;
 
   return (
-    <div className={`group/turn flex flex-col ${compact ? "gap-2 pb-2" : "gap-3 pb-4"}`}>
-      {/* The Stepwise Process Inspector */}
+    <div className={`group/turn flex flex-col ${compact ? "gap-1.5 pb-2" : "gap-2 pb-3"}`}>
       {(calls.length > 0 || message.isStreaming) && (
         <ProcessWatcher
           engine={message.engineUsed}
@@ -92,21 +110,15 @@ export const MessageBlock: React.FC<{
         />
       )}
 
-      {/* Fallback compact timeline if finished with calls */}
-      {!message.isStreaming && calls.length > 0 && false && <WorkTimeline calls={calls} />}
-
-      {(awaitingFirstToken || (message.isStreaming && calls.length === 0)) && (
-        <ThinkingIndicator
-          active
-          charCount={message.content.length}
-          toolLabel={runningCall ? runningCall.name : null}
-          onStop={onStop}
-        />
+      {/* Only when there is no process strip to carry the liveness — two live
+          timers ticking beside each other is one too many. */}
+      {message.isStreaming && calls.length === 0 && !message.content.trim() && (
+        <ThinkingIndicator active charCount={message.content.length} toolLabel={runningCall?.name ?? null} onStop={onStop} />
       )}
 
       {segments.map((piece, index) =>
         piece.kind === "prose" ? (
-          <div key={index} className={`${compact ? "text-xs" : "text-md"} text-ink-prose leading-relaxed markdown-body`}>
+          <div key={index} className={`${compact ? "text-xs" : "text-sm"} text-ink-prose leading-[1.65] markdown-body`}>
             <CursorMarkdownRenderer content={piece.text} />
           </div>
         ) : (
@@ -123,65 +135,51 @@ export const MessageBlock: React.FC<{
       )}
 
       {message.isStreaming && message.content.trim() && (
-        <span className="inline-block w-1.5 h-4 ml-1 rounded-[1px] bg-accent animate-pulse" />
+        <span className="inline-block w-[3px] h-3.5 rounded-[1px] bg-ink-faint animate-caret" />
       )}
 
-      {!message.isStreaming && message.content && (
-        <div className="flex items-center gap-2 font-mono text-2xs text-ink-faint pt-0.5 select-none">
-            <span>{clockOf(message.timestamp)}</span>
-            {message.engineUsed && (
-              <>
-                <span className="text-ink-disabled">·</span>
-                <span className="text-ink-soft uppercase tracking-wider text-3xs font-medium">
-                  {message.engineUsed}
-                </span>
-              </>
-            )}
-            {typeof message.tokensCount === "number" && message.tokensCount > 0 && (
-              <>
-                <span className="text-ink-disabled">·</span>
-                <span>{message.tokensCount.toLocaleString()} tokens</span>
-              </>
-            )}
-            {message.costLabel && (
-              <>
-                <span className="text-ink-disabled">·</span>
-                <span>{message.costLabel}</span>
-              </>
-            )}
-            {typeof message.durationSec === "number" && message.durationSec > 0 && (
-              <>
-                <span className="text-ink-disabled">·</span>
-                <span>{message.durationSec.toFixed(1)}s</span>
-              </>
-            )}
+      {/* Telemetry, on hover. Every field here is measured — none of it is
+          worth a permanent line under every reply. */}
+      {settled && message.content && (
+        <div className="h-5 flex items-center gap-2 font-mono text-2xs text-ink-disabled select-none opacity-0 group-hover/turn:opacity-100 focus-within:opacity-100 transition-opacity duration-ds ease-ds">
+          <span>{clockOf(message.timestamp)}</span>
+          {message.engineUsed && <Meta>{message.engineUsed}</Meta>}
+          {typeof message.tokensCount === "number" && message.tokensCount > 0 && (
+            <Meta>{message.tokensCount.toLocaleString()} tok</Meta>
+          )}
+          {typeof message.durationSec === "number" && message.durationSec > 0 && <Meta>{message.durationSec.toFixed(1)}s</Meta>}
+          {message.costLabel && <Meta>{message.costLabel}</Meta>}
 
-            <span className="flex-1" />
+          <span className="flex-1" />
 
-            {/* Actions stay hidden until the turn is hovered: they are useful
-                but they are not what you are reading. */}
-            <span className="flex items-center gap-1 opacity-0 group-hover/turn:opacity-100 focus-within:opacity-100 transition-opacity duration-ds ease-ds">
-              <button
-                type="button"
-                onClick={copy}
-                title="Copy reply"
-                className="w-6 h-6 flex items-center justify-center rounded-md text-ink-muted hover:bg-surface-hover hover:text-ink-high transition-colors duration-ds ease-ds"
-              >
-                {copied ? <Check size={12} className="text-success" /> : <Copy size={12} />}
-              </button>
-              {onRetry && (
-                <button
-                  type="button"
-                  onClick={onRetry}
-                  title="Ask again"
-                  className="w-6 h-6 flex items-center justify-center rounded-md text-ink-muted hover:bg-surface-hover hover:text-ink-high transition-colors duration-ds ease-ds"
-                >
-                  <RotateCcw size={12} />
-                </button>
-              )}
-            </span>
+          <button
+            type="button"
+            onClick={copy}
+            title="Copy reply"
+            className="w-5 h-5 flex items-center justify-center rounded text-ink-faint hover:bg-surface-hover hover:text-ink-high transition-colors duration-ds ease-ds"
+          >
+            {copied ? <Check size={11} className="text-success" /> : <Copy size={11} />}
+          </button>
+          {onRetry && (
+            <button
+              type="button"
+              onClick={onRetry}
+              title="Ask again"
+              className="w-5 h-5 flex items-center justify-center rounded text-ink-faint hover:bg-surface-hover hover:text-ink-high transition-colors duration-ds ease-ds"
+            >
+              <RotateCcw size={11} />
+            </button>
+          )}
         </div>
       )}
     </div>
   );
 };
+
+/** A telemetry field, behind the separator that keeps the row scannable. */
+const Meta: React.FC<{ children: React.ReactNode }> = ({ children }) => (
+  <>
+    <span className="text-ink-disabled/60">·</span>
+    <span>{children}</span>
+  </>
+);

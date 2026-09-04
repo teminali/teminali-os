@@ -18,6 +18,23 @@ export interface LiveEditSnapshot {
   file?: WorkspaceFileResponse;
 }
 
+/**
+ * One file, written. Emitted after the bytes are on disk so a reviewer can
+ * offer to put them back — see `store/changeStore.ts`.
+ *
+ * `before` is the content this service already read to play the edit back
+ * against; capturing it here costs nothing and is the only moment it is
+ * knowable, because the write that follows destroys it.
+ */
+export interface CommittedEdit {
+  path: string;
+  before: string;
+  after: string;
+  /** False when the assistant created the file — rejecting then means removing it. */
+  existedBefore: boolean;
+  requestId: string;
+}
+
 interface ObserveInput {
   requestId: string;
   text: string;
@@ -48,6 +65,16 @@ class CopilotLiveEditService {
   private pendingLoads = new Map<string, Promise<WorkspaceFileResponse | null>>();
   private dirtyPaths = new Set<string>();
   private draftRevision = 0;
+
+  private commitListeners = new Set<(edit: CommittedEdit) => void>();
+
+  /** Subscribe to committed writes. Returns the unsubscribe. */
+  onCommit = (listener: (edit: CommittedEdit) => void) => {
+    this.commitListeners.add(listener);
+    return () => {
+      this.commitListeners.delete(listener);
+    };
+  };
 
   getSnapshot = () => this.snapshot;
   subscribe = (listener: () => void) => {
@@ -176,6 +203,15 @@ class CopilotLiveEditService {
           file: base ?? undefined,
         });
         const written = await WorkspaceService.writeFile(edit.path, edit.content, base?.modified ?? null);
+        this.commitListeners.forEach((listener) =>
+          listener({
+            path: edit.path,
+            before: base?.content ?? "",
+            after: written.content,
+            existedBefore: base !== null,
+            requestId,
+          }),
+        );
         this.baseByPath.set(edit.path, written);
         this.targetContent = written.content;
         if (following) {

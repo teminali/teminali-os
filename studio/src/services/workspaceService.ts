@@ -110,6 +110,20 @@ export class WorkspaceService {
     return (await response.json()) as WorkspaceFileResponse;
   }
 
+  /**
+   * Removes a file. The only caller is rejecting a proposed change to a file
+   * the assistant created — see `store/changeStore.ts`.
+   */
+  static async deleteFile(path: string, signal?: AbortSignal): Promise<{ path: string; deleted: boolean }> {
+    const response = await GatewayClient.request("/api/workspace/delete", {
+      method: "POST",
+      signal,
+      body: JSON.stringify({ path }),
+    });
+    await GatewayClient.expectOk(response);
+    return (await response.json()) as { path: string; deleted: boolean };
+  }
+
   static async createDirectory(path: string, signal?: AbortSignal): Promise<{ path: string }> {
     const response = await GatewayClient.request("/api/workspace/mkdir", {
       method: "POST",

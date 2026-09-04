@@ -7,6 +7,7 @@ import { useVoice } from "../../../hooks/useVoice";
 import { composePrompt } from "../../../services/fileService";
 import { MessageBlock } from "../../chat/MessageBlock";
 import { Composer } from "../../chat/Composer";
+import { ChangeReviewDock } from "../../chat/ChangeReviewDock";
 import { EmptyState } from "../../ui";
 import type { ChatMessage } from "../../../types";
 
@@ -134,7 +135,6 @@ export const SideChatPane: React.FC<{ panel: PanelTab }> = ({ panel }) => {
               <MessageBlock
                 key={message.id}
                 message={message}
-                previousRole={index > 0 ? messages[index - 1].role : null}
                 density="compact"
                 onStop={stop}
                 onRetry={
@@ -153,7 +153,11 @@ export const SideChatPane: React.FC<{ panel: PanelTab }> = ({ panel }) => {
         )}
       </div>
 
-      <div className="flex-shrink-0 px-3 pb-4">
+      <div className="flex-shrink-0 px-3 pb-4 flex flex-col gap-2">
+        {/* Pending changes are workspace state, not conversation state: any
+            surface with a composer must let you settle them before the next
+            prompt. The dock renders nothing when there is nothing to review. */}
+        <ChangeReviewDock width="fill" />
         <Composer
           value={input}
           onChange={setInput}

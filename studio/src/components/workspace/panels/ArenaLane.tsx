@@ -7,7 +7,7 @@ import {
   CircleX,
   LoaderCircle,
 } from "lucide-react";
-import { describeCall } from "../../chat/WorkTimeline";
+import { describeCall } from "../../../services/activityGroups";
 import { formatElapsed, isLaneBusy, statusLabel, tailOf } from "../../../services/arenaLive";
 import type { LiveCheck, LaneStatus } from "../../../services/arenaLive";
 import type { Contestant, SandboxInfo, SandboxMeasurement, Verdict } from "../../../services/arenaService";

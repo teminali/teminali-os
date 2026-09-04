@@ -11,6 +11,7 @@ import { useCommandApproval } from "../../hooks/useCommandApproval";
 import { CommandApprovalPrompt } from "./CommandApprovalPrompt";
 import { Composer } from "./Composer";
 import { MessageBlock } from "./MessageBlock";
+import { ChangeReviewDock } from "./ChangeReviewDock";
 import { speakableText } from "../../services/voice";
 import { useGitHubStatus } from "../../hooks/useGitHubStatus";
 import { useProjectLibrary } from "../../hooks/useProjectLibrary";
@@ -401,6 +402,10 @@ export const StudioChat: React.FC<{
           )}
 
           <div className="w-full flex justify-center">
+            <ChangeReviewDock />
+          </div>
+
+          <div className="w-full flex justify-center">
             <Composer
               value={input}
               onChange={setInput}
@@ -476,7 +481,6 @@ export const StudioChat: React.FC<{
                 <MessageBlock
                   key={message.id}
                   message={message}
-                  previousRole={index > 0 ? messages[index - 1].role : null}
                   onRetry={message.role === "assistant" && index > 0
                     ? () => void send(messages[index - 1].content)
                     : undefined}
@@ -498,8 +502,11 @@ export const StudioChat: React.FC<{
             </div>
           </div>
 
-          <div className="flex-shrink-0 flex flex-col items-center gap-2.5 px-8 pt-3 pb-5">
+          <div className="flex-shrink-0 flex flex-col items-center gap-2 px-8 pt-2.5 pb-4">
             {assistant.open && <AssistantHud assistant={assistant} transcript={voice.transcript} voiceState={voice.state} />}
+            {/* Directly above the composer: the last thing between an edit that
+                is already on disk and the next prompt. */}
+            <ChangeReviewDock />
             <Composer
               value={input}
               onChange={setInput}
@@ -511,14 +518,14 @@ export const StudioChat: React.FC<{
               voice={voice}
               attachments={attachments}
             />
-            {/* Cursor repeats the machine picker under the follow-up bar at the
-                same size it uses above the empty-state composer — it is the same
-                control, so it must not shrink into a caption here. */}
+            {/* The machine, at caption weight. It was repeated here at the
+                same 13px as the empty state's picker, which made a static fact
+                the second-loudest thing under the composer. */}
             <div
-              className="w-full max-w-composer flex items-center gap-1.5 text-sm text-ink-muted pl-1"
+              className="w-full max-w-composer flex items-center gap-1.5 text-2xs text-ink-disabled pl-1"
               title="Turns run locally on this machine"
             >
-              <Laptop size={14} />
+              <Laptop size={11} />
               This Mac
             </div>
           </div>

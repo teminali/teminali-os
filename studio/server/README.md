@@ -86,6 +86,7 @@ is the complete list.
 | `GET` | `/api/workspace/tree` | bearer | The workspace tree under the configured root. |
 | `POST` | `/api/workspace/file` | bearer | Reads one file. Paths over 2,048 characters are rejected. |
 | `POST` | `/api/workspace/write` | bearer | Writes one file. |
+| `POST` | `/api/workspace/delete` | bearer | Removes one file. Same guards as the write path — inside the root, a regular file rather than a symlink, a text extension. Its only caller is rejecting a proposed change to a file the assistant created; see `studio/src/store/changeStore.ts`. |
 | `POST` | `/api/workspace/search` | bearer | Searches the workspace. |
 | `GET` | `/api/workspace/projects` | bearer | The current project plus the remembered recents. A recent whose directory is gone is filtered out of the response but kept in the store, so a project on an unmounted volume comes back when the volume does. |
 | `POST` | `/api/workspace/open` | bearer | Opens a project and rebinds the workspace root. An unopenable or over-broad root is refused. |

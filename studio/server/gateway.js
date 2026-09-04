@@ -10,7 +10,7 @@ import {
 } from "../../gateway/frontier-runner.js";
 import { BoundedAuditLog } from "./audit-log.js";
 import { createConfig } from "./config.js";
-import { createWorkspaceDirectory, listWorkspaceTree, readWorkspaceFile, searchWorkspace, writeWorkspaceFile } from "./workspace.js";
+import { createWorkspaceDirectory, deleteWorkspaceFile, listWorkspaceTree, readWorkspaceFile, searchWorkspace, writeWorkspaceFile } from "./workspace.js";
 import { TERMINAL_LIMITS, runWorkspaceCommand } from "./terminal.js";
 import { forgetVoiceStatus, readBounded, speak, transcribe, voiceStatus } from "./voice.js";
 import { act, assistantCapabilities, observe, requestAccessibility } from "./assistant.js";
@@ -1136,6 +1136,23 @@ export async function createGateway(options = {}) {
           });
           await audit.write({ event: "workspace-file-written", correlationId, method: request.method, route, path: written.path, bytes: written.size });
           replyJson(response, 200, written);
+        } catch (error) {
+          throw workspaceError(error);
+        }
+        return;
+      }
+
+      /* Rejecting a proposed change to a file the assistant created: the
+         file has to go, not be blanked. Nothing else calls this. */
+      if (request.method === "POST" && route === "/api/workspace/delete") {
+        const deleteRequest = await readJson(request, config.maxJsonBytes);
+        if (typeof deleteRequest?.path !== "string" || deleteRequest.path.length > 2_048) {
+          throw new GatewayError(400, "INVALID_WORKSPACE_PATH", "A bounded workspace-relative file path is required.");
+        }
+        try {
+          const removed = await deleteWorkspaceFile(config.workspaceRoot, deleteRequest.path);
+          await audit.write({ event: "workspace-file-deleted", correlationId, method: request.method, route, path: removed.path });
+          replyJson(response, 200, removed);
         } catch (error) {
           throw workspaceError(error);
         }

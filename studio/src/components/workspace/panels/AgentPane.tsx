@@ -8,6 +8,7 @@ import { useVoice } from "../../../hooks/useVoice";
 import { composePrompt } from "../../../services/fileService";
 import { MessageBlock } from "../../chat/MessageBlock";
 import { Composer } from "../../chat/Composer";
+import { ChangeReviewDock } from "../../chat/ChangeReviewDock";
 import { BrandGlyph, EmptyState } from "../../ui";
 import type { ChatMessage } from "../../../types";
 
@@ -258,7 +259,6 @@ export const AgentPane: React.FC<{ panel: PanelTab & { kind: AgentEngine } }> = 
               <MessageBlock
                 key={message.id}
                 message={message}
-                previousRole={index > 0 ? messages[index - 1].role : null}
                 density="compact"
                 onStop={stop}
                 onRetry={
@@ -286,7 +286,12 @@ export const AgentPane: React.FC<{ panel: PanelTab & { kind: AgentEngine } }> = 
         </div>
       )}
 
-      <div className="flex-shrink-0 px-3 pb-4">
+      <div className="flex-shrink-0 px-3 pb-4 flex flex-col gap-2">
+        {/* The agent CLIs write in their own process, so nothing typed here ever
+            adds a row. The dock still belongs: pending changes are workspace
+            state, and this pane has a composer that would otherwise let you
+            move on with an unreviewed edit on disk. */}
+        <ChangeReviewDock width="fill" />
         <Composer
           value={input}
           onChange={setInput}

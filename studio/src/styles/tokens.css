@@ -87,7 +87,15 @@
   --text-high: #f0f0f0;             /* filenames, labels on a dark fill */
   --text: #ededed;                  /* default body on frame */
   --text-body: #e0e0e0;             /* menu rows, list items */
-  --text-prose: #f0f0f0;            /* paragraphs in chat — measured, bright */
+  /* Paragraphs in chat. The one deliberate departure from the Cursor
+     measurement in this ramp: it was #f0f0f0, the same value as a heading, and
+     a wall of near-white body text at 13px is the loudest thing in a window
+     otherwise built from five greys. Dropping it one step puts the emphasis
+     back where the markup asks for it — a heading and a `strong` still resolve
+     to --text-bright, and now they read as emphasis instead of as more of the
+     same. 11.5:1 on --ground, so this is a contrast the eye can rest on, not a
+     contrast it is fighting. */
+  --text-prose: #cbcbcb;            /* paragraphs in chat */
   --text-code: #d4d4d4;             /* code, terminal output */
   --text-dim: #c4c4c4;              /* secondary chrome */
   --text-muted: #b8b8b8;            /* sidebar rows, icons, captions — measured */

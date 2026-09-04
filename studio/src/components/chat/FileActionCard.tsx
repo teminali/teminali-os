@@ -1,15 +1,18 @@
 import React, { useState } from "react";
-import { ChevronRight, Copy, Check, FileText, Code2, SquareTerminal, ArrowUpRight } from "lucide-react";
+import { ArrowUpRight, Check, ChevronRight, Code2, Copy, FileText, SquareTerminal } from "lucide-react";
 import { highlightCode } from "../../utils/syntaxHighlight";
-import { Chip } from "../ui";
 
 /**
- * The file/code card from the design: a one-line header that expands to reveal
- * the code beneath it.
+ * A block of code inside a reply: one 28px line that opens onto the code.
  *
  * Collapsed by default on purpose. A reply that touches five files should read
  * as five lines you can scan, not five screens you have to scroll past — the
  * code is one click away when you actually want it.
+ *
+ * The row carries the chevron, the name, the size and the two or three things
+ * you can do with it, and nothing else. It previously ended in an "Expand"
+ * chip that did exactly what the chevron beside it did, and a "Copy" that
+ * spelled out its own label — a header wider than most of the filenames in it.
  */
 
 export interface FileActionCardProps {
@@ -48,66 +51,68 @@ export const FileActionCard: React.FC<FileActionCardProps> = ({
   };
 
   return (
-    <div className="flex flex-col gap-2">
-      <div className="lit lit-inner h-9 rounded-md bg-surface flex items-center px-3 gap-3">
+    <div className="rounded-lg border border-edge/70 bg-surface-sunken overflow-hidden">
+      <div className="group h-8 flex items-center gap-2 px-2 hover:bg-surface-hover/50 transition-colors duration-ds ease-ds">
         <button
           type="button"
           onClick={() => setOpen((previous) => !previous)}
           aria-expanded={open}
-          aria-label={open ? "Collapse" : "Expand"}
-          className="flex-shrink-0 text-accent-dim hover:text-accent transition-colors duration-ds ease-ds"
+          aria-label={open ? `Collapse ${title}` : `Expand ${title}`}
+          className="flex-1 min-w-0 h-full flex items-center gap-2 text-left"
         >
           <ChevronRight
-            size={13}
-            className={`transition-transform duration-ds ease-ds ${open ? "rotate-90" : ""}`}
+            size={12}
+            className={`flex-shrink-0 text-ink-disabled transition-transform duration-ds ease-ds ${open ? "rotate-90" : ""}`}
           />
+          {runnable ? (
+            <SquareTerminal size={12} className="text-ink-faint flex-shrink-0" />
+          ) : /\.(tsx?|jsx?|mjs|cjs)$/.test(title) ? (
+            <Code2 size={12} className="text-ink-faint flex-shrink-0" />
+          ) : (
+            <FileText size={12} className="text-ink-faint flex-shrink-0" />
+          )}
+          <span className="font-mono text-2xs text-ink-dim truncate">{title}</span>
+          <span className="font-mono text-3xs text-ink-disabled tabular-nums flex-shrink-0">{lines}L</span>
         </button>
 
-        {runnable ? (
-          <SquareTerminal size={13} className="text-ink-muted flex-shrink-0" />
-        ) : /\.(tsx?|jsx?)$/.test(title) ? (
-          <Code2 size={13} className="text-accent-dim flex-shrink-0" />
-        ) : (
-          <FileText size={13} className="text-accent-dim flex-shrink-0" />
-        )}
-
-        <span className="font-mono text-xs font-semibold text-ink-high truncate">{title}</span>
-        <Chip>{lines} {lines === 1 ? "line" : "lines"}</Chip>
-
-        <div className="flex-1" />
-
-        {onJumpToFile && (
-          <Chip as="button" onClick={onJumpToFile}>
-            <ArrowUpRight size={11} />
-            Jump to File
-          </Chip>
-        )}
-        {runnable && onRun && (
-          <Chip as="button" onClick={onRun}>
-            <SquareTerminal size={11} />
-            Run in Terminal
-          </Chip>
-        )}
-        <button
-          type="button"
-          onClick={copy}
-          title="Copy"
-          className="flex items-center gap-1.5 font-mono text-2xs text-ink-dim hover:text-ink-high px-1.5 py-1 transition-colors duration-ds ease-ds flex-shrink-0"
-        >
-          {copied ? <Check size={11} className="text-success" /> : <Copy size={11} />}
-          {copied ? "Copied" : "Copy"}
-        </button>
-        <Chip as="button" onClick={() => setOpen((previous) => !previous)}>
-          {open ? "Collapse" : "Expand"}
-        </Chip>
+        <span className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 focus-within:opacity-100 transition-opacity duration-ds ease-ds">
+          {onJumpToFile && (
+            <IconAction onClick={onJumpToFile} title="Open in the editor">
+              <ArrowUpRight size={12} />
+            </IconAction>
+          )}
+          {runnable && onRun && (
+            <IconAction onClick={onRun} title="Run in the terminal">
+              <SquareTerminal size={12} />
+            </IconAction>
+          )}
+          <IconAction onClick={copy} title="Copy">
+            {copied ? <Check size={12} className="text-success" /> : <Copy size={12} />}
+          </IconAction>
+        </span>
       </div>
 
       {open && (
         <pre
-          className="lit rounded-lg bg-surface-sunken px-4 py-3 overflow-x-auto font-mono text-xs leading-[1.8] text-ink-code animate-reveal"
+          className="border-t border-edge/60 px-3 py-2.5 overflow-x-auto font-mono text-2xs leading-[1.75] text-ink-code animate-reveal"
           dangerouslySetInnerHTML={{ __html: highlightCode(code, language) }}
         />
       )}
     </div>
   );
 };
+
+const IconAction: React.FC<{ onClick: () => void; title: string; children: React.ReactNode }> = ({
+  onClick,
+  title,
+  children,
+}) => (
+  <button
+    type="button"
+    onClick={onClick}
+    title={title}
+    className="w-6 h-6 flex items-center justify-center rounded text-ink-faint hover:text-ink-high hover:bg-surface-hover transition-colors duration-ds ease-ds"
+  >
+    {children}
+  </button>
+);

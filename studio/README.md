@@ -52,7 +52,7 @@ route requires it. Roughly sixty routes across:
 | Model mode & routing | `/api/frontier/status` · `/api/frontier/resolve-mode` · `/api/models/*` |
 | Entitlement | `/api/entitlement` · `/api/entitlement/{refresh,sign-in,sign-in/poll,sign-out}` · `/api/entitlement/{plans,checkout}` · `/api/entitlement/order/:id` |
 | Hosted providers | `/api/providers` · `/api/providers/key` · `/api/providers/lanes` |
-| Workspace | `/api/workspace/{tree,file,write,search,open,projects}`, `/api/workspace/projects/{remember,forget}` |
+| Workspace | `/api/workspace/{tree,file,write,delete,mkdir,search,open,projects}`, `/api/workspace/projects/{remember,forget}` |
 | Terminal | `/api/terminal/exec` |
 | Agent CLIs | `/api/agents` · `/api/agents/models` · `/api/agents/run` |
 | Screen assistant | `/api/assistant/{capabilities,permissions,observe,act}` |
@@ -518,7 +518,7 @@ ollama serve              # local models on 127.0.0.1:11434
 
 ```bash
 npm run typecheck   # tsc --noEmit
-npm test            # 832 tests, 0 failures
+npm test            # 842 tests, 0 failures
 npm run build       # tsc && vite build
 npm run verify:core # all three
 ```

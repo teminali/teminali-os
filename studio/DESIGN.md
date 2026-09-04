@@ -31,7 +31,8 @@ reachable as ordinary utilities:
 | Table and card edge | `border-edge` | `#262626` |
 | User-bubble edge, outline pills | `border-edge-strong` | `#313131` |
 | Composer edge (brightest in the window) | `border-edge-popover` | `#3a3a3a` |
-| Body copy, headings, active labels | `text-ink-bright` / `-prose` | `#f0f0f0` |
+| Headings, `strong`, active labels | `text-ink-bright` | `#f0f0f0` |
+| Chat paragraphs | `text-ink-prose` | `#cbcbcb` |
 | Sidebar rows, icons, secondary | `text-ink-muted` | `#b8b8b8` |
 | Timestamps | `text-ink-soft` | `#9f9f9f` |
 | Section labels, tool lines | `text-ink-faint` | `#989898` |
@@ -180,8 +181,8 @@ StudioTitleBar    traffic lights · sidebar toggle · title · IDE · Video Edit
 │   └── Sidebar        the selected view · SidebarFooter
 │       └── view       StudioSidebar (chats) · Explorer · GlobalSearchView
 │                      · Skills
-├── StudioChat       empty state (brand mark) / transcript · Composer
-│                    (voice lives here) · AssistantHud
+├── StudioChat       empty state (brand mark) / transcript · ChangeReviewDock
+│                    · Composer (voice lives here) · AssistantHud
 └── WorkspacePanel   terminal · browser · canvas · side chat · file · guardian
                      · Claude Code · Codex · usage · benchmark · release
                      · video editor
@@ -368,6 +369,78 @@ banner**; the announcement is a dot on this control and the pill in
 `SidebarFooter`, both reading the one `useUpdates` check so they cannot
 disagree. In a browser the rollback rows are absent rather than dead — replacing
 the bundle needs the desktop bridge (`no dead affordances`, below).
+
+### The conversation surface (`components/chat/**`)
+
+A turn is read in a fixed order, and the components are laid out to enforce it:
+**what it did**, then **what it said**, then — only on hover — **what it cost**.
+
+| Piece | File | What it is |
+| --- | --- | --- |
+| Process inspector | `chat/ProcessWatcher.tsx` | The live activity strip above a reply. |
+| Activity grouping | `services/activityGroups.ts` | Pure: folds tool calls into the rows the strip shows. |
+| Turn | `chat/MessageBlock.tsx` | Prompt, reply, code cards, hover telemetry. |
+| Code card | `chat/FileActionCard.tsx` | A 28px row that opens onto the code. |
+| Waiting line | `chat/ThinkingIndicator.tsx` | The gap before the first token. |
+| Review dock | `chat/ChangeReviewDock.tsx` | Accept / reject what was written to disk. |
+| Pending set | `store/changeStore.ts`, `services/changeSet.ts` | The changes, and the arithmetic behind them. |
+
+**One line per thing that happened, not per event.** `groupActivity` collapses
+consecutive tool calls of one kind into a single row — "Ran 6 commands",
+"Explored 3 files, 1 search", "Edited main.cjs +5 −2" — which opens on click.
+Consecutive, never global: the order in which the assistant read, ran and
+edited is itself information, so two runs of commands either side of an edit
+stay two rows. A group holding one call renders as that call's own row, because
+"Ran ls -la" above an indented "ls -la" is the same sentence twice.
+
+The strip is **open while the turn is live and closes when it settles**. During
+the turn it is the only thing to look at; afterwards it is a footnote under the
+answer. Verbs follow: "Running 5 commands" while it runs, "Ran 5 commands" when
+it is done — the tense is in `services/activityGroups.ts`, not in the renderer.
+
+**Telemetry is hover-revealed.** Engine, tokens, duration and cost are all
+measured and all real; none of them is what anyone is reading, and six fields
+under every reply at full contrast is what made the column feel like a log.
+
+**The waiting sweep is monochrome.** `.text-shimmer` in `index.css` runs
+`--text-soft` through `--text-bright`. It was a cyan → violet → amber gradient,
+which made a background process the brightest object in a window whose entire
+palette is five greys.
+
+### Accept and reject (`chat/ChangeReviewDock.tsx`, `store/changeStore.ts`)
+
+The assistant edits the working tree directly — that is the point of it — so
+review here cannot mean staging a patch that has not landed. It means the edit
+is on disk, it is listed above the composer, and one click puts the file back.
+
+* **`before` is captured once.** `liveEditService` already reads a file before
+  it writes it, to play the edit back against; it now emits that content with
+  the commit (`onCommit`). Two successive edits to one path collapse into one
+  reviewable change whose `before` is still what was on disk when the turn
+  started, so a reject restores the file the operator actually had — not the
+  state halfway through the turn. Tested in `tests/change-review.test.mjs`.
+* **Accept cannot fail.** The bytes are already written; accepting is the
+  operator saying they have seen them.
+* **Reject is a real write.** It restores `before`, or calls
+  `POST /api/workspace/delete` when the assistant created the file — blanking a
+  file the operator never asked for is not a restore. A row disappears only
+  after the disk agrees; a reject that fails leaves the row and says why.
+* **An edit that lands the file back on its original content is not a change**
+  and drops out of the set.
+* **Nothing is persisted.** A `before` snapshot is only true of the disk it was
+  read from. Restoring one across a restart, over whatever the operator did in
+  between, would be the worst kind of confident wrong.
+* **The set is workspace state, not conversation state.** One store backs every
+  surface, so the dock is mounted above every composer — the main chat
+  (`chat/StudioChat.tsx`), the side chat and the agent tabs
+  (`panels/SideChatPane.tsx`, `panels/AgentPane.tsx`, both `width="fill"`) —
+  and shows the same rows in each. A change made in one pane cannot be walked
+  past by typing in another. The dock renders nothing when the set is empty.
+* **The boundary, stated plainly:** this covers the local Frontier engine's own
+  writes, which go through `liveEditService`. An agent CLI (Claude Code, Codex)
+  writes files in its own process; the shell never sees the pre-edit bytes, so
+  those edits are reported in the process strip but are **not** listed here.
+  Use git for those.
 
 ### Agent tabs (`server/agent-cli.js`, `panels/AgentPane.tsx`)
 
