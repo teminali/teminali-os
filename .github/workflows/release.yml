@@ -169,3 +169,50 @@ jobs:
             studio/release/*.zip
             studio/release/*.exe
             studio/release/*.AppImage
+
+  release-notes:
+    name: Ensure Release Notes
+    needs: build
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Attach release notes
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG_NAME: ${{ github.ref_name }}
+        run: |
+          set -e
+          echo "Checking release notes for tag: $TAG_NAME"
+          EXISTING_BODY=$(gh release view "$TAG_NAME" --json body --jq .body 2>/dev/null || echo "")
+
+          if [ -z "$(echo "$EXISTING_BODY" | tr -d '[:space:]')" ]; then
+            echo "Release body is empty. Generating release notes..."
+            PREV_TAG=$(git describe --tags --abbrev=0 "${TAG_NAME}^" 2>/dev/null || echo "")
+
+            NOTES_FILE="release_notes.md"
+            echo "## What's Changed in $TAG_NAME" > "$NOTES_FILE"
+            echo "" >> "$NOTES_FILE"
+
+            if [ -n "$PREV_TAG" ]; then
+              echo "### Changes since $PREV_TAG:" >> "$NOTES_FILE"
+              git log "${PREV_TAG}..${TAG_NAME}" --pretty=format:"* %s (%h)" --no-merges >> "$NOTES_FILE"
+            else
+              echo "### Recent Changes:" >> "$NOTES_FILE"
+              git log -n 15 --pretty=format:"* %s (%h)" --no-merges >> "$NOTES_FILE"
+            fi
+
+            echo "" >> "$NOTES_FILE"
+            echo "" >> "$NOTES_FILE"
+
+            gh release edit "$TAG_NAME" --title "Teminali Code ${TAG_NAME#v}" --notes-file "$NOTES_FILE"
+            echo "Release notes successfully published for $TAG_NAME!"
+          else
+            echo "Release notes already exist for $TAG_NAME."
+          fi
+
