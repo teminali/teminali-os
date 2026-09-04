@@ -66,6 +66,8 @@ function applyPackagedEnvironment() {
     TEMINALI_USAGE_LEDGER: store("usage-ledger.jsonl"),
     TEMINALI_ADMIN_STORE: store("admins.json"),
     TEMINALI_ARENA_HISTORY: store("arena-runs.jsonl"),
+    TEMINALI_APP_ROOT: app.getAppPath(),
+    TEMINALI_APP_VERSION: app.getVersion(),
     // Left to itself this resolves inside the asar, where no project lives.
     FRONTIER_WORKSPACE_ROOT: app.getPath("home"),
   };
@@ -93,7 +95,11 @@ async function startGateway() {
   for (const port of [undefined, 0]) {
     let instance;
     try {
-      instance = await createGateway(port === undefined ? {} : { config: { port } });
+      instance = await createGateway(
+        port === undefined
+          ? { config: { appRoot: app.getAppPath() } }
+          : { config: { port, appRoot: app.getAppPath() } }
+      );
       const address = await instance.listen();
       gateway = instance;
       gatewaySession = {

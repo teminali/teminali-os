@@ -59,8 +59,19 @@ export function compareVersions(a, b) {
 }
 
 export async function currentVersion(appRoot) {
+  if (typeof process.env.TEMINALI_APP_VERSION === "string" && process.env.TEMINALI_APP_VERSION.trim()) {
+    return process.env.TEMINALI_APP_VERSION.trim().replace(/^v/, "");
+  }
+  if (appRoot) {
+    try {
+      const manifest = JSON.parse(await readFile(join(appRoot, "package.json"), "utf8"));
+      return typeof manifest.version === "string" ? manifest.version : null;
+    } catch {
+      return null;
+    }
+  }
   try {
-    const manifest = JSON.parse(await readFile(join(appRoot, "package.json"), "utf8"));
+    const manifest = JSON.parse(await readFile(new URL("../package.json", import.meta.url), "utf8"));
     return typeof manifest.version === "string" ? manifest.version : null;
   } catch {
     return null;

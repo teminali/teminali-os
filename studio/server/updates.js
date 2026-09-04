@@ -174,6 +174,7 @@ export async function checkForUpdate({
 
     const release = await response.json();
     if (release?.draft) return answer({});
+    if (!version) return answer({ error: "The currently installed version could not be determined." });
     if (!parseVersion(release?.tag_name)) return answer({ error: "The latest release has no readable version." });
 
     const asset = assetForPlatform(release.assets, { platform, arch });
