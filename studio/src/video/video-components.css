@@ -500,20 +500,48 @@
     gap: 5px;
   }
 
+  /* Two rows, at every tier, with the transport centred on its own.
+
+     This was a three-column grid — timecode | transport | marking —
+     centring the transport by putting equal tracks either side of it.
+     Measured in the running app, that row is 324px wide at `md` and
+     320px at `lg`: the rails take the pane's extra width, so the
+     monitor column stays ~480px and the master meters take 159px of
+     it. Its content needs 163 + 176 + 164 plus gaps = 527px. It
+     overflowed by ~150px and the three groups sat 15px ON each other
+     at both tiers. Hiding the meters would not have saved it either.
+
+     So the transport gets a row to itself and is centred in it, which
+     is both what the design asked for and the only arrangement the
+     width allows. `minmax(0, 1fr)` on the timecode's track lets the
+     first row shrink rather than overflow the way the old one did. */
   .video-workspace .editor-transport-row {
     display: grid;
-    grid-template-columns: minmax(136px, 1fr) auto minmax(136px, 1fr);
-    column-gap: 12px;
+    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-areas:
+      'time actions'
+      'transport transport';
+    row-gap: var(--sp-2);
+    column-gap: var(--sp-2);
   }
 
   .video-workspace .editor-transport-time {
+    grid-area: time;
     justify-self: start;
+    min-width: 0;
     min-height: 20px;
     column-gap: 8px;
   }
 
+  .video-workspace .editor-transport-cluster {
+    grid-area: transport;
+    justify-self: center;
+  }
+
   .video-workspace .editor-transport-actions {
+    grid-area: actions;
     justify-self: end;
+    min-width: 0;
   }
 
   .video-workspace .editor-align-shelf .glass {
@@ -659,5 +687,541 @@
   .dragging-move,
   .dragging-move * {
     cursor: grabbing !important;
+  }
+}
+
+/* ═══════════════════════════════════════════════════════════════════
+   THE RESPONSIVE LAYER
+
+   Everything above this line is the Cut's, ported. Everything below is
+   Code's own, and it exists because this editor is a PANEL, not a
+   window: it opens at 452px beside a chat column, expands to 736px,
+   and can be dragged to any width in between or beyond. The ported
+   sheet was written for a 1440px window and had no opinion at 452px,
+   which is why the panel drew a toolbar with "Delete" clipped to "Du"
+   and a zoom slider sitting under its own readout.
+
+   THE TIER IS DECIDED IN ONE PLACE AND ONLY ONE. `VideoPane` measures
+   itself, resolves the tier through `hooks/useDensity.tsx`, and stamps
+   it on the root as `data-tier`. Every rule here reads that attribute.
+   There are no `@media` queries in this file on purpose — a media
+   query answers about the DISPLAY, and this editor routinely lives in
+   a third of one. A 452px panel on a 5K monitor is `xs`, and a media
+   query would have called it `lg` and been wrong in the only case
+   that matters.
+
+     xs  < 460   sm  460-639   md  640-899   lg  >= 900
+
+   The vertical tier (`data-vtier`: short / mid / tall) is separate and
+   independent: a pane can be wide and short, and a 291px timeline in a
+   360px-tall pane leaves no monitor at any width.
+   ═══════════════════════════════════════════════════════════════════ */
+
+@layer components {
+
+  /* ── The bars supply their own box ────────────────────────────────
+     Height, padding and the hairline used to be Tailwind utilities in
+     the TSX, which meant a bar could not change shape with the tier
+     without a conditional class string at every call site. They live
+     here now so the tier rules below have something to override. */
+
+  .video-workspace .editor-timeline-toolbar {
+    height: 43px;
+    padding: 0 var(--sp-4);
+    border-bottom: 1px solid var(--line);
+  }
+
+  .video-workspace .editor-track-list-header {
+    padding: 1px var(--sp-4) 0;
+  }
+
+  .video-workspace .editor-track-row {
+    gap: 9px;
+    padding: 0 11px;
+  }
+
+  /* ── Tool buttons ─────────────────────────────────────────────────
+     One class, two shapes. Square when it is an icon, and only as wide
+     as its label needs when it carries one — rather than the twelve
+     hand-typed `w-[26px] h-[var(--h-sm)]` and `px-2 gap-1.5` pairs
+     these replaced, which is how two buttons on the same row ended up
+     26px and 28px tall. */
+
+  .video-workspace .editor-tool-btn {
+    width: var(--h-sm);
+    height: var(--h-sm);
+    padding: 0;
+    flex-shrink: 0;
+  }
+
+  .video-workspace .editor-tool-btn.has-label {
+    width: auto;
+    padding: 0 var(--sp-3);
+    gap: var(--sp-2);
+    font-size: var(--text-xs);
+    font-weight: 500;
+  }
+
+  .video-workspace .editor-toolbar-sep {
+    width: 1px;
+    height: 16px;
+    margin: 0 2px;
+    flex-shrink: 0;
+    background: var(--line);
+  }
+
+  .video-workspace .editor-zoom-slider {
+    width: 112px;
+    flex-shrink: 1;
+    min-width: 56px;
+  }
+
+  .video-workspace .editor-zoom-readout {
+    height: var(--h-sm);
+    padding: 0 var(--sp-3);
+  }
+
+  /* ── The splitter ─────────────────────────────────────────────────
+     6px of grab area, 1px of visible line. A handle you can see is a
+     handle you can hit; the reverse is a 1px target and a fight. */
+
+  .video-workspace .editor-splitter {
+    position: relative;
+    height: 6px;
+    flex-shrink: 0;
+    cursor: row-resize;
+    background: transparent;
+    touch-action: none;
+  }
+
+  .video-workspace .editor-splitter::after {
+    content: '';
+    position: absolute;
+    left: 50%;
+    top: 50%;
+    width: 44px;
+    height: 2px;
+    border-radius: 2px;
+    transform: translate(-50%, -50%);
+    background: var(--line-strong);
+    opacity: 0;
+    transition: opacity var(--t-fast) var(--ease), background-color var(--t-fast) var(--ease);
+  }
+
+  .video-workspace .editor-splitter:hover::after,
+  .video-workspace .editor-splitter:focus-visible::after {
+    opacity: 1;
+    background: var(--accent);
+  }
+
+  .video-workspace .editor-splitter:focus-visible {
+    outline: none;
+    box-shadow: 0 0 0 2px var(--focus-ring);
+  }
+
+  .dragging-v,
+  .dragging-v * {
+    cursor: row-resize !important;
+    user-select: none !important;
+  }
+
+  /* ── Side panels: seated, visiting, or arriving from the floor ────
+     Three states for the same content. A column when the pane can
+     afford one, an overlay over the monitor when it cannot, and a
+     sheet up from the floor at the tightest tier — where a 296px rail
+     would leave a 452px pane a 156px monitor, which is not a monitor. */
+
+  .video-workspace .editor-library-column {
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+    overflow: hidden;
+    background: var(--surface);
+    border-right: 1px solid var(--line);
+  }
+
+  .video-workspace .editor-overlay-scrim {
+    position: absolute;
+    inset: 0;
+    z-index: 25;
+    background: rgba(0, 0, 0, 0.42);
+    animation: fade-in var(--dur-fast) var(--ease);
+  }
+
+  .video-workspace .editor-side-overlay {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    z-index: 30;
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+    overflow: hidden;
+    background: var(--surface);
+    box-shadow: var(--lift-float);
+  }
+
+  .video-workspace .editor-side-overlay.is-left {
+    left: 0;
+    border-right: 1px solid var(--line-popover);
+  }
+
+  .video-workspace .editor-side-overlay.is-right {
+    right: 0;
+    border-left: 1px solid var(--line-popover);
+  }
+
+  .video-workspace .editor-inspector-sheet {
+    position: absolute;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 30;
+    display: flex;
+    flex-direction: column;
+    /* Never past two thirds: the sheet is FOR editing the thing you can
+       see, so covering the thing you can see defeats it. */
+    max-height: 66%;
+    min-height: 180px;
+    overflow: hidden;
+    background: var(--surface);
+    border-top: 1px solid var(--line-popover);
+    border-radius: var(--r-lg) var(--r-lg) 0 0;
+    box-shadow: 0 -18px 48px rgba(0, 0, 0, 0.55);
+    animation: slide-up var(--dur-slow) var(--ease);
+  }
+
+  .video-workspace .editor-sheet-grip {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    height: 20px;
+    flex-shrink: 0;
+    background: transparent;
+  }
+
+  .video-workspace .editor-sheet-grip-bar {
+    width: 36px;
+    height: 4px;
+    border-radius: 999px;
+    background: var(--line-popover);
+    transition: background-color var(--t-fast) var(--ease);
+  }
+
+  .video-workspace .editor-sheet-grip:hover .editor-sheet-grip-bar {
+    background: var(--text-faint);
+  }
+
+  /* ── Summoning them ───────────────────────────────────────────────
+     In the monitor's header, beside the `Program` label. It floated on
+     the stage's floor before, which cost the picture and made the
+     alignment shelf move aside for it; the header is chrome and has the
+     room. Labelled, because these two are the whole navigation of the
+     compact editor and an unlabelled icon is a thing you have to have
+     been told about. No float shadow now that it sits IN chrome rather
+     than over the picture — it reads as a segmented control. */
+
+  .video-workspace .editor-summon-bar {
+    display: flex;
+    align-items: center;
+    gap: var(--sp-1);
+    flex-shrink: 0;
+    margin-left: var(--sp-1);
+    padding: 2px;
+    border-radius: var(--r-md);
+    background: var(--surface-2);
+    border: 1px solid var(--line);
+  }
+
+  .video-workspace .editor-summon-btn {
+    height: var(--h-sm);
+    padding: 0 var(--sp-3);
+    gap: var(--sp-2);
+    font-size: var(--text-xs);
+    font-weight: 500;
+  }
+
+  /* A button with no word in it is square, not a wide slab with its label
+     cut out. `:has()` asks the button whether it kept its span rather than
+     making the pane pass a second flag down for something the DOM already
+     knows. */
+  .video-workspace .editor-summon-btn:not(:has(span)) {
+    padding: 0;
+    width: var(--h-sm);
+    justify-content: center;
+  }
+
+  /* ── Context menu ─────────────────────────────────────────────────
+     The store has had one since the port; this is the first sheet that
+     draws it. See `components/ui/Overlays.tsx`. */
+
+  .video-workspace .video-menu {
+    min-width: 196px;
+    max-width: 280px;
+    padding: var(--sp-1);
+  }
+
+  .video-workspace .video-menu-item {
+    display: flex;
+    align-items: center;
+    gap: var(--sp-3);
+    width: 100%;
+    height: var(--h-row);
+    padding: 0 var(--sp-3);
+    border-radius: var(--r-sm);
+    color: var(--text-muted);
+    font-size: var(--text-sm);
+    background: transparent;
+    text-align: left;
+    transition: background-color var(--t-fast) var(--ease), color var(--t-fast) var(--ease);
+  }
+
+  .video-workspace .video-menu-item:hover:not(:disabled) {
+    background: var(--surface-hover);
+    color: var(--text-bright);
+  }
+
+  .video-workspace .video-menu-item:disabled {
+    opacity: 0.35;
+    cursor: not-allowed;
+  }
+
+  .video-workspace .video-menu-item.is-danger:hover:not(:disabled) {
+    color: var(--red, #ec6765);
+    background: rgba(236, 103, 101, 0.12);
+  }
+
+  /* ── Toasts ───────────────────────────────────────────────────────
+     Bottom-centre over the timeline. Top-right is where the host's own
+     notifications land, and two stacks in one corner is one stack that
+     lies about who is speaking. */
+
+  .video-workspace .video-toasts {
+    position: absolute;
+    left: 50%;
+    bottom: var(--sp-5);
+    z-index: 900;
+    display: flex;
+    flex-direction: column;
+    gap: var(--sp-2);
+    width: min(360px, calc(100% - var(--sp-7)));
+    transform: translateX(-50%);
+    pointer-events: none;
+  }
+
+  .video-workspace .video-toast {
+    display: flex;
+    align-items: flex-start;
+    gap: var(--sp-3);
+    padding: var(--sp-3) var(--sp-3) var(--sp-3) var(--sp-4);
+    border-radius: var(--r-md);
+    background: var(--surface-2);
+    border: 1px solid var(--line-popover);
+    box-shadow: var(--lift-float);
+    pointer-events: auto;
+  }
+
+  .video-workspace .video-toast.is-success { color: var(--accent); }
+  .video-workspace .video-toast.is-error { color: var(--red, #ec6765); }
+  .video-workspace .video-toast.is-info,
+  .video-workspace .video-toast.is-progress { color: var(--text-dim); }
+
+  .video-workspace .video-toast-track {
+    height: 3px;
+    margin-top: var(--sp-2);
+    border-radius: 999px;
+    background: var(--sunken);
+    overflow: hidden;
+  }
+
+  .video-workspace .video-toast-fill {
+    height: 100%;
+    border-radius: 999px;
+    background: var(--accent);
+    transition: width var(--t-slow) var(--ease);
+  }
+
+  /* ═══════════════════════════════════════════════════════════════
+     TIER OVERRIDES
+
+     Read as: "what this bar gives back, in the order it gives it".
+     ═══════════════════════════════════════════════════════════════ */
+
+  /* ── md and below: chrome tightens, the picture keeps its size ──── */
+
+  .video-workspace[data-tier='md'] .editor-timeline-toolbar,
+  .video-workspace[data-tier='sm'] .editor-timeline-toolbar,
+  .video-workspace[data-tier='xs'] .editor-timeline-toolbar {
+    padding: 0 var(--sp-3);
+    gap: var(--sp-1);
+  }
+
+  .video-workspace[data-tier='md'] .editor-zoom-slider {
+    width: 72px;
+  }
+
+  /* ── sm and below: one column, and the transport stops being a
+        three-part grid it no longer has the width to be ──────────── */
+
+  .video-workspace[data-tier='sm'] .editor-program-transport,
+  .video-workspace[data-tier='xs'] .editor-program-transport {
+    min-height: 0;
+    padding: var(--sp-2) var(--sp-3) var(--sp-3);
+  }
+
+  /* Where the meters DO show, they yield before the transport does.
+
+     They ship `flex-shrink-0` at 119px, which is why `md` and `lg` gave
+     the transport only 324px and 320px — less than the 383px `xs` gets,
+     because `xs` hides the meters entirely. The transport's first row
+     needs 335px, so the primary controls were the ones overflowing to
+     pay for a secondary readout. A level meter is a bar and degrades
+     with width; the floor keeps it a meter rather than a stub. */
+  .video-workspace .editor-program-transport > :last-child {
+    /* Stated, not left to the content, so the mirror below can be the same
+       number rather than a second copy of it. 119px is what the meters
+       measured — the value the note above already quotes. */
+    width: var(--transport-meters-w);
+    flex-shrink: 1;
+    min-width: 88px;
+  }
+
+  /* The transport is centred in its own row — but that row is the flex
+     child to the LEFT of the master meters, so its centre is the bar's
+     centre minus half the meters. The play disc sat ~85px left of the
+     picture it belongs under, which is exactly what it looked like.
+
+     So the bar gets a mirror of the meters on its other side. A `::before`
+     rather than a spacer element, because `> :first-child` and
+     `> :last-child` above still have to mean the transport and the meters,
+     and a pseudo-element is not matched by either — an added <div> would
+     have silently moved the 336px minimum onto the spacer.
+
+     The mirror is the meters' own width, shrink and floor, so the two
+     narrow together and the centre holds while they do. It was written as a
+     literal 159px, which is not what the meters measure — the note above says
+     119 — and a mirror 40px too wide moved the disc 21px to the RIGHT of the
+     picture instead of leaving it under the middle. One variable now, so
+     there is no second number to drift. */
+  .video-workspace .editor-program-transport::before {
+    content: '';
+    width: var(--transport-meters-w);
+    flex-shrink: 1;
+    min-width: 88px;
+  }
+
+  /* Below `TRANSPORT_METERS_MIN` the bar cannot hold the meters at their
+     floor, and it does not clip: it paints its own controls and the meters
+     over the inspector column beside it. The tier gate cannot see this —
+     `data-tier` is the pane's width, and this bar gets only what the seated
+     library and inspector leave. `PreviewPlayer` measures the bar and sets
+     `data-narrow`; here that means what `sm`/`xs` already mean below. */
+  .video-workspace .editor-program-transport[data-narrow] > :last-child,
+  .video-workspace .editor-program-transport[data-narrow]::before {
+    display: none;
+  }
+
+  /* And the transport has to CLAIM that width, or nothing yields: the
+     controls are `flex-1 min-w-0`, so they absorb whatever is left over
+     and the row is never over-full for the meters to shrink against.
+     336px is the measured first row — timecode 163 + 8 gap + marking
+     tools 164 — rounded up. Below `md` the meters are gone and the
+     transport has 383px at `xs` anyway, so this floor never binds. */
+  .video-workspace .editor-program-transport > :first-child {
+    min-width: 336px;
+  }
+
+  /* The master meters are a 92px instrument for a mix you cannot make
+     in a 400px panel. Hidden below `md`, and hidden is honest here —
+     a 20px stub would read as a broken meter rather than as no meter. */
+  .video-workspace[data-tier='sm'] .editor-program-transport > :last-child,
+  .video-workspace[data-tier='xs'] .editor-program-transport > :last-child {
+    display: none;
+  }
+
+  /* Nothing to mirror once the meters are gone: the transport is then the
+     only child and centring it needs no help. Leaving the mirror in would
+     push it right by exactly the error it was added to remove. */
+  .video-workspace[data-tier='sm'] .editor-program-transport::before,
+  .video-workspace[data-tier='xs'] .editor-program-transport::before {
+    display: none;
+  }
+
+  /* ── xs: the phone shape ────────────────────────────────────────── */
+
+  .video-workspace[data-tier='xs'] .editor-program-header {
+    height: 38px;
+    padding-left: var(--sp-3);
+    padding-right: var(--sp-3);
+  }
+
+  .video-workspace[data-tier='xs'] .editor-timeline-toolbar {
+    height: 40px;
+  }
+
+  .video-workspace[data-tier='xs'] .editor-track-row {
+    gap: var(--sp-1);
+    padding: 0 var(--sp-1) 0 var(--sp-2);
+  }
+
+  .video-workspace[data-tier='xs'] .editor-track-list-header {
+    padding: 1px var(--sp-2) 0;
+  }
+
+  /*
+    TOUCH-SIZED, NOT JUST SMALLER.
+
+    This is the half of the mobile lesson that is easy to miss: a phone
+    UI is not a desktop UI scaled down, it is a desktop UI with FEWER
+    controls at LARGER sizes. Shrinking a 22px button to 18px because
+    the pane got narrow is exactly backwards — the narrow pane is the
+    one being used on a trackpad in a hurry, or on a touch display.
+
+    So the tightest tier spends some of what the folding saved on
+    raising the control rhythm two steps. The bars stay the same height
+    because the buttons inside them stopped carrying labels.
+  */
+  .video-workspace[data-tier='xs'] {
+    --h-xs: 26px;
+    --h-sm: 30px;
+    --h-md: 32px;
+  }
+
+  /* The primary transport control, in the brand green.
+
+     The ported sheet drew a near-white disc here, matched to the
+     reference's fullscreen player. Code paints this editor in the brand
+     accent, and the transport's primary action is the one control where
+     that accent means ACT rather than "this is on" — so it wears it.
+
+     The colour does not change while playing. An earlier version turned
+     accent on play, which said with colour what the icon already said
+     with shape; the near-white disc was the fix for that, and a green
+     disc must not walk back into it. `--on-accent` is the ink for a fill
+     of `--accent`; `--accent-ink` is the host's and means something else
+     here (see `video-tokens.css`). */
+  .video-workspace .editor-play-btn {
+    background: var(--accent);
+    color: var(--on-accent);
+    box-shadow: 0 6px 18px var(--accent-soft), 0 2px 6px rgba(0, 0, 0, 0.3);
+  }
+
+  .video-workspace .editor-play-btn:hover {
+    background: var(--accent-hover);
+  }
+
+  /* ── Short panes ─────────────────────────────────────────────────
+     Vertical space is scarcer than horizontal in a docked panel, and
+     the transport's scrub bar is the one row whose job the timeline
+     ruler already does. */
+
+  .video-workspace[data-vtier='short'] .editor-program-transport {
+    min-height: 0;
+    padding-top: var(--sp-2);
+    padding-bottom: var(--sp-2);
+  }
+
+  .video-workspace[data-vtier='short'] .editor-playback-controls {
+    gap: 2px;
   }
 }

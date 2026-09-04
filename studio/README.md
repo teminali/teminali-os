@@ -50,17 +50,18 @@ route requires it. Roughly sixty routes across:
 | --- | --- |
 | Health, session, audit | `/health` · `/api/session` · `/api/audit` |
 | Model mode & routing | `/api/frontier/status` · `/api/frontier/resolve-mode` · `/api/models/*` |
+| Entitlement | `/api/entitlement` · `/api/entitlement/{refresh,sign-in,sign-in/poll,sign-out}` · `/api/entitlement/{plans,checkout}` · `/api/entitlement/order/:id` |
 | Hosted providers | `/api/providers` · `/api/providers/key` · `/api/providers/lanes` |
-| Workspace | `/api/workspace/{tree,file,write,search,open,projects}` |
+| Workspace | `/api/workspace/{tree,file,write,search,open,projects}`, `/api/workspace/projects/{remember,forget}` |
 | Terminal | `/api/terminal/exec` |
 | Agent CLIs | `/api/agents` · `/api/agents/models` · `/api/agents/run` |
 | Screen assistant | `/api/assistant/{capabilities,permissions,observe,act}` |
 | Voice | `/api/voice/{status,transcribe,speak}` |
 | Guardian | `/api/guardian/{snapshot,unload,governor,storage}` |
 | Benchmark arena | `/api/arena/{sandbox,measure,measure/stream,history,cleanup}` |
-| Usage, files, device | `/api/usage` · `/api/files/{capabilities,ingest}` · `/api/system/device` |
+| Usage, files, device | `/api/usage` · `/api/plan` · `/api/files/{capabilities,ingest}` · `/api/system/device` |
 | GitHub, admin | `/api/github/{status,repos,token,clone}` · `/api/me` · `/api/admin/*` |
-| Updates & releases | `/api/updates/{check,download,publish}` |
+| Updates & releases | `/api/updates/{check,releases,download,publish}` |
 | Upstream proxies | `/api/ollama/*` · `/api/anthropic/v1/messages` · `/api/mcp` |
 
 Audit records are metadata only — route, status, duration, byte counts — with
@@ -74,8 +75,8 @@ and transcripts are never written to it.
 ### The shell
 
 A 48px activity bar, a 212px sidebar panel beside it, the conversation, and a
-workspace panel strip. Sidebar views: **Chats · Explorer · Search · Skills ·
-Media**. The rail stays on screen when the panel is collapsed, so a dismissed
+workspace panel strip. Sidebar views: **Chats · Explorer · Search · My Projects · Skills**.
+The rail stays on screen when the panel is collapsed, so a dismissed
 sidebar is one click from open on any view. The panel strip holds any number of
 tabs of twelve kinds:
 
@@ -91,9 +92,27 @@ tabs of twelve kinds:
 Video Editor is the one kind limited to a single tab: it owns a timeline and a
 playback clock, and a second copy would be a second project competing for them.
 
+**Screen recording is not a panel.** It is a dialog (`⇧⌘8`), and the reason is
+that a panel is somewhere you leave the app while recording is something you
+do: a panel persists into the next session, sits in the tab strip, and splits
+the window with the conversation you are not looking at while you pick a
+display. It also wanted width the panel did not have — 568px before the
+options rail can be a column, against the panel's 452px default. See
+[Screen recording](#screen-recording).
+
 Plus `⌘B` sidebar · `⌘L` chats · `⇧⌘E` explorer · `⇧⌘F` search · `⌘K`/`⌘P`
-command palette · `⌘,` settings. Skills and Media are reached from the rail; they
-have no shortcut.
+command palette · `⌘,` settings. My Projects and Skills are reached from the
+rail; neither has a shortcut. The media pool lives in the video editor's own
+rail.
+
+**My Projects** is one list of both kinds — repositories and saved video
+projects, newest first, with the current root marked. The gateway classifies
+each directory from the marker file on every read, so the glyph is what the
+folder is right now rather than what it was when it was last opened. Clicking
+one opens it *by its kind*: a repository rebinds the workspace root every
+workspace and terminal route reads, and a video project loads into the editor
+without touching the root. The same list, capped at four, sits under the
+composer on the empty chat screen.
 
 ### Engines
 
@@ -214,8 +233,105 @@ that advertises the panel, so a name gets added only when someone decides to pay
 for it. `ffmpeg_process`'s `custom` operation, which takes a raw filtergraph,
 is reachable from the panel's own chat and is **not** advertised over MCP.
 
-**Media is a sidebar tab, and importing from it is a grant.** A file you pick or
-drop is a human gesture, so it grants that file and its containing folder for the
+**The layout is a function of the panel's width.** The pane measures itself and
+resolves a tier (`xs` < 460 · `sm` 460–639 · `md` 640–899 · `lg` ≥ 900), then
+spends the width it actually has: at `lg` the media library, the program monitor
+and the inspector are three columns; at `md` the library visits as an overlay;
+below 576px both visit, and on the tightest tier the inspector arrives as a
+bottom sheet so the monitor keeps the room. Nothing is removed at any width —
+the 12 timeline tools that exist at 1200px all exist at 400px, folding into an
+overflow menu that carries their labels and shortcuts. The alignment shelf that
+floats over the stage follows the same rule: it is eight icons rather than
+fourteen, with the four *transform* actions on it — both flips, fit-to-frame and
+reset — behind a single `⋯`. Labels on the bar appear
+at `lg` only; the controls themselves get *larger* at `xs`, not smaller. A drag
+handle between the monitor and the timeline sets the split (arrow keys move it,
+double-click resets it).
+
+**The panel expands to the edge, and the inspector can always be put away.** The
+tab strip's expand button runs the editor out to the vertical tab rail —
+`--panel-w-expanded` is `calc(100vw - var(--shell-left-inset))`, not the flat
+736px it was — and while expanded the conversation is hidden rather than crushed,
+staying mounted. Dragged short of that, the chat keeps a 420px floor. `Edit` is
+drawn at every tier, and only the mechanism behind it changes: where the
+inspector is seated it minimises that column, where the inspector is summoned it
+opens the overlay. One control, so there is no width at which the 296px rail
+cannot be given back to the picture.
+
+**A project is a directory**, and saving is a File-menu command. `⌥⌘S` writes
+`project.json` — settings, tracks, markers and the media pool — into a folder
+you name once and it reuses after that; `⌥⌘O` opens one back. `⌥` and not `⇧`
+because `⇧⌘S` and `⇧⌘O` are already the side chat and Codex, and a menu
+accelerator silently takes the key away from the page. The commands live in the
+native File menu for the recorder's reason: it owns its accelerator whatever
+has focus, and this panel hands focus to a canvas, a timeline and a row of
+numeric fields. `⌥⌘E` exports the sequence to a file, from the same menu.
+
+Two limits are in the format rather than discovered later. **A saved project is
+machine-local** — clips reference media by absolute `file://` path and nothing
+copies the bytes, so the folder moved to another machine opens with its clips
+pointing at nothing. And **a take recorded in a browser tab cannot be saved at
+all**: its `blob:` URL dies with the page, so the save refuses by name instead
+of writing a file that is already broken. A successful save or open records the
+folder in My Projects without rebinding the workspace root.
+
+**The camera is choreographed, not parked.** Three things move the inset
+after a take, all of them keyframes on the camera clip rather than anything
+baked into a picture: it is cut to a **shape** (the whole frame, a rounded
+one, a square, or a circle — a circle squeezes the mask on one axis, because
+an ellipse over a 16:9 layer is an oval); it **dodges**, crossing to the other
+side of the frame when the pointer settles under it and coming back when the
+pointer leaves; and it **takes the whole frame while you are explaining**.
+
+That last one used to need a transcript, which is why it was absent. It does
+not: the question is not "is there speech here" but "is the screen still the
+subject", and the hands answer that better than the words do. Presenting
+drives the interface — clicks, scrolls, a pointer going somewhere. Explaining
+lets go of it. So the takeover is placed on input silence over a live
+microphone, and the microphone is the half that keeps it honest — quiet hands
+with no narration is someone who walked away, and a take whose camera has no
+audio gets no takeover at all. It is bounded to match the weaker evidence: no
+stretch past 12s, never more than 35% of the take, never the closing seconds.
+See `src/video/engine/cameraChoreography.ts`; the numbers are tested against
+the cases that break them in `tests/camera-choreography.test.mjs`.
+
+A take recorded without a webcam skips all of it, and so does one where the
+camera is switched off before the build.
+
+**The build is chosen on the review screen, not in setup.** The rail beside the
+take carries the arguments to the assemble — the **backdrop** (nine, drawn as
+swatches painting their own gradient, one of which is None), **how the zoom
+moves** (Glide, Cut, Ease, or None, which is no zooms at all), whether to
+**include the camera**, the camera's **shape**, and the two choreography
+switches above. They are asked here rather than before recording because none
+of them touch the files: a backdrop you did not want costs one rebuild, where a
+wrong frame rate costs the take. Every list is exported by the engine module
+that honours it, so a new preset arrives in the picker with its own label.
+
+A take with no webcam is not shown four dead camera controls — the group says
+there was no camera and stops. The full-frame switch is drawn disabled when the
+camera clip carries no sound, because that is the evidence the takeover runs
+on. The answers persist, so the next take opens with them already given.
+
+**The transport has keys**, and its play disc is centred on the picture rather
+than on what is left of the row. `Space` plays and pauses — and replays, when the
+playhead is parked at the end — `Home` / `End` jump to the in and out points,
+`←` / `→` step a frame (hold to scrub), `M` drops a marker, `I` sets or clears
+the in point, and `L` toggles loop. They are live only while the editor is the
+open panel, and never while you are typing in a field.
+
+**The media library lives in the editor.** It was a sidebar tab as well; that
+tab is gone, and the editor's rail is the only seat now — which is where you
+reach for a clip. It is the same component reading the same pool. The import
+gate is unaffected: its prompt is mounted by `App.tsx`, never by this panel
+(below).
+
+Right-click menus and toasts now render inside the panel. They had been pushed
+to `uiStore` since the port with nothing subscribed, so every track and clip
+context menu was dead and beat detection reported its result to no one.
+
+**Importing is a grant.** A file you pick or drop in the editor's media rail is
+a human gesture, so it grants that file and its containing folder for the
 session. Anything else — a path an agent names — raises an approval prompt that
 shows the *resolved* path and offers: allow this file · allow this folder for the
 session · deny. Nothing is persisted, and there is no "always allow".
@@ -229,6 +345,102 @@ is one audit line naming the tool, the agent, the resolved path and *which* gran
 satisfied it.
 
 Design and reasoning: [`src/video/P3-import-gate.md`](src/video/P3-import-gate.md).
+
+### Screen recording
+
+A **dialog**, not a workspace panel — see the panel table above for why.
+Reachable two ways: **File → Record Screen…** and the **Record Screen** pill on
+the empty-chat screen. There is no tab and no add-panel entry.
+
+`⇧⌘8` is the File menu item's own accelerator, and it is the only binding: a
+native menu accelerator fires whatever has focus — a terminal, a webview, a
+text field — where a renderer key handler would be swallowed by all three.
+Both entry points are idempotent, because pressing the accelerator twice must
+not remount a recorder that is holding a running take
+(`src/store/recorderDialogStore.ts`).
+
+Dismissing the dialog mid-take does not abandon the take:
+`recorderStore.close()` refuses while recording, and the floating bar — its own
+`BrowserWindow`, fed by `recorder:publishState` — is what stops it while the
+main window is hidden.
+
+Recording is split across the process boundary because it has to be. A renderer
+is the only place a `MediaStream` can live, and main is the only place the four
+things a `MediaRecorder` cannot reach can live:
+
+| in main (`electron/screenRecorder.cjs`) | why it cannot be in the renderer |
+| --- | --- |
+| `desktopCapturer.getSources` | the renderer is handed ids, and can never ask for a source that was not offered |
+| chunk-to-disk writing | a twenty-minute take held as a renderer blob is a gigabyte of heap, copied again on read |
+| the cursor track, 30Hz | `screen.getCursorScreenPoint()` is main-only, and is the only cursor position in Electron |
+| the floating control bar | its own window, `setContentProtection(true)`, so it is not *in* the recording it controls |
+
+The cursor track is **not a click stream** — nothing in Electron reports a mouse
+button pressed in another application. `electron/inputEvents.cjs` can see real
+clicks when its optional `uiohook-napi` binding is installed; that binding is
+deliberately **not** in this app's dependencies, so today the module reports
+`not-installed` and the recorder falls back to inferring attention from the
+track (travel, then stillness). The operator can also mark a moment by hand.
+
+Takes land in `~/Videos/Teminali Code Recordings/<timestamp>/`, mode 0700 —
+never in a temp directory, because losing a recording to a reboot would be
+indefensible. Each take is remuxed to MP4 before it reaches a timeline: a
+MediaRecorder file carries no duration in its header and no cue index, so a
+`<video>` element reports `Infinity` and cannot seek. Stream copy is attempted
+only when the file **actually holds** an MP4-taggable codec, which is read off
+ffmpeg rather than trusted from the mime the renderer asked for
+(`electron/remuxPlan.cjs`).
+
+The sidecar — every cursor position and the timing of every keystroke — is
+sealed with AES-GCM (`electron/recorderVault.cjs`). The video is deliberately
+left in the clear: encrypting it would put the plaintext back on the same disk
+at every export and buy nothing. What sealing buys and what it cannot is written
+out in that file's header.
+
+Global shortcuts while a take runs: `⌥⇧R` stop · `⌥⇧P` pause · `⌥⇧Z` mark.
+These take the key away from every app on the machine for the length of the
+recording, which is why they are `⌥⇧` rather than anything a person presses by
+accident.
+
+The renderer half is `src/video/engine/screenCapture.ts` (the capture engine),
+`src/video/store/recorderStore.ts` (phases, sticky settings, the fault
+watchdog), `src/video/components/recorder/` (the recorder surface, source grid
+and capture options) mounted through
+`src/components/modals/RecorderModal.tsx`, and
+`src/components/recorder/RecorderBar.tsx` — the floating bar, which is its own
+window and so lives outside `src/video/`, loaded from this same bundle at
+`?window=recorder-bar`.
+
+`src/video/engine/recordingProject.ts` turns a finished take into a project.
+**Open on the timeline** in the review builds it in one undoable step, and what
+that build contains is a matter of the six **Auto edit** switches on the capture
+rail. All of them are on out of the box (`TUTORIAL_ASSEMBLE`); turn all six off
+and you get `RAW_ASSEMBLE` — screen, camera and narration as separate clips on
+their own tracks, sized and cornered by `pictureInPicture.ts`, nothing
+interpreted.
+
+| Switch | What it adds | Engine |
+| --- | --- | --- |
+| Push in on what you click | Zoom moments detected from real clicks, scrolls, keystrokes and marks, keyframed onto the screen clip | `cursorZoom.ts` |
+| Draw the pointer | A shape layer following the cursor track, mapped through the zoom's own transform | `cursorLayer.ts` |
+| Blur the zoom moves | `motionBlur` on the screen clip, and only when zooms were placed | — |
+| Cinematic frame | Backdrop track, the picture inset and rounded on it, fades in and out | `cinematicLook.ts` |
+| Click ticks and whooshes | Ticks and whooshes rendered offline into the take folder, on their own audio track | `sfxEngine.ts`, `recordingSound.ts` |
+| Mark every moment | A timeline marker wherever a zoom was placed | — |
+
+`assembleRecording` is `async` for one reason: the sound is rendered and written
+to disk before the store transaction opens. With that switch off, nothing in the
+build awaits anything.
+
+**Not yet ported from the Cut:** everything decided from the WORDS. The camera
+taking the whole frame during a spoken pause, opening on the face for an
+introduction, and both caption tracks are all read out of a TRANSCRIPT, and this
+app ships no speech model — `Take.transcript` exists and nothing fills it. Those
+are not options that would behave conservatively without one; the Cut's
+`alignToSpeech` returns null on an empty transcript, so `cameraOnPauses` would
+find nothing every time. They are absent from `AssembleOptions` rather than
+present and pinned to `false`, and Tutorial skill and Go live are absent from the
+capture rail rather than shown and inert.
 
 ### File ingestion
 
@@ -246,6 +458,14 @@ against the public Releases API with no credential. Installs are **full asset
 replacement** — the app is ad-hoc signed, so Squirrel-style in-place updating is
 not available, and macOS clears Screen Recording / Accessibility / Microphone on
 every update.
+
+The running version is shown bottom-right and is itself the control: it opens
+update, check and **rollback**. `/api/updates/releases` lists recent releases
+with the artifact this machine could install and marks each one against the
+running build, so the menu can offer the one release below it — a single step
+back, which is where a regression introduced by an update lives. A rollback is
+confirmed before it runs, downloads that release's own asset and installs it the
+same way an update is installed. There is no update banner.
 
 ---
 
@@ -298,7 +518,7 @@ ollama serve              # local models on 127.0.0.1:11434
 
 ```bash
 npm run typecheck   # tsc --noEmit
-npm test            # 591 tests, 0 failures
+npm test            # 828 tests, 0 failures
 npm run build       # tsc && vite build
 npm run verify:core # all three
 ```
@@ -360,6 +580,13 @@ extending it, so omitting it drops the runner from macOS builds alone.
 to start the gateway. `electron/main.cjs` now starts it in-process — the gateway
 is ESM inside an asar, which Node can import but cannot execute as a script.
 
+Two top-level directories ship as `extraResources` because `server/` imports
+them from outside this package: `gateway/` (the runner) and `licence/` (the
+licence format and the plan registry). `licence/` holds only the verifying
+half — `billing/`, which signs licences and talks to the payment rails, is a
+separately deployed service and is never packaged, so no build of this app
+carries the code that mints entitlements.
+
 It prefers port 4310 and falls back to an ephemeral port rather than dying on
 `EADDRINUSE` when a development gateway already holds it; the renderer is told
 the address either way.
@@ -395,8 +622,173 @@ Everything is optional; every default is loopback.
 | `TEMINALI_RELEASE_REPO` | `teminali/teminalicode` |
 | `TEMINALI_RUNTIME_MODE` | `local` (or `api`) |
 | `FRONTIER_AUDIT_PATH` | `benchmark-results/gateway-audit.jsonl`; `userData/gateway/` in a packaged app |
+| `TEMINALI_LICENCE_STORE` | `benchmark-results/licence.json` (written `0600`) |
+| `TEMINALI_BILLING_URL` | unset — no billing service, so the app runs as free |
+| `TEMINALI_LICENCE_PUBLIC_KEYS` | unset — JSON `{"kid": "<PEM>"}`, staging and tests only |
+| `FFMPEG_PATH` | unset — an explicit ffmpeg binary, tried before every search location |
 
 Non-loopback values are rejected at startup rather than accepted and ignored.
+
+### Finding ffmpeg
+
+The recorder's remux and the media tools need an ffmpeg, and `findFfmpeg` in
+`electron/mediaAccess.cjs` is the one place that looks for it. It tries
+`FFMPEG_PATH`, then the install directories the platform's package managers
+actually use — Homebrew (Apple silicon and Intel), MacPorts and `/usr/bin` on
+macOS; `C:\ffmpeg\bin`, `%ProgramFiles%`, Chocolatey, Scoop and winget's Links
+directory on Windows; the usual `bin` directories plus `/snap/bin` on Linux —
+and only then walks `PATH`.
+
+`PATH` is searched **last**, which is the opposite of what a shell does, for the
+reason the list exists at all: a GUI app does not inherit the shell's `PATH`. On
+macOS it gets launchd's, which has no `/opt/homebrew/bin`; on Windows it gets
+whatever Explorer started with, so an ffmpeg installed since the last sign-in is
+invisible. The fixed list is ordered by preference, and putting `PATH` first
+would let an arbitrary earlier entry outrank a deliberate one.
+
+`ffmpegInstallHint()` names the package manager the operator is actually likely
+to have (`brew`, `winget`, `apt`), because sending a Windows operator to
+Homebrew is worse than saying nothing.
+
+### Exporting video
+
+The Export button sits in the program monitor's header, beside the fullscreen
+control, and **File → Export Video…** (`⌥⌘E`) opens the same dialog. It offers
+three presets (YouTube, TikTok / Reels, Master), a resolution — the preset
+names the SHORT edge, so 1080p on a vertical sequence is 1080 wide — a codec
+(H.264, HEVC, ProRes), a GPU-encoder switch, and a range toggle that appears
+only when the timeline has an in or out point. The save dialog is the OS one,
+so it owns the overwrite question; declining to choose puts the file in the
+Videos folder.
+
+`src/video/engine/exportPipeline.ts` drives it, and does two things the
+window-shaped editor this was ported from does not have to:
+
+- **The preview stands down.** `seekVideosForFrame` parks the same `<video>`
+  elements the program monitor draws from, so `useProgramLoop` yields while
+  `isExporting` is set, exactly as it yields to the fullscreen player. Two
+  callers and the file holds whichever wrote last.
+- **The loop yields to paint.** It spends at most 12ms between frames before
+  handing the thread back through `requestAnimationFrame`, raced against a
+  60ms timer because a minimised or occluded window stops animating. A render
+  that froze the thread would freeze the terminal and the agent beside it, not
+  just the editor — the editor is a panel in this app, not the app.
+
+Preflight refuses two things outright rather than encoding them: media that
+tainted the canvas (`toBlob` throws several thousand frames in) and sources
+that will not decode, which the compositor draws as a grey gradient that would
+land in the file looking like a deliberate shot.
+
+`src/video/engine/exportPlan.ts` holds the arithmetic — output size, the
+render window, the audio collection with its solo, mute and range rules — with
+type-only imports, so `tests/video-export-driver.test.mjs` runs it under plain
+`node --test`. The solo gate is `audioEngine`'s and not the compositor's:
+solo is counted over audio tracks and then applied to every track, so soloing
+a narration track silences a screen recording's own audio in the export as it
+does on playback.
+
+Progress, cancellation and the dialog all live in `useProjectStore`, so an
+export an agent started shows in the same dialog, with the same working Cancel
+button, as one a person started. Hiding the dialog does not stop the render;
+the header button keeps the percentage while it runs.
+
+When it finishes, the dialog says so and stays: a tick, the full path, and
+**Show in Finder** (**Show in Explorer** on Windows, **Show in folder**
+elsewhere), with *Export again* to return to the form. The same button rides
+the finish toast, for the case where the dialog was hidden. Both reveal
+through `videoProject:reveal`. Because the result is read from the store, an
+export an agent ran — or one that finished while the dialog was closed — ends
+on the same screen.
+
+`electron/videoExport.cjs` keeps one ffmpeg per export with `image2pipe` on
+its stdin. The renderer draws each frame to an off-DOM canvas and sends it as
+one complete JPEG — `image2pipe` finds frame boundaries by scanning for JPEG
+markers, so a partial write corrupts the stream from that point on.
+
+| Channel | Does |
+| --- | --- |
+| `export:choose` | The OS save dialog, which owns the overwrite question |
+| `export:start` | Opens a session; returns `{sessionId}` or `{error}` |
+| `export:frame` | Writes one JPEG; waits only when the pipe is full |
+| `export:material` | Writes `blob:`/`data:` bytes into the session's temp dir |
+| `export:finish` | Mixes audio, muxes, returns where the file went |
+| `export:cancel` | Kills ffmpeg and removes the temp directory |
+
+`export:material` is not an edge case: a take opened straight from the
+recorder is made of `blob:` URLs, which exist only in the renderer's memory
+and which ffmpeg cannot open. The copies go in the session's own working
+directory, so `finish` and `cancel` already delete them.
+
+Audio never goes down the frame pipe. `export:finish` mixes it in a second
+ffmpeg pass straight from the source files, so audio already on disk is not
+re-encoded through a canvas. Sources are probed first: one unreadable URL
+would otherwise fail the whole filtergraph and ship a silent file with nothing
+to say about why, so `finish` returns a per-clip `audio` report instead.
+
+The mux caps `-t` at the video's own duration and never uses `-shortest`,
+which cuts to the shortest *input* — a short music bed once truncated a
+16-second sequence to 5.5 seconds.
+
+`electron/exportFilters.cjs` holds the pure argv and filtergraph builders,
+separately from anything that spawns a process, so `tests/video-export.test.mjs`
+can assert the strings without a binary. Hardware encoders are chosen by
+`electron/hardwareEncoder.cjs` (VideoToolbox on macOS, NVENC/QSV/AMF on
+Windows) and are given a bitrate rather than a CRF, which means nothing to
+them.
+
+### The Pro entitlement
+
+`TEMINALI_BILLING_URL` being unset is the ordinary state for a development
+checkout, and it resolves to the **free** plan rather than to an error. Free
+carries the local lanes — Flash, Max and the built-in voice — so a machine that
+has never seen a billing service is a working editor, not a locked one.
+
+Pro carries two capabilities, and they behave differently on purpose:
+
+| Capability | What it unlocks | Without it |
+| --- | --- | --- |
+| `frontier.escalation` | Frontier Auto's escalation to Claude Sonnet, and the `claude-sonnet` / `claude-opus` profiles | **Refused.** `POST /api/frontier/resolve-mode` answers `402 PLAN_UPGRADE_REQUIRED` with the capability and plan in `details` |
+| `voice.vibevoice` | The VibeVoice sidecar tier for speech | **Downgraded.** The voice routes serve the built-in engines instead and report `gated: "voice.vibevoice"` in `/api/voice/status` |
+
+The difference is the cost, not the policy. Escalation spends money per turn
+against a hosted API and has no local substitute, so a free caller is refused.
+The sidecar runs on the user's own machine and whisper.cpp plus the system
+voices sit underneath it, so a free caller is served the ordinary tier rather
+than losing their microphone. `frontier.max` stays free for the same economic
+reason the local lanes do: it burns the user's own electricity.
+
+Sign-in is a device-code flow — a desktop app has no redirect URI worth
+trusting. `POST /api/entitlement/sign-in` returns a code to type on another
+device, `POST /api/entitlement/sign-in/poll` waits for it to be claimed, and
+`GET /api/entitlement` reports the current plan together with the capability
+catalogue the upgrade screen renders from.
+
+All of that surfaces in the **Usage panel**, above the agent-CLI plan headroom
+and labelled apart from it: the two answer different questions, and a reader
+who conflates them would think upgrading here raised a Claude Code limit. The
+section lists every capability with a tick or a lock, offers sign-in when there
+is no session, and offers the price list when — and only when — some plan on
+sale carries a capability this licence lacks. That test is on capabilities, not
+on the plan name, so adding a tier needs no edit to the component. A card price
+opens Stripe in a browser; a mobile-money price takes a phone number, pushes a
+prompt to the handset and polls the order until it settles, then refreshes the
+licence itself. A build with no `TEMINALI_BILLING_URL` shows the capability
+list and says so, rather than offering a button that cannot work.
+
+The licence is an Ed25519 token verified locally against a key baked into the
+build, so Pro survives with no network: it is refreshed well before expiry, and
+honoured for a grace window past expiry (`licence/format.js` — 7-day token,
+14-day grace). Past grace it silently becomes free. The plan/capability
+registry is `licence/entitlements.js`, and adding a capability to a plan is an
+edit to that one file.
+
+The service on the other end is [`billing/`](../billing/README.md) — a
+Cloudflare Worker with a D1 database, deployed separately and never packaged.
+It runs the device flow, takes money on two rails (Stripe for cards, Lipia for
+mobile money) and signs the licence. It is not deployed yet, and until its
+public key is pasted into `BAKED_PUBLIC_KEYS` in `server/licence.js` — still
+empty in this checkout — no build honours any licence and every machine
+resolves to free.
 
 ## Further reading
 
@@ -409,6 +801,8 @@ Non-loopback values are rejected at startup rather than accepted and ignored.
 - [`docs/VOICE_SIDECAR.md`](docs/VOICE_SIDECAR.md) — the VibeVoice contract.
 - [`src/video/P3-import-gate.md`](src/video/P3-import-gate.md) — what the media
   approval gate grants, and why reading a path is the capability it guards.
+- [`../billing/README.md`](../billing/README.md) — the billing Worker: routes,
+  the two payment rails, and how to stand one up.
 
 ## Licence
 

@@ -18,10 +18,18 @@ export interface WorkspaceFileResponse {
   modified: string;
 }
 
+export type ProjectKind = "code" | "video";
+
 export interface ProjectEntry {
   path: string;
   name: string;
   openedAt?: string;
+  /**
+   * Classified by the gateway from the marker file on disk, not stored by the
+   * client. A directory is `"video"` when it holds a `project.json` carrying
+   * `teminali-video-project`; everything else is `"code"`.
+   */
+  kind?: ProjectKind;
 }
 
 export interface ProjectsResponse {
@@ -46,6 +54,24 @@ export class WorkspaceService {
     });
     await GatewayClient.expectOk(response);
     return (await response.json()) as ProjectsResponse;
+  }
+
+  /**
+   * Records a project as recently opened WITHOUT rebinding the workspace root.
+   *
+   * The route a video project uses. `openProject` switches the root every
+   * workspace and terminal route is bounded to, which is right for a code
+   * project and wrong for a timeline — opening one must not repoint the file
+   * tree and the terminals at the folder that holds it.
+   */
+  static async rememberProject(path: string, signal?: AbortSignal): Promise<{ recent: ProjectEntry[] }> {
+    const response = await GatewayClient.request("/api/workspace/projects/remember", {
+      method: "POST",
+      signal,
+      body: JSON.stringify({ path }),
+    });
+    await GatewayClient.expectOk(response);
+    return (await response.json()) as { recent: ProjectEntry[] };
   }
 
   static async forgetProject(path: string, signal?: AbortSignal): Promise<{ recent: ProjectEntry[] }> {

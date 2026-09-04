@@ -1,5 +1,9 @@
 import React, { useEffect, useState } from "react";
 
+import type { RecorderBridge } from "../../types/recorder";
+import type { VideoProjectsBridge } from "../../types/videoProjects";
+import type { ExporterBridge } from "../../types/exporter";
+
 interface TeminaliBridge {
   isElectron: boolean;
   platform: string;
@@ -22,6 +26,25 @@ interface TeminaliBridge {
     install: (filePath: string) => Promise<{ ok: boolean; reason?: string }>;
     restart: () => Promise<boolean>;
   };
+  /**
+   * Screen recording. Optional for the same reason as the assistant: a
+   * browser build has no bridge, and the recorder falls back to
+   * `getDisplayMedia` rather than pretending the source grid, the
+   * floating bar and the global shortcuts exist.
+   */
+  recorder?: RecorderBridge;
+  /**
+   * Saving and opening a video project. Optional for the same reason as the
+   * recorder: a browser build has no folder dialog and cannot write outside
+   * the page, so the editor offers no save there rather than one that fails.
+   */
+  videoProjects?: VideoProjectsBridge;
+  /**
+   * Rendering the sequence to a file. Optional for the same reason again: a
+   * browser has no ffmpeg and nowhere to write, so the editor offers no
+   * Export button there rather than one that opens a dialog and fails.
+   */
+  exporter?: ExporterBridge;
   /**
    * The screen assistant. Optional because a browser build has no bridge at
    * all, and the assistant degrades to the in-window panel rather than

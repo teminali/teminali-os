@@ -39,6 +39,8 @@ export const UPDATE_LIMITS = Object.freeze({
   maxAssetBytes: 600 * 1024 * 1024,
   /** Downloaded installers kept before the oldest is swept. */
   maxKeptDownloads: 2,
+  /** Releases read when the version menu asks what it could go back to. */
+  releasePageSize: 10,
 });
 
 /** Where a downloaded installer lands. Fixed, so the open route can verify it. */
@@ -197,6 +199,85 @@ export async function checkForUpdate({
       error: error?.name === "TimeoutError"
         ? "GitHub did not answer in time."
         : "GitHub could not be reached.",
+    });
+  }
+}
+
+/**
+ * Every published release, newest first, each with the file this machine could
+ * install — which is what makes going *backwards* possible.
+ *
+ * The check above asks GitHub for `releases/latest` and answers one question:
+ * are you behind. That is the wrong shape for a rollback, because the version
+ * somebody wants after a bad update is by definition not the latest one. This
+ * reads the release list instead and marks each entry relative to the running
+ * build, so the renderer never has to carry a second copy of the semver rules.
+ *
+ * When the running version cannot be read, `compareVersions` answers 0 for
+ * everything and no release is marked `older` — so the menu offers no rollback
+ * rather than offering to install something over an unknown build. That is the
+ * failure worth having.
+ *
+ * Like the check, it never throws: "GitHub could not be reached" is an answer.
+ */
+export async function listReleases({
+  appRoot,
+  repo,
+  platform = process.platform,
+  arch = process.arch,
+  fetchImpl = globalThis.fetch,
+} = {}) {
+  const version = await currentVersion(appRoot);
+  const answer = (extra) => ({
+    version,
+    releases: [],
+    checkedAt: new Date().toISOString(),
+    error: null,
+    ...extra,
+  });
+
+  try {
+    const response = await fetchImpl(
+      `https://api.github.com/repos/${repo}/releases?per_page=${UPDATE_LIMITS.releasePageSize}`,
+      {
+        headers: { accept: "application/vnd.github+json", "user-agent": "teminali-code-updater" },
+        signal: AbortSignal.timeout(UPDATE_LIMITS.checkTimeoutMs),
+      },
+    );
+
+    if (response.status === 404) return answer({ error: "This repository has no releases yet." });
+    if (response.status === 403) return answer({ error: "GitHub is rate-limiting update checks. Try again shortly." });
+    if (!response.ok) return answer({ error: `GitHub answered ${response.status}.` });
+
+    const body = await response.json();
+    const releases = (Array.isArray(body) ? body : [])
+      .filter((release) => !release?.draft && parseVersion(release?.tag_name))
+      .map((release) => {
+        const asset = assetForPlatform(release.assets, { platform, arch });
+        // Against the running build: 0 is this one, below 0 is somewhere to go
+        // back to, above 0 is an update and has its own route.
+        const order = compareVersions(release.tag_name, version);
+        return {
+          tag: release.tag_name,
+          version: String(release.tag_name).trim().replace(/^v/, ""),
+          name: release.name ?? release.tag_name,
+          publishedAt: release.published_at ?? null,
+          url: release.html_url ?? null,
+          prerelease: Boolean(release.prerelease),
+          asset: asset ? normaliseAsset(asset) : null,
+          current: order === 0,
+          older: order < 0,
+        };
+      })
+      // GitHub orders by publication date, which is the order they were cut and
+      // not always the order they are numbered — a patch to an old line can be
+      // published after a newer minor.
+      .sort((a, b) => compareVersions(b.tag, a.tag));
+
+    return answer({ releases });
+  } catch (error) {
+    return answer({
+      error: error?.name === "TimeoutError" ? "GitHub did not answer in time." : "GitHub could not be reached.",
     });
   }
 }

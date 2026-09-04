@@ -5,11 +5,11 @@ import { WorkspaceService } from "../../services/workspaceService";
 import { GlobalSearchView } from "../search/GlobalSearchView";
 import { EmptyState, IconButton, Input, SectionLabel } from "../ui";
 import { FileTreeItem } from "./FileTree";
+import { ProjectsPanel } from "./ProjectsPanel";
 import { StudioSidebar } from "./StudioSidebar";
 import { SidebarFooter } from "./SidebarFooter";
 import type { UseUpdatesResult } from "../../hooks/useUpdates";
 import type { SpecialistSkill } from "../../types";
-import { MediaPanel } from "./MediaPanel";
 import type { SidebarTabId } from "./ActivityBar";
 
 /**
@@ -23,7 +23,8 @@ import type { SidebarTabId } from "./ActivityBar";
  *
  * Each tab is a view that already existed somewhere in the shell; this file
  * does not re-implement any of them, it only decides which one is on screen.
- * `media` is the exception and the reason for the change — see `MediaPanel`.
+ * Media is no longer among them: its pool is the video editor's own rail now,
+ * and the approval gate never depended on this panel — see `ActivityBar`.
  */
 
 /* ── Shared panel head ────────────────────────────────────────────────────── */
@@ -53,6 +54,7 @@ const ViewHost: React.FC<{ children: React.ReactNode }> = ({ children }) => (
 
 const ExplorerPanel: React.FC = () => {
   const { files, setFiles } = useStudioStore();
+  const workspacePath = useStudioStore((state) => state.workspacePath);
   const [rootName, setRootName] = useState("workspace");
   const [filter, setFilter] = useState("");
   const [error, setError] = useState("");
@@ -80,11 +82,15 @@ const ExplorerPanel: React.FC = () => {
     [setFiles],
   );
 
+  // `workspacePath` is a dependency and not decoration: the tree route reads
+  // whatever root the gateway is bound to, so opening a project from My
+  // Projects changes what `listFiles` returns without changing this component.
+  // Without it the Explorer keeps drawing the previous repository.
   useEffect(() => {
     const controller = new AbortController();
     void refresh(controller.signal);
     return () => controller.abort();
-  }, [refresh]);
+  }, [refresh, workspacePath]);
 
   const visibleFiles = useMemo(() => {
     const query = filter.trim().toLowerCase();
@@ -258,10 +264,10 @@ export const Sidebar: React.FC<SidebarProps> = ({
             <GlobalSearchView />
           </ViewHost>
         );
+      case "projects":
+        return <ProjectsPanel />;
       case "skills":
         return <SkillsPanel />;
-      case "media":
-        return <MediaPanel />;
       case "chats":
       default:
         return <StudioSidebar activeView={activeView} />;

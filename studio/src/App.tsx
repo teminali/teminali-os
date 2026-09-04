@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useState } from "react";
 import { MacCloseButton } from "./components/ui";
 import { StudioTitleBar } from "./components/layout/StudioTitleBar";
 import { SidebarDock } from "./components/sidebar/SidebarDock";
+import { ACTIVITY_BAR_WIDTH } from "./components/sidebar/ActivityBar";
 import type { SidebarTabId } from "./components/sidebar/ActivityBar";
 import { StudioChat } from "./components/chat/StudioChat";
 import { WorkspacePanel } from "./components/workspace/WorkspacePanel";
@@ -9,6 +10,8 @@ import { CursorSettingsModal } from "./components/modals/CursorSettingsModal";
 import { CommandPaletteModal } from "./components/modals/CommandPaletteModal";
 import { SkillsModal } from "./components/modals/SkillsModal";
 import { MediaConsentModal } from "./components/modals/MediaConsentModal";
+import { RecorderModal } from "./components/modals/RecorderModal";
+import { useRecorderDialogStore } from "./store/recorderDialogStore";
 import { DiffInspectorModal } from "./components/diff/DiffInspectorModal";
 import { BenchmarkGapAnalyzer } from "./components/benchmark/BenchmarkGapAnalyzer";
 import { CopilotLiveEditController } from "./components/editor/CopilotLiveEditController";
@@ -17,9 +20,12 @@ import { AssistantProvider } from "./components/assistant/AssistantContext";
 import { useAssistant } from "./hooks/useAssistant";
 import { useUpdates } from "./hooks/useUpdates";
 import { UpdateModal } from "./components/updates/UpdateModal";
+import { VersionControl } from "./components/updates/VersionControl";
 import { GitHubModal } from "./components/github/GitHubModal";
 import { useStudioStore } from "./store/studioStore";
 import { usePanelStore } from "./store/panelStore";
+import { openVideoProject, saveVideoProject } from "./video/project/io";
+import { useProjectStore } from "./video/store/projectStore";
 
 /**
  * The studio shell.
@@ -71,6 +77,7 @@ export default function App() {
   } = useStudioStore();
 
   const { open: openPanel, focusOrOpen, toggleOpen: togglePanels } = usePanelStore();
+  const openRecorder = useRecorderDialogStore((state) => state.open);
 
   /**
    * The one screen assistant.
@@ -96,6 +103,19 @@ export default function App() {
   useEffect(() => {
     localStorage.setItem(SIDEBAR_WIDTH_KEY, String(sidebarWidth));
   }, [sidebarWidth]);
+
+  /* ── Where the shell's content actually starts ────────────────────────────
+     The rail and the sidebar are the only things left of the conversation, and
+     three separate places need to know how wide they add up to: the stylesheet
+     (a fully expanded panel reaches the sidebar's edge, not an arbitrary
+     736px), the panel store (a drag may not squeeze the chat below its
+     minimum), and the title bar (its tab strip lines up with the panel). It is
+     published once, on the document element so plain CSS and the store can
+     both read it, rather than being derived three times and drifting. */
+  useEffect(() => {
+    const inset = ACTIVITY_BAR_WIDTH + (sidebarCollapsed ? 0 : sidebarWidth);
+    document.documentElement.style.setProperty("--shell-left-inset", `${inset}px`);
+  }, [sidebarWidth, sidebarCollapsed]);
 
   useEffect(() => {
     localStorage.setItem(SIDEBAR_COLLAPSED_KEY, String(sidebarCollapsed));
@@ -233,6 +253,45 @@ export default function App() {
     return bridge.menu.on("menu:open-guardian", () => focusOrOpen({ kind: "guardian" }));
   }, [focusOrOpen]);
 
+  // "Record Screen…" (⇧⌘8) only asks for the dialog; the take is started by a
+  // person choosing a source. `open` is idempotent, because the accelerator
+  // fires whatever has focus and pressing it twice must not remount a
+  // recorder that is already holding a running take.
+  useEffect(() => {
+    const bridge = window.teminali;
+    if (!bridge) return;
+    return bridge.menu.on("menu:record-screen", () => openRecorder());
+  }, [openRecorder]);
+
+  // "Open Video Project…" (⌥⌘O) and "Save Video Project…" (⌥⌘S).
+  //
+  // The panel is focused BEFORE the verb runs, and not as a courtesy: both
+  // report through the video editor's own toasts, which render inside
+  // `VideoPane`. A save refused for unsaveable media with the pane closed
+  // would be a silent failure.
+  useEffect(() => {
+    const bridge = window.teminali;
+    if (!bridge) return;
+    const run = (verb: () => Promise<void>) => {
+      focusOrOpen({ kind: "video" });
+      void verb();
+    };
+    const offOpen = bridge.menu.on("menu:open-video-project", () => run(openVideoProject));
+    const offSave = bridge.menu.on("menu:save-video-project", () => run(saveVideoProject));
+    /* "Export Video…" (⌥⌘E) opens the dialog rather than starting a render.
+       The menu cannot know whether the sequence has anything in it, and an
+       accelerator that spawns ffmpeg on a keypress is one nobody can undo. */
+    const offExport = bridge.menu.on("menu:export-video", () => {
+      focusOrOpen({ kind: "video" });
+      useProjectStore.getState().setExportModalOpen(true);
+    });
+    return () => {
+      offOpen();
+      offSave();
+      offExport();
+    };
+  }, [focusOrOpen]);
+
   /* ── Sidebar geometry ──────────────────────────────────────────────────── */
 
   const resizeSidebar = useCallback((delta: number) => {
@@ -309,6 +368,13 @@ export default function App() {
         </div>
       </div>
 
+      {/* ── Version, updates and rollback ───────────────────────────────
+          Bottom right, over everything and owned by nothing: the shell has no
+          status bar, and the question it answers — which build is this — is
+          asked from wherever you happen to be. It reads the same update check
+          the sidebar pill does, so the two can never disagree. */}
+      <VersionControl updates={updates} onOpenUpdate={() => setUpdateOpen(true)} />
+
       {/* ── Modal layer ─────────────────────────────────────────────────── */}
 
       <CursorSettingsModal isOpen={isSettingsOpen} onClose={() => setSettingsOpen(false)} />
@@ -325,6 +391,10 @@ export default function App() {
           module load and serves agent CLIs whether or not a video panel is
           open, so the question it asks has to have somewhere to be asked. */}
       <MediaConsentModal />
+      {/* App-level for the same reason as the consent gate: the File menu can
+          ask for it from anywhere, and there is no longer a panel to hang it
+          off. It renders nothing until asked. */}
+      <RecorderModal />
 
       {isBenchmarkModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4">

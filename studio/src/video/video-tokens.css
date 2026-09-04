@@ -97,6 +97,13 @@
   --sp-6: 20px;
   --sp-7: 24px;
 
+  /* ── The master meters' width ────────────────────────────────────
+     One number, because the transport bar carries a mirror of the meters
+     on its other side to keep the play disc under the centre of the
+     picture, and a mirror that is not the meters' width is an error the
+     size of the difference. Measured at 119px. */
+  --transport-meters-w: 119px;
+
   /* ── Control heights ────────────────────────────────────────────
      The editor's rows are denser than the shell's, and four of these
      are read directly out of the slice's TS (not just through

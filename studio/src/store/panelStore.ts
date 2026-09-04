@@ -2,10 +2,12 @@
  * Workspace panel model.
  *
  * The redesign replaces the old single-slot split view with a tab strip that
- * holds any number of panels of twelve kinds — terminal, browser, canvas, side
- * chat, file, guardian, the two agent CLIs, usage, benchmark, release (the
+ * holds any number of panels of twelve kinds — terminal, browser, canvas,
+ * side chat, file, guardian, the two agent CLIs, usage, benchmark, release (the
  * last of which the tab strip hides for non-administrators) and the video
- * editor. It lives in its
+ * editor. The screen recorder is NOT among them: it is a dialog, because it is
+ * something you do rather than somewhere you leave the app. See
+ * `recorderDialogStore`. It lives in its
  * own store rather than inside
  * studioStore because it is pure view state: which panels exist, which one is
  * showing, and how wide the strip is. None of it belongs in the chat/session
@@ -82,6 +84,43 @@ interface PanelState {
 
 const MIN_WIDTH = 320;
 const DEFAULT_WIDTH = 452;
+
+/**
+ * The widest the panel may be *right now*.
+ *
+ * The old clamp reserved 420px OF THE WINDOW for the chat and then let the
+ * sidebar spend 260 of it, so the conversation was squeezed to ~160px — the
+ * defect this replaces. The room the chat actually gets is the window minus
+ * the rail and sidebar, and both numbers are read from the shell rather than
+ * assumed, so the clamp follows the sidebar as it is dragged or collapsed.
+ *
+ * It is exported because a drag is not the only way a panel gets too wide: a
+ * width restored from a session on a wider window, and a window dragged
+ * narrower afterwards, both arrive without passing through `setWidth`.
+ */
+export function clampPanelWidth(width: number): number {
+  if (typeof window === "undefined") return width;
+  const css = getComputedStyle(document.documentElement);
+  const px = (name: string, fallback: number) => {
+    const value = parseFloat(css.getPropertyValue(name));
+    return Number.isFinite(value) ? value : fallback;
+  };
+
+  /* Where the conversation actually starts, and what sits between it and the
+     panel, are measured rather than derived. `--shell-left-inset` stops at the
+     sidebar's edge and so counts neither splitter, and those two 2px gutters
+     are exactly the amount by which a derived clamp still put the panel off
+     the screen. Before first paint — and while an expanded panel has the chat
+     hidden — there is nothing to measure, and the inset is the right answer. */
+  const chat = document.querySelector("[data-chat-column]")?.getBoundingClientRect();
+  const panel = document.querySelector("[data-workspace-panel]")?.getBoundingClientRect();
+  const laidOut = chat !== undefined && chat.width > 0;
+  const left = laidOut ? chat.left : px("--shell-left-inset", 260);
+  const gutter = laidOut && panel !== undefined ? Math.max(0, panel.left - chat.right) : 0;
+
+  const room = window.innerWidth - left - px("--chat-min-w", 420) - gutter;
+  return Math.max(MIN_WIDTH, Math.min(width, Math.max(MIN_WIDTH, room)));
+}
 
 let sequence = 0;
 function panelId(): string {
@@ -172,19 +211,43 @@ export const usePanelStore = create<PanelState>()(
 
       toggleExpanded: () => set((state) => ({ isExpanded: !state.isExpanded })),
 
-      setWidth: (width) =>
-        set(() => {
-          const available = typeof window !== "undefined" ? window.innerWidth : 1440;
-          // Always leave room for the chat column; a panel that eats the whole
-          // window is a bug, not a feature.
-          return { width: Math.max(MIN_WIDTH, Math.min(width, available - 420)) };
-        }),
+      /* A drag records an intent the operator could actually express, so it is
+         clamped on the way in. Everything else is clamped on the way out, by
+         `WorkspacePanel`, which leaves the chosen width intact in the store. */
+      setWidth: (width) => set(() => ({ width: clampPanelWidth(width) })),
 
       setAddMenuOpen: (open) => set({ isAddMenuOpen: open }),
     }),
     {
       name: "teminali-panels-v1",
       storage: createJSONStorage(() => localStorage),
+      /*
+        A stored session can hold a tab of a kind this build no longer has —
+        "recorder", now that the recorder is a dialog. Left alone it does not
+        crash: `WorkspacePanel` falls through to the file pane and the tab
+        strip draws a document glyph, so the operator gets a tab labelled
+        "Record Screen" that opens an empty file view. Dropping it is the
+        only honest answer, and it has to happen on the way OUT of storage
+        rather than in the reducers, because nothing ever calls a reducer
+        for a panel that was simply restored.
+      */
+      version: 2,
+      migrate: (persisted) => {
+        const state = persisted as { panels?: { id: string; kind: string }[]; activePanelId?: string | null };
+        if (!state?.panels) return state;
+        const panels = state.panels.filter((panel) => panel.kind !== "recorder");
+        const kept = new Set(panels.map((panel) => panel.id));
+        return {
+          ...state,
+          panels,
+          activePanelId:
+            state.activePanelId && kept.has(state.activePanelId)
+              ? state.activePanelId
+              : panels.length > 0
+                ? panels[panels.length - 1].id
+                : null,
+        };
+      },
       partialize: (state) => ({
         panels: state.panels,
         activePanelId: state.activePanelId,

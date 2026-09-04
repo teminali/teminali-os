@@ -36,6 +36,47 @@ export interface UsageSummary {
   engines: (UsageBucket & { id: string })[];
 }
 
+/**
+ * Plan headroom, as last reported by an agent CLI.
+ *
+ * Separate from the ledger above on purpose. The ledger is what this machine
+ * has spent; this is what the account has left, which only the provider knows.
+ * `observedAt` is load-bearing rather than decorative: these windows move only
+ * when a turn runs, so the panel has to say when the reading was taken instead
+ * of implying it is live.
+ */
+export interface PlanWindow {
+  /** `five_hour`, `seven_day`, or a model-scoped window the CLI reported. */
+  id: string;
+  /** 0–1, as the CLI reports it. */
+  utilization: number;
+  /** Unix seconds, or null when the CLI did not say. */
+  resetsAt: number | null;
+}
+
+export interface PlanLimits {
+  observedAt: string;
+  status: string | null;
+  isUsingOverage: boolean;
+  windows: PlanWindow[];
+}
+
+export interface PlanAccount {
+  loggedIn: boolean;
+  /** `claude.ai` is the only login with a plan behind it. */
+  authMethod: string | null;
+  email: string | null;
+  organization: string | null;
+  plan: string | null;
+  /** Whatever the CLI said when it could not answer in fields. */
+  detail: string | null;
+}
+
+export interface PlanSummary {
+  accounts: Partial<Record<"claude" | "codex", PlanAccount>>;
+  limits: Partial<Record<"claude" | "codex", PlanLimits>>;
+}
+
 export interface LocalTurnUsage {
   engine: string;
   model?: string | null;
@@ -55,6 +96,17 @@ export class UsageService {
       const response = await GatewayClient.request(`/api/usage?days=${days}`, { method: "GET", signal });
       if (!response.ok) return null;
       return (await response.json()) as UsageSummary;
+    } catch {
+      return null;
+    }
+  }
+
+  /** Who the agent CLIs are signed in as, and what is left of the plan. */
+  public static async plan(signal?: AbortSignal): Promise<PlanSummary | null> {
+    try {
+      const response = await GatewayClient.request("/api/plan", { method: "GET", signal });
+      if (!response.ok) return null;
+      return (await response.json()) as PlanSummary;
     } catch {
       return null;
     }

@@ -272,6 +272,39 @@ function normaliseClaude(event, state) {
     return out;
   }
 
+  /*
+    Plan headroom, free of charge.
+
+    The CLI reports the account's rate-limit windows on the same stream it
+    reports tokens on, so the studio learns how much of the plan is left
+    without asking for it — see server/plan.js for what is done with them and
+    for why Codex has no equivalent. Only a subscription login emits this: an
+    API-key turn has no plan behind it, so silence here is a fact about the
+    login rather than a parse failure.
+  */
+  if (event.type === "rate_limit_event") {
+    const info = event.rate_limit_info ?? {};
+    const unified = info.unifiedWindows && typeof info.unifiedWindows === "object" ? info.unifiedWindows : {};
+    const windows = Object.entries(unified)
+      // A window with no utilisation is a window the account does not have.
+      // Rendering it as 0% would claim the plan is untouched on that axis.
+      .filter(([, window]) => window && typeof window.utilization === "number")
+      .map(([id, window]) => ({
+        id,
+        utilization: window.utilization,
+        resetsAt: typeof window.resetsAt === "number" ? window.resetsAt : null,
+      }));
+    if (windows.length > 0) {
+      out.push({
+        type: "limits",
+        status: typeof info.status === "string" ? info.status : null,
+        isUsingOverage: Boolean(info.isUsingOverage),
+        windows,
+      });
+    }
+    return out;
+  }
+
   if (event.type === "result") {
     state.sessionId = event.session_id ?? state.sessionId;
     out.push({

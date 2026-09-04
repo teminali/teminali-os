@@ -174,20 +174,23 @@ The pre-redesign code is swept onto tokens by role, not by hue:
 ## 3. Shell architecture (`studio/src/`)
 
 ```
-StudioTitleBar    traffic lights · sidebar toggle · title · panel tab strip
+StudioTitleBar    traffic lights · sidebar toggle · title · IDE · Video Editor · panel tab strip
 ├── SidebarDock      ActivityBar (48px, always) + one 212px panel
 │   ├── ActivityBar    New Chat · SIDEBAR_TABS glyphs · Customize
 │   └── Sidebar        the selected view · SidebarFooter
 │       └── view       StudioSidebar (chats) · Explorer · GlobalSearchView
-│                      · Skills · MediaPanel
+│                      · Skills
 ├── StudioChat       empty state (brand mark) / transcript · Composer
 │                    (voice lives here) · AssistantHud
 └── WorkspacePanel   terminal · browser · canvas · side chat · file · guardian
                      · Claude Code · Codex · usage · benchmark · release
+                     · video editor
+RecorderModal        the screen recorder, app-level — a dialog, not a panel
 
 AssistantProvider    wraps the shell; one session, reachable from every composer
 AssistantBridge      renders nothing — keeps the tray, hotkey and overlay in step
 MediaConsentModal    the media approval gate's prompt; App.tsx's modal layer
+VersionControl       bottom-right, fixed: the running version, updates, rollback
 ```
 
 The **empty state carries the mark**: `BrandGlyph brand="teminali"` at 52px
@@ -205,11 +208,21 @@ true and it is still a cost. What was paid for it (`3ba5b55`) is width. Labelled
 rows priced the sidebar at 260px because the switch had to fit the word
 "Customize"; glyphs cost 48 and let the panel open at 212 — the same 260px of
 shell, with the labels' width handed back to whatever the panel is showing. Five
-destinations now fit the switch without wrapping, and the fifth is Media.
+destinations fit the switch without wrapping; Media was the fifth until it
+moved into the video editor's rail (below), and four fit with room to spare.
+
+**`IDE` and `Video Editor` sit together in the title bar's right group**, split
+by a 1px `bg-edge-strong` hairline —
+because they are the same verb — take this conversation somewhere it can be
+worked on. They differ in where they go, and say so: the IDE leaves for another
+application and wears the external-link arrow, the editor opens a panel here and
+wears that panel's own glyph and accelerator (`⇧⌘V`), and the rule is a divider
+rather than a label. It calls `focusOrOpen`, so
+pressing it twice focuses the editor already open rather than stacking a second.
 
 One list, `SIDEBAR_TABS` in `sidebar/ActivityBar.tsx`, not the old
 `PRIMARY_NAV` / `WORKSPACE_NAV` pair: Chats (⌘L) · Explorer (⇧⌘E) · Search
-(⇧⌘F) · Skills · Media. New Chat sits above it and Customize below, both
+(⇧⌘F) · My Projects · Skills. New Chat sits above it and Customize below, both
 gestures rather than destinations. `ACTIVITY_BAR_WIDTH` is exported because the
 title bar lines its edge up with the rail; `DEFAULT_SIDEBAR_WIDTH` is 212 in
 `App.tsx`, under `frontier_sidebar_width_v2` — the key is bumped because a 260
@@ -225,11 +238,105 @@ teaches the operator that tabs in this list might not do anything. **A glyph
 earns its place by having a view behind it**; at 48px the label is one hover
 away, which costs no pixels, where a label in the layout costs 212 of them.
 
-**Media is a sidebar tab, not a workspace panel, and that is load-bearing.** A
-workspace panel is mounted only while it is open; a sidebar tab always is. The
-operator's import gesture (`sidebar/MediaPanel.tsx`, `bring()`) and the approval
-gate that must take consent from it therefore have the same lifetime — a gate
-drawn inside the video panel would be absent exactly when it is needed most.
+**My Projects is one list of two kinds** (`sidebar/ProjectsPanel.tsx`, and the
+capped four-pill row under the empty composer in `chat/StudioChat.tsx`; both
+read `hooks/useProjectLibrary.ts`). Two lists side by side was the alternative
+and it was rejected: an operator looking for the thing they had open on Tuesday
+does not remember which of the two editors it belonged to, so a split makes
+them guess before they can look. The glyph carries the kind and the *click* is
+what differs — a repository goes through `/api/workspace/open`, which rebinds
+the root every workspace and terminal route reads; a video project goes through
+`/api/workspace/projects/remember`, which rebinds nothing, because a timeline
+is not a workspace and opening one must not repoint the file tree at the folder
+that holds it. The kind itself is never stored: the gateway re-classifies each
+directory from its marker file on every read, so a folder that stops being a
+video project stops being offered as one.
+
+`⌥⌘S` / `⌥⌘O` save and open a video project, in the **native File menu** rather
+than in the video pane's chrome, for the reason the recorder's `⇧⌘8` gives: a
+native menu owns its accelerator whatever has focus, and this pane hands focus
+to a canvas, a timeline and a row of numeric fields. `⌥` and not `⇧` is a
+correctness constraint, not taste — `⇧⌘S` and `⇧⌘O` are already the side chat
+and Codex in `App.tsx`'s shortcut handler, and a key the menu takes is a key
+the page stops hearing, with no error anywhere.
+`tests/video-project-bridge.test.mjs` asserts that collision cannot come back.
+`⌥⌘E` joins them for **Export Video…**, in the same menu and for the same
+reason, and it opens the dialog rather than starting a render: the menu cannot
+know whether the sequence has anything in it, and an accelerator that spawns
+ffmpeg on a keypress is one nobody can undo.
+
+**The export dialog is scoped to the pane, not to the window.** It draws its
+scrim inside `VideoPane` and sets `aria-modal="false"`, because the render is a
+question about the video and blacking out the terminal and the agent to ask it
+would stop the work the export is part of. Hiding it leaves the render running,
+which is why the program header's Export button wears the percentage while one
+is: a running render with nowhere on screen is one nobody cancels. The whole of
+its state — progress, phase, telemetry, the cancel handler — lives in
+`useProjectStore`, so an export an agent started is shown and cancelled by the
+same dialog as one a person started.
+
+**A render takes the video elements, it does not share them.**
+`seekVideosForFrame` parks the same `<video>` cache the monitor draws from, so
+`useProgramLoop` yields while `isExporting` is set exactly as it yields to the
+fullscreen player, and the loop hands the thread back through
+`requestAnimationFrame` every 12ms. The editor this was ported from owns a
+window and may freeze for the length of a render; this one is a panel, and a
+frozen panel is a frozen IDE.
+
+**An export lifts background throttling, and puts it back.** Chromium clamps a
+backgrounded page to roughly one task per second, and `canvas.toBlob` returns
+its encoded frame through one of those tasks. Measured on a 1664x1080 frame:
+**12ms with the window in front, 1023ms behind it** — the render is unchanged,
+the callback is simply held. That is the ordinary case rather than the edge
+one, because the dialog itself says hiding it leaves the export running. So
+`export:start` calls `setBackgroundThrottling(false)` on the webContents that
+asked, and finish and cancel alike put it back, refcounted on `sessions.size`
+beside the power lock that was already there. An IDE idling behind another
+window should still be throttled; an IDE rendering should not. With the lock
+in place a 741-frame export measured 7.6 fps occluded against 7.4 fps focused
+— the gap is gone, and what remains is the per-frame IPC, not the window state.
+
+**A finished export ends on the file, not on the settings it was started
+from.** The dialog kept its result in one grey line at the foot of the form —
+"Last export · reveal" — which is where an exported file goes missing: the
+operator never chose the destination, "your Videos folder" is not a path, and
+the notice that names it lasts 3.2 seconds. So a completed export now holds the
+dialog: a green tick, the whole path wrapped rather than truncated, and
+**Show in Finder** / **Show in Explorer** / **Show in folder** — named for the
+platform, because "Finder" on Windows is a button nobody presses. *Export
+again* returns to the form, *Done* closes.
+
+The result is read from `useProjectStore` rather than from the call that
+started it, so an export an AGENT ran ends the same way, and so does one that
+finished while the dialog was hidden — reopening shows it. It reveals through
+`videoProject:reveal`, the transport's existing `shell.showItemInFolder`,
+because an export is one more file on disk and does not need a channel of its
+own. The finish toast carries the same button (`Toast.action`, at most one, and
+taking it dismisses the toast) on a 9-second life rather than the default 3.2:
+with the dialog hidden the toast is the only surface the export ever gets, and
+a notice that expires before it can be pressed is a taunt.
+
+**Media is no longer a sidebar tab.** It was one, and this document argued at
+length that it had to stay: a workspace panel is mounted only while it is open,
+a sidebar tab always is, so the import gesture and the approval gate that takes
+consent from it were said to need the tab's lifetime.
+
+**That argument was wrong on its facts, and the code already said so.** The
+gate's subscriber is not `MediaPanel` — it is `MediaConsentModal`, which
+`App.tsx` mounts in its modal layer at the top level, and whose own header
+comment gives the reason in as many words: `WorkspacePanel.tsx` mounts the video
+panel conditionally while the tool bridge is registered at module load in
+`main.tsx`, so the prompt must live above both. The gate's lifetime never
+depended on the sidebar. What the tab actually held was the operator's *import
+gesture* (`sidebar/MediaPanel.tsx`, `bring()`) — a convenience, not a safety
+property.
+
+**So the pool lives in the video editor's rail only** (`VideoPane.tsx`), by the
+operator's explicit call. It is the *same component* reading the same
+`mediaPool` out of `timelineStore`, so there is still exactly one implementation
+of the import gesture, and CapCut's reasoning applies: the library belongs where
+you reach for a clip. The cost is real and worth naming — importing now means
+opening the video panel first, where before it was one glyph away from any view.
 See `src/video/P3-import-gate.md`.
 
 Panel state is its own store (`store/panelStore.ts`) because it is pure view
@@ -238,6 +345,29 @@ is selected lives in `App.tsx` beside the sidebar geometry, because the global
 shortcuts (⇧⌘E / ⇧⌘F, ⌘B, ⌘L) drive it. The panel shortcuts live beside them and
 mirror the add-panel menu exactly, so the menu doubles as the shortcut reference
 and the two cannot drift apart.
+
+**The version is a control, bottom right** (`components/updates/VersionControl.tsx`).
+The shell has no status bar, so it is `fixed bottom-2 right-3 z-40` — over the
+canvas and the workspace panel, under the modal layer — and the version string
+itself is the button. That placement is deliberate: "which build is this" is
+asked from wherever you happen to be, and on an ad-hoc signed application it is
+the first question worth asking when the assistant stops seeing the screen,
+because every update clears its permission grants. Floating chrome has to answer
+for what is under it: the video editor's timeline is the one pane that draws
+content into that corner, so it reserves the 30px strip the control occupies
+(`video/components/timeline/Timeline.tsx`) rather than letting a lane render
+beneath it. Move the offset and that reservation moves with it.
+
+Behind it: **Update to X** (which opens `UpdateModal`, where the release notes
+are), **Check for updates**, and **exactly one** previous release to roll back
+to. One, not a catalogue — the regression a rollback is for arrived in the
+update just installed, so the build below it is the one that answers, and a
+longer list invites landing on a version nobody is testing. A rollback is
+confirmed in place before it runs and names what it costs. There is **no update
+banner**; the announcement is a dot on this control and the pill in
+`SidebarFooter`, both reading the one `useUpdates` check so they cannot
+disagree. In a browser the rollback rows are absent rather than dead — replacing
+the bundle needs the desktop bridge (`no dead affordances`, below).
 
 ### Agent tabs (`server/agent-cli.js`, `panels/AgentPane.tsx`)
 
@@ -305,6 +435,86 @@ Three properties carry the whole thing:
 The admin gate is enforced in the gateway, not the renderer — `requireAdmin`
 guards every `/api/arena/*` route. Hiding the panel is a courtesy.
 
+### The Teminali plan (`server/licence.js`, `panels/EntitlementSection.tsx`)
+
+Top of the Usage panel, above the agent-CLI headroom, and labelled apart from
+it. The two are adjacent because both are "what am I allowed", and separated
+because they are bought from different people: this one is what the operator
+bought from us, the one below is what is left of a subscription bought from
+Anthropic. Stacked without labels, the obvious reading is that upgrading here
+raises a Claude Code limit.
+
+Three rules hold the component together, and each of them exists because a
+paid-feature gate is exactly the code that rots into a lie:
+
+1. **The feature list is never written in the component.** The capability
+   catalogue arrives on `GET /api/entitlement`, which reads it from
+   `licence/entitlements.js` — the same registry the gates enforce. A list
+   typed into JSX is a list that silently stops matching the product. The test
+   in `tests/entitlement.test.mjs` fails the file if a capability label appears
+   in it as a string literal.
+2. **Whether to offer an upgrade is a capability question, never a plan name.**
+   The section offers a paid plan exactly when some plan on sale carries a
+   capability this licence lacks. Adding a tier — Team, a trial, lifetime —
+   needs no edit here, and a user who already holds everything a plan offers is
+   never shown an upsell for it.
+3. **A failure is never an upgrade prompt.** Every read fails to null and the
+   whole section renders nothing. Telling an offline subscriber they are on Free
+   is worse than telling them nothing.
+
+The two rails answer in different shapes, and the difference is surfaced rather
+than smoothed over, because it decides what the user does next: a card price
+opens Stripe's hosted checkout in a browser and the panel says to come back and
+refresh; a mobile-money price takes a phone number, pushes a prompt to the
+handset, and polls the order every four seconds until it settles — then
+refreshes the licence itself, because the money landing *is* the moment the
+entitlement changed. Sign-in is the device-code flow: a code to type elsewhere,
+polled at the interval the service asked for and never faster than 2s. That
+poll stops on the first definite answer — granted, denied, expired, or a code
+the service no longer knows — and keeps going only for the failures that a
+later tick could plausibly fix.
+
+A build with no `TEMINALI_BILLING_URL` still draws the capability list and says
+plainly that it has no billing service, rather than offering a button that
+would fail. That is the ordinary state of a development checkout, and the free
+lanes need no account.
+
+### Plan headroom (`server/plan.js`, `panels/UsagePane.tsx`)
+
+A different question from the ledger below, so a different source. The ledger is
+what this machine has spent; this is what the account has left — a number only
+the provider knows.
+
+Both halves come from the CLI rather than from the provider's API, because the
+CLI already holds the operator's credentials and this process has no business
+borrowing them out of their keychain entry:
+
+- **Windows ride the turn.** `claude -p --output-format stream-json` emits a
+  `rate_limit_event` carrying `unifiedWindows`; `normaliseClaude` lifts it into
+  a `limits` event, and the gateway records it while streaming the turn. It
+  costs no extra request, because that stream was already being parsed.
+- **The account** is `claude auth status --json`, cached for a minute because it
+  is a process spawn rather than a read.
+
+Three things the panel has to say out loud rather than imply:
+
+1. **A reading is stamped, never presented as live.** These windows move only
+   when a turn runs, so the panel prints "as reported at 14:32". A bar with no
+   timestamp claims a freshness it does not have.
+2. **An empty meter is explained.** No windows means either "no turn yet" or
+   "this login has no plan behind it" — an API-key turn emits nothing. Those are
+   different states with different fixes, and the panel distinguishes them.
+3. **Codex reports an account and no headroom.** `codex exec --json` emits no
+   rate-limit event; its limits travel over the `codex app-server` protocol,
+   which the studio does not speak. Drawing an empty Codex meter would read as
+   "nothing used" rather than as "not knowable here", so none is drawn. (Its
+   `login status` also prints to stderr with an empty stdout — observed, not
+   assumed.)
+
+This is the one place in the panel where colour stops meaning magnitude: past
+90% a window's fill leaves `--chart` for `--danger`, because at that point the
+number is no longer a measurement being read but a limit about to interrupt.
+
 ### Usage (`server/usage-ledger.js`, `panels/UsagePane.tsx`)
 
 Append-only JSONL, one line per turn, aggregated on read. A running total in a
@@ -328,6 +538,414 @@ contrast on the dark surface rather than picked by eye), marks capped at 24px
 with a 2px surface gap, and text on ink tokens so a label never wears the data
 colour. Empty days are drawn as zero rows: dropping them compresses the axis and
 makes a quiet week look busy.
+
+### Video editor (`panels/VideoPane.tsx`, `src/video/**`)
+
+**The editor is a panel, so its layout is a function of the panel's width — not
+the window's, and not a designer's guess.** It opens at 452px beside a chat
+column, the tab strip's expand button runs it out to the edge of the vertical
+tab rail — `--panel-w-expanded` is `calc(100vw - var(--shell-left-inset))`, not
+the flat 736px it was — and the panel edge drags to anything. While expanded the
+chat is hidden rather than crushed, and stays mounted. Dragging short of that,
+the chat keeps a `--chat-min-w` floor of 420px.
+
+**That floor is enforced on every route to a width, not just on the drag.** The
+store clamped `setWidth`, which is the only route it can see; a width restored
+from a session on a wider window, and a window dragged narrower afterwards, both
+arrive without passing through it. The shell does not scroll, so what runs past
+the right edge is not awkward to reach but gone — 684px of the editor, its
+inspector and meters and the end of its timeline, measured off-screen after
+narrowing a 1600px window to 900px. `clampPanelWidth` is therefore applied where
+the width is *rendered*, and the store keeps the width the operator chose, so it
+comes back when the room does — the rule the splitter and the inspector's
+minimize already follow. It measures `[data-chat-column]` and the gutter to
+`[data-workspace-panel]` rather than deriving them: `--shell-left-inset` stops at
+the sidebar's edge and counts neither splitter, and those two 2px gutters were
+exactly what a derived clamp still spilled. The CSS variables remain the
+pre-paint fallback. A media query would answer about the display while the editor
+lives in a third of one; a 452px panel on a 5K monitor is the *narrowest* case
+and `@media` would call it the widest.
+
+So the pane measures itself with a `ResizeObserver`, resolves a tier through
+`src/video/hooks/useDensity.tsx`, publishes it on a context, and stamps it on
+the root as `data-tier` / `data-vtier` for the stylesheet. **One measurement,
+one answer.** The four ad-hoc width checks that preceded it — the pane's own
+two-column minimum, `ClipBlock`'s 72px, `TrackHeader`'s 46px, and the toolbars'
+none at all — were four thresholds measured against four different boxes, and
+they could not agree. The visible consequence was the panel drawing a toolbar
+built for 1200px: "Delete" clipped to "Du", the zoom slider under its own
+readout, the Add-track button off the end.
+
+| Tier | Width | The upper band |
+| --- | --- | --- |
+| `xs` | < 460 | monitor only; library and inspector are summoned, the inspector as a bottom sheet |
+| `sm` | 460–639 | monitor only; both visit as side overlays |
+| `md` | 640–899 | monitor │ inspector; the library visits |
+| `lg` | ≥ 900 | library │ monitor │ inspector — the desktop editor |
+
+`data-vtier` (`short` < 460, `mid`, `tall` ≥ 680) is independent, because a pane
+can be wide and short and a 291px timeline in a 360px-tall pane leaves no
+monitor at any width.
+
+**Nothing is removed at any width; only the number of clicks changes.** That is
+the whole of the mobile lesson and it is enforced, not intended:
+`TimelineToolbar` is a *list* of 12 tools, each declaring the tier from which it
+earns a seat on the bar, and `onBar` / `inMenu` are complements over that list —
+so a tool that leaves the bar is in the overflow menu by construction, carrying
+its label and its shortcut. `tests/responsive-layout.test.mjs` asserts the
+partition is total and that split, delete and snap keep their seats at every
+width. The same folding applies to the monitor's five overlay switches (one
+`Eye` button with the on-count as a badge, below `lg`) and to the track gutter,
+which drops 160px to 62px by moving the lane name to a tooltip and solo/lock
+into the row menu it already had.
+
+**Labels are the first thing bought with width and the first thing sold.** They
+appear at `lg` only. Icons never leave.
+
+**The tightest tier gets bigger controls, not smaller ones.** `--h-xs` / `--h-sm`
+/ `--h-md` step up under `[data-tier='xs']`. A narrow pane is the one being used
+in a hurry or on a touch display, and shrinking a 22px target because the pane
+shrank is exactly backwards; the buttons could afford it because they had
+already stopped carrying labels.
+
+**The band and the timeline are separated by a real splitter** (`.editor-splitter`
+— 6px of grab, 1px of line, arrow keys, double-click to reset). The height was
+derived from the pane's before, which is defensible at 291px on a desktop and
+useless in a 380px panel where the only two useful answers are "mostly monitor"
+and "mostly lanes". A dragged height is kept and only ever clamped, so a choice
+made when the panel was tall cannot strand the monitor when it is short.
+
+**The transport is a two-row grid, and the play button is the centre of it.**
+The row had been one line of three groups — timecode, transport, marking — and
+at `md`/`lg` that is 527px of content in a 320–324px row: all three groups
+overlapping by 15–16px. The rails take the pane's extra width, so the monitor
+column stays ~480px at both tiers and the master meters take 159px of it, which
+is why the two *wider* tiers were the ones that broke and `xs`, where the meters
+are hidden, was fine. The fix is `'time actions' / 'transport transport'` at
+every tier, with a 336px floor under the transport so the meters yield first;
+they shrink to ~105px and stay visible. The play disc is then centred in the
+pane to within a pixel at all four tiers, measured in the running app rather
+than reasoned about — an earlier diagnosis of this same row was argued from the
+markup and was simply wrong. **The disc's colour is constant brand green**: the
+icon alone carries play/pause, and an older build that turned it accent only
+while playing was saying the same thing twice.
+
+**Play at the end replays.** `useProgramLoop` finishes a pass by parking the
+playhead exactly on the end and clearing `isPlaying`, so flipping the flag back
+on from there was undone on the next frame and the button looked dead once a
+project had run through. `togglePlay(programEndMs)` rewinds to `inPointMs ?? 0`
+first. The end is passed in rather than read, because `timelineStore`
+deliberately does not import `projectStore`.
+
+**The transport's keys are bound, because they were already promised.** Every
+button in the row named a shortcut in its `title` — Space, Home, End, ← / →, M,
+I, L — and not one of them was bound anywhere in `src/`; the affordance rule
+above forbids exactly that, so `video/hooks/useTransportShortcuts.ts` now binds
+the eight the buttons name and nothing more. `O` for the out point is the
+standard partner of `I` and is deliberately absent, because no control offers
+it. Each key calls the same thing its button calls — `stepPlayheadByFrames` is
+shared with `PlaybackControls`, not reimplemented — so the two paths cannot
+drift. That step counts in *frames*: adding `frames * (1000 / fps)` is the
+obvious version and is wrong at 30fps, because the store rounds the playhead to
+whole milliseconds and `formatTimecode` then floors 33ms against a 33.333ms
+frame, so one press of → moved nothing. Both inputs had that bug. The listener is on `window`, since a freshly opened editor has focus on
+nothing and a subtree listener would hear nothing; `WorkspacePanel` mounts one
+pane at a time, so while the hook lives the editor *is* the workspace. It stands
+down for modals, typing targets and `<select>` (which is what leaves the rate
+picker's own arrow keys alone), for focus outside the pane, and for anything
+with a modifier, so the shell's ⌘-shortcuts still land.
+
+**The summon bar sits in the monitor's header, not on the stage.** Below `lg`
+the library and inspector are summoned rather than seated, and their buttons had
+been laid over the picture. Beside the `Program` label there is 179px of free
+space at `xs`, 279 at `sm` and 120 at `md` for a bar of 147/147/81px. The
+alignment shelf's `:has(.editor-summon-bar)` lift went with it.
+
+**The inspector can be put away at every width, through that one control.**
+Wide enough to seat the inspector is not the same as wanting it — a 296px rail
+is 296px the picture does not get, and the editor at full width is where someone
+watches rather than tweaks. So `Edit` is drawn at every tier, unlike `Media`,
+and only the mechanism behind it changes: seated, it clears
+`inspectorSeated = canSeatInspector && !inspectorMinimized`; summoned, it opens
+the overlay. The overlay stays gated on `!canSeatInspector`, so a minimised
+column never summons a sheet over the space it just gave back. The choice is
+kept across a trip down through the narrow tiers and back — except that widening
+with the overlay open spends it, since that is a request to see the inspector,
+not to hide it. At `lg` the header is effectively full, so the toggle is drawn
+icon-only wherever the inspector is seated and the format strip beside `Program`
+truncates to pay for it. `tests/responsive-layout.test.mjs` holds the shape.
+
+**The transport is centred on the picture, not on what is left of the row.**
+It is centred within `.editor-transport-row`, but that row is the flex child to
+the *left* of the master meters, so its centre was the bar's centre minus half
+the meters — the play disc sat under the picture's left-of-centre. The bar now
+carries a mirror of the meters on its other side as
+`.editor-program-transport::before`, sharing their width, shrink and 88px floor
+so the pair narrow together. A pseudo-element rather than a spacer `<div>`,
+because `> :first-child` and `> :last-child` in the same layer still have to
+mean the transport and the meters; an added element would have moved the 336px
+minimum onto the spacer. At `sm`/`xs` the meters are `display: none` and so is
+the mirror, or it would push the transport right by the error it removes.
+
+**The mirror is the meters' width, held as one token.** It first shipped as a
+literal `159px` against meters that measure `119px`, which did not centre the
+disc so much as mirror the error — measured at 21px to the *right* of the
+picture, where it had been ~85px to the left. Both sides now read
+`--transport-meters-w`, so there is no second number to drift. Measured after:
+0–1px off centre at every panel width from 700 to 1716.
+
+**The meters are gated on the bar's own width, not on the tier.** `data-tier` is
+the *pane's* width, but the transport bar gets only what the seated library and
+inspector leave behind: at `lg` with both seated it is 439px, and at `md` 339px,
+where the tier gate still says the meters may stay. Their 88px floor plus the
+mirror's plus the transport's 336px minimum needs 564px, and the bar does not
+clip — below that it painted its own controls and the meters straight over the
+inspector column beside it, measured at 111px of spill at `lg` and 211px at
+`md`. `PreviewPlayer` measures the bar with `useMeasure` and sets `data-narrow`
+below `TRANSPORT_METERS_MIN`; the stylesheet then drops the meters and the
+mirror together, which is what `sm`/`xs` already do through the tier gate.
+*Not yet solved:* at a 339px bar the transport's own 336px minimum still
+overflows by 11px, which moves the disc 12px off centre. That floor predates
+the mirror and needs the two-row grid `sm`/`xs` use, not a wider gate.
+
+**The alignment shelf holds alignment.** It floats over the stage whenever
+something is selected, and it had grown to fourteen icons — six align, two
+distribute, then flip H, flip V, fit-to-frame and reset. The last four are
+*transform* actions on a shelf named for alignment, which is what makes them the
+ones to demote: they answer a question about one layer, not about how several
+sit together, and three of the four already have a twin in the Transform
+inspector — both flips and reset (the inspector's `Fit to frame` is the `fitMode`
+select, a different mechanism). They now live behind a single `⋯` that opens the editor's own anchored menu
+(`useAnchoredMenu` → `ContextMenuItem[]`, the same pattern the timeline toolbar's
+overflow uses), so eight icons cover the picture instead of fourteen. Nothing is
+removed at any width — only the click count changes — and
+`tests/responsive-layout.test.mjs` fails if any of the four grows a button back
+or drops out of the menu.
+
+**The track gutter is wider than the tier minimum** — 76 / 120 / 150 / 176px
+across the four tiers. It was cut to the narrowest legible width when the
+folding rules were written, which is the right instinct applied one step too
+far: the gutter is where the operator aims, not merely where the name is read.
+
+**Two surfaces the slice had always talked to are now drawn.** `uiStore` has
+carried `contextMenu` and `toasts` since the port and eleven call sites push to
+them — every track and clip right-click menu, and the entire result path of beat
+detection. Nothing subscribed, so right-click opened the browser's own menu and
+a failed analysis reported success by saying nothing. `video/components/ui/Overlays.tsx`
+renders both, and it renders them *inside* `.video-workspace` because the classes
+they wear are scoped to it.
+
+### Screen recorder (`modals/RecorderModal.tsx`, `src/video/components/recorder/**`)
+
+**Not a panel kind — a dialog**, and the change is the design. A workspace
+panel is somewhere you *leave the app*: it persists into the next session, it
+holds a slot in the tab strip, and it splits the window with a conversation
+you are not reading while you choose a display. Recording is none of those. It
+is started, watched and finished, and then it is over. So `panelStore` no
+longer has a `recorder` kind, `PanelKind` is twelve rather than thirteen, and
+the persisted-state `migrate` at version 2 drops a `recorder` tab left in a
+stored session — without it that tab falls through `WorkspacePanel`'s default
+case and opens an empty *file* pane wearing the label "Record Screen".
+
+Open state lives in `store/recorderDialogStore.ts`, one boolean, deliberately
+**not persisted**: a modal is something you are doing, and restoring a session
+straight into one nobody asked for is the failure the panel had. It is a store
+rather than `App` state only because the two openers are far apart in the tree
+— the File-menu listener in `App.tsx` and the pill in `StudioChat.tsx`.
+
+Reachable two ways: **File → Record Screen…** and the **Record Screen** pill on
+the empty-chat screen, which carries a filled record dot in `--danger` — the
+one red in the palette, and what makes it readable as the recorder beside a
+neighbour that is only words. `⇧⌘8` is the menu item's accelerator and the only
+binding — a native accelerator fires whatever has focus, where a renderer key
+handler is swallowed by a terminal, a webview or a text field. (It was
+previously a `PANEL_DEFAULTS` label with *nothing* bound to it; the menu item
+that was supposed to own it did not exist. Both halves are real now.) `open()`
+is idempotent, because the accelerator can fire over a dialog already holding
+a running take. The pill it replaced advertised `⇧Tab`, which nothing bound.
+
+**A stop that never returns wedges the recorder for the life of the page.**
+Reported from the running app: nothing recorded at all, and every attempt
+answered *"This take is already being finished"* on a screen headed *"The
+recording did not start"*. One session explains all of it. `stopCapture` marks
+the session `finishing` before it awaits the recorders and only reaches
+`session = null` after, so any await that does not end strands it — and two
+did: `MediaRecorder.onstop` never fires for a recorder whose source track has
+already ended (the captured window closed, the display slept), and `stop()` on
+one the browser has torn down throws instead, from inside the promise
+executor. With the session stranded `isRecording()` stays true, so the toggle
+routes every later press to stop, stop reports the take is already finishing,
+and start reports one is already running. Only *Back to setup* — which calls
+`cancelCapture` — or a reload gives it back.
+
+Both doors are now shut. `stopped()` races `onstop` against `STOP_TIMEOUT_MS`
+(4s) and treats a throwing `stop()` as a stop that finished; `recorderStore`'s
+`stop` catches anything out of `stopCapture` and calls `cancelCapture(false)`,
+which releases the session and **keeps the files** — a failed finish must not
+also delete what was recorded. What a fired timeout costs is the last chunk of
+one track; what it saves is every recording after this one.
+
+**The bridge the whole recorder runs on had never been published.**
+`electron/screenRecorder.cjs` registers fifteen `recorder:*` handlers and owns
+the capture, the vault, the remux and the floating bar — and nothing in
+`electron/main.cjs` required it, while `electron/preload.cjs` put no `recorder`
+key on `window.teminali`. `bridge()` in `src/video/engine/screenCapture.ts`
+reads exactly that key, so in the packaged app it returned `undefined` and the
+recorder took the browser fallback: one synthetic `web:screen` source named
+"Browser Display / Window / Tab", and **`Windows (0)` on a desktop full of
+windows**. `main.cjs` now calls `initScreenRecorder(() => mainWindow)` after
+`createWindow` and `shutdownScreenRecorder()` on `will-quit`; the preload
+exposes the verbs and the two pushes (`recorder:command`, `recorder:state`).
+`tests/recorder-bridge.test.mjs` asserts the three files agree — every handler
+reachable, every push heard, every verb typed — because each was individually
+correct while the feature was dead.
+
+An empty **Windows** tab in a browser now says so, rather than "No other
+windows are open." A browser cannot enumerate windows at all; its own picker
+offers them when the take starts.
+
+`RecorderModal` is the same wrapper `VideoPane` is, and for the same reason: the
+ported UI wears `.video-workspace`-scoped classes, and the recorder store's
+fault watchdog — the one warning that can save a take recording nothing —
+pushes to the video `uiStore`, whose toast surface only renders inside that
+scope. Outside it the recorder is not slightly off; it is unstyled and silent.
+
+**The dialog is what finally gives the layout its width.** The Cut's shape puts
+the source grid beside a fixed 288px options rail, which needs 568px before
+either half works, and the panel opened at 452px — so the recorder's most
+common surface summoned its rail as an overlay. At `size="xl"` the rail seats.
+Both paths are kept and still measured rather than assumed (`max-w-5xl` is a
+ceiling, and a narrow window is narrower than it): seated at ≥568px, summoned
+below it through `VideoPane`'s own `editor-side-overlay is-right` and
+`editor-overlay-scrim` rather than a second overlay mechanism.
+
+**That paragraph was true of the layout and false of the app**, for as long as
+the dialog existed. `RecorderModal` returns `null` while it is shut, so the box
+`useMeasure` was told to watch did not exist when the hook mounted — and the
+hook attached its `ResizeObserver` in a mount-only effect. It measured nothing,
+kept `0×0` for the life of the component, and the width every rule above reads
+was zero. Measured on the running app: dialog 1024px, pane 1024px, density tier
+`xs`, rail **not** seated, capture options behind the summon button with room
+for them four times over. That is the shape the report described as "the webcam
+options are so hidden".
+
+The fix is in the hook, not the dialog: the observing effect now runs after
+every render and re-attaches when `ref.current` changes hands, guarded by an
+`observed` ref so the per-render cost is one comparison. Re-measured: pane 1024,
+tier `lg`, rail seated, `Options` button gone. `PreviewPlayer` and `VideoPane`
+use the same hook and were never wrong only because their boxes exist at mount
+— the guard is in `tests/responsive-layout.test.mjs`, and it was confirmed to
+fail against a mount-only effect. The review rail
+(320px) stacks under 600px instead of overlaying — a summary reads fine
+stacked. The dialog is given a fixed `h-[78vh]` so the surface does not resize
+as the phase changes, which would move the Start button under the cursor.
+
+`Modal` gained one prop for this: `bodyClassName`, replacing rather than
+extending the default padded scroll box. The recorder owns its whole surface
+and lays out its own footers; 16px of modal padding and an outer scrollbar put
+a second scroll region around it.
+
+**Mount is `open()`, and it is guarded.** `open()` resets the phase and clears
+the take, which is right when opening to record and catastrophic mid-take: a
+recording started from the File menu and then dismissed with Escape would be
+forgotten by the one surface that can stop it. So the recorder calls `open()`
+only when `phase === 'setup' && !take`. Unmount calls `close()`, which itself
+refuses while a take is running — which is what makes dismissing the dialog
+mid-take safe rather than destructive, with the floating bar carrying the stop
+control while the main window is hidden.
+
+**The floating bar is the one recorder file outside `src/video/`.**
+`components/recorder/RecorderBar.tsx` renders in its own transparent,
+always-on-top window — `setContentProtection(true)`, so it is not *in* the
+recording it controls — loaded from this same bundle at `?window=recorder-bar`
+(`main.tsx` branches on it, and skips the video tool bridge there so the two
+windows do not race the same channel). Being its own window means no
+`.video-workspace` above it, so it wears only Tailwind utilities and
+`tailwind.config.js` tokens, and it stamps `html.recorder-bar-window` on mount
+to make the page transparent — a body painted with the editor ground would put
+a hard-edged dark square behind the rounded pill. It is a second renderer with
+no access to the store: one `recorder:state` message in, one command out.
+
+**Review promises nothing it cannot do.** It offers **Open on the timeline**,
+and what that builds is what the **Auto edit** group on the capture rail says it
+will: zooms pushed in on real clicks, a drawn pointer, a cinematic frame, click
+ticks. Every switch there is honoured by an engine module that ships —
+`cursorZoom`, `cursorLayer`, `cinematicLook`, `sfxEngine`, `recordingSound` —
+and turning all six off leaves `RAW_ASSEMBLE`, which lays down screen, camera
+and narration and stops. Either way the whole build is one history entry, so
+there is nothing to undo piecemeal.
+
+**The fourth group on the rail is the only one that is not final.** Camera,
+Sound and Capture describe the FILE being written and are settled the moment the
+take stops. Auto edit describes what the build makes of that file, which can be
+turned off and rebuilt. That is why it is a separate group rather than more rows
+under Capture.
+
+What Review still cannot offer is everything decided from the WORDS: the camera
+taking the whole frame during a spoken pause, opening on a spoken introduction,
+and captions. All three read a TRANSCRIPT and this app ships no speech model, so
+they are absent from `AssembleOptions` rather than pinned to `false` — the Cut's
+`alignToSpeech` returns null on an empty transcript, so they would be inert, not
+conservative. Tutorial skill and Go live are likewise absent from the rail.
+
+**The panel switch is the pane's decision, not the recorder's.** Everything
+under `src/video/` knows about tracks and clips and nothing about which tabs the
+shell has open, so `RecorderPanel` takes an `onOpenedOnTimeline` callback and
+`RecorderModal` — app-side already — is what closes itself and calls
+`focusOrOpen({ kind: "video" })`.
+Reaching for `panelStore` from inside `src/video/` would have been that
+boundary's first exception.
+
+**The convert step reports itself.** `RecorderPanel`'s `processing` phase was a
+spinner and a paragraph, which is a promise that something is happening with no
+claim about how much — and on a take that finishes in five seconds, a motionless
+screen for five seconds reads as a hang. Measured on a real 6m18s, 397MB take
+from this machine: the probe is 0.07s and the stream copy is 5.0s, so the
+complaint was never the remux's speed, it was the silence.
+
+Three things changed, and only the third is cosmetic:
+
+- **`convertProgress.cjs`** is a pure parser for `ffmpeg -progress pipe:1
+  -nostats`, sitting beside `remuxPlan.cjs` for the same reason — the failures
+  here are silent ones. `out_time_ms` is ffmpeg's own misnomer and holds
+  MICROseconds, and a progress block arrives in whatever pieces the pipe felt
+  like, so the reader carries the whole open block forward rather than the
+  trailing half-line. `recorder-convert-progress.test.mjs` proves both,
+  including at every byte boundary of a block.
+- **The two streams convert in parallel.** `recorder:finish` looped `await
+  toMp4(...)` over screen and camera one after the other, which doubled the wait
+  on a two-source take for no reason anybody watching a spinner could have
+  guessed. They are independent files.
+- **A real bar**, fed by `recorder:convert` — a send channel, not a sixteenth
+  handler — through `preload`'s `onConvert` and `screenCapture.onConvertProgress`
+  into `recorderStore.convert`. It is ffmpeg's own position in the take, it is
+  capped at 99% while `+faststart` rewrites the file (a pass that reports
+  nothing, and a full bar that has stopped moving reads as hung), it says
+  *Copying* or *Re-encoding* because those have very different costs, and when
+  the duration is unknown it stays indeterminate rather than inventing a number.
+  The explanatory paragraph stays: it is the part that says why there is a wait.
+
+**The handover to the editor says what landed.** Pressing *Open on the timeline*
+on the review screen builds the project, closes the dialog and focuses the video
+panel — three things that, done silently, are indistinguishable from nothing
+happening, because the panel the operator is left looking at is one that may
+already have been open. `recorderStore.openOnTimeline` now calls `announce`,
+which pushes a success toast built from the `AssembleReport` (`6:18 ·
+1920x1080 · 3 clips`, plus zooms, sound clips and a split narration when the
+build produced them) followed by at most two of the build's notes.
+
+The toasts go through the shared `uiStore` rather than the dialog's own overlay,
+which is what lets them outlive the dialog: the same store backs `<Toasts />` in
+`RecorderModal` and in `VideoPane`, so a toast pushed while the dialog is
+closing finishes its life inside the editor — beside the timeline it is
+describing. Two notes and not all of them, because a stack of advisories buries
+the one line that says the take arrived; the rest stay on the recorder's
+`warnings` for the next review screen.
+
+The click itself was kept. Making the build automatic on finish would have
+removed the review screen, and with it the discard button and the per-take
+assemble settings — a real loss to fix a problem that was only ever silence.
+teminaliCut keeps the same click for the same reason.
 
 ### Two menu bar items
 
@@ -387,6 +1005,19 @@ that fights you:
 The model picker spans three groups, so it derives one flat row list in render
 order and each group renders against that index. Building it any other way makes
 the arrows disagree with what the eye sees.
+
+**Its height is measured, not a `vh` fraction.** The menu is `bottom-11` off the
+composer and grows upwards from that fixed edge, so a viewport fraction cannot
+know how much room is above it: on the empty chat the composer is vertically
+centred, and `max-h-[62vh]` put the first rows — Frontier Flash and the group
+above them — off the *top* of the window, where scrolling cannot reach them
+because the scroll container itself has gone off screen. `maxHeight` is now read
+from the menu's own `getBoundingClientRect().bottom` after layout, less 16px of
+air, and re-read on `resize`. The bottom edge does not move when the height
+changes, so a single reading is stable.
+
+Rows are 24px on 20px group headers in a 284px column — the density a menu of
+this length needs to be read rather than scrolled.
 
 ### Composer triggers
 

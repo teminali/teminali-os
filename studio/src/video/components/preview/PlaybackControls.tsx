@@ -1,6 +1,7 @@
 import React from 'react';
 import { useTimelineStore } from '../../store/timelineStore';
 import { useProjectStore } from '../../store/projectStore';
+import { stepPlayheadByFrames } from '../../hooks/useTransportShortcuts';
 import { formatTimecode } from '../../utils/time';
 import {
   Play, Pause, SkipBack, SkipForward, ChevronLeft, ChevronRight, Repeat, Flag, ScissorsLineDashed,
@@ -24,12 +25,6 @@ export const PlaybackControls: React.FC = () => {
 
   const project = useProjectStore((s) => s.project);
 
-  const stepFrame = (frames: number) => {
-    const frameMs = 1000 / project.fps;
-    const current = useTimelineStore.getState().playheadMs;
-    setPlayheadMs(Math.max(0, Math.min(project.durationMs, current + frames * frameMs)));
-  };
-
   return (
     <div className="editor-playback-controls flex flex-col gap-2">
       {/* Scrub bar */}
@@ -44,27 +39,31 @@ export const PlaybackControls: React.FC = () => {
         <TransportTimecode fps={project.fps} durationMs={project.durationMs} />
 
         {/* Transport */}
-        <div className="flex items-center gap-1">
+        <div className="editor-transport-cluster flex items-center gap-1">
           <button onClick={() => setPlayheadMs(inPointMs ?? 0)} className="pro-btn w-7 h-7" title="Go to start (Home)"
             aria-label="Go to start (Home)">
             <SkipBack className="w-[15px] h-[15px]" />
           </button>
-          <button onClick={() => stepFrame(-1)} className="pro-btn w-7 h-7" title="Previous frame (←)"
+          <button onClick={() => stepPlayheadByFrames(-1)} className="pro-btn w-7 h-7" title="Previous frame (←)"
             aria-label="Previous frame (←)">
             <ChevronLeft className="w-[17px] h-[17px]" />
           </button>
 
-          {/* The one bright control on the screen. Measured off the
-              reference, which draws the SAME 40px near-white disc in the
-              editor and in the fullscreen player: 40px, 50%, #f2f2f2 on
-              a soft drop, with the icon carrying the state. It used to
-              be a 36px dark disc that turned accent while playing —
-              a second signal for something the icon already says, in a
-              hard-coded #2b1108 left over from the accent before last. */}
+          {/* The one bright control on the screen, and the only place the
+              brand green is unambiguously an ACTION rather than a state.
+              It was a 40px near-white disc, measured off the reference,
+              which draws the same disc in the editor and in the
+              fullscreen player. Code paints this editor in the brand
+              accent, so the primary transport control wears it too.
+              The colour is CONSTANT — the icon alone carries play/pause.
+              An older version turned accent only while playing, a second
+              signal for something the icon already said, and the
+              near-white disc was what replaced it; going green must not
+              reintroduce that. Styled in `video-components.css` rather
+              than here, because it reads `--accent` and `--on-accent`. */}
           <button
-            onClick={togglePlay}
-            className="w-10 h-10 mx-1 rounded-full flex items-center justify-center transition-all duration-fast
-                       bg-spectrum-textBright text-spectrum-panelHeader hover:bg-white shadow-[0_5px_16px_rgba(0,0,0,0.25)]"
+            onClick={() => togglePlay(project.durationMs)}
+            className="editor-play-btn w-10 h-10 mx-1 rounded-full flex items-center justify-center transition-all duration-fast"
             title="Play / pause (Space)"
             aria-label="Play / pause (Space)"
           >
@@ -73,7 +72,7 @@ export const PlaybackControls: React.FC = () => {
               : <Play className="w-[15px] h-[15px] ml-0.5" weight="fill" />}
           </button>
 
-          <button onClick={() => stepFrame(1)} className="pro-btn w-7 h-7" title="Next frame (→)"
+          <button onClick={() => stepPlayheadByFrames(1)} className="pro-btn w-7 h-7" title="Next frame (→)"
             aria-label="Next frame (→)">
             <ChevronRight className="w-[17px] h-[17px]" />
           </button>

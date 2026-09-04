@@ -176,6 +176,15 @@ interface StudioState {
   workspacePath: string;
   activeWorkspaceId: "teminali" | "teminali-code-tests" | "argus-vpn";
   setWorkspace: (ws: "teminali" | "teminali-code-tests" | "argus-vpn") => void;
+  /**
+   * Points the shell at a root the gateway has already been rebound to.
+   *
+   * `setWorkspace` above only knows three hardcoded ids, which cannot serve
+   * a recent list read off disk. This one takes the path and nothing else;
+   * the caller is responsible for `WorkspaceService.openProject` first, as
+   * the gateway — not this store — owns which root the routes read.
+   */
+  setWorkspacePath: (path: string) => void;
   files: FileItem[];
   setFiles: (files: FileItem[]) => void;
   
@@ -285,6 +294,9 @@ export const useStudioStore = create<StudioState>()(
           });
         }
       },
+
+      setWorkspacePath: (workspacePath) => set({ workspacePath }),
+
       files: [
         {
           id: "root-1",

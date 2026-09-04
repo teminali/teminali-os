@@ -27,6 +27,18 @@ export interface ExportTelemetry {
 interface ProjectState {
   project: ProjectSettings;
 
+  /**
+   * Where this project was last saved to or opened from, absolute, or `null`
+   * for one that has never been written down.
+   *
+   * It is what makes ⇧⌘S a save rather than a Save As every time: the format
+   * lives in a directory, and the operator names that directory once. Not part
+   * of `ProjectSettings` because it is not part of the file — a project moved
+   * to another folder is still the same project, and writing its own path into
+   * it would make the copy lie about where it is.
+   */
+  projectDir: string | null;
+
   isExporting: boolean;
   exportProgress: number;
   exportStatusText: string;
@@ -58,6 +70,7 @@ interface ProjectState {
   setMcpModalOpen: (open: boolean) => void;
   setExportModalOpen: (open: boolean) => void;
   loadProjectSettings: (settings: ProjectSettings) => void;
+  setProjectDir: (dir: string | null) => void;
 }
 
 let activeExportCancelFn: (() => void) | null = null;
@@ -66,6 +79,7 @@ const touch = (p: ProjectSettings): ProjectSettings => ({ ...p, updatedAt: Date.
 
 export const useProjectStore = create<ProjectState>((set) => ({
   project: INITIAL_PROJECT,
+  projectDir: null,
 
   isExporting: false,
   exportProgress: 0,
@@ -122,4 +136,5 @@ export const useProjectStore = create<ProjectState>((set) => ({
   setExportModalOpen: (isExportModalOpen) => set({ isExportModalOpen }),
 
   loadProjectSettings: (project) => set({ project }),
+  setProjectDir: (projectDir) => set({ projectDir }),
 }));

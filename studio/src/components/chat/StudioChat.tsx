@@ -1,8 +1,9 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ChevronDown, Laptop } from "lucide-react";
+import { ChevronDown, Circle, Clapperboard, FolderGit2, Laptop } from "lucide-react";
 import { AIService } from "../../services/aiService";
 import { useStudioStore, PROFILES_LIST } from "../../store/studioStore";
 import { usePanelStore } from "../../store/panelStore";
+import { useRecorderDialogStore } from "../../store/recorderDialogStore";
 import { useVoice } from "../../hooks/useVoice";
 import { useAttachments } from "../../hooks/useAttachments";
 import { composePrompt } from "../../services/fileService";
@@ -12,6 +13,7 @@ import { Composer } from "./Composer";
 import { MessageBlock } from "./MessageBlock";
 import { speakableText } from "../../services/voice";
 import { useGitHubStatus } from "../../hooks/useGitHubStatus";
+import { useProjectLibrary } from "../../hooks/useProjectLibrary";
 import { UsageService } from "../../services/usageService";
 import { AssistantHud } from "../assistant/AssistantHud";
 import { BrandGlyph } from "../ui/BrandGlyph";
@@ -49,8 +51,14 @@ export const StudioChat: React.FC<{
   } = useStudioStore();
 
   const { status: github } = useGitHubStatus();
+  const { recent, openEntry } = useProjectLibrary();
+  // Four is what fits one row beside the two suggestion pills above it
+  // without wrapping at the composer's width.
+  const recentProjects = useMemo(() => recent.slice(0, 4), [recent]);
   const openPanel = usePanelStore((state) => state.open);
   const focusOrOpen = usePanelStore((state) => state.focusOrOpen);
+  const openRecorder = useRecorderDialogStore((state) => state.open);
+  const panelExpanded = usePanelStore((state) => state.isExpanded && state.isOpen);
   const agentSelection = useStudioStore((state) => state.agentSelection);
   const agentPermission = useStudioStore((state) => state.agentPermission);
   const chatDraft = useStudioStore((state) => state.chatDraft);
@@ -349,7 +357,17 @@ export const StudioChat: React.FC<{
     /* Flat. The canvas carried a warm floor wash and a cool top light, which is
        what a designed dark theme does and what Cursor conspicuously does not —
        its chat sits on one unbroken #151515 from the title bar to the composer. */
-    <main className="flex-1 min-w-0 flex flex-col bg-frame-mid">
+    /* `min-w-0` let the chat absorb every pixel a widening panel took, down
+       to a 160px slot with a wrapped composer. It has a floor now; past it
+       the panel stops. Expanding the panel is the one gesture that may
+       take the whole column, and it hides the chat rather than crushing
+       it — the conversation stays mounted, so nothing is lost. */
+    <main
+      data-chat-column
+      className={`flex-1 min-w-[var(--chat-min-w)] flex-col bg-frame-mid ${
+        panelExpanded ? "hidden" : "flex"
+      }`}
+    >
       {isEmpty ? (
         /* Cursor's empty state is the pickers that say what the next turn runs
            against, the composer, and a row of outline pills — and above them,
@@ -398,13 +416,57 @@ export const StudioChat: React.FC<{
           </div>
 
           <div className="w-full max-w-composerEmpty flex items-center gap-2 pl-1">
-            <Pill onClick={() => setInput("Plan: ")} shortcut="⇧Tab">
-              Plan New Idea
+            {/* The shortcut is ⇧⌘8 because that is the File menu accelerator
+                that opens this exact dialog. The pill it replaced advertised
+                ⇧Tab, which nothing in the app has ever bound. */}
+            <Pill
+              onClick={openRecorder}
+              shortcut="⇧⌘8"
+              /* The record dot, in `--danger` — the one red in the palette, and
+                 the same red the take's own controls use. It is what makes this
+                 pill readable as the recorder at a glance, next to a neighbour
+                 that is only words. */
+              icon={<Circle className="w-2.5 h-2.5 fill-current text-danger" />}
+            >
+              Record Screen
             </Pill>
             <Pill onClick={onConnectGitHub}>
               {github?.connected ? "Open a Repository" : "Connect Your Repos"}
             </Pill>
           </div>
+
+          {/* Recent projects — one list, both kinds.
+
+              Here and nowhere else: this is the screen with room for it, and
+              the conversation view is already the answer to "which project am
+              I in". A code project and a video project sit side by side
+              because that is what the operator has been working on; the glyph
+              is the only thing that separates them, and the click is what
+              actually differs. */}
+          {recentProjects.length > 0 && (
+            <div className="w-full max-w-composerEmpty flex items-center gap-2 pl-1 flex-wrap">
+              {recentProjects.map((entry) => (
+                <Pill
+                  key={entry.path}
+                  onClick={() => {
+                    // The editor has to be on screen before the load runs: it
+                    // reports through the video pane's own toasts.
+                    if (entry.kind === "video") focusOrOpen({ kind: "video" });
+                    void openEntry(entry);
+                  }}
+                  icon={
+                    entry.kind === "video" ? (
+                      <Clapperboard size={13} strokeWidth={1.7} />
+                    ) : (
+                      <FolderGit2 size={13} strokeWidth={1.7} />
+                    )
+                  }
+                >
+                  <span className="max-w-[13ch] truncate">{entry.name}</span>
+                </Pill>
+              ))}
+            </div>
+          )}
         </div>
       ) : (
         <>
@@ -509,13 +571,15 @@ const Picker: React.FC<{ label: string; icon?: React.ReactNode; onSelect?: () =>
 const Pill: React.FC<{
   children: React.ReactNode;
   shortcut?: string;
+  icon?: React.ReactNode;
   onClick?: () => void;
-}> = ({ children, shortcut, onClick }) => (
+}> = ({ children, shortcut, icon, onClick }) => (
   <button
     type="button"
     onClick={onClick}
     className="h-7 px-3 rounded-full border border-edge-strong text-sm text-ink-muted flex items-center gap-1.5 hover:text-ink-high hover:bg-surface-hover transition-colors duration-ds ease-ds"
   >
+    {icon && <span className="flex-shrink-0 flex items-center">{icon}</span>}
     {children}
     {shortcut && <span className="text-ink-placeholder">{shortcut}</span>}
   </button>

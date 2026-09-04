@@ -16,12 +16,32 @@
  *
  * Reference implementation and model choices are documented in
  * docs/VOICE_SIDECAR.md.
+ *
+ * ## The entitlement, and why it downgrades rather than refuses
+ *
+ * The sidecar tier is `voice.vibevoice`, which Pro carries and free does not.
+ * Every function here therefore takes `allowVibeVoice`, and when it is false
+ * the sidecar is not probed at all — the request is served by the local
+ * engines instead. Not refused: served. The sidecar runs on the user's own
+ * machine, so nothing is being rationed except quality, and a paywall that
+ * takes away someone's microphone is a worse product than one that hands them
+ * the ordinary voice. `/api/voice/status` says which tier they got and names
+ * the capability that would raise it, so the UI can offer the upgrade without
+ * anything having failed.
  */
 
 import { localAsrStatus, localTtsStatus, speakLocal, transcribeLocal } from "./speech-local.js";
 
-/** Cached probe, so an always-open microphone does not poll a dead port. */
-let statusCache = { at: 0, value: null };
+/**
+ * Cached probe, so an always-open microphone does not poll a dead port.
+ *
+ * Keyed by entitlement, because the entitled and unentitled answers are
+ * genuinely different documents — one names the sidecar, the other names the
+ * local engines. A single slot would serve whichever was asked for first to
+ * whoever asked second, so an upgrade would appear not to have taken effect
+ * for the length of the TTL.
+ */
+const statusCache = new Map();
 const STATUS_TTL_MS = 15_000;
 
 function timeoutSignal(ms) {
@@ -36,46 +56,58 @@ function timeoutSignal(ms) {
  * Ask the sidecar what it can do. Never throws: an unreachable sidecar is an
  * ordinary state, not an error, and the answer says so.
  */
-export async function voiceStatus(config, { force = false } = {}) {
+export async function voiceStatus(config, { force = false, allowVibeVoice = true } = {}) {
   const now = Date.now();
-  if (!force && statusCache.value && now - statusCache.at < STATUS_TTL_MS) return statusCache.value;
+  const cached = statusCache.get(allowVibeVoice);
+  if (!force && cached && now - cached.at < STATUS_TTL_MS) return cached.value;
 
-  // 1. The VibeVoice sidecar, if someone is running one.
-  const { signal, done } = timeoutSignal(Math.min(2500, config.voiceTimeoutMs));
+  // 1. The VibeVoice sidecar, if someone is running one and this plan carries
+  //    it. An unentitled caller skips the probe entirely rather than probing
+  //    and discarding: the sidecar is a loopback round trip with a timeout, and
+  //    spending it to reach an answer already known is just latency.
   let sidecarDetail = null;
-  try {
-    const response = await fetch(new URL("/status", config.voiceUrl), { signal });
-    if (response.ok) {
-      const body = await response.json();
-      if (body?.asr || body?.tts) {
-        return cache({
-          available: true,
-          engine: "vibevoice",
-          asr: body.asr ?? null,
-          tts: body.tts ?? null,
-        });
+  if (allowVibeVoice) {
+    const { signal, done } = timeoutSignal(Math.min(2500, config.voiceTimeoutMs));
+    try {
+      const response = await fetch(new URL("/status", config.voiceUrl), { signal });
+      if (response.ok) {
+        const body = await response.json();
+        if (body?.asr || body?.tts) {
+          return cache(allowVibeVoice, {
+            available: true,
+            engine: "vibevoice",
+            asr: body.asr ?? null,
+            tts: body.tts ?? null,
+          });
+        }
+        sidecarDetail = "The sidecar reported no speech models.";
+      } else {
+        sidecarDetail = `The voice sidecar answered ${response.status}.`;
       }
-      sidecarDetail = "The sidecar reported no speech models.";
-    } else {
-      sidecarDetail = `The voice sidecar answered ${response.status}.`;
+    } catch (error) {
+      sidecarDetail =
+        error?.name === "AbortError"
+          ? "The voice sidecar did not answer in time."
+          : `No voice sidecar is listening on ${config.voiceUrl.origin}.`;
+    } finally {
+      done();
     }
-  } catch (error) {
-    sidecarDetail =
-      error?.name === "AbortError"
-        ? "The voice sidecar did not answer in time."
-        : `No voice sidecar is listening on ${config.voiceUrl.origin}.`;
-  } finally {
-    done();
   }
+
+  // What the UI needs to tell the two cases apart: a plan that cannot reach the
+  // sidecar, versus a plan that can and found nothing there. Only the first is
+  // an upgrade prompt; the second is an install prompt.
+  const gated = allowVibeVoice ? null : "voice.vibevoice";
 
   // 2. Local engines. This is the path that matters in the desktop build: the
   //    browser's own recogniser cannot work inside Electron, so without this
   //    there would be no voice at all.
   const [asr, tts] = await Promise.all([localAsrStatus(), localTtsStatus()]);
   if (asr.available || tts.available) {
-    return cache({
+    return cache(allowVibeVoice, {
       available: true,
       engine: "local",
+      gated,
       sidecarDetail,
       asr: asr.available
         ? {
@@ -101,24 +133,32 @@ export async function voiceStatus(config, { force = false } = {}) {
     });
   }
 
-  return cache({
+  return cache(allowVibeVoice, {
     available: false,
     engine: null,
+    gated,
     detail: asr.detail ?? sidecarDetail ?? "No speech engine is available.",
   });
 }
 
-function cache(value) {
-  statusCache = { at: Date.now(), value };
+function cache(allowVibeVoice, value) {
+  statusCache.set(allowVibeVoice, { at: Date.now(), value });
   return value;
 }
 
+/** Drop the probe cache. Called when the entitlement changes under a running gateway. */
+export function forgetVoiceStatus() {
+  statusCache.clear();
+}
+
 /** Forward a recorded utterance for transcription. */
-export async function transcribe(config, { body, contentType, language = "auto" }) {
-  const status = await voiceStatus(config);
+export async function transcribe(config, {
+  body, contentType, language = "auto", maxSegmentChars = 0, allowVibeVoice = true,
+}) {
+  const status = await voiceStatus(config, { allowVibeVoice });
   // The local engine takes a raw audio buffer, not a multipart envelope.
   if (status.engine === "local") {
-    return transcribeLocal(extractAudio(body, contentType), { language });
+    return transcribeLocal(extractAudio(body, contentType), { language, maxSegmentChars });
   }
 
   const { signal, done } = timeoutSignal(config.voiceTimeoutMs);
@@ -144,8 +184,8 @@ export async function transcribe(config, { body, contentType, language = "auto" 
 }
 
 /** Render text to speech and stream the audio back. */
-export async function speak(config, payload) {
-  const status = await voiceStatus(config);
+export async function speak(config, payload, { allowVibeVoice = true } = {}) {
+  const status = await voiceStatus(config, { allowVibeVoice });
   if (status.engine === "local") {
     const audio = await speakLocal(payload.text, {
       language: payload.language,

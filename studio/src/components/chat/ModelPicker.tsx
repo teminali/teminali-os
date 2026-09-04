@@ -64,6 +64,19 @@ export const ModelPicker: React.FC<ModelPickerProps> = ({ open, onClose }) => {
   const { currentProfile, setProfile, agentSelection, setAgentSelection, agentPermission, setAgentPermission } =
     useStudioStore();
   const ref = React.useRef<HTMLDivElement>(null);
+  /*
+    How tall this menu may be, in pixels, and why it is measured.
+
+    The menu is `bottom-11` off the composer, so it grows UPWARDS from a
+    fixed edge. A `vh` cap cannot know where that edge is: on the empty
+    chat the composer is vertically centred, which left `62vh` of list
+    running off the TOP of the window with its first rows unreachable —
+    scrolling does not help when the scroll container itself has gone off
+    screen. The bottom edge does not move when the height changes, so
+    reading it once after layout is stable, and `resize` is the only
+    thing that can invalidate it.
+  */
+  const [maxHeight, setMaxHeight] = useState<number | undefined>(undefined);
   const [routing, setRouting] = useState<RoutingPlan | null>(null);
   const [loading, setLoading] = useState(false);
   const [agents, setAgents] = useState<Record<AgentEngine, AgentDescriptor> | null>(null);
@@ -94,6 +107,19 @@ export const ModelPicker: React.FC<ModelPickerProps> = ({ open, onClose }) => {
       setAgentModels(models);
     });
     return () => controller.abort();
+  }, [open]);
+
+  React.useLayoutEffect(() => {
+    if (!open) return;
+    const measure = () => {
+      const node = ref.current;
+      if (!node) return;
+      // 16px of air, so the menu never sits flush against the window edge.
+      setMaxHeight(Math.max(160, node.getBoundingClientRect().bottom - 16));
+    };
+    measure();
+    window.addEventListener("resize", measure);
+    return () => window.removeEventListener("resize", measure);
   }, [open]);
 
   useEffect(() => {
@@ -204,7 +230,7 @@ export const ModelPicker: React.FC<ModelPickerProps> = ({ open, onClose }) => {
       title={title}
       onMouseEnter={() => index >= 0 && setActiveIndex(index)}
       onClick={onSelect}
-      className={`w-full h-7 px-2.5 rounded-md flex items-center gap-2 text-sm transition-colors duration-ds ease-ds disabled:opacity-40 ${
+      className={`w-full h-6 px-2 rounded-md flex items-center gap-2 text-sm transition-colors duration-ds ease-ds disabled:opacity-40 ${
         active
           ? "bg-surface-active text-ink-strong"
           : highlighted
@@ -215,14 +241,14 @@ export const ModelPicker: React.FC<ModelPickerProps> = ({ open, onClose }) => {
       <span className="flex-shrink-0 flex items-center">{icon}</span>
       <span className="truncate">{label}</span>
       <span className="flex-1" />
-      {meta && <span className="text-2xs text-ink-soft truncate max-w-[140px]">{meta}</span>}
+      {meta && <span className="text-2xs text-ink-soft truncate max-w-[128px]">{meta}</span>}
       {active && <Check size={12} className="text-ink-muted flex-shrink-0" />}
     </button>
     );
   };
 
   const Group: React.FC<{ children: React.ReactNode; trailing?: string }> = ({ children, trailing }) => (
-    <div className="flex items-center justify-between h-6 px-2.5 mt-1 first:mt-0">
+    <div className="flex items-center justify-between h-5 px-2 mt-0.5 first:mt-0">
       <span className="text-2xs text-ink-faint">{children}</span>
       {trailing && <span className="text-2xs text-ink-disabled truncate max-w-[120px]">{trailing}</span>}
     </div>
@@ -232,7 +258,8 @@ export const ModelPicker: React.FC<ModelPickerProps> = ({ open, onClose }) => {
     <div
       ref={ref}
       role="menu"
-      className="lit lit-strong absolute bottom-11 left-0 z-30 w-[300px] max-h-[62vh] overflow-y-auto rounded-xl bg-surface-popover shadow-popover p-1 animate-in"
+      className="lit lit-strong absolute bottom-11 left-0 z-30 w-[284px] overflow-y-auto rounded-xl bg-surface-popover shadow-popover p-1 animate-in"
+      style={{ maxHeight }}
     >
       <Group>Frontier</Group>
       {PROFILES_LIST.map((profile) => {
@@ -285,7 +312,7 @@ export const ModelPicker: React.FC<ModelPickerProps> = ({ open, onClose }) => {
           no way to change it — the permission selector existed only in the
           agent tabs. It belongs wherever the agent is chosen. */}
       {agentSelection && agents?.[agentSelection.engine] && (
-        <div className="mt-1.5 pt-1.5 border-t border-edge">
+        <div className="mt-1 pt-1 border-t border-edge">
           <Group>Permissions</Group>
           {(agents[agentSelection.engine].permissions ?? []).map((value) => {
             const active = (agentPermission ?? agents[agentSelection.engine].defaultPermission) === value;

@@ -2,6 +2,7 @@ import React, { useState, useCallback } from 'react';
 import { useTimelineStore } from '../../store/timelineStore';
 import { useUiStore } from '../../store/uiStore';
 import { Track } from '../../types/edl';
+import { useDensity } from '../../hooks/useDensity';
 import {
   Eye, EyeOff, Lock, Unlock, Volume2, VolumeX, Headphones, ChevronUp, ChevronDown, Trash2,
 } from '../ui/icons';
@@ -24,6 +25,7 @@ const BADGE_FAMILY: Record<Track['type'], Track['type'][]> = {
 };
 
 export const TrackHeader: React.FC<{ track: Track }> = ({ track }) => {
+  const density = useDensity();
   const allTracks = useTimelineStore((s) => s.tracks);
   const selectedTrackId = useTimelineStore((s) => s.selectedTrackId);
   const setSelectedTrackId = useTimelineStore((s) => s.setSelectedTrackId);
@@ -83,18 +85,37 @@ export const TrackHeader: React.FC<{ track: Track }> = ({ track }) => {
   return (
     <div
       onClick={() => setSelectedTrackId(track.id)}
+      onDoubleClick={() => { if (density.isTight) setIsRenaming(true); }}
+      title={density.isTight ? `${track.name} — double-click to rename` : undefined}
       onContextMenu={(e) => {
         e.preventDefault();
         openContextMenu(e.clientX, e.clientY, [
           { id: 'selall', label: 'Select all clips on track', onSelect: () => selectAllOnTrack(track.id) },
           { id: 'rename', label: 'Rename track', onSelect: () => setIsRenaming(true) },
+          /* Solo and lock live on the row itself from `sm` up. At `xs` the
+             gutter is 62px — one toggle wide — so they are listed here
+             instead of being dropped. A control in a menu is still a
+             control; a control clipped off the edge of a 62px column is
+             not. */
+          ...(isAudio ? [{
+            id: 'solo',
+            label: track.solo ? 'Un-solo track' : 'Solo track',
+            icon: Headphones,
+            onSelect: () => setTrackSolo(track.id),
+          }] : []),
+          {
+            id: 'lock',
+            label: track.locked ? 'Unlock track' : 'Lock track',
+            icon: track.locked ? Lock : Unlock,
+            onSelect: () => setTrackLock(track.id),
+          },
           { id: 'up', label: 'Move track up', icon: ChevronUp, separatorBefore: true, onSelect: () => reorderTrack(track.id, -1) },
           { id: 'down', label: 'Move track down', icon: ChevronDown, onSelect: () => reorderTrack(track.id, 1) },
           { id: 'del', label: 'Delete track', icon: Trash2, danger: true, separatorBefore: true, onSelect: () => removeTrack(track.id) },
         ]);
       }}
       style={{ height: track.heightPx }}
-      className={`editor-track-row relative w-full flex items-center gap-[9px] px-[11px] border-b border-line cursor-pointer group transition-colors ${
+      className={`editor-track-row relative w-full flex items-center border-b border-line cursor-pointer group transition-colors ${
         isSelected ? 'is-active bg-spectrum-card' : 'bg-spectrum-panelHeader hover:bg-spectrum-hover'
       }`}
     >
@@ -120,7 +141,11 @@ export const TrackHeader: React.FC<{ track: Track }> = ({ track }) => {
         {style.badge}{laneNumber}
       </span>
 
-      <div className="flex-1 min-w-0 flex flex-col justify-center gap-1">
+      {/* The name column disappears entirely at `xs` rather than truncating
+          to two characters — "Pr…" identifies nothing that the V1 badge
+          beside it has not already said, and the 40px it costs is a clip
+          you can see. Double-click still renames; the target is the row. */}
+      <div className={`flex-1 min-w-0 flex flex-col justify-center gap-1 ${density.isTight && !isRenaming ? 'hidden' : ''}`}>
         {isRenaming ? (
           <input
             autoFocus
@@ -147,7 +172,7 @@ export const TrackHeader: React.FC<{ track: Track }> = ({ track }) => {
         )}
 
         {/* Volume rail on taller audio lanes */}
-        {isAudio && !isCompact && (
+        {isAudio && !isCompact && !density.isCompact && (
           <div className="flex items-center gap-1.5 pr-1">
             <input
               type="range"
@@ -174,11 +199,11 @@ export const TrackHeader: React.FC<{ track: Track }> = ({ track }) => {
         video row so the icons lined up between rows of different types
         — but a row's type never changes, so nothing could ever shift,
         and the reservation was costing the track NAME a quarter of its
-        width. At 160px that is the difference between "Ground" and
+        width. At 176px that is the difference between "Ground" and
         "Gr…".
       */}
       <div className="flex items-center gap-0.5 flex-shrink-0">
-        {isAudio && (
+        {isAudio && !density.isTight && (
           <button
             onClick={(e) => { e.stopPropagation(); setTrackSolo(track.id); }}
             className={`pro-btn w-[22px] h-[var(--h-xs)] ${track.solo ? 'pro-btn-active' : ''}`}
@@ -202,7 +227,7 @@ export const TrackHeader: React.FC<{ track: Track }> = ({ track }) => {
 
         <button
           onClick={(e) => { e.stopPropagation(); setTrackLock(track.id); }}
-          className={`pro-btn w-[22px] h-[var(--h-xs)] ${track.locked ? 'pro-btn-active !text-spectrum-amber' : ''}`}
+          className={`pro-btn w-[22px] h-[var(--h-xs)] ${density.isTight ? 'hidden' : ''} ${track.locked ? 'pro-btn-active !text-spectrum-amber' : ''}`}
           title={track.locked ? 'Unlock track' : 'Lock track'}
         
             aria-label={track.locked ? 'Unlock track' : 'Lock track'}>

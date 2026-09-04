@@ -64,7 +64,7 @@ is the complete list.
 | | Path | Auth | |
 | --- | --- | --- | --- |
 | `GET` | `/api/frontier/status` | bearer | Current model mode and whether an expert-qualified provider is reachable. |
-| `POST` | `/api/frontier/resolve-mode` | bearer | Resolves a requested mode against what the machine and providers can actually serve. |
+| `POST` | `/api/frontier/resolve-mode` | bearer | Resolves a requested mode against what the machine and providers can actually serve. Answers `402 PLAN_UPGRADE_REQUIRED` when the resolved profile needs a capability the licence does not carry. |
 | `GET` | `/api/models` · `/api/models/local` | bearer | Models installed in Ollama, from its `api/tags`. |
 | `GET` | `/api/models/library` | bearer | The catalog, filtered against the detected device and what is already installed. |
 | `POST` | `/api/models/resolve` | bearer | Picks a model for a given prompt. |
@@ -87,8 +87,9 @@ is the complete list.
 | `POST` | `/api/workspace/file` | bearer | Reads one file. Paths over 2,048 characters are rejected. |
 | `POST` | `/api/workspace/write` | bearer | Writes one file. |
 | `POST` | `/api/workspace/search` | bearer | Searches the workspace. |
-| `GET` | `/api/workspace/projects` | bearer | The current project plus the remembered recents. |
+| `GET` | `/api/workspace/projects` | bearer | The current project plus the remembered recents. A recent whose directory is gone is filtered out of the response but kept in the store, so a project on an unmounted volume comes back when the volume does. |
 | `POST` | `/api/workspace/open` | bearer | Opens a project and rebinds the workspace root. An unopenable or over-broad root is refused. |
+| `POST` | `/api/workspace/projects/remember` | bearer | Records a project in the recents **without** rebinding the workspace root. What a video project uses, so opening a timeline does not repoint the file tree, search and terminals at the folder holding it. |
 | `POST` | `/api/workspace/projects/forget` | bearer | Drops one project from the recents. |
 
 ### Terminal
@@ -118,9 +119,35 @@ is the complete list.
 
 | | Path | Auth | |
 | --- | --- | --- | --- |
-| `GET` | `/api/voice/status` | bearer | Whether the VibeVoice sidecar is up, and whether it offers ASR, TTS or both. |
-| `POST` | `/api/voice/transcribe` | bearer | Speech to text. Refused when the sidecar reports no ASR. |
-| `POST` | `/api/voice/speak` | bearer | Text to speech. Refused when the sidecar reports no TTS. |
+| `GET` | `/api/voice/status` | bearer | Whether the VibeVoice sidecar is up, and whether it offers ASR, TTS or both. Reports `gated: "voice.vibevoice"` when the plan cannot reach the sidecar tier. |
+| `POST` | `/api/voice/transcribe` | bearer | Speech to text. Refused when no ASR is available at all; served by whisper.cpp rather than the sidecar when the plan does not carry `voice.vibevoice`. Multipart fields: `audio`, `language` (`auto` guesses, and guesses badly on short or non-English takes), and `maxSegmentChars` — pass it and the local engine returns `segments` with real millisecond `startMs`/`endMs`, which is what a caption track needs. The sidecar returns none. |
+| `POST` | `/api/voice/speak` | bearer | Text to speech. Refused when no TTS is available at all; served by the system voices rather than the sidecar when the plan does not carry `voice.vibevoice`. |
+
+### Entitlement
+
+What this machine may do, and how it comes to be allowed more. The gates
+themselves live at the routes they guard; these routes exist so the UI can show
+the state and act on it rather than inferring the plan from a refusal it
+happened to receive.
+
+The last three are thin proxies to the billing service, and they are proxies
+rather than direct calls from the renderer for one reason: the gateway holds
+the billing session token and the service address, and a token reachable from
+the page is a token reachable from anything the page ever renders. Nothing here
+decides what a plan costs or what it unlocks — prices come from the service,
+capabilities from `licence/entitlements.js`, and a licence only ever arrives
+through `/api/entitlement/refresh`, where it is verified before it is stored.
+
+| Method | Route | Auth | Purpose |
+| --- | --- | --- | --- |
+| `GET` | `/api/entitlement` | bearer | The current plan, capabilities, licence state and expiry, plus the capability catalogue an upgrade screen renders from. |
+| `POST` | `/api/entitlement/refresh` | bearer | Asks the billing service for a fresh licence. A network failure returns the cached entitlement rather than a downgrade. |
+| `POST` | `/api/entitlement/sign-in` | bearer | Starts a device-code sign-in and returns the code to type on another device. Optional `provider` (`github`, the default, or `google`) is passed through to the billing service. |
+| `POST` | `/api/entitlement/sign-in/poll` | bearer | `{ status: "pending" }` until the code is claimed, then the granted entitlement. |
+| `POST` | `/api/entitlement/sign-out` | bearer | Revokes the session at the billing service, then forgets the licence and the session here. The local half happens even when the service cannot be reached, so this route does not fail. |
+| `GET` | `/api/entitlement/plans` | bearer | What is for sale, proxied from the billing service. Public on the far side — no billing session needed, because a price is a thing you read before you have an account. |
+| `POST` | `/api/entitlement/checkout` | bearer | Starts a payment. `{ rail: "stripe" \| "lipia", priceId, msisdn? }`. Stripe answers `{ url }` to open in a browser; Lipia answers `{ order }` to poll while the handset prompt is approved. Refuses an unknown rail and a signed-out caller before touching the network. |
+| `GET` | `/api/entitlement/order/:id` | bearer | How one payment is going. Scoped to the signed-in account by the billing service, which reconciles on read. |
 
 ### Guardian
 
@@ -146,6 +173,7 @@ is the complete list.
 | --- | --- | --- | --- |
 | `GET` | `/api/usage` | bearer | The ledger, `?days=` clamped to 1–90, default 7. |
 | `POST` | `/api/usage` | bearer | Records a turn the gateway cannot observe for itself — a local turn is counted in the renderer. |
+| `GET` | `/api/plan` | bearer | Who each agent CLI is signed in as, and the plan windows it last reported. `limits` is `{}` until a subscription turn runs. |
 
 ### Benchmarks and arena
 
@@ -270,6 +298,7 @@ State files, all defaulting under `benchmark-results/` in the working directory:
 | `TEMINALI_AGENT_MODEL_STORE` | `agent-models.json` |
 | `TEMINALI_ADMIN_STORE` | `admins.json` |
 | `TEMINALI_USAGE_LEDGER` | `usage-ledger.jsonl` |
+| `TEMINALI_PLAN_STORE` | `plan-limits.json` — the plan windows the agent CLI last reported |
 | `TEMINALI_ARENA_HISTORY` | `arena-runs.jsonl` |
 | `TEMINALI_ASSISTANT_FRAMES` | `assistant-frames/` — screenshots the assistant looked at, pruned to the last handful |
 

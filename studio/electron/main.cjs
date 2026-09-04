@@ -7,6 +7,9 @@ const { attachAssistantOverlay } = require("./assistant-overlay.cjs");
 const { initVideoToolBridge, setBridgeWindow, videoBridge } = require("./videoToolBridge.cjs");
 const { startVideoRpcServer } = require("./videoRpc.cjs");
 const { resolveRealPath, processWithFfmpeg, formatAuditLine } = require("./mediaAccess.cjs");
+const { initScreenRecorder, shutdownScreenRecorder } = require("./screenRecorder.cjs");
+const { initVideoProjects, shutdownVideoProjects } = require("./videoProjects.cjs");
+const { initVideoExport, shutdownVideoExport } = require("./videoExport.cjs");
 
 const logFile = path.join(app.getPath("userData"), "studio-main.log");
 function log(...args) {
@@ -515,6 +518,57 @@ function buildMenu() {
           click: () => target()?.webContents.send("menu:save"),
         },
         { type: "separator" },
+        {
+          /*
+            The video editor's own file commands, and the only way to reach
+            them: a timeline is not a file in the tree, so ⌘O and ⌘S above —
+            which open a folder and save the focused editor buffer — cannot
+            serve it.
+
+            Here rather than in the pane's own chrome for the reason the
+            recorder's item gives: a native menu owns its accelerator whatever
+            has focus, and the video pane hands focus to a canvas, a timeline
+            and a dozen numeric fields. The summon bar in `VideoPane` is
+            navigation, and it is width-gated away at `sm`.
+
+            ⌥ rather than ⇧, and that is not a taste call: ⇧⌘O and ⇧⌘S are
+            already the Codex panel and the side panel in `App.tsx`'s shortcut
+            handler. An accelerator the menu takes is one the renderer stops
+            hearing, so those two bindings would have gone quiet with no error
+            anywhere. ⌥ keeps the letters, which is the whole mnemonic — the
+            video editor's ⌘O and ⌘S.
+          */
+          label: "Open Video Project…",
+          accelerator: "Alt+CmdOrCtrl+O",
+          click: () => target()?.webContents.send("menu:open-video-project"),
+        },
+        {
+          // Ellipsis because the first save names a folder. Later saves reuse
+          // it — `projectDir` on the project store is what remembers.
+          label: "Save Video Project…",
+          accelerator: "Alt+CmdOrCtrl+S",
+          click: () => target()?.webContents.send("menu:save-video-project"),
+        },
+        {
+          // The renderer decides whether an export can start — only it knows
+          // whether the sequence has anything in it and whether the media
+          // decodes — so this opens the dialog rather than beginning a render.
+          label: "Export Video…",
+          accelerator: "Alt+CmdOrCtrl+E",
+          click: () => target()?.webContents.send("menu:export-video"),
+        },
+        { type: "separator" },
+        {
+          // The only way in, now that the recorder is a dialog rather than a
+          // workspace panel: there is no tab to click and no add-panel entry.
+          // The accelerator lives here rather than in a renderer key handler
+          // because a native menu owns it whatever has focus — a terminal, a
+          // webview, a text field — and none of those swallow it.
+          label: "Record Screen…",
+          accelerator: "Shift+CmdOrCtrl+8",
+          click: () => target()?.webContents.send("menu:record-screen"),
+        },
+        { type: "separator" },
         isMac ? { role: "close" } : { role: "quit" },
       ],
     },
@@ -657,6 +711,47 @@ app.whenReady().then(async () => {
   buildMenu();
   createWindow();
 
+  /*
+    The recorder's fifteen `recorder:*` handlers, and the window getter they
+    hide and restore around a take. Registered after `createWindow` so that
+    `initScreenRecorder` finds a live window and can attach its did-finish-load
+    reconciliation straight away rather than deferring a tick.
+
+    Nothing else in main requires this module, so until it is called here the
+    handlers do not exist — and `window.teminali.recorder` in the preload has
+    nothing to invoke.
+  */
+  try {
+    initScreenRecorder(() => mainWindow);
+  } catch (error) {
+    log("The screen recorder could not be started:", error?.message || error);
+  }
+
+  /*
+    The video project transport. Same shape and the same reason: without this
+    call the `videoProject:*` handlers do not exist, and `window.teminali`'s
+    `videoProjects` key has nothing to invoke. `tests/video-project-bridge.test.mjs`
+    asserts this call is here, because a complete and correct module that
+    nothing required is exactly how the recorder shipped dead.
+  */
+  try {
+    initVideoProjects(() => mainWindow);
+  } catch (error) {
+    log("The video project transport could not be started:", error?.message || error);
+  }
+
+  /*
+    The exporter's four `export:*` handlers. Registered here for the same
+    reason as the two above and asserted by `tests/video-export.test.mjs`:
+    the renderer's export driver is a long loop that only discovers a missing
+    handler on the frame after it has already started encoding.
+  */
+  try {
+    initVideoExport();
+  } catch (error) {
+    log("The video exporter could not be started:", error?.message || error);
+  }
+
   // The status item is a nice-to-have, not a dependency: a platform without a
   // tray must still get a window, so its own failure never reaches this far.
   try {
@@ -712,6 +807,25 @@ app.on("will-quit", () => {
     globalShortcut.unregisterAll();
   } catch (error) {
     log("Could not release global shortcuts:", error.message);
+  }
+  // Releases the recorder's own global shortcuts, closes the floating bar and
+  // ends any half-written take file. Its shortcuts are registered per session,
+  // so `unregisterAll` above has already taken them; this is for the streams.
+  try {
+    shutdownScreenRecorder();
+  } catch (error) {
+    log("Could not shut the screen recorder down:", error.message);
+  }
+  try {
+    shutdownVideoProjects();
+  } catch (error) {
+    log("Could not shut the video project transport down:", error.message);
+  }
+  // Kills any ffmpeg still encoding, so it cannot outlive the app.
+  try {
+    shutdownVideoExport();
+  } catch (error) {
+    log("Could not shut the video exporter down:", error.message);
   }
   assistantOverlay?.destroy();
   // Takes the endpoint file with it, so the next launch's gateway cannot find

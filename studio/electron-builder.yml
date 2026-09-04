@@ -48,6 +48,11 @@ asarUnpack:
 # collects paths under the app directory.
 extraResources:
   - from: ../gateway
+  # server/licence.js imports "../../licence/format.js" for the same reason and
+  # by the same route. Only the verifying half lives there — the signer stays in
+  # billing/, which is deployed to a server and never packaged, so no build of
+  # this app carries the code that mints entitlements.
+  - from: ../licence
     to: gateway
     filter:
       - "**/*.js"

@@ -1,0 +1,22 @@
+# Local development secrets. Copy to `.dev.vars`, which is gitignored.
+# In production these are `wrangler secret put <NAME>` instead.
+
+# The private half of the licence signing key, PKCS8 PEM, newlines as \n.
+# Generate with `npm run keygen` — it prints this line ready to paste, and
+# the public half to bake into studio/server/licence.js BAKED_PUBLIC_KEYS.
+LICENCE_SIGNING_KEY="-----BEGIN PRIVATE KEY-----\n...\n-----END PRIVATE KEY-----\n"
+
+# OAuth device flow. At least one provider must be configured or sign-in 503s.
+GITHUB_CLIENT_SECRET=""
+GOOGLE_CLIENT_SECRET=""
+
+# Stripe. The webhook secret is per endpoint — `stripe listen` prints its own
+# for local forwarding, and it is NOT the dashboard endpoint's secret.
+STRIPE_SECRET_KEY=""
+STRIPE_WEBHOOK_SECRET=""
+
+# Lipia (pay.mhasibudigital.com). The public/secret pair is sent colon-joined
+# inside one Bearer header; the webhook secret is separate and signs callbacks.
+LIPIA_PUBLIC_KEY=""
+LIPIA_SECRET=""
+LIPIA_WEBHOOK_SECRET=""

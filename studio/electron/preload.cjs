@@ -87,6 +87,10 @@ contextBridge.exposeInMainWorld("teminali", {
         "menu:toggle-terminal",
         "menu:command-palette",
         "menu:open-guardian",
+        "menu:record-screen",
+        "menu:open-video-project",
+        "menu:save-video-project",
+        "menu:export-video",
       ]);
       if (!allowed.has(channel)) return () => {};
       const handler = (_event, payload) => listener(payload);
@@ -104,6 +108,105 @@ contextBridge.exposeInMainWorld("teminali", {
   updates: {
     install: (filePath) => ipcRenderer.invoke("updates:install", filePath),
     restart: () => ipcRenderer.invoke("updates:restart"),
+  },
+  /**
+   * The screen recorder.
+   *
+   * Every verb here answers one `recorder:*` handler in screenRecorder.cjs, and
+   * the shape of each is the `RecorderBridge` contract in
+   * `src/types/recorder.ts`. Without this key `window.teminali.recorder` is
+   * undefined, and the renderer's `bridge()` falls through to the browser path
+   * that can enumerate neither displays nor windows — which is exactly what a
+   * missing bridge looked like from the outside: "Displays (1), Windows (0)".
+   *
+   * `onCommand` and `onState` are the only two pushes. The bar window is a
+   * second renderer with no recorder of its own, so its buttons arrive here as
+   * commands and its labels leave as state.
+   */
+  recorder: {
+    sources: (thumbWidth) => ipcRenderer.invoke("recorder:sources", { thumbWidth }),
+    permissions: () => ipcRenderer.invoke("recorder:permissions"),
+    requestPermission: (kind) => ipcRenderer.invoke("recorder:requestPermission", { kind }),
+    resetScreenPermission: () => ipcRenderer.invoke("recorder:resetScreenPermission"),
+    relaunch: () => ipcRenderer.invoke("recorder:relaunch"),
+
+    begin: (options) => ipcRenderer.invoke("recorder:begin", options),
+    chunk: (sessionId, stream, bytes) =>
+      ipcRenderer.invoke("recorder:chunk", { sessionId, stream, bytes }),
+    pause: (sessionId, paused) => ipcRenderer.invoke("recorder:pause", { sessionId, paused }),
+    finish: (sessionId, copyable) => ipcRenderer.invoke("recorder:finish", { sessionId, copyable }),
+    cancel: (sessionId, discard) => ipcRenderer.invoke("recorder:cancel", { sessionId, discard }),
+
+    writeTakeAsset: (dir, name, bytes) =>
+      ipcRenderer.invoke("recorder:writeTakeAsset", { dir, name, bytes }),
+    readManifest: (dir) => ipcRenderer.invoke("recorder:readManifest", { dir }),
+    reveal: (path) => ipcRenderer.invoke("recorder:reveal", { path }),
+
+    publishState: (state) => ipcRenderer.invoke("recorder:publishState", state),
+    barCommand: (action) => ipcRenderer.invoke("recorder:barCommand", { action }),
+
+    /** Stop/pause/mark, from the floating bar or a global shortcut. */
+    onCommand: (listener) => {
+      const handler = (_event, command) => listener(command);
+      ipcRenderer.on("recorder:command", handler);
+      return () => ipcRenderer.removeListener("recorder:command", handler);
+    },
+    /** Bar window only: what the main renderer says the take is doing. */
+    onState: (listener) => {
+      const handler = (_event, state) => listener(state);
+      ipcRenderer.on("recorder:state", handler);
+      return () => ipcRenderer.removeListener("recorder:state", handler);
+    },
+    /** How far through the remux, while `finish` is still awaiting. */
+    onConvert: (listener) => {
+      const handler = (_event, progress) => listener(progress);
+      ipcRenderer.on("recorder:convert", handler);
+      return () => ipcRenderer.removeListener("recorder:convert", handler);
+    },
+  },
+
+  /**
+   * Saving and opening a video project.
+   *
+   * Every verb here answers one `videoProject:*` handler in videoProjects.cjs,
+   * and the typed shape the renderer programs against is `src/types/videoProjects.ts`.
+   * Without this key `window.teminali.videoProjects` is undefined and the
+   * editor has no save at all — which is exactly how the recorder shipped
+   * dead, so `tests/video-project-bridge.test.mjs` reads all three files and
+   * asserts they agree.
+   *
+   * `json` crosses as a STRING in both directions. The renderer owns the
+   * format; main writes bytes. Serialising here would put a second copy of
+   * the format on the wrong side of the boundary.
+   */
+  videoProjects: {
+    chooseSaveDir: (suggestedName) =>
+      ipcRenderer.invoke("videoProject:chooseSaveDir", { suggestedName }),
+    chooseOpenDir: () => ipcRenderer.invoke("videoProject:chooseOpenDir"),
+    save: (dir, json) => ipcRenderer.invoke("videoProject:save", { dir, json }),
+    read: (dir) => ipcRenderer.invoke("videoProject:read", { dir }),
+    reveal: (path) => ipcRenderer.invoke("videoProject:reveal", { path }),
+  },
+  /**
+   * The exporter.
+   *
+   * A session, then one call per frame, then a finish that returns where the
+   * file went. The frame bytes cross as a `Uint8Array` in the structured
+   * clone — not base64, not a data URL: a 4K JPEG is around a megabyte and
+   * base64 would add a third to that on every one of several thousand frames.
+   *
+   * `cancel` is deliberately fire-and-forget. It is called from a beforeunload
+   * and from an abort the operator has already committed to, neither of which
+   * has anywhere to put a rejected promise.
+   */
+  exporter: {
+    choose: (suggestedName, codec) => ipcRenderer.invoke("export:choose", suggestedName, codec),
+    start: (options) => ipcRenderer.invoke("export:start", options),
+    frame: (sessionId, jpeg, frames) => ipcRenderer.invoke("export:frame", sessionId, jpeg, frames),
+    materialize: (sessionId, bytes, extension) =>
+      ipcRenderer.invoke("export:material", sessionId, bytes, extension),
+    finish: (sessionId, audioClips) => ipcRenderer.invoke("export:finish", sessionId, audioClips),
+    cancel: (sessionId) => ipcRenderer.invoke("export:cancel", sessionId),
   },
   /**
    * The video panel's MCP bridge.

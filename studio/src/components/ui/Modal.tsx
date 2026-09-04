@@ -14,6 +14,15 @@ export interface ModalProps {
   footer?: React.ReactNode;
   showCloseButton?: boolean;
   className?: string;
+  /**
+   * Replaces the body's own classes rather than adding to them.
+   *
+   * The default is a padded scroll box, which is right for a form and
+   * wrong for a tool that owns its whole surface: the recorder lays out
+   * a flex column with its own footers, and 16px of modal padding plus
+   * an outer scrollbar puts a second scroll region around it.
+   */
+  bodyClassName?: string;
 }
 
 const sizeStyles: Record<ModalSize, string> = {
@@ -35,6 +44,7 @@ export const Modal: React.FC<ModalProps> = ({
   footer,
   showCloseButton = true,
   className = "",
+  bodyClassName = "flex-1 overflow-y-auto p-4",
 }) => {
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -84,7 +94,7 @@ export const Modal: React.FC<ModalProps> = ({
         )}
 
         {/* Modal Body */}
-        <div className="flex-1 overflow-y-auto p-4">{children}</div>
+        <div className={bodyClassName}>{children}</div>
 
         {/* Modal Footer */}
         {footer && (

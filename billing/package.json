@@ -1,0 +1,19 @@
+{
+  "name": "@teminali/billing",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Teminali Code billing — accounts, subscriptions, Stripe and Lipia, and the signer that issues Pro licences",
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "db:local": "wrangler d1 execute teminali-billing --local --file=./schema.sql",
+    "db:remote": "wrangler d1 execute teminali-billing --remote --file=./schema.sql",
+    "seed:local": "wrangler d1 execute teminali-billing --local --file=./seed.sql",
+    "seed:remote": "wrangler d1 execute teminali-billing --remote --file=./seed.sql",
+    "keygen": "node scripts/keygen.mjs"
+  },
+  "devDependencies": {
+    "wrangler": "^4.0.0"
+  }
+}

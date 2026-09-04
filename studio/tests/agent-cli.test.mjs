@@ -146,6 +146,43 @@ test("claude session, cost and duration are carried through verbatim", async () 
   assert.equal(outcome.sessionId, "sess-1");
 });
 
+test("plan windows are lifted off the turn's own stream", async () => {
+  // Copied from a real `rate_limit_event`: the CLI reports the account's
+  // headroom on the same stream it reports tokens on, which is the whole
+  // reason the studio can show a plan meter without a second request.
+  const { events } = await collect("claude", [
+    {
+      type: "rate_limit_event",
+      rate_limit_info: {
+        status: "allowed_warning",
+        rateLimitType: "seven_day",
+        utilization: 0.63,
+        isUsingOverage: false,
+        unifiedWindows: {
+          five_hour: { utilization: 0.8, resetsAt: 1788468600 },
+          seven_day: { utilization: 0.63, resetsAt: 1788886800 },
+        },
+      },
+    },
+  ]);
+
+  const limits = events.filter((e) => e.type === "limits");
+  assert.equal(limits.length, 1);
+  assert.equal(limits[0].status, "allowed_warning");
+  assert.equal(limits[0].isUsingOverage, false);
+  assert.deepEqual(limits[0].windows, [
+    { id: "five_hour", utilization: 0.8, resetsAt: 1788468600 },
+    { id: "seven_day", utilization: 0.63, resetsAt: 1788886800 },
+  ]);
+});
+
+test("a rate limit event with no windows reports nothing rather than zero", async () => {
+  // An API-key login has no plan behind it and says so by omission. Emitting a
+  // limits event here would draw an empty meter, which reads as "nothing used".
+  const { events } = await collect("claude", CLAUDE_TURN);
+  assert.equal(events.filter((e) => e.type === "limits").length, 0);
+});
+
 test("a failed claude turn reports why rather than resolving empty", async () => {
   const { events } = await collect("claude", [
     { type: "system", subtype: "init", session_id: "s", model: "m", cwd: "/w", tools: [] },

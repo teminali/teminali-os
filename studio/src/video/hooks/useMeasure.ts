@@ -8,6 +8,20 @@ export interface Size {
 /**
  * Track an element's content-box size via ResizeObserver.
  * Returns a ref to attach and the live size (0×0 until first measurement).
+ *
+ * The effect deliberately has NO dependency array, and that is the whole
+ * correctness argument: it must run after every render so that it can notice
+ * the ref changing hands. A mount-only effect measures whatever `ref.current`
+ * happens to be at mount, and for any consumer that renders `null` first there
+ * is nothing there — the observer is never attached and the size stays 0×0
+ * for the life of the component. `RecorderModal` is exactly that shape (it
+ * returns `null` while the dialog is shut), which pinned its measured width at
+ * 0, its density tier at `xs`, and left the capture options — the camera
+ * preview and the microphone meter — permanently behind a summon button on a
+ * 1024px-wide dialog with room for them four times over.
+ *
+ * The per-render cost is one reference comparison; the observer is rebuilt
+ * only when the element itself is new.
  */
 export function useMeasure<T extends HTMLElement = HTMLDivElement>(): [
   React.RefObject<T | null>,
@@ -15,10 +29,16 @@ export function useMeasure<T extends HTMLElement = HTMLDivElement>(): [
 ] {
   const ref = useRef<T | null>(null);
   const [size, setSize] = useState<Size>({ width: 0, height: 0 });
+  const observed = useRef<T | null>(null);
+  const observer = useRef<ResizeObserver | null>(null);
 
   useLayoutEffect(() => {
     const el = ref.current;
-    if (!el) return;
+    if (el === observed.current) return;
+
+    observer.current?.disconnect();
+    observer.current = null;
+    observed.current = el;
 
     const update = (width: number, height: number) => {
       setSize((prev) =>
@@ -28,17 +48,32 @@ export function useMeasure<T extends HTMLElement = HTMLDivElement>(): [
       );
     };
 
+    // The element went away: report nothing rather than a stale size, so a
+    // consumer that seats a rail on width does not seat it against a box that
+    // is no longer laid out.
+    if (!el) {
+      update(0, 0);
+      return;
+    }
+
     update(el.clientWidth, el.clientHeight);
 
-    const observer = new ResizeObserver((entries) => {
+    const next = new ResizeObserver((entries) => {
       const entry = entries[0];
       if (!entry) return;
       const box = entry.contentRect;
       update(box.width, box.height);
     });
 
-    observer.observe(el);
-    return () => observer.disconnect();
+    next.observe(el);
+    observer.current = next;
+  });
+
+  // Unmount is the one moment the loop above cannot see.
+  useLayoutEffect(() => () => {
+    observer.current?.disconnect();
+    observer.current = null;
+    observed.current = null;
   }, []);
 
   return [ref, size];

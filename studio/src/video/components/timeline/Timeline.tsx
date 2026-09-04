@@ -17,13 +17,30 @@ import { ClipBlock } from './ClipBlock';
 import { Playhead, PlayheadHead } from './Playhead';
 import { MarkerLane } from './MarkerLane';
 import { MediaAsset } from '../../types/edl';
+import { useDensity } from '../../hooks/useDensity';
 
 /* The scale and its clamp live in the store, because the store is what
    enforces them. Re-exported here so the existing import sites keep
    working — this module was their source before. */
 export { BASE_PX_PER_MS } from '../../store/timelineStore';
 import { BASE_PX_PER_MS } from '../../store/timelineStore';
-export const HEADER_WIDTH = 160;
+/**
+ * The track-header gutter, per tier.
+ *
+ * 160px is the desktop number and it is the right one there — it seats a
+ * lane badge, a real track name, and three toggles. In a 452px panel it is
+ * a THIRD OF THE TIMELINE spent on labels for lanes you can already tell
+ * apart by colour, and what it costs is the only thing the timeline is
+ * for: the lanes themselves. So the gutter gives width back first.
+ *
+ * At `xs` it keeps the badge and the toggles and drops the name to a
+ * tooltip — which is what CapCut's phone timeline does, and it is why that
+ * timeline reads at 390px. Nothing is removed: the name is still there on
+ * hover, still editable by double-click, and the row's right-click menu
+ * carries rename, reorder and delete at every width.
+ */
+export const HEADER_WIDTH = 176;
+const HEADER_WIDTH_BY_TIER = { xs: 76, sm: 120, md: 150, lg: HEADER_WIDTH } as const;
 const RULER_HEIGHT = 30;
 const MARKER_HEIGHT = 18;
 
@@ -36,6 +53,9 @@ export interface DragGhost {
 }
 
 export const Timeline: React.FC = () => {
+  const density = useDensity();
+  const headerWidth = HEADER_WIDTH_BY_TIER[density.tier];
+
   const tracks = useTimelineStore((s) => s.tracks);
   const zoomLevel = useTimelineStore((s) => s.zoomLevel);
   const selectedTrackId = useTimelineStore((s) => s.selectedTrackId);
@@ -283,17 +303,24 @@ export const Timeline: React.FC = () => {
     <div className="editor-timeline-inner flex flex-col h-full bg-spectrum-panel border-t border-line overflow-hidden select-none">
       <TimelineToolbar scrollRef={scrollRef} />
 
-      <div className="flex-1 flex overflow-hidden min-h-0">
+      {/* The version control floats in the window's bottom-right corner, and the
+          timeline is what sits under it (VersionControl.tsx: bottom-2, 22px tall
+          => a 30px strip). Reserve that strip so a lane never renders beneath it;
+          slack under the last track is what an editor wants there anyway. If that
+          offset changes, change this with it. */}
+      <div className="flex-1 flex overflow-hidden min-h-0 pb-[30px]">
         {/* ── Track headers ── */}
         <div
           className="editor-track-list flex-shrink-0 flex flex-col bg-spectrum-panelHeader border-r border-line z-20"
-          style={{ width: HEADER_WIDTH }}
+          style={{ width: headerWidth }}
         >
           <div
-            className="editor-track-list-header flex items-center px-[12px] pt-px border-b border-line bg-spectrum-panelHeader flex-shrink-0"
+            className="editor-track-list-header flex items-center border-b border-line bg-spectrum-panelHeader flex-shrink-0"
             style={{ height: RULER_HEIGHT + MARKER_HEIGHT }}
           >
-            <span className="panel-title text-spectrum-textDimCool">Tracks</span>
+            <span className="panel-title text-spectrum-textDimCool">
+              {density.isTight ? 'Trk' : 'Tracks'}
+            </span>
           </div>
 
           <div className="flex-1 overflow-hidden">

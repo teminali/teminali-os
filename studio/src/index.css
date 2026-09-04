@@ -376,6 +376,20 @@ body {
   -webkit-font-smoothing: antialiased;
 }
 
+/*
+  The floating recorder bar is its own BrowserWindow — transparent and
+  frameless, loaded from this same bundle. A body painted with the editor
+  ground would fill that window with a dark rectangle, and the rounded pill
+  inside it would sit on a hard-edged square. `RecorderBar` stamps this class
+  on <html> as it mounts, so only that window pays for it.
+*/
+html.recorder-bar-window,
+html.recorder-bar-window body,
+html.recorder-bar-window #root {
+  background: transparent;
+  overflow: hidden;
+}
+
 .ide-window {
   background: var(--vsc-editor-bg);
 }
