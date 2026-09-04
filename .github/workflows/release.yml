@@ -110,9 +110,13 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          # Pending, and deliberately harmless while it is. An absent secret is
-          # an empty string, which every reader below treats as absent:
-          # electron-builder skips signing, and afterPack.cjs ad-hoc signs.
+          # Pending, and inert while it is — but inert by being UNSET, not by
+          # being empty. An absent secret interpolates to an empty string, and
+          # electron-builder reads CSC_LINK with `v1 == null ? v2 : v1`, so ""
+          # is a value: it resolves as a certificate PATH against the project
+          # directory and the build dies with "<projectDir> not a file". That
+          # is what failed v1.2.0 on this runner, twice. The run step below
+          # unsets both when they arrive empty.
           #
           # Scoped to the macOS runner because CSC_LINK is not a macOS variable —
           # electron-builder hands it to signtool on Windows too, and a Developer
@@ -131,9 +135,21 @@ jobs:
           APPLE_ID: ${{ secrets.APPLE_ID }}
           APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
-        run: >-
-          npx electron-builder ${{ matrix.args }}
-          --publish ${{ (github.event_name == 'push' && 'always') || 'never' }}
+        # `unset`, not `: "${VAR:=}"`. electron-builder distinguishes an empty
+        # certificate path from an absent one and only the absent one takes the
+        # ad-hoc path, so the variables have to leave this shell's environment
+        # entirely. Adding the secrets makes them non-empty and this is a no-op.
+        run: |
+          if [ -z "${CSC_LINK}" ]; then
+            unset CSC_LINK CSC_KEY_PASSWORD
+          fi
+          # Same rule, same reason: notarization reads these as present-or-not,
+          # and three empty strings are a set that is present and unusable.
+          if [ -z "${APPLE_ID}" ]; then
+            unset APPLE_ID APPLE_APP_SPECIFIC_PASSWORD APPLE_TEAM_ID
+          fi
+          npx electron-builder ${{ matrix.args }} \
+            --publish ${{ (github.event_name == 'push' && 'always') || 'never' }}
 
       # On a rehearsal there is no release to attach to, so the artifacts are
       # kept on the run itself — otherwise a dry run produces nothing to look at.

@@ -518,7 +518,7 @@ ollama serve              # local models on 127.0.0.1:11434
 
 ```bash
 npm run typecheck   # tsc --noEmit
-npm test            # 831 tests, 0 failures
+npm test            # 832 tests, 0 failures
 npm run build       # tsc && vite build
 npm run verify:core # all three
 ```
@@ -548,12 +548,20 @@ carries no entitlements.
 
 The release workflow already passes `CSC_LINK`, `CSC_KEY_PASSWORD` and
 `APPLE_ID` / `APPLE_APP_SPECIFIC_PASSWORD` / `APPLE_TEAM_ID`. An absent secret
-arrives as an empty string, and every reader treats empty as "no certificate":
-electron-builder skips signing, `afterPack.cjs` ad-hoc signs, and notarization —
-which only runs after a real signature — never starts. **Adding the secrets in
-repository settings is the whole switch-over; no file changes.** The macOS
-variables are scoped to the macOS runner, because `CSC_LINK` also feeds
-`signtool` on Windows.
+arrives as an **empty string, which is not the same as absent** — and that
+distinction is load-bearing. electron-builder reads `CSC_LINK` with
+`v1 == null ? v2 : v1`, so `""` is a value: it is resolved as a certificate
+path against the project directory, and packaging dies with
+`<projectDir> not a file`. This failed the v1.2.0 macOS build twice, on a
+public tag, before it was understood. The packaging step therefore `unset`s
+both pairs when they arrive empty, and only then does electron-builder take
+the ad-hoc path and skip notarization. `tests/packaging-resources.test.mjs`
+asserts the guard is still there and still runs before the build.
+
+**Adding the secrets in repository settings is the whole switch-over; no file
+changes** — non-empty values make the `unset` a no-op. The macOS variables are
+scoped to the macOS runner, because `CSC_LINK` also feeds `signtool` on
+Windows.
 
 Signing is not what gates updates. The updater here is bespoke
 (`server/updates.js`, `server/install-macos.js`) and replaces the whole app, so

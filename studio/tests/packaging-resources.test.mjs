@@ -10,10 +10,14 @@
   This exists because it went wrong in exactly one way and nothing caught it.
   A second entry was written into the list *above* the `to:` and `filter:`
   that belonged to the first, and YAML read them as the second entry's own:
-  the gateway lost its destination and its filter, the licence was copied on
-  top of the path the gateway is imported from, and the macOS build failed
-  during packaging with "not a file" — five minutes into a release, on a tag
-  that had already been pushed.
+  the gateway lost its destination and its filter, and the licence was copied
+  on top of the path the gateway is imported from. Both cross-package imports
+  were broken in the v1.2.0 artifacts that built — silently, because a missing
+  resource is only found when the packaged app tries to import it.
+
+  It did not break packaging; that was the signing variables, asserted at the
+  bottom of this file. The two failures arrived together and the first was
+  mistaken for the cause of the second.
 
   Nothing here runs electron-builder. It reads the config the way the build
   will and asserts the two properties a broken entry violates: every entry
@@ -103,4 +107,38 @@ test("every cross-package import has a resource that carries it", () => {
       `in a packaged app, but no extraResources entry copies anything to "${dir}"`,
     );
   }
+});
+
+/*
+  The signing variables, which are pending and must stay inert.
+
+  `CSC_LINK` is read as `v1 == null ? v2 : v1` — an empty string is a value,
+  not an absence. The release workflow sets it from a secret that does not
+  exist yet, so it arrives as "", electron-builder resolves it as a
+  certificate *path* against the project directory, and the macOS build dies
+  with "<projectDir> not a file". It failed v1.2.0 twice that way, on a tag
+  that was already public, and nothing in the suite could see it because the
+  variable only exists on a runner.
+
+  So the run step unsets them when they are empty, and this asserts it still
+  does. It is a text assertion on a workflow rather than a behavioural one:
+  cheap, and the alternative is finding out during a release again.
+*/
+test("the release workflow unsets empty signing variables before packaging", () => {
+  const workflow = readFileSync(
+    new URL("../../.github/workflows/release.yml", import.meta.url).pathname, "utf8",
+  );
+
+  assert.match(
+    workflow, /unset CSC_LINK CSC_KEY_PASSWORD/,
+    "an empty CSC_LINK is read as a certificate path, not as an absent one",
+  );
+  assert.match(
+    workflow, /unset APPLE_ID APPLE_APP_SPECIFIC_PASSWORD APPLE_TEAM_ID/,
+    "three empty notarization variables are a set that is present and unusable",
+  );
+  // The guard is worthless if it runs after the thing it guards.
+  const guard = workflow.indexOf("unset CSC_LINK");
+  const build = workflow.indexOf("npx electron-builder");
+  assert.ok(guard !== -1 && build !== -1 && guard < build, "the unset must precede the build");
 });
