@@ -91,7 +91,10 @@ export function hasVideoToolCalls(text: string): boolean {
  * when trying to invoke an editor tool.
  */
 export function parseFallbackVideoToolCalls(text: string, knownTools?: string[]): VideoToolRequest[] {
-  const FALLBACK_FENCE = /```(?:json|video_tool|videotool|tool)[^\n]*\n([\s\S]*?)(?:```|$)/g;
+  // Only accept variants intended for video tools (e.g. video_tool, videotool, video-tools).
+  // Generic `json` fences must never be executed as tools, because documentation and tutorials
+  // emit JSON blocks that would otherwise accidentally execute against the timeline.
+  const FALLBACK_FENCE = /```(?:video_tool|videotool|video-tools)[^\n]*\n([\s\S]*?)(?:```|$)/g;
   const allowed = knownTools ? new Set(knownTools) : null;
   const requests: VideoToolRequest[] = [];
   let match: RegExpExecArray | null;
