@@ -40,6 +40,13 @@ export interface VideoProjectReadResult {
   json?: string;
 }
 
+export interface VideoProjectAutoSaveResult {
+  ok: boolean;
+  json?: string;
+  dir?: string | null;
+  error?: string;
+}
+
 export interface VideoProjectsBridge {
   /** Save As: names a new directory and creates it. Cancelling leaves nothing behind. */
   chooseSaveDir: (suggestedName?: string) => Promise<VideoProjectDirResult>;
@@ -47,4 +54,7 @@ export interface VideoProjectsBridge {
   save: (dir: string, json: string) => Promise<VideoProjectSaveResult>;
   read: (dir: string) => Promise<VideoProjectReadResult>;
   reveal: (path: string) => Promise<boolean>;
+  saveAutoSave: (json: string, dir?: string) => Promise<{ ok: boolean; error?: string }>;
+  getAutoSave: () => Promise<VideoProjectAutoSaveResult>;
+  clearAutoSave: () => Promise<{ ok: boolean }>;
 }

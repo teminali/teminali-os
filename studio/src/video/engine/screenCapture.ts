@@ -364,12 +364,10 @@ async function acquireScreen(settings: CaptureSettings): Promise<{
     systemAudio: null,
     ...(settings.systemAudio && !canLoopback
       ? {
-        warning: 'System audio is a Windows feature, so the screen take has no sound of its own. '
-          + 'Your microphone was still recorded. Asking for it here does not merely fail: it '
-          + 'returns a track that never delivers a sample and stops the recording entirely, so '
-          + 'Teminali Code does not ask.',
+        warning: 'System audio loopback is supported natively on Windows. On macOS, microphone narration is recorded.',
       }
       : {}),
+
   };
 }
 

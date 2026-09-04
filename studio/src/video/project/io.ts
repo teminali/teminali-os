@@ -190,3 +190,73 @@ export async function openVideoProject(): Promise<void> {
 
   await openVideoProjectAt(chosen.dir);
 }
+
+/* ── Auto-save & session recovery ────────────────────────────────── */
+
+let autoSaveTimer: ReturnType<typeof setTimeout> | null = null;
+let autoSaveUnsubs: Array<() => void> = [];
+
+export function initAutoSave(): () => void {
+  autoSaveUnsubs.forEach((unsub) => unsub());
+  autoSaveUnsubs = [];
+
+  const trigger = () => {
+    if (autoSaveTimer) clearTimeout(autoSaveTimer);
+    autoSaveTimer = setTimeout(async () => {
+      const bridge = window.teminali?.videoProjects;
+      if (!bridge) return;
+      const state = currentState();
+      if (unsaveableMedia(state).length > 0 || state.tracks.length === 0) return;
+
+      const serialized = serializeProject(state);
+      const jsonStr = `${JSON.stringify(serialized, null, 2)}\n`;
+      const dir = useProjectStore.getState().projectDir || undefined;
+
+      await bridge.saveAutoSave(jsonStr, dir).catch(() => {});
+      if (dir) {
+        await bridge.save(dir, jsonStr).catch(() => {});
+      }
+    }, 1000);
+  };
+
+  const unsub1 = useTimelineStore.subscribe(trigger);
+  const unsub2 = useProjectStore.subscribe(trigger);
+  autoSaveUnsubs = [unsub1, unsub2];
+
+  return () => {
+    if (autoSaveTimer) clearTimeout(autoSaveTimer);
+    autoSaveUnsubs.forEach((unsub) => unsub());
+    autoSaveUnsubs = [];
+  };
+}
+
+export async function restoreAutoSave(): Promise<boolean> {
+  const bridge = window.teminali?.videoProjects;
+  if (!bridge) return false;
+
+  if (useTimelineStore.getState().tracks.length > 0) return false;
+
+  try {
+    const res = await bridge.getAutoSave();
+    if (!res || !res.ok || !res.json) return false;
+
+    const parsed = parseProject(res.json);
+    if (!parsed.ok) return false;
+
+    useProjectStore.getState().loadProjectSettings(parsed.file.project);
+    useTimelineStore.getState().loadProject(parsed.file.tracks, parsed.file.markers, parsed.file.mediaPool);
+    if (res.dir) {
+      useProjectStore.getState().setProjectDir(res.dir);
+    }
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+export async function clearAutoSave(): Promise<void> {
+  const bridge = window.teminali?.videoProjects;
+  if (!bridge) return;
+  await bridge.clearAutoSave().catch(() => {});
+}
+

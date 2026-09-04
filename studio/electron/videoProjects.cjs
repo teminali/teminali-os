@@ -18,7 +18,7 @@
    use this to write anywhere it likes under any name it likes.
    ═══════════════════════════════════════════════════════════════════ */
 
-const { dialog, ipcMain, shell } = require("electron");
+const { app, dialog, ipcMain, shell } = require("electron");
 const fs = require("node:fs");
 const path = require("node:path");
 
@@ -121,6 +121,47 @@ function initVideoProjects(mainWindowGetter) {
     if (!p || !p.path) return false;
     shell.showItemInFolder(p.path);
     return true;
+  });
+
+  const getAutoSavePath = () => {
+    const userData = app ? app.getPath("userData") : process.cwd();
+    return path.join(userData, "video-autosave.json");
+  };
+
+  ipcMain.handle("videoProject:saveAutoSave", async (_event, p) => {
+    if (!p || typeof p.json !== "string") return { ok: false, error: "JSON payload required." };
+    try {
+      const file = getAutoSavePath();
+      const temporary = `${file}.${process.pid}.tmp`;
+      const payload = JSON.stringify({ json: p.json, dir: p.dir || null, savedAt: Date.now() });
+      fs.writeFileSync(temporary, payload, "utf8");
+      fs.renameSync(temporary, file);
+      return { ok: true };
+    } catch (err) {
+      return { ok: false, error: err.message };
+    }
+  });
+
+  ipcMain.handle("videoProject:getAutoSave", async () => {
+    try {
+      const file = getAutoSavePath();
+      if (!fs.existsSync(file)) return { ok: false };
+      const raw = fs.readFileSync(file, "utf8");
+      const parsed = JSON.parse(raw);
+      return { ok: true, json: parsed.json, dir: parsed.dir };
+    } catch (err) {
+      return { ok: false, error: err.message };
+    }
+  });
+
+  ipcMain.handle("videoProject:clearAutoSave", async () => {
+    try {
+      const file = getAutoSavePath();
+      if (fs.existsSync(file)) fs.unlinkSync(file);
+      return { ok: true };
+    } catch (err) {
+      return { ok: false, error: err.message };
+    }
   });
 }
 

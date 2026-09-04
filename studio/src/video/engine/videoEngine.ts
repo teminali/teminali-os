@@ -50,9 +50,40 @@ interface VideoEntry {
    * special-cased at each call site.
    */
   live: boolean;
+  /**
+   * Last decoded frame cached onto an offscreen canvas.
+   * Prevents black screen / placeholder flashes during seeks and buffer stalls.
+   */
+  lastFrameCanvas?: HTMLCanvasElement;
 }
 
 const videos = new Map<string, VideoEntry>();
+
+/**
+ * Capture the current frame into the entry's canvas so it can be held
+ * seamlessly across subsequent seeks.
+ */
+function updateLastFrame(entry: VideoEntry): void {
+  if (entry.live || entry.el.readyState < 2 || entry.el.videoWidth === 0 || entry.el.videoHeight === 0) return;
+  try {
+    if (!entry.lastFrameCanvas) {
+      entry.lastFrameCanvas = document.createElement('canvas');
+    }
+    if (
+      entry.lastFrameCanvas.width !== entry.el.videoWidth ||
+      entry.lastFrameCanvas.height !== entry.el.videoHeight
+    ) {
+      entry.lastFrameCanvas.width = entry.el.videoWidth;
+      entry.lastFrameCanvas.height = entry.el.videoHeight;
+    }
+    const ctx = entry.lastFrameCanvas.getContext('2d');
+    if (ctx) {
+      ctx.drawImage(entry.el, 0, 0);
+    }
+  } catch {
+    /* ignore draw errors if element is momentarily detached */
+  }
+}
 
 /**
  * Bumped whenever a new frame becomes drawable, so a paused preview
@@ -111,6 +142,7 @@ function acquire(url: string): VideoEntry {
 
   el.onloadeddata = () => {
     entry.loaded = true;
+    updateLastFrame(entry);
     generation++;
   };
   el.onerror = () => {
@@ -120,8 +152,12 @@ function acquire(url: string): VideoEntry {
     entry.seekWaiters.splice(0).forEach((fn) => fn());
   };
   el.onseeked = () => {
+    updateLastFrame(entry);
     generation++;
     entry.seekWaiters.splice(0).forEach((fn) => fn());
+  };
+  el.ontimeupdate = () => {
+    updateLastFrame(entry);
   };
 
   el.src = url;
@@ -194,23 +230,43 @@ export function videoFailed(url: string): boolean {
 }
 
 /**
- * The element, if it currently holds a frame that can be drawn.
+ * The element or cached frame, if it currently holds a frame that can be drawn.
  *
  * Returns null while decoding so the caller paints its placeholder
  * rather than a blank element — drawing a video with readyState 0
  * silently paints nothing at all.
+ * Returns the cached last frame if seeking or buffering to prevent black-screen flash.
  */
-export function getVideoFrame(url: string): HTMLVideoElement | null {
+export function getVideoFrame(url: string): CanvasImageSource | null {
   const entry = acquire(url);
   if (entry.failed) return null;
-  // HAVE_CURRENT_DATA — there is a frame at the current position.
-  return entry.el.readyState >= 2 && entry.el.videoWidth > 0 ? entry.el : null;
+
+  if (entry.el.readyState >= 2 && entry.el.videoWidth > 0) {
+    if (entry.el.seeking && entry.lastFrameCanvas && entry.lastFrameCanvas.width > 0) {
+      return entry.lastFrameCanvas;
+    }
+    if (!entry.lastFrameCanvas) {
+      updateLastFrame(entry);
+    }
+    return entry.el;
+  }
+
+  if (entry.lastFrameCanvas && entry.lastFrameCanvas.width > 0) {
+    return entry.lastFrameCanvas;
+  }
+
+  return null;
 }
 
 /** Intrinsic pixel size once the metadata has decoded, else null. */
 export function getVideoNaturalSize(url: string): { width: number; height: number } | null {
   const entry = acquire(url);
-  if (entry.failed || entry.el.videoWidth === 0) return null;
+  if (entry.failed || entry.el.videoWidth === 0) {
+    if (entry.lastFrameCanvas && entry.lastFrameCanvas.width > 0) {
+      return { width: entry.lastFrameCanvas.width, height: entry.lastFrameCanvas.height };
+    }
+    return null;
+  }
   return { width: entry.el.videoWidth, height: entry.el.videoHeight };
 }
 
@@ -281,17 +337,29 @@ export function syncVideo(tracks: Track[], playheadMs: number, isPlaying: boolea
 
     if (scrub) {
       if (!entry.el.paused) entry.el.pause();
-      if (Math.abs(entry.el.currentTime - sourceSeconds) > 0.02) {
+      if (Math.abs(entry.el.currentTime - sourceSeconds) > 0.02 && !entry.el.seeking) {
         try { entry.el.currentTime = sourceSeconds; } catch { /* not seekable yet */ }
       }
       continue;
     }
 
     const targetRate = Math.max(0.0625, Math.min(16, rate * (clip.speed?.multiplier ?? 1)));
-    if (entry.el.playbackRate !== targetRate) entry.el.playbackRate = targetRate;
+    const signedDrift = sourceSeconds - entry.el.currentTime;
+    const absDrift = Math.abs(signedDrift);
 
-    if (Math.abs(entry.el.currentTime - sourceSeconds) > RESYNC_TOLERANCE_S) {
-      try { entry.el.currentTime = sourceSeconds; } catch { /* not seekable yet */ }
+    if (absDrift > 1.2) {
+      if (!entry.el.seeking) {
+        try { entry.el.currentTime = sourceSeconds; } catch { /* not seekable yet */ }
+      }
+    } else if (absDrift > 0.03) {
+      // Dynamic PLL rate adjustment instead of hard seeking: eliminates stutter & black screens
+      const nudge = Math.max(-0.25, Math.min(0.25, signedDrift * 0.4));
+      const adjustedRate = Math.max(0.0625, Math.min(16, targetRate * (1 + nudge)));
+      if (Math.abs(entry.el.playbackRate - adjustedRate) > 0.01) {
+        entry.el.playbackRate = adjustedRate;
+      }
+    } else {
+      if (entry.el.playbackRate !== targetRate) entry.el.playbackRate = targetRate;
     }
 
     if (entry.el.paused) void entry.el.play().catch(() => {});
@@ -379,6 +447,11 @@ export function stopAllVideo(): void {
       entry.el.pause();
       entry.el.removeAttribute('src');
       entry.el.load();
+      if (entry.lastFrameCanvas) {
+        entry.lastFrameCanvas.width = 0;
+        entry.lastFrameCanvas.height = 0;
+        entry.lastFrameCanvas = undefined;
+      }
     } catch {
       /* already torn down */
     }
@@ -394,6 +467,11 @@ export function invalidateVideo(url: string): void {
     entry.el.pause();
     entry.el.removeAttribute('src');
     entry.el.load();
+    if (entry.lastFrameCanvas) {
+      entry.lastFrameCanvas.width = 0;
+      entry.lastFrameCanvas.height = 0;
+      entry.lastFrameCanvas = undefined;
+    }
   } catch {
     /* already torn down */
   }

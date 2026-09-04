@@ -66,7 +66,8 @@ import {
   DEFAULT_LOOK, LookOptions, SHAPE_BASE,
   addBackdrop, applyScreenLook, addFades, addCameraMotion,
 } from './cinematicLook';
-import { CURSOR_SIZE_PCT, cursorPlaneStyle, cursorLayerKeyframes } from './cursorLayer';
+import { CURSOR_SIZE_PCT, cursorPlaneStyle, cursorStyleFor, CursorStyleId, cursorLayerKeyframes } from './cursorLayer';
+
 import {
   CameraShape, DEFAULT_DODGE, DEFAULT_EXPLAIN,
   cameraDodges, cameraShapeMask, explainingStretches,
@@ -76,6 +77,8 @@ import {
 } from './recordingSound';
 import { Take } from './screenCapture';
 import { formatFileSize } from '../utils/time';
+import { WorkspaceService } from '../../services/workspaceService';
+import { serializeProject } from '../project/format';
 
 /* ── Options ────────────────────────────────────────────────────── */
 
@@ -141,8 +144,10 @@ export interface AssembleOptions {
    * explains why it grows with the zoom rather than holding one size.
    */
   drawCursor: boolean;
+  cursorStyle?: CursorStyleId;
 
   /* ── Look ── */
+
 
   /** Sit the picture on a backdrop, inset and rounded, and fade it up. */
   cinematic: boolean;
@@ -173,7 +178,9 @@ export const RAW_ASSEMBLE: AssembleOptions = {
   motionBlur: false,
   markMoments: false,
   drawCursor: false,
+  cursorStyle: 'plane',
   cinematic: false,
+
   look: DEFAULT_LOOK,
   sound: false,
   soundOptions: DEFAULT_SOUND,
@@ -424,10 +431,14 @@ export async function assembleRecording(
 
   /* ── 3. Tracks, bottom of the stack first ───────────────────────── */
 
+  const narrationTrack = o.detachNarration && (take.camera?.hasAudio || screen.hasAudio)
+    ? store().addTrack('audio', 'A1 · Narration')
+    : null;
   const soundTrack = soundKit && (soundKit.click || soundKit.whoosh)
     ? store().addTrack('audio', 'A2 · Sound design')
     : null;
-  const backdropTrack = o.cinematic && o.look.backdrop !== 'none'
+  const hasBackdrop = o.cinematic && (o.look.backdrop !== 'none' || Boolean(o.look.backdropImage));
+  const backdropTrack = hasBackdrop
     ? store().addTrack('video', 'V1 · Backdrop')
     : null;
   const screenTrack = store().addTrack('video', 'V2 · Screen');
@@ -439,7 +450,7 @@ export async function assembleRecording(
   const cursorTrack = o.drawCursor && take.cursor.length > 0
     ? store().addTrack('video', 'V3 · Cursor')
     : null;
-  const cameraTrack = take.camera && take.camera.url
+  const cameraTrack = o.includeCamera && take.camera && take.camera.url
     ? store().addTrack('video', 'V4 · Camera')
     : null;
   const gradeTrack = o.cinematic && (o.look.fadeInMs > 0 || o.look.fadeOutMs > 0)
@@ -448,7 +459,8 @@ export async function assembleRecording(
 
   /* ── 4. The backdrop ────────────────────────────────────────────── */
 
-  if (backdropTrack) addBackdrop(backdropTrack, settings, take.durationMs, o.look.backdrop);
+  if (backdropTrack) addBackdrop(backdropTrack, settings, take.durationMs, o.look.backdrop, o.look.backdropImage);
+
 
   /* ── 5. The screen ──────────────────────────────────────────────── */
 
@@ -602,7 +614,7 @@ export async function assembleRecording(
       0,
       Math.max(1, Math.round(take.durationMs))
     );
-    store().updateShapeStyle(cursorClipId, cursorPlaneStyle(restPx));
+    store().updateShapeStyle(cursorClipId, cursorStyleFor(o.cursorStyle ?? 'plane', restPx));
     /*
       The resting size is written to the base transform as well as
       keyframed. A take whose every sample was out of range emits no
@@ -628,8 +640,9 @@ export async function assembleRecording(
       },
       /* No hidden spans: the camera never takes the whole frame here,
          because deciding when it should is read out of a transcript. */
-      { hiddenSpans: [] }
+      { hiddenSpans: [], cursorStyle: o.cursorStyle ?? 'plane' }
     );
+
 
     for (const keyframe of cursorKeyframes) {
       store().addKeyframe(cursorClipId, {
@@ -788,18 +801,29 @@ export async function assembleRecording(
 
     /* ── The narration, on its own track ── */
     if (o.detachNarration && camera.hasAudio) {
-      const detached = store().detachAudio(cameraClipId);
-      if (detached.ok && detached.audioTrackId) {
-        store().renameTrack(detached.audioTrackId, 'A1 · Narration');
-      } else if (detached.error) {
+      const detached = store().detachAudio(cameraClipId, narrationTrack ?? undefined);
+      if (!detached.ok && detached.error) {
         notes.push(detached.error);
       }
     }
+  } else if (!o.includeCamera && take.camera && take.camera.hasAudio && narrationTrack) {
+    /* When camera video is excluded from timeline, lay down its audio onto A1 · Narration so narration is never lost */
+    const narrationAsset: MediaAsset = {
+      id: `media_rec_narration_${seq}_${now.toString(36)}`,
+      name: 'Narration.mp4',
+      type: 'audio',
+      url: take.camera.url,
+      thumbnailUrl: '',
+      durationMs: Math.max(200, take.durationMs - take.cameraOffsetMs),
+      fileSizeFormatted: formatFileSize(take.camera.bytes),
+    };
+    store().addMediaAsset(narrationAsset);
+    const audioClipId = store().insertClip(narrationTrack, narrationAsset, take.cameraOffsetMs);
+    store().patchClip(audioClipId, { name: 'Narration' });
   } else if (o.detachNarration && screen.hasAudio) {
-    const detached = store().detachAudio(screenClipId);
-    if (detached.ok && detached.audioTrackId) {
-      store().renameTrack(detached.audioTrackId, 'A1 · Narration');
-    } else if (detached.error) {
+
+    const detached = store().detachAudio(screenClipId, narrationTrack ?? undefined);
+    if (!detached.ok && detached.error) {
       notes.push(detached.error);
     }
   }
@@ -840,6 +864,26 @@ export async function assembleRecording(
 
   const finalState = useTimelineStore.getState();
   const clipCount = finalState.tracks.reduce((n, track) => n + track.clips.length, 0);
+
+  if (take.dir) {
+    useProjectStore.getState().setProjectDir(take.dir);
+    const serialized = serializeProject({
+      project: useProjectStore.getState().project,
+      tracks: finalState.tracks,
+      markers: finalState.markers,
+      mediaPool: finalState.mediaPool,
+    });
+    const jsonStr = `${JSON.stringify(serialized, null, 2)}\n`;
+    if (window.teminali?.videoProjects) {
+      void window.teminali.videoProjects.save(take.dir, jsonStr);
+      void window.teminali.videoProjects.saveAutoSave(jsonStr, take.dir);
+    }
+    try {
+      void WorkspaceService.rememberProject(take.dir);
+    } catch {
+      /* gateway might be offline */
+    }
+  }
 
   return {
     projectName,

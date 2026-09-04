@@ -148,6 +148,83 @@ const SHADOW_OFFSET_X = -0.02;
 const SHADOW_OFFSET_Y = 0.035;
 const SHADOW_COLOR = 'rgba(34, 36, 72, 0.30)';
 
+/* ── Cursor styles ──────────────────────────────────────────────── */
+
+export type CursorStyleId = 'plane' | 'arrow' | 'circle' | 'glow';
+
+export interface CursorStylePreset {
+  id: CursorStyleId;
+  label: string;
+  hint: string;
+  hotspotX: number;
+  hotspotY: number;
+}
+
+export const CURSOR_STYLES: CursorStylePreset[] = [
+  { id: 'plane', label: 'Dart', hint: 'Faceted paper plane with specular gradient', hotspotX: 5.8, hotspotY: 5.8 },
+  { id: 'arrow', label: 'Pointer', hint: 'Clean modern arrow with high-contrast outline', hotspotX: 8, hotspotY: 8 },
+  { id: 'circle', label: 'Dot', hint: 'Minimalist touch indicator for tutorials', hotspotX: 50, hotspotY: 50 },
+  { id: 'glow', label: 'Halo', hint: 'Vibrant pointer with neon focus halo', hotspotX: 10, hotspotY: 10 },
+];
+
+export const ARROW_PATH = 'M10 10 L10 82 L32 60 L52 95 L68 85 L48 52 L76 52 Z';
+export const CIRCLE_PATH = 'M50 16 A34 34 0 1 1 49.9 16 Z';
+export const GLOW_PATH = 'M12 12 L12 80 L32 60 L50 92 L64 84 L46 54 L72 54 Z';
+
+/**
+ * Returns shape style for the specified cursor style and resting size.
+ */
+export function cursorStyleFor(styleId: CursorStyleId = 'plane', restSizePx: number): Partial<ShapeStyle> {
+  const size = Math.max(1, restSizePx);
+  switch (styleId) {
+    case 'arrow':
+      return {
+        kind: 'path',
+        pathData: ARROW_PATH,
+        fill: '#FFFFFF',
+        stroke: '#0F172A',
+        strokeWidth: 7,
+        shadow: {
+          color: 'rgba(0, 0, 0, 0.40)',
+          blur: Math.round(size * 0.12),
+          offsetX: 0,
+          offsetY: Math.round(size * 0.04),
+        },
+      };
+    case 'circle':
+      return {
+        kind: 'path',
+        pathData: CIRCLE_PATH,
+        fill: '#3B82F6',
+        stroke: '#FFFFFF',
+        strokeWidth: 8,
+        shadow: {
+          color: 'rgba(59, 130, 246, 0.50)',
+          blur: Math.round(size * 0.16),
+          offsetX: 0,
+          offsetY: 0,
+        },
+      };
+    case 'glow':
+      return {
+        kind: 'path',
+        pathData: GLOW_PATH,
+        fill: '#06B6D4',
+        stroke: '#0F172A',
+        strokeWidth: 7,
+        shadow: {
+          color: 'rgba(6, 182, 212, 0.75)',
+          blur: Math.round(size * 0.22),
+          offsetX: 0,
+          offsetY: 0,
+        },
+      };
+    case 'plane':
+    default:
+      return cursorPlaneStyle(size);
+  }
+}
+
 /**
  * The icon's style, sized for a given resting box in canvas pixels.
  *
@@ -182,6 +259,7 @@ export function cursorPlaneStyle(restSizePx: number): Partial<ShapeStyle> {
   };
 }
 
+
 /* ── Placing it ─────────────────────────────────────────────────── */
 
 export interface CursorLayerGeometry {
@@ -201,8 +279,11 @@ export interface HiddenSpan {
 }
 
 export interface CursorLayerOptions {
+  /** The cursor pointer style. */
+  cursorStyle?: CursorStyleId;
   /** The icon's box as a percentage of the picture's height. */
   sizePct: number;
+
   /**
    * How far the cursor may stray from the emitted path before a sample
    * is kept, as a fraction of the picture.
@@ -449,12 +530,14 @@ export function cursorLayerKeyframes(
     const layerScale = boxPx / SHAPE_BASE;
 
     /* Content point to canvas, then hotspot to layer centre. The tip is
-       at `PLANE_HOTSPOT` of the way across a box drawn centred on the
+       at hotspot of the way across a box drawn centred on the
        layer's position, so the layer sits half a box minus that further
        down and right than the point it is aiming at. */
     const tipX = geometry.canvasWidth / 2 + frame.x + pictureW * (entry.x - 0.5);
     const tipY = geometry.canvasHeight / 2 + frame.y + pictureH * (entry.y - 0.5);
-    const centreOffset = ((50 - PLANE_HOTSPOT) / 100) * boxPx;
+    const stylePreset = CURSOR_STYLES.find((s) => s.id === (o.cursorStyle ?? 'plane')) ?? CURSOR_STYLES[0];
+    const centreOffsetX = ((50 - stylePreset.hotspotX) / 100) * boxPx;
+    const centreOffsetY = ((50 - stylePreset.hotspotY) / 100) * boxPx;
 
     const shared = {
       timeOffsetMs: at,
@@ -464,16 +547,17 @@ export function cursorLayerKeyframes(
 
     out.push({
       property: 'positionX',
-      value: tipX + centreOffset - geometry.canvasWidth / 2,
+      value: tipX + centreOffsetX - geometry.canvasWidth / 2,
       ...shared,
     });
     out.push({
       property: 'positionY',
-      value: tipY + centreOffset - geometry.canvasHeight / 2,
+      value: tipY + centreOffsetY - geometry.canvasHeight / 2,
       ...shared,
     });
     out.push({ property: 'scaleX', value: layerScale, ...shared });
     out.push({ property: 'scaleY', value: layerScale, ...shared });
+
   }
 
   /* ── Hiding it ─────────────────────────────────────────────────── */

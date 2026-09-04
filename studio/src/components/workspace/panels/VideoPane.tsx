@@ -10,6 +10,7 @@ import { ContextMenu, Toasts } from "../../../video/components/ui/Overlays";
 import { ExportDialog } from "../../../video/components/preview/ExportDialog";
 import { FolderOpen, Sliders, X } from "../../../video/components/ui/icons";
 import { MediaPanel } from "../../sidebar/MediaPanel";
+import { initAutoSave, restoreAutoSave } from "../../../video/project/io";
 
 /* ── The Cut's own numbers ──────────────────────────────────────────────────
    Read off `teminaliCut/src/store/layoutStore.ts` and its editor shell in
@@ -107,6 +108,13 @@ export const VideoPane: React.FC = () => {
   /* The transport keys the buttons advertise — Space, Home/End, ←/→, M, I,
      L. Scoped to this pane, which is the only one mounted while it lives. */
   useTransportShortcuts(paneRef);
+
+  useEffect(() => {
+    void restoreAutoSave();
+    const cleanup = initAutoSave();
+    return cleanup;
+  }, []);
+
   const density = densityFor(width, height);
 
   const canSeatInspector = width >= INSPECTOR_COLUMN_MIN_W;

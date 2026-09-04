@@ -22,3 +22,4 @@ studio/native/macos/bin/
 # Session handover notes, written by the handover skill. Working notes about
 # the repository rather than part of it.
 .claude/
+.agent/

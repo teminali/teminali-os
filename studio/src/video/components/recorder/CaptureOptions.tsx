@@ -137,22 +137,12 @@ export const CaptureOptions: React.FC<Props> = ({
       <MicMeter deviceId={settings.micDeviceId} />
 
       <ToggleRow
-        label="System audio"
+        label={permissions?.platform === 'win32' ? 'System audio' : 'System audio (Windows)'}
         checked={settings.systemAudio}
         onChange={(v) => onChange('systemAudio', v)}
-        hint="What the machine is playing"
+        hint={permissions?.platform === 'win32' ? 'What the machine is playing' : 'Natively supported on Windows'}
       />
 
-      {/* The caveat as a paragraph rather than as a hint: `ToggleRow`
-          truncates its hint to one line, and a warning cut off mid-word
-          is worse than no warning. */}
-      {permissions && permissions.platform !== 'win32' && settings.systemAudio && (
-        <p className="text-micro text-spectrum-textFaint leading-relaxed">
-          Only Windows exposes a loopback device. It is asked for anyway, in case one is
-          installed here; if there is none the screen clip simply has no sound of its own
-          and the take says so.
-        </p>
-      )}
 
       {/* Narration sits under Sound rather than under the camera it is
           recorded with, because what this decides is where the voice

@@ -26,7 +26,10 @@ import {
 } from "./agentCommands";
 import {
   buildVideoToolEvidence,
+  executeVideoToolRequests,
   hasVideoToolCalls,
+  parseFallbackVideoToolCalls,
+  parseVideoToolCalls,
   runVideoToolCalls,
   type VideoToolExecutor,
 } from "./videoToolCalls";
@@ -439,6 +442,55 @@ CRITICAL VISUAL DESIGN RULES:
           // Editor results are real evidence, so they buy an investigation
           // turn rather than a correction one — the same as a command's output.
           investigated = true;
+        }
+      } else if (capabilities.runVideoTool && editorTurns < MAX_EDITOR_TOOL_TURNS) {
+        const toolNames = (capabilities.videoTools || []).map((t) => t.name);
+        const fallbackRequests = parseFallbackVideoToolCalls(turnText, toolNames);
+        if (fallbackRequests.length > 0) {
+          const executions = await executeVideoToolRequests(fallbackRequests.slice(0, 6), {
+            execute: capabilities.runVideoTool,
+            signal: controller.signal,
+            onToolCall: callbacks.onToolCall,
+          });
+          if (executions.length > 0) {
+            const evidence = buildVideoToolEvidence(executions);
+            observation = observation ? `${observation}\n\n${evidence}` : evidence;
+            editorTurns += 1;
+            investigated = true;
+          }
+        }
+      }
+
+      if (!observation && capabilities.runVideoTool && correctionTurns < MAX_AGENT_COMMAND_TURNS) {
+        const videoTools = capabilities.videoTools || [];
+        const toolNames = videoTools.map((t) => t.name);
+
+        if (/```video-tool/i.test(turnText) && !hasVideoToolCalls(turnText)) {
+          observation =
+            "[PROTOCOL ERROR] The ```video-tool fence was incomplete or invalid JSON. " +
+            "To call an editor tool, emit a complete ```video-tool fence holding valid JSON, e.g.:\n" +
+            "```video-tool\n" +
+            '{"tool":"describe_timeline","arguments":{}}\n' +
+            "```\n" +
+            "Please emit the tool call now.";
+          correctionTurns += 1;
+        } else if (toolNames.length > 0) {
+          const matchingTool = toolNames.find((name) => {
+            const inJsonBlock = new RegExp(`["'](?:tool|name)["']\\s*:\\s*["']${name}["']`, "i").test(turnText);
+            const announcedIntent = new RegExp(`(?:I'll|I will|calling|let me call|going to call)\\s+${name}`, "i").test(turnText);
+            return inJsonBlock || announcedIntent;
+          });
+
+          if (matchingTool) {
+            observation =
+              `[PROTOCOL NOTICE] You indicated calling "${matchingTool}", but did not emit an executable \`\`\`video-tool fence. ` +
+              `A \`\`\`json block or plain text is documentation and is never executed.\n` +
+              `To execute "${matchingTool}", emit it in an explicit \`\`\`video-tool fence now:\n` +
+              "```video-tool\n" +
+              `{"tool":"${matchingTool}","arguments":{}}\n` +
+              "```";
+            correctionTurns += 1;
+          }
         }
       }
 

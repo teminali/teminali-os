@@ -59,13 +59,12 @@ import {
 import type { Track } from '../types/edl';
 import type { ExporterBridge } from '../../types/exporter';
 
-/* Quality 0.92 is the Cut's. Below about 0.9 the intermediate JPEG starts
-   showing on flat UI colour — which is most of a screen recording. */
-const JPEG_QUALITY = 0.92;
+/* Quality 0.85 balances intermediate frame encoding speed and fidelity. */
+const JPEG_QUALITY = 0.85;
 /** How often the store hears about progress. React does not need 60fps of it. */
 const PROGRESS_INTERVAL_MS = 80;
 /** How long the loop may hold the thread before giving it back to paint. */
-const PAINT_BUDGET_MS = 12;
+const PAINT_BUDGET_MS = 60;
 /** And how long it waits for a paint that a hidden window will never make. */
 const PAINT_TIMEOUT_MS = 60;
 /** Weights the fonts are rendered at, so all three are fetched before frame 0. */

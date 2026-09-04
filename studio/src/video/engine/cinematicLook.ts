@@ -32,7 +32,7 @@
    ═══════════════════════════════════════════════════════════════════ */
 
 import { useTimelineStore } from '../store/timelineStore';
-import { Easing, ProjectSettings } from '../types/edl';
+import { Easing, ProjectSettings, MediaAsset } from '../types/edl';
 
 /* ── Backdrops ──────────────────────────────────────────────────── */
 
@@ -48,6 +48,40 @@ export type FrameEdgeId =
   | 'neon-violet'
   | 'neon-coral';
 
+export interface WallpaperPreset {
+  id: string;
+  label: string;
+  url: string;
+  previewGradient: string;
+}
+
+export const WALLPAPER_PRESETS: WallpaperPreset[] = [
+  {
+    id: 'studio-clean',
+    label: 'Studio Clean',
+    url: 'data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="1920" height="1080" viewBox="0 0 1920 1080"><defs><radialGradient id="g1" cx="20%" cy="15%" r="60%"><stop offset="0%" stop-color="%23f1f5f9"/><stop offset="100%" stop-color="%23cbd5e1"/></radialGradient><radialGradient id="g2" cx="80%" cy="85%" r="50%"><stop offset="0%" stop-color="%23e2e8f0"/><stop offset="100%" stop-color="%2394a3b8"/></radialGradient></defs><rect width="1920" height="1080" fill="url(%23g1)"/><rect width="1920" height="1080" fill="url(%23g2)" opacity="0.45"/></svg>',
+    previewGradient: 'linear-gradient(135deg, #f1f5f9, #94a3b8)',
+  },
+  {
+    id: 'dark-horizon',
+    label: 'Dark Horizon',
+    url: 'data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="1920" height="1080" viewBox="0 0 1920 1080"><defs><linearGradient id="dh" x1="0%" y1="0%" x2="100%" y2="100%"><stop offset="0%" stop-color="%23090d16"/><stop offset="50%" stop-color="%23111827"/><stop offset="100%" stop-color="%231e1b4b"/></linearGradient></defs><rect width="1920" height="1080" fill="url(%23dh)"/></svg>',
+    previewGradient: 'linear-gradient(135deg, #090d16, #1e1b4b)',
+  },
+  {
+    id: 'cyber-neon',
+    label: 'Cyber Neon',
+    url: 'data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="1920" height="1080" viewBox="0 0 1920 1080"><defs><linearGradient id="cn" x1="0%" y1="0%" x2="100%" y2="100%"><stop offset="0%" stop-color="%230f172a"/><stop offset="50%" stop-color="%23312e81"/><stop offset="100%" stop-color="%234c0519"/></linearGradient></defs><rect width="1920" height="1080" fill="url(%23cn)"/></svg>',
+    previewGradient: 'linear-gradient(135deg, #312e81, #4c0519)',
+  },
+  {
+    id: 'warm-sunset',
+    label: 'Warm Sunset',
+    url: 'data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="1920" height="1080" viewBox="0 0 1920 1080"><defs><linearGradient id="ws" x1="0%" y1="0%" x2="100%" y2="100%"><stop offset="0%" stop-color="%23fff7ed"/><stop offset="50%" stop-color="%23ffedd5"/><stop offset="100%" stop-color="%23fecdd3"/></linearGradient></defs><rect width="1920" height="1080" fill="url(%23ws)"/></svg>',
+    previewGradient: 'linear-gradient(135deg, #fff7ed, #fecdd3)',
+  },
+];
+
 export interface Backdrop {
   id: BackdropId;
   label: string;
@@ -61,6 +95,7 @@ export interface Backdrop {
   /** True for the light set, so the UI can group them and the picture can be told apart. */
   light?: boolean;
 }
+
 
 /*
   ── The light set, and why it is now the front half of the list ─────
@@ -181,6 +216,7 @@ export const BACKDROPS: Backdrop[] = [
 
 export interface LookOptions {
   backdrop: BackdropId;
+  backdropImage?: string | null;
   /**
    * Optional mask rim. This is deliberately NOT part of the measured
    * reference look in HANDOVER §7c; it is a selectable departure.
@@ -205,6 +241,7 @@ export interface LookOptions {
 
 export const DEFAULT_LOOK: LookOptions = {
   backdrop: 'daylight',
+  backdropImage: null,
   /*
     The measured reference has no edge treatment. Keep the authored
     cinematic rim available without quietly rewriting that evidence.
@@ -282,13 +319,36 @@ const FRAME_EDGES: Record<Exclude<FrameEdgeId, 'none'>, {
 
 /* ── The backdrop ───────────────────────────────────────────────── */
 
-/** Full-bleed gradient behind everything. Returns the clip id, or null. */
+/** Full-bleed gradient or custom image behind everything. Returns the clip id, or null. */
 export function addBackdrop(
   trackId: string,
   project: ProjectSettings,
   durationMs: number,
-  backdrop: BackdropId
+  backdrop: BackdropId,
+  backdropImage?: string | null
 ): string | null {
+  if (backdropImage) {
+    const assetId = `media_backdrop_${Date.now().toString(36)}`;
+    const asset: MediaAsset = {
+      id: assetId,
+      name: 'Backdrop Wallpaper',
+      type: 'image',
+      url: backdropImage,
+      thumbnailUrl: backdropImage,
+      durationMs: Math.round(durationMs),
+      width: project.width,
+      height: project.height,
+      fileSizeFormatted: '',
+    };
+    store().addMediaAsset(asset);
+    const id = store().insertClip(trackId, asset, 0);
+    store().patchClip(id, {
+      name: 'Backdrop · Image',
+      fitMode: 'cover',
+    });
+    return id;
+  }
+
   const preset = BACKDROPS.find((b) => b.id === backdrop);
   if (!preset) return null;
 
@@ -318,6 +378,7 @@ export function addBackdrop(
   });
   return id;
 }
+
 
 /* ── The picture ────────────────────────────────────────────────── */
 

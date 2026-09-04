@@ -186,6 +186,10 @@ contextBridge.exposeInMainWorld("teminali", {
     save: (dir, json) => ipcRenderer.invoke("videoProject:save", { dir, json }),
     read: (dir) => ipcRenderer.invoke("videoProject:read", { dir }),
     reveal: (path) => ipcRenderer.invoke("videoProject:reveal", { path }),
+    saveAutoSave: (json, dir) =>
+      ipcRenderer.invoke("videoProject:saveAutoSave", { json, dir }),
+    getAutoSave: () => ipcRenderer.invoke("videoProject:getAutoSave"),
+    clearAutoSave: () => ipcRenderer.invoke("videoProject:clearAutoSave"),
   },
   /**
    * The exporter.

@@ -313,18 +313,29 @@ class AudioPlaybackEngine {
         if (!isPlaying) {
           if (!voice.el.paused) voice.el.pause();
           // Keep the element parked so unpausing is instant and correct.
-          if (Math.abs(voice.el.currentTime - sourceSeconds) > 0.05 && Number.isFinite(sourceSeconds)) {
+          if (Math.abs(voice.el.currentTime - sourceSeconds) > 0.05 && !voice.el.seeking && Number.isFinite(sourceSeconds)) {
             try { voice.el.currentTime = sourceSeconds; } catch { /* not seekable yet */ }
           }
           continue;
         }
 
         const targetRate = Math.max(0.25, Math.min(4, rate * (clip.speed?.multiplier ?? 1)));
-        if (voice.el.playbackRate !== targetRate) voice.el.playbackRate = targetRate;
+        const signedDrift = sourceSeconds - voice.el.currentTime;
+        const absDrift = Math.abs(signedDrift);
 
-        const drift = Math.abs(voice.el.currentTime - sourceSeconds);
-        if (drift > RESYNC_TOLERANCE_S && Number.isFinite(sourceSeconds)) {
-          try { voice.el.currentTime = sourceSeconds; } catch { /* not seekable yet */ }
+        if (absDrift > 1.2 && Number.isFinite(sourceSeconds)) {
+          if (!voice.el.seeking) {
+            try { voice.el.currentTime = sourceSeconds; } catch { /* not seekable yet */ }
+          }
+        } else if (absDrift > 0.03 && Number.isFinite(sourceSeconds)) {
+          // Dynamic PLL rate adjustment instead of hard seeking: eliminates audio muting and stutter
+          const nudge = Math.max(-0.15, Math.min(0.15, signedDrift * 0.3));
+          const adjustedRate = Math.max(0.25, Math.min(4, targetRate * (1 + nudge)));
+          if (Math.abs(voice.el.playbackRate - adjustedRate) > 0.01) {
+            voice.el.playbackRate = adjustedRate;
+          }
+        } else {
+          if (voice.el.playbackRate !== targetRate) voice.el.playbackRate = targetRate;
         }
 
         if (voice.el.paused) {

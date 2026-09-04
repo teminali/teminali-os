@@ -48,6 +48,8 @@ import {
 import { zoomStyleShape, type ZoomStyleId } from '../engine/cursorZoom';
 import type { CameraShape } from '../engine/cameraChoreography';
 import type { BackdropId } from '../engine/cinematicLook';
+import type { CursorStyleId } from '../engine/cursorLayer';
+
 
 export type RecorderPhase =
   | 'setup'
@@ -102,6 +104,14 @@ export interface StickySettings {
 
   /** Which backdrop `cinematic` sets the picture on. */
   backdrop: BackdropId;
+  /** Custom backdrop image URL or data URI. When set, overrides preset gradient. */
+  backdropImage: string | null;
+  /** Cursor pointer style. */
+  cursorStyle: CursorStyleId;
+  /** Inset padding percentage. */
+  insetPct: number;
+  /** Corner radius percentage. */
+  cornerPct: number;
   /** How the zoom moves between framings — or `none`, which is no zooms. */
   zoomStyle: ZoomStyleId;
   /** Lay the camera down at all. Distinct from a take that has no camera. */
@@ -116,6 +126,8 @@ export interface StickySettings {
 
 const STORAGE_KEY = 'teminali.recorder.v1';
 
+const isWin32 = typeof window !== 'undefined' && window.teminali?.platform === 'win32';
+
 const DEFAULT_STICKY: StickySettings = {
   fps: 30,
   maxWidth: 0,
@@ -125,7 +137,8 @@ const DEFAULT_STICKY: StickySettings = {
   cameraHeight: 1080,
   mirrorCamera: true,
   micDeviceId: null,
-  systemAudio: true,
+  /* System audio loopback is supported natively on Windows; on macOS/Linux default to false so no false warnings appear */
+  systemAudio: isWin32,
   countdownSec: 3,
   hideWindow: true,
   detachNarration: true,
@@ -148,6 +161,10 @@ const DEFAULT_STICKY: StickySettings = {
      stores the SHAPE and this stores the name of it; `smooth` is the
      name of the shape it stores. */
   backdrop: TUTORIAL_ASSEMBLE.look.backdrop,
+  backdropImage: null,
+  cursorStyle: 'plane',
+  insetPct: 88,
+  cornerPct: 1.8,
   zoomStyle: 'smooth',
   includeCamera: TUTORIAL_ASSEMBLE.includeCamera,
   cameraShape: TUTORIAL_ASSEMBLE.cameraShape,
@@ -158,11 +175,16 @@ const DEFAULT_STICKY: StickySettings = {
 function loadSticky(): StickySettings {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
-    return raw ? { ...DEFAULT_STICKY, ...(JSON.parse(raw) as Partial<StickySettings>) } : DEFAULT_STICKY;
+    if (!raw) return DEFAULT_STICKY;
+    const parsed = JSON.parse(raw) as Partial<StickySettings>;
+    // If on non-Windows, ensure systemAudio defaults to false unless explicitly user-set
+    const systemAudio = isWin32 ? (parsed.systemAudio ?? true) : Boolean(parsed.systemAudio);
+    return { ...DEFAULT_STICKY, ...parsed, systemAudio };
   } catch {
     return DEFAULT_STICKY;
   }
 }
+
 
 function persistSticky(settings: StickySettings): void {
   try {
@@ -725,11 +747,19 @@ export const useRecorderStore = create<RecorderState>((set, get) => ({
         autoZoom: settings.autoZoom && settings.zoomStyle !== 'none',
         zoomShape: zoomStyleShape(settings.zoomStyle),
         drawCursor: settings.drawCursor,
+        cursorStyle: settings.cursorStyle,
         motionBlur: settings.motionBlur,
         markMoments: settings.markMoments,
         cinematic: settings.cinematic,
-        look: { ...TUTORIAL_ASSEMBLE.look, backdrop: settings.backdrop },
+        look: {
+          ...TUTORIAL_ASSEMBLE.look,
+          backdrop: settings.backdrop,
+          backdropImage: settings.backdropImage,
+          insetPct: settings.insetPct,
+          cornerPct: settings.cornerPct,
+        },
         sound: settings.sound,
+
         soundOptions: TUTORIAL_ASSEMBLE.soundOptions,
       });
       /*

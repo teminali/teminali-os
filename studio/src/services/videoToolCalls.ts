@@ -86,6 +86,27 @@ export function hasVideoToolCalls(text: string): boolean {
   return parseVideoToolCalls(text).length > 0;
 }
 
+/**
+ * Fallback parser for local models that write ```json or ```video_tool fences
+ * when trying to invoke an editor tool.
+ */
+export function parseFallbackVideoToolCalls(text: string, knownTools?: string[]): VideoToolRequest[] {
+  const FALLBACK_FENCE = /```(?:json|video_tool|videotool|tool)[^\n]*\n([\s\S]*?)(?:```|$)/g;
+  const allowed = knownTools ? new Set(knownTools) : null;
+  const requests: VideoToolRequest[] = [];
+  let match: RegExpExecArray | null;
+  while ((match = FALLBACK_FENCE.exec(text)) !== null) {
+    const raw = match[1];
+    const parsed = toRequests(raw);
+    for (const req of parsed) {
+      if (!allowed || allowed.has(req.tool)) {
+        requests.push(req);
+      }
+    }
+  }
+  return requests;
+}
+
 export interface VideoToolExecution {
   tool: string;
   arguments: Record<string, unknown>;
@@ -121,13 +142,11 @@ const DEFAULT_MAX_CALLS = 6;
  */
 const DEFAULT_MAX_OUTPUT_CHARS = 12_000;
 
-export async function runVideoToolCalls(
-  text: string,
+export async function executeVideoToolRequests(
+  requests: VideoToolRequest[],
   options: RunVideoToolCallsOptions,
 ): Promise<VideoToolExecution[]> {
-  const maxCalls = options.maxCalls ?? DEFAULT_MAX_CALLS;
   const maxOutputChars = options.maxOutputChars ?? DEFAULT_MAX_OUTPUT_CHARS;
-  const requests = parseVideoToolCalls(text).slice(0, maxCalls);
   const executions: VideoToolExecution[] = [];
 
   for (const request of requests) {
@@ -175,6 +194,15 @@ export async function runVideoToolCalls(
   }
 
   return executions;
+}
+
+export async function runVideoToolCalls(
+  text: string,
+  options: RunVideoToolCallsOptions,
+): Promise<VideoToolExecution[]> {
+  const maxCalls = options.maxCalls ?? DEFAULT_MAX_CALLS;
+  const requests = parseVideoToolCalls(text).slice(0, maxCalls);
+  return executeVideoToolRequests(requests, options);
 }
 
 function stringify(data: unknown): string {

@@ -8,7 +8,7 @@ already cut, and an exporter that renders that timeline back out to a file.
 
 The product ships as a desktop application from
 [`teminali/teminalicode`](https://github.com/teminali/teminalicode/releases)
-(currently **v1.2.0**). Everything below is how it is built.
+(currently **v1.2.1**). Everything below is how it is built.
 
 > The repository directory is `teminaliCode`, under `my_projects/teminali/`, and
 > the internal package is `@teminali/core`. "Frontier" survives as the name of

@@ -293,7 +293,7 @@ export interface TimelineActions {
    * of the same clip (which used to stack a duplicate copy of the same
    * sound into the mix).
    */
-  detachAudio: (clipId: string) => {
+  detachAudio: (clipId: string, targetTrackId?: string) => {
     ok: boolean;
     error?: string;
     audioClipId?: string;
@@ -1496,7 +1496,7 @@ export const useTimelineStore = create<TimelineStore>()(
       return outcome;
     },
 
-    detachAudio: (clipId) => {
+    detachAudio: (clipId, targetTrackId) => {
       const audioClipId = uid('clip');
       let outcome: {
         ok: boolean; error?: string; audioClipId?: string; audioTrackId?: string;
@@ -1536,7 +1536,12 @@ export const useTimelineStore = create<TimelineStore>()(
           return;
         }
 
-        let audioTrack = s.tracks.find((t) => t.type === 'audio' && !t.locked);
+        let audioTrack = targetTrackId
+          ? s.tracks.find((t) => t.id === targetTrackId && t.type === 'audio')
+          : s.tracks.find((t) => t.type === 'audio' && !t.locked && t.clips.length === 0);
+        if (!audioTrack && !targetTrackId) {
+          audioTrack = s.tracks.find((t) => t.type === 'audio' && !t.locked);
+        }
         if (!audioTrack) {
           audioTrack = {
             id: uid('track'),

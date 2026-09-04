@@ -577,17 +577,16 @@ const Review: React.FC<{ stacked: boolean; onOpened?: () => void }> = ({ stacked
           )}
 
           {store.warnings.length > 0 && (
-            <div className="space-y-1.5 pt-1">
-              {store.warnings.map((warning) => (
-                <div
-                  key={warning}
-                  className="flex items-start gap-1.5 rounded-squircle-xs bg-spectrum-amber/10
-                             border border-spectrum-amber/25 px-2 py-1.5"
-                >
-                  <AlertTriangle className="w-3 h-3 text-spectrum-amber flex-shrink-0 mt-px" />
-                  <span className="text-micro text-spectrum-textMuted leading-snug">{warning}</span>
-                </div>
-              ))}
+            <div className="rounded-squircle-xs bg-spectrum-amber/10 border border-spectrum-amber/25 p-2 space-y-1">
+              <div className="flex items-center gap-1.5 text-micro font-medium text-spectrum-amber">
+                <AlertTriangle className="w-3.5 h-3.5 flex-shrink-0" />
+                <span>Take notes ({store.warnings.length})</span>
+              </div>
+              <ul className="space-y-1 pl-4 list-disc text-micro text-spectrum-textMuted leading-snug">
+                {store.warnings.map((warning) => (
+                  <li key={warning}>{warning}</li>
+                ))}
+              </ul>
             </div>
           )}
 
@@ -616,7 +615,7 @@ const Review: React.FC<{ stacked: boolean; onOpened?: () => void }> = ({ stacked
         </div>
       </div>
 
-      <div className="flex-shrink-0 border-t border-line px-3 py-2 flex items-center gap-2">
+      <div className="flex-shrink-0 border-t border-line px-3 py-2 flex items-center gap-2 flex-wrap">
         <button
           onClick={() => { void store.openOnTimeline().then((r) => { if (r) onOpened?.(); }); }}
           className="btn-primary h-8 px-3 text-ui gap-1.5"
@@ -625,17 +624,31 @@ const Review: React.FC<{ stacked: boolean; onOpened?: () => void }> = ({ stacked
           <Film className="w-3.5 h-3.5" />
           Open on the timeline
         </button>
-        {/* Secondary now, because the take in hand is the thing to act on
-            and recording over it is the step back, not the step on. */}
+        {take.camera && (
+          <button
+            type="button"
+            onClick={() => store.set('includeCamera', !store.settings.includeCamera)}
+            className={`h-8 px-2.5 rounded text-ui-xs font-medium border flex items-center gap-1.5 transition-colors ${
+              store.settings.includeCamera
+                ? 'bg-spectrum-blue/15 border-spectrum-blue/30 text-spectrum-blue hover:bg-spectrum-blue/25'
+                : 'bg-spectrum-bgMuted border-line text-spectrum-textMuted hover:text-spectrum-text'
+            }`}
+            title="Toggle whether webcam is included on the timeline (voice narration is always preserved)"
+          >
+            <Camera className="w-3.5 h-3.5" />
+            <span>{store.settings.includeCamera ? 'Webcam: Included' : 'Webcam: Excluded'}</span>
+          </button>
+        )}
         <button
           onClick={() => void store.discard()}
-          className="pro-btn h-8 px-3 text-ui gap-1.5"
+          className="pro-btn h-8 px-3 text-ui gap-1.5 ml-auto"
           title="Go back to setup. The take stays on disk."
         >
           <Record className="w-3.5 h-3.5" weight="fill" />
           Record again
         </button>
       </div>
+
     </>
   );
 };
