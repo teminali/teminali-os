@@ -227,7 +227,7 @@ const ExplorerPanel: React.FC = () => {
 
       {/* Prominently displayed active project root with live item count */}
       <div
-        className="flex items-center justify-between gap-2 px-3 pt-2 pb-1.5 border-b border-edge/30 select-none"
+        className="flex items-center justify-between gap-2 px-3 pt-2 pb-1 select-none"
         title={workspacePath || rootName}
       >
         <div className="flex items-center gap-1.5 min-w-0">
@@ -236,7 +236,7 @@ const ExplorerPanel: React.FC = () => {
             {rootName}
           </span>
         </div>
-        <span className="font-mono text-3xs text-ink-faint flex-shrink-0 bg-surface-sunken px-1.5 py-0.5 rounded border border-edge/40">
+        <span className="font-mono text-3xs text-ink-faint flex-shrink-0 tabular-nums">
           {entryCount}
           {isTruncated ? "+" : ""} files
         </span>

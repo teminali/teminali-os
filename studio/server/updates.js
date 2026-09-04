@@ -178,6 +178,16 @@ export async function checkForUpdate({
     if (!parseVersion(release?.tag_name)) return answer({ error: "The latest release has no readable version." });
 
     const asset = assetForPlatform(release.assets, { platform, arch });
+    const isNewer = compareVersions(release.tag_name, version) > 0;
+    let missingBuildError = null;
+    if (!asset && isNewer) {
+      const publishedMs = release.published_at ? new Date(release.published_at).getTime() : 0;
+      const isRecent = Date.now() - publishedMs < 15 * 60_000;
+      missingBuildError = isRecent
+        ? `Release ${release.tag_name} is still compiling on GitHub Actions. Click "Check Again" in a moment.`
+        : `Release ${release.tag_name} has no build for ${platform}/${arch}.`;
+    }
+
     return answer({
       latest: {
         tag: release.tag_name,
@@ -188,12 +198,10 @@ export async function checkForUpdate({
         notes: typeof release.body === "string" ? release.body.slice(0, 8_000) : "",
       },
       asset: asset ? normaliseAsset(asset) : null,
-      updateAvailable: compareVersions(release.tag_name, version) > 0,
+      updateAvailable: isNewer,
       // An update with nothing to download on this platform is worth naming.
       // Silently showing no button would read as "no update".
-      error: asset || compareVersions(release.tag_name, version) <= 0
-        ? null
-        : `Release ${release.tag_name} has no build for ${platform}/${arch}.`,
+      error: missingBuildError,
     });
   } catch (error) {
     return answer({
