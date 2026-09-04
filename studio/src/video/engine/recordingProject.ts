@@ -68,6 +68,10 @@ import {
 } from './cinematicLook';
 import { CURSOR_SIZE_PCT, cursorPlaneStyle, cursorLayerKeyframes } from './cursorLayer';
 import {
+  CameraShape, DEFAULT_DODGE, DEFAULT_EXPLAIN,
+  cameraDodges, cameraShapeMask, explainingStretches,
+} from './cameraChoreography';
+import {
   DEFAULT_SOUND, SoundOptions, prepareSoundKit, placeSoundDesign,
 } from './recordingSound';
 import { Take } from './screenCapture';
@@ -93,6 +97,30 @@ export interface AssembleOptions {
   cameraCorner: CameraCorner;
   /** Flip the webcam horizontally, so moving right moves right like a mirror. */
   mirrorCamera: boolean;
+  /**
+   * Lay the camera down at all.
+   *
+   * Distinct from "there was no camera": a take recorded without one has
+   * `take.camera` undefined and every camera option below is moot. This
+   * is the operator deciding, after the fact, that the take is better
+   * without the face — which is a decision worth having before the
+   * build, because removing the clip afterwards leaves the narration
+   * detached from a clip that is gone.
+   */
+  includeCamera: boolean;
+  /** What the inset is cut to: the whole frame, a rounded one, a square, a circle. */
+  cameraShape: CameraShape;
+  /**
+   * Move the inset to the other side when the pointer settles under it.
+   * Off leaves it in `cameraCorner` for the whole take.
+   */
+  cameraDodge: boolean;
+  /**
+   * Hand the camera the whole frame while the hands are off the machine
+   * and the microphone is live. See `cameraChoreography.ts` for why the
+   * pointer track is better evidence for this than a transcript.
+   */
+  cameraOnExplaining: boolean;
 
   /* ── Motion ── */
 
@@ -133,6 +161,13 @@ export const RAW_ASSEMBLE: AssembleOptions = {
   cameraSizePct: 24,
   cameraCorner: 'bottom-right',
   mirrorCamera: true,
+  includeCamera: true,
+  /* Square corners in the raw assemble for the same reason the radius is
+     zero there: a shape is a style decision, and `cinematic` is where
+     the style decisions live. */
+  cameraShape: 'full',
+  cameraDodge: false,
+  cameraOnExplaining: false,
   autoZoom: false,
   zoomShape: DEFAULT_SHAPE,
   motionBlur: false,
@@ -162,6 +197,9 @@ export const RAW_ASSEMBLE: AssembleOptions = {
 export const TUTORIAL_ASSEMBLE: AssembleOptions = {
   ...RAW_ASSEMBLE,
   autoZoom: true,
+  cameraShape: 'rounded',
+  cameraDodge: true,
+  cameraOnExplaining: true,
   zoomShape: SMOOTH_SHAPE,
   motionBlur: true,
   markMoments: true,
@@ -198,6 +236,10 @@ export interface AssembleReport {
   cursorKeyframes: number;
   /** Ticks and whooshes placed. 0 when `sound` was off or nothing happened. */
   soundClips: number;
+  /** Stretches where the camera takes the whole frame. 0 without narration. */
+  cameraFullFrames: number;
+  /** Times the inset crossed the frame to get out of the pointer's way. */
+  cameraDodges: number;
   narrationDetached: boolean;
   notes: string[];
 }
@@ -604,7 +646,9 @@ export async function assembleRecording(
   /* ── 7. The camera ──────────────────────────────────────────────── */
 
   let cameraClipId: string | null = null;
-  if (cameraTrack && take.camera) {
+  let cameraFullFrames = 0;
+  let cameraDodgeCount = 0;
+  if (cameraTrack && take.camera && o.includeCamera) {
     const camera = take.camera;
     const cameraAsset: MediaAsset = {
       id: `media_rec_camera_${seq}_${now.toString(36)}`,
@@ -644,6 +688,14 @@ export async function assembleRecording(
       /* Square in the raw assemble: a radius is a style decision, and
          `cinematic` is where the style decisions live. */
       const cornerRadius = Math.round(settings.height * (o.cinematic ? 0.022 : 0));
+      /* The shape is a mask, so it composes with the geometry rather
+         than replacing it: the inset keeps the size and the corner the
+         operator chose, and the mask decides what of it is visible. */
+      const shapeMask = cameraShapeMask(
+        o.cameraShape,
+        { width: camera.width, height: camera.height },
+        cornerRadius
+      );
       const patch = buildPipPatch(
         geometry,
         { cornerRadiusPx: cornerRadius },
@@ -652,6 +704,7 @@ export async function assembleRecording(
       notes.push(...patch.warnings);
       store().patchClip(cameraClipId, {
         ...patch.properties,
+        ...shapeMask,
         'transform.flipH': o.mirrorCamera !== false,
       });
 
@@ -665,10 +718,11 @@ export async function assembleRecording(
         pins every property that ever moves at time zero for exactly that
         reason — which is why the entrance cannot simply be written here.
 
-        `fullFrame` is empty: it holds the stretches where the camera
-        takes the whole picture, and finding those needs a transcript.
-        With none, this writes the fade and the settle into the inset,
-        and nothing else.
+        `fullFrame` and `dodges` both used to be empty here, and the
+        note said finding them needed a transcript. That was true of the
+        Cut's method and not of the question: see
+        `cameraChoreography.ts`, which reads the pointer track the zoom
+        detector already reads and gets the same two answers out of it.
       */
       if (o.cinematic) {
         const base = getClipBaseSize(
@@ -676,6 +730,37 @@ export async function assembleRecording(
           settings,
           { width: camera.width, height: camera.height }
         );
+        /*
+          Both detectors read take time and the camera clip runs in clip
+          time, so everything is shifted by the recorder offset. Getting
+          this backwards puts the takeover a few frames off the silence
+          it was placed on, in the direction nobody thinks to check —
+          the same trap `cameraOffsetMs` exists for.
+        */
+        const shift = (ms: number) => Math.max(0, ms - take.cameraOffsetMs);
+
+        const fullFrame = o.cameraOnExplaining
+          ? explainingStretches({
+            cursor: take.cursor,
+            events: take.events,
+            durationMs: take.durationMs,
+            hasNarration: camera.hasAudio,
+          }, DEFAULT_EXPLAIN).map((stretch) => ({
+            startMs: shift(stretch.startMs),
+            endMs: shift(stretch.endMs),
+          }))
+          : [];
+
+        const dodges = o.cameraDodge
+          ? cameraDodges(take.cursor, {
+            x: geometry.transformX,
+            widthPx: base.width * geometry.scaleX,
+            heightPx: base.height * geometry.scaleY,
+            frameW: settings.width,
+            frameH: settings.height,
+          }, DEFAULT_DODGE).map((move) => ({ atMs: shift(move.atMs), x: move.x }))
+          : [];
+
         addCameraMotion(cameraClipId, {
           pip: {
             scale: geometry.scaleX,
@@ -684,9 +769,20 @@ export async function assembleRecording(
             roundness: cornerRadius,
           },
           coverScale: Math.max(settings.width / base.width, settings.height / base.height),
-          fullFrame: [],
+          fullFrame,
+          dodges,
           durationMs: cameraAsset.durationMs,
         });
+
+        if (o.cameraOnExplaining && fullFrame.length === 0 && !camera.hasAudio) {
+          notes.push(
+            'The camera was recorded without sound, so the takeover was not placed: '
+            + 'quiet hands over a silent microphone is someone who stepped away, not '
+            + 'someone explaining.'
+          );
+        }
+        cameraFullFrames = fullFrame.length;
+        cameraDodgeCount = dodges.length;
       }
     }
 
@@ -759,6 +855,8 @@ export async function assembleRecording(
     keyframes: keyframeCount,
     cursorKeyframes: cursorKeyframeCount,
     soundClips,
+    cameraFullFrames,
+    cameraDodges: cameraDodgeCount,
     narrationDetached: Boolean(
       o.detachNarration
       && (cameraClipId ? take.camera?.hasAudio : screen.hasAudio)

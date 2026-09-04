@@ -435,12 +435,27 @@ export interface CameraMotion {
   coverScale: number;
   /** Stretches, in CLIP time, where the camera takes the whole frame. */
   fullFrame: { startMs: number; endMs: number }[];
+  /**
+   * Sideways moves of the inset, in CLIP time, so it is not sitting on
+   * what the pointer is pointing at. `x` is the transform offset the
+   * inset holds from that moment until the next move.
+   *
+   * Here rather than as a second keyframe pass for the reason the
+   * header gives: a property keyframed by two callers ends up with the
+   * second caller's first key as its value at time zero. The dodge and
+   * the takeover both write `positionX`, so they are emitted together
+   * or one of them silently wins.
+   */
+  dodges?: { atMs: number; x: number }[];
   /** How long the clip runs, so the last hold has somewhere to end. */
   durationMs: number;
 }
 
 /** How long the camera takes to grow into the frame, and to leave it. */
 export const CAMERA_TAKEOVER_MS = 620;
+/** How long the inset takes to cross the frame. Shorter than a takeover:
+    it is a smaller move, and it happens while the viewer is reading. */
+export const DODGE_TRAVEL_MS = 520;
 const ENTER_MS = 420;
 
 /**
@@ -492,6 +507,34 @@ export function addCameraMotion(clipId: string, motion: CameraMotion): void {
       'mask.roundness': [[0, motion.pip.roundness]],
     };
 
+  /*
+    Where the inset's home is at a given moment.
+
+    Without this the takeover's return key sends the inset back to the
+    pose it had at the start of the take, undoing every dodge before it
+    in one glide. The takeover has to return to wherever the dodge has
+    since put it, so the two choreographies compose instead of fighting.
+  */
+  const dodges = [...(motion.dodges ?? [])].sort((a, b) => a.atMs - b.atMs);
+  const homeX = (ms: number): number => {
+    let x = motion.pip.x;
+    for (const dodge of dodges) {
+      if (dodge.atMs > ms) break;
+      x = dodge.x;
+    }
+    return x;
+  };
+
+  /* The travel is a pair of keys: hold the old side until the move
+     starts, arrive at the new one. `DODGE_TRAVEL_MS` before the sample
+     that triggered it, so the inset is clear by the time the pointer is
+     where it was going. */
+  for (const dodge of dodges) {
+    const from = Math.max(0, dodge.atMs - DODGE_TRAVEL_MS);
+    if (from > 0) track.positionX.push([from, homeX(from - 1)]);
+    track.positionX.push([dodge.atMs, dodge.x]);
+  }
+
   for (let index = 0; index < motion.fullFrame.length; index++) {
     const stretch = motion.fullFrame[index];
 
@@ -501,7 +544,7 @@ export function addCameraMotion(clipId: string, motion: CameraMotion): void {
       const outAt = Math.min(motion.durationMs, held + CAMERA_TAKEOVER_MS);
       track.scaleX.push([held, motion.coverScale], [outAt, motion.pip.scale]);
       track.scaleY.push([held, motion.coverScale], [outAt, motion.pip.scale]);
-      track.positionX.push([held, 0], [outAt, motion.pip.x]);
+      track.positionX.push([held, 0], [outAt, homeX(outAt)]);
       track.positionY.push([held, 0], [outAt, motion.pip.y]);
       track['mask.roundness'].push([held, 0], [outAt, motion.pip.roundness]);
       continue;
@@ -520,7 +563,7 @@ export function addCameraMotion(clipId: string, motion: CameraMotion): void {
       [held, motion.coverScale], [outAt, motion.pip.scale]);
     track.scaleY.push([from, motion.pip.scale], [inAt, motion.coverScale],
       [held, motion.coverScale], [outAt, motion.pip.scale]);
-    track.positionX.push([from, motion.pip.x], [inAt, 0], [held, 0], [outAt, motion.pip.x]);
+    track.positionX.push([from, homeX(from)], [inAt, 0], [held, 0], [outAt, homeX(outAt)]);
     track.positionY.push([from, motion.pip.y], [inAt, 0], [held, 0], [outAt, motion.pip.y]);
     /* Square at full frame. A rounded corner is what says "this is an
        inset"; edge to edge it would just look like a mistake. */
@@ -530,6 +573,10 @@ export function addCameraMotion(clipId: string, motion: CameraMotion): void {
   }
 
   for (const [property, points] of Object.entries(track) as [Prop, [number, number][]][]) {
+    /* Sorted, because the dodges are interleaved with the takeovers
+       rather than appended after them, and a keyframe list that arrives
+       out of order is a shape nobody downstream has to accept. */
+    points.sort((a, b) => a[0] - b[0]);
     for (const [ms, value] of points) {
       store().addKeyframe(clipId, {
         property,
