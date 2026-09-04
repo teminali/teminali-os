@@ -444,6 +444,9 @@ ipcMain.handle("updates:restart", () => {
   } catch (error) {
     log("Relaunch could not be queued:", error.message);
   }
+  setTimeout(() => {
+    try { app.exit(0); } catch { /* best effort */ }
+  }, 150);
   app.quit();
   return true;
 });

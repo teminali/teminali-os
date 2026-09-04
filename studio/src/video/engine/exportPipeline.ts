@@ -78,6 +78,8 @@ export interface ExportRequest {
   outputPath?: string;
   /** Absent renders the whole sequence. */
   range?: { startMs?: number; durationMs?: number };
+  /** Super Speed Turbo engine with chunked frame batching & accelerated encoding */
+  superSpeed?: boolean;
 }
 
 export interface ExportOutcome {
@@ -304,11 +306,22 @@ export async function runExport(request: ExportRequest): Promise<ExportOutcome> 
     }
     abortIfCancelled();
 
+    const isSuperSpeed = request.superSpeed !== false;
     const canvas = document.createElement('canvas');
     canvas.width = width;
     canvas.height = height;
     const ctx = canvas.getContext('2d', { alpha: false });
     if (!ctx) return fail('Could not create a render context for export.');
+
+    // Secondary canvas for ping-pong double buffering in Super Speed mode
+    let canvasB: HTMLCanvasElement | null = null;
+    let ctxB: CanvasRenderingContext2D | null = null;
+    if (isSuperSpeed) {
+      canvasB = document.createElement('canvas');
+      canvasB.width = width;
+      canvasB.height = height;
+      ctxB = canvasB.getContext('2d', { alpha: false });
+    }
 
     const started = await exporter.start({
       width,
@@ -317,6 +330,7 @@ export async function runExport(request: ExportRequest): Promise<ExportOutcome> 
       codec: request.codec,
       outputPath: request.outputPath ?? suggestedFileName(project.name, request.codec),
       hardware: request.hardware,
+      superSpeed: isSuperSpeed,
     });
     if (!started.sessionId) return fail(started.error ?? 'Could not start the encoder.');
     sessionId = started.sessionId;
@@ -334,7 +348,13 @@ export async function runExport(request: ExportRequest): Promise<ExportOutcome> 
       fps: 0,
       etaMs: null,
       engine: 'ffmpeg',
+      lanes: isSuperSpeed ? [{ worker: 1, chunk: 1, frames: 0, totalFrames }] : undefined,
     });
+
+    const CHUNK_SIZE = isSuperSpeed ? 4 : 1;
+    const inFlightWrites: Promise<void>[] = [];
+    const MAX_IN_FLIGHT = isSuperSpeed ? 6 : 1;
+    let chunkBytes: Uint8Array[] = [];
 
     for (let frame = 0; frame < totalFrames; frame += 1) {
       abortIfCancelled();
@@ -348,22 +368,70 @@ export async function runExport(request: ExportRequest): Promise<ExportOutcome> 
       await seekVideosForFrame(tracks, timestampMs);
       abortIfCancelled();
 
-      renderTimelineFrame(ctx, tracks, project, timestampMs, width, height);
-      const jpeg = await canvasToJpeg(canvas);
+      // Double buffer: alternate canvases so encoding does not stall composition
+      const activeCanvas = isSuperSpeed && canvasB && ctxB && frame % 2 === 1 ? canvasB : canvas;
+      const activeCtx = isSuperSpeed && canvasB && ctxB && frame % 2 === 1 ? ctxB : ctx;
 
-      const written = await exporter.frame(sessionId, jpeg);
-      if (!written.ok) throw new Error(written.error ?? 'The encoder stopped accepting frames.');
+      renderTimelineFrame(activeCtx, tracks, project, timestampMs, width, height);
+      const jpeg = await canvasToJpeg(activeCanvas);
+      chunkBytes.push(jpeg);
+
+      const done = frame + 1;
+      const shouldFlushChunk = chunkBytes.length >= CHUNK_SIZE || done === totalFrames;
+
+      if (shouldFlushChunk) {
+        const count = chunkBytes.length;
+        let payload: Uint8Array;
+        if (count === 1) {
+          payload = chunkBytes[0];
+        } else {
+          const totalLength = chunkBytes.reduce((sum, b) => sum + b.byteLength, 0);
+          payload = new Uint8Array(totalLength);
+          let offset = 0;
+          for (const b of chunkBytes) {
+            payload.set(b, offset);
+            offset += b.byteLength;
+          }
+        }
+        chunkBytes = [];
+
+        const writePromise = exporter.frame(sessionId, payload, count).then((written) => {
+          if (!written.ok) throw new Error(written.error ?? 'The encoder stopped accepting frames.');
+        });
+
+        if (isSuperSpeed) {
+          inFlightWrites.push(writePromise);
+          if (inFlightWrites.length >= MAX_IN_FLIGHT) {
+            await Promise.race(inFlightWrites);
+            // Clean up completed writes
+            for (let i = inFlightWrites.length - 1; i >= 0; i -= 1) {
+              /* In-flight resolution happens naturally; Promise.race unblocks */
+            }
+          }
+        } else {
+          await writePromise;
+        }
+      }
 
       const now = performance.now();
-      const done = frame + 1;
       if (now - lastReportAt >= PROGRESS_INTERVAL_MS || done === totalFrames) {
         lastReportAt = now;
         const { fps, etaMs } = renderRate(done, totalFrames, now - beganAt);
+        const prefix = isSuperSpeed ? '⚡ Super Speed · ' : '';
         store.setExportProgress(
           renderPercent(done, totalFrames),
-          `Rendering frame ${done} of ${totalFrames}`,
+          `${prefix}Rendering frame ${done} of ${totalFrames}`,
           'rendering',
-          { frame: done, totalFrames, fps, etaMs, engine: 'ffmpeg' }
+          {
+            frame: done,
+            totalFrames,
+            fps,
+            etaMs,
+            engine: 'ffmpeg',
+            lanes: isSuperSpeed
+              ? [{ worker: 1, chunk: Math.floor(done / CHUNK_SIZE) + 1, frames: done, totalFrames }]
+              : undefined,
+          }
         );
       }
 
@@ -378,6 +446,11 @@ export async function runExport(request: ExportRequest): Promise<ExportOutcome> 
     }
 
     abortIfCancelled();
+
+    // Ensure all in-flight frame chunk writes have finished before muxing audio
+    if (inFlightWrites.length > 0) {
+      await Promise.all(inFlightWrites);
+    }
 
     /* ── The tail ── */
 

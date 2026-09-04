@@ -22,6 +22,8 @@ export interface ExportStartOptions {
   hardware?: boolean;
   /** Absent means CRF 18 in software, or the hardware default. */
   bitrateMbps?: number;
+  /** Super Speed Turbo engine with chunked frame batching & accelerated encoding */
+  superSpeed?: boolean;
 }
 
 export interface ExportStartResult {

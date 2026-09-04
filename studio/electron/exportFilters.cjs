@@ -19,7 +19,7 @@
  * cheaper to assert than to discover in a player.
  */
 function encoderArgs(options, hardwareName) {
-  const { codec, bitrateMbps, height } = options;
+  const { codec, bitrateMbps, height, superSpeed } = options;
 
   /*
     ProRes ignores both `hardware` and `bitrateMbps`: it is a constant-quality
@@ -38,16 +38,19 @@ function encoderArgs(options, hardwareName) {
       limiting factor against a screen recording's flat colour.
     */
     const hwBitrate = bitrateMbps ?? (height >= 2000 ? 40 : 12);
+    const turboHw = superSpeed && hardwareName.includes("videotoolbox") ? ["-realtime", "0"] : [];
     return [
       "-c:v", hardwareName, "-b:v", `${hwBitrate}M`, "-pix_fmt", "yuv420p",
+      ...turboHw,
       ...(codec === "hevc" ? ["-tag:v", "hvc1"] : []),
     ];
   }
 
+  const speedPreset = superSpeed ? "faster" : "medium";
   return [
     "-c:v", codec === "hevc" ? "libx265" : "libx264",
     ...(bitrateMbps ? ["-b:v", `${bitrateMbps}M`] : ["-crf", "18"]),
-    "-preset", "medium", "-pix_fmt", "yuv420p",
+    "-preset", speedPreset, "-pix_fmt", "yuv420p",
     /*
       Without `hvc1` QuickTime and Safari refuse an HEVC file outright: they
       accept only that branding, and ffmpeg's default `hev1` is legal but

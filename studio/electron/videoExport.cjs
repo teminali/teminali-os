@@ -139,8 +139,12 @@ function startExport(options, sender) {
   const workDir = fs.mkdtempSync(path.join(app.getPath("temp"), "teminali-export-"));
   const videoPath = path.join(workDir, opts.codec === "prores" ? "video.mov" : "video.mp4");
 
+  const speedFlags = opts.superSpeed
+    ? ["-probesize", "32", "-analyzeduration", "0", "-threads", "0"]
+    : [];
+
   const args = [
-    "-y", "-f", "image2pipe", "-framerate", String(opts.fps), "-i", "pipe:0",
+    "-y", ...speedFlags, "-f", "image2pipe", "-framerate", String(opts.fps), "-i", "pipe:0",
     ...encoderArgs(opts, opts.hardware
       ? hardwareEncoderFor(opts.codec === "hevc" ? "hevc" : "h264", ff)
       : null),
