@@ -56,6 +56,11 @@ let gatewaySession = null;
 function applyPackagedEnvironment() {
   const userData = app.getPath("userData");
   const store = (name) => path.join(userData, "gateway", name);
+  // App root and version MUST always reflect this running process, never
+  // an inherited value from a previous instance before an update restart.
+  process.env.TEMINALI_APP_ROOT = app.getAppPath();
+  process.env.TEMINALI_APP_VERSION = app.getVersion();
+
   const defaults = {
     FRONTIER_AUDIT_PATH: store("gateway-audit.jsonl"),
     FRONTIER_PROJECTS_STORE: store("recent-projects.json"),
@@ -66,8 +71,6 @@ function applyPackagedEnvironment() {
     TEMINALI_USAGE_LEDGER: store("usage-ledger.jsonl"),
     TEMINALI_ADMIN_STORE: store("admins.json"),
     TEMINALI_ARENA_HISTORY: store("arena-runs.jsonl"),
-    TEMINALI_APP_ROOT: app.getAppPath(),
-    TEMINALI_APP_VERSION: app.getVersion(),
     // Left to itself this resolves inside the asar, where no project lives.
     FRONTIER_WORKSPACE_ROOT: app.getPath("home"),
   };
@@ -440,6 +443,8 @@ ipcMain.handle("updates:install", async (_event, filePath) => {
  */
 ipcMain.handle("updates:restart", () => {
   try {
+    delete process.env.TEMINALI_APP_VERSION;
+    delete process.env.TEMINALI_APP_ROOT;
     app.relaunch();
   } catch (error) {
     log("Relaunch could not be queued:", error.message);

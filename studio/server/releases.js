@@ -59,17 +59,36 @@ export function compareVersions(a, b) {
 }
 
 export async function currentVersion(appRoot) {
-  if (typeof process.env.TEMINALI_APP_VERSION === "string" && process.env.TEMINALI_APP_VERSION.trim()) {
-    return process.env.TEMINALI_APP_VERSION.trim().replace(/^v/, "");
-  }
   if (appRoot) {
     try {
       const manifest = JSON.parse(await readFile(join(appRoot, "package.json"), "utf8"));
-      return typeof manifest.version === "string" ? manifest.version : null;
+      if (typeof manifest.version === "string") return manifest.version;
     } catch {
+      // If appRoot is an asar archive, pure node:fs/promises fails with ENOTDIR.
+      // Fall back to reading via @electron/asar if the path involves an asar.
+      try {
+        if (String(appRoot).includes(".asar")) {
+          const asarPath = appRoot.endsWith(".asar")
+            ? appRoot
+            : join(appRoot, "package.json").split(".asar")[0] + ".asar";
+          const { createRequire } = await import("node:module");
+          const require = createRequire(import.meta.url);
+          const asar = require("@electron/asar");
+          const manifest = JSON.parse(asar.extractFile(asarPath, "package.json").toString("utf8"));
+          if (typeof manifest.version === "string") return manifest.version;
+        }
+      } catch {
+        /* asar fallback failed */
+      }
       return null;
     }
+    return null;
   }
+
+  if (typeof process.env.TEMINALI_APP_VERSION === "string" && process.env.TEMINALI_APP_VERSION.trim()) {
+    return process.env.TEMINALI_APP_VERSION.trim().replace(/^v/, "");
+  }
+
   try {
     const manifest = JSON.parse(await readFile(new URL("../package.json", import.meta.url), "utf8"));
     return typeof manifest.version === "string" ? manifest.version : null;
