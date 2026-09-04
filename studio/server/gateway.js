@@ -941,6 +941,34 @@ export async function createGateway(options = {}) {
         return;
       }
 
+      /*
+        Remember a project WITHOUT switching to it.
+
+        `/api/workspace/open` does two things at once — it records the project
+        and it rebinds `config.workspaceRoot`, which is what bounds every
+        workspace and terminal route. That pairing is right for a code project
+        and wrong for a video one: opening a timeline must not silently point
+        the file tree, the search and the terminals at the folder holding it.
+
+        So this is a second route rather than a `kind` branch inside `open`.
+        Branching would have left one route whose name says "switch" and whose
+        behaviour sometimes does not, and callers cannot see a branch — they
+        can see which route they called.
+      */
+      if (request.method === "POST" && route === "/api/workspace/projects/remember") {
+        const rememberRequest = await readJson(request, config.maxJsonBytes);
+        let project;
+        try {
+          project = await validateProjectRoot(rememberRequest?.path);
+        } catch (error) {
+          throw projectError(error);
+        }
+        const recent = await rememberProject(config.projectsStorePath, project);
+        await audit.write({ event: "workspace-remembered", correlationId, method: request.method, route, path: project.path });
+        replyJson(response, 200, { recent });
+        return;
+      }
+
       if (request.method === "POST" && route === "/api/workspace/projects/forget") {
         const forgetRequest = await readJson(request, config.maxJsonBytes);
         if (typeof forgetRequest?.path !== "string" || !forgetRequest.path) {

@@ -118,6 +118,26 @@ export interface RecordedFile {
   error?: string;
 }
 
+/**
+ * How far through converting a finished take, while `finish` is awaiting.
+ *
+ * `percent` is null when the take's duration was never known, and the
+ * panel draws an indeterminate bar rather than inventing a number.
+ *
+ * `finalising` is not a rounding of "nearly done": `-movflags +faststart`
+ * rewrites the whole output after the last frame is converted, and that
+ * pass reports nothing at all. It is a real stage with a real cost, so
+ * it is named rather than shown as a full bar that has stopped moving.
+ */
+export interface RecorderConvertProgress {
+  percent: number | null;
+  phase: "converting" | "finalising";
+  /** A stream copy is near disk speed; a re-encode is not, and says so. */
+  pass: "copy" | "encode";
+  /** ffmpeg's own "12.4x", or null before the first frame. */
+  speed: string | null;
+}
+
 export interface RecordingResult {
   ok: true;
   dir: string;
@@ -208,4 +228,6 @@ export interface RecorderBridge {
   onCommand: (listener: (command: RecorderCommand) => void) => () => void;
   /** Bar window only. Returns an unsubscribe function. */
   onState: (listener: (state: RecorderBarState) => void) => () => void;
+  /** How far through the remux. Returns an unsubscribe function. */
+  onConvert: (listener: (progress: RecorderConvertProgress) => void) => () => void;
 }
