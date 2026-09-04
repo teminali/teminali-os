@@ -108,8 +108,17 @@ jobs:
       - name: Package and publish
         working-directory: studio
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # electron-builder publishes to teminali/releases, which is a
+          # different repository from the one this workflow runs in. The default
+          # GITHUB_TOKEN is scoped to *this* repository and cannot create a
+          # release or upload an asset anywhere else: the upload fails while the
+          # build reports success, which is how the public v1.2.8 came to be
+          # assembled by hand seven minutes after CI went green. RELEASES_TOKEN
+          # is a PAT with `contents: write` on teminali/releases. The fallback
+          # keeps a fork or a rehearsal building — only the upload needs the
+          # wider token.
+          GH_TOKEN: ${{ secrets.RELEASES_TOKEN || secrets.GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.RELEASES_TOKEN || secrets.GITHUB_TOKEN }}
           # Pending, and inert while it is — but inert by being UNSET, not by
           # being empty. An absent secret interpolates to an empty string, and
           # electron-builder reads CSC_LINK with `v1 == null ? v2 : v1`, so ""
@@ -184,12 +193,20 @@ jobs:
 
       - name: Attach release notes
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Same token and the same reason: the release these notes belong to
+          # lives in teminali/releases.
+          GH_TOKEN: ${{ secrets.RELEASES_TOKEN || secrets.GITHUB_TOKEN }}
           TAG_NAME: ${{ github.ref_name }}
+          # `gh release` defaults to the repository it is run in. Without this
+          # the notes land on this repository's release, which is private and
+          # which nobody outside can read — that is why the public v1.2.8 shipped
+          # with a forty-character body. The git log they are generated from
+          # still comes from the checkout above, which is this repository.
+          RELEASE_REPO: teminali/releases
         run: |
           set -e
-          echo "Checking release notes for tag: $TAG_NAME"
-          EXISTING_BODY=$(gh release view "$TAG_NAME" --json body --jq .body 2>/dev/null || echo "")
+          echo "Checking release notes for $TAG_NAME in $RELEASE_REPO"
+          EXISTING_BODY=$(gh release view "$TAG_NAME" --repo "$RELEASE_REPO" --json body --jq .body 2>/dev/null || echo "")
 
           if [ -z "$(echo "$EXISTING_BODY" | tr -d '[:space:]')" ]; then
             echo "Release body is empty. Generating release notes..."
@@ -210,7 +227,8 @@ jobs:
             echo "" >> "$NOTES_FILE"
             echo "" >> "$NOTES_FILE"
 
-            gh release edit "$TAG_NAME" --title "Teminali Code ${TAG_NAME#v}" --notes-file "$NOTES_FILE"
+            gh release edit "$TAG_NAME" --repo "$RELEASE_REPO" \
+              --title "Teminali Code ${TAG_NAME#v}" --notes-file "$NOTES_FILE"
             echo "Release notes successfully published for $TAG_NAME!"
           else
             echo "Release notes already exist for $TAG_NAME."

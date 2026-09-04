@@ -81,10 +81,17 @@ export function createConfig(environment = process.env, overrides = {}) {
     // Who may run privileged tools. TEMINALI_ADMINS additionally pins logins
     // that no API call can remove.
     adminStorePath: resolve(environment.TEMINALI_ADMIN_STORE || resolve(process.cwd(), "benchmark-results", "admins.json")),
-    // The studio ships itself: `appRoot` is this package (the thing that gets
-    // built), `releaseRepo` is where its releases live.
+    // The studio ships itself, and it does so out of two repositories.
+    // `appRoot` is this package — the thing that gets built. `sourceRepo` is
+    // where the code and .github/workflows/release.yml live, and it is private.
+    // `releaseRepo` is the public repository the built artefacts are published
+    // to and read back from: an update check runs on every install with no
+    // credential, so the repository it asks has to be one an anonymous caller
+    // can see. A private repository answers 404, which the updater can only
+    // report as "this repository has no releases yet".
     appRoot: resolve(environment.TEMINALI_APP_ROOT || process.cwd()),
     releaseRepo: environment.TEMINALI_RELEASE_REPO || "teminali/releases",
+    sourceRepo: environment.TEMINALI_SOURCE_REPO || "teminali/teminalicode",
     // Every benchmark that has been run. Diffs are not kept; see arena.js.
     arenaHistoryPath: resolve(environment.TEMINALI_ARENA_HISTORY || resolve(process.cwd(), "benchmark-results", "arena-runs.jsonl")),
     // "local" runs Ollama models; "api" routes to a hosted provider.

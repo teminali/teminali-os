@@ -7,7 +7,7 @@ understanding and agents all run locally by default. Hosted providers are
 available and never required. Everything the renderer can reach goes through one
 loopback gateway that never binds off `127.0.0.1`.
 
-- Package: `@teminali/code` · version **1.2.8** · app id `code.teminali.app`
+- Package: `@teminali/code` · version **1.2.9** · app id `code.teminali.app`
 - Ships as `Teminali-Code-<version>-macOS-Apple-Silicon.dmg` / `-Intel.dmg`,
   a Windows NSIS installer, and a Linux AppImage, from
   [`teminali/releases`](https://github.com/teminali/releases/releases).
@@ -451,10 +451,22 @@ and a sample. Images: up to 4, PNG/JPEG/WebP, 1536px max edge.
 
 ### Releases and updates
 
-The studio ships itself. Publishing (`/api/updates/publish`, the Release panel)
-is administrator-only and drives typecheck → test → build → preflight → tag → CI
-→ notes through the `gh` CLI. Checking for an update runs on every install
-against the public Releases API with no credential. Installs are **full asset
+The studio ships itself, out of **two repositories**. `teminali/teminalicode`
+(`TEMINALI_SOURCE_REPO`) is private and holds the code, the tags and
+`.github/workflows/release.yml`. `teminali/releases` (`TEMINALI_RELEASE_REPO`)
+is public and holds nothing but the published releases and their assets. The
+split exists because an update check runs with **no credential**: a private
+repository answers an anonymous caller `404`, and the updater can only render
+that as "this repository has no releases yet" — which is what every build up to
+and including 1.2.8 did, because those builds asked the private repository.
+**1.2.9 is the first build that asks the public one**; anything older cannot be
+reached by an update it cannot see and has to be replaced by hand, once.
+
+Publishing (`/api/updates/publish`, the Release panel) is administrator-only and
+drives typecheck → test → build → preflight → tag → CI → notes through the `gh`
+CLI. It tags and pushes to the source repository, watches the workflow *there*,
+and writes the notes onto the release in the public one. Checking for an update
+runs on every install against the public Releases API with no credential. Installs are **full asset
 replacement** — the app is ad-hoc signed, so Squirrel-style in-place updating is
 not available, and macOS clears Screen Recording / Accessibility / Microphone on
 every update.
@@ -518,7 +530,7 @@ ollama serve              # local models on 127.0.0.1:11434
 
 ```bash
 npm run typecheck   # tsc --noEmit
-npm test            # 856 tests, 0 failures
+npm test            # 863 tests, 0 failures
 npm run build       # tsc && vite build
 npm run verify:core # all three
 ```
@@ -537,6 +549,17 @@ npm run package:linux
 `build/afterAllArtifactBuild.cjs` renames the two macOS DMGs after the fact,
 because `artifactName` cannot branch on architecture. That is only safe because
 `dmg.publish: null` is set in `electron-builder.yml` — do not remove it.
+
+### Publishing across two repositories
+
+`electron-builder.yml` publishes to `teminali/releases`, and the workflow runs in
+`teminali/teminalicode`. A workflow's default `GITHUB_TOKEN` is scoped to the
+repository it runs in, so it **cannot** create a release or upload an asset in
+the other one — the build goes green and the upload does not happen. Add a PAT
+with `contents: write` on `teminali/releases` as the `RELEASES_TOKEN` secret;
+the workflow prefers it and falls back to `GITHUB_TOKEN` so a fork still builds.
+The release-notes job passes `--repo teminali/releases` for the same reason:
+without it the notes are written to the private release nobody can read.
 
 ### Signing — wired, pending a certificate
 
@@ -639,7 +662,8 @@ Everything is optional; every default is loopback.
 | `TEMINALI_VOICE_URL` | `http://127.0.0.1:8321` |
 | `TEMINALI_CUT_MCP_URL` | `http://127.0.0.1:3888` |
 | `FRONTIER_WORKSPACE_ROOT` | the repository root |
-| `TEMINALI_RELEASE_REPO` | `teminali/releases` |
+| `TEMINALI_RELEASE_REPO` | `teminali/releases` — public; published releases are read from here |
+| `TEMINALI_SOURCE_REPO` | `teminali/teminalicode` — private; tags and the release workflow live here |
 | `TEMINALI_RUNTIME_MODE` | `local` (or `api`) |
 | `FRONTIER_AUDIT_PATH` | `benchmark-results/gateway-audit.jsonl`; `userData/gateway/` in a packaged app |
 | `TEMINALI_LICENCE_STORE` | `benchmark-results/licence.json` (written `0600`) |

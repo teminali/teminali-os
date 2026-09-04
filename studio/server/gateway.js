@@ -1611,10 +1611,13 @@ export async function createGateway(options = {}) {
           appRoot: config.appRoot,
           version,
           notes: typeof body?.notes === "string" ? body.notes : "",
-          // A publish now tags and pushes, and CI builds from that tag. The
-          // repository is therefore part of the operation rather than something
-          // only the update check needed to know.
+          // A publish now tags and pushes, and CI builds from that tag. Both
+          // repositories are therefore part of the operation rather than
+          // something only the update check needed to know: the tag and the
+          // workflow belong to the source repository, the release and its notes
+          // to the public one.
           repo: config.releaseRepo,
+          sourceRepo: config.sourceRepo,
           dryRun: body?.dryRun !== false,
           onEvent: send,
           signal: abort.signal,

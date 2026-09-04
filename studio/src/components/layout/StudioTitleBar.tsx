@@ -5,6 +5,7 @@ import {
   ExternalLink,
   Loader2,
   Maximize2,
+  Minimize2,
   MonitorSmartphone,
   MoreHorizontal,
   PanelLeft,
@@ -146,6 +147,7 @@ export const StudioTitleBar: React.FC<StudioTitleBarProps> = ({
       </div>
 
       {/* ── Conversation region ────────────────────────────────────────── */}
+      {!isExpanded && (
       <div className="flex-1 min-w-0 flex items-center gap-3 px-4">
         <span className="text-sm text-ink-faint truncate">{title}</span>
         {title && <MonitorSmartphone size={13} className="text-ink-placeholder flex-shrink-0" />}
@@ -194,13 +196,16 @@ export const StudioTitleBar: React.FC<StudioTitleBarProps> = ({
           </IconButton>
         </div>
       </div>
+      )}
 
       {/* ── Panel tab strip ────────────────────────────────────────────── */}
       {isOpen && (
         <div
-          className="flex items-center gap-1.5 px-3 border-l border-edge-chrome flex-shrink-0 min-w-0 relative"
+          className={`flex items-center gap-1.5 px-3 min-w-0 relative ${
+            isExpanded ? "flex-1" : "flex-shrink-0"
+          } ${(!isExpanded || sidebarCollapsed) ? "border-l border-edge-chrome" : ""}`}
           style={{
-            width: isExpanded ? "var(--panel-w-expanded)" : width,
+            width: isExpanded ? undefined : width,
             WebkitAppRegion: "no-drag",
           } as React.CSSProperties}
         >
@@ -274,8 +279,13 @@ export const StudioTitleBar: React.FC<StudioTitleBarProps> = ({
 
           <div className="flex-1" />
 
-          <IconButton onClick={toggleExpanded} active={isExpanded} title="Widen panel" size={24}>
-            <Maximize2 size={14} />
+          <IconButton
+            onClick={toggleExpanded}
+            active={isExpanded}
+            title={isExpanded ? "Minimize panel" : "Widen panel"}
+            size={24}
+          >
+            {isExpanded ? <Minimize2 size={14} /> : <Maximize2 size={14} />}
           </IconButton>
           <IconButton onClick={toggleOpen} title="Hide panels" size={24}>
             <PanelRight size={14} />

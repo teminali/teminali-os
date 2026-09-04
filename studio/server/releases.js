@@ -292,6 +292,11 @@ export async function preflight(appRoot, version, repo) {
  * Pushing a tag is not releasing. Reporting success the moment the push
  * returns would claim a release that CI may still be about to fail, which is
  * exactly the kind of thing an operator finds out about from a user.
+ *
+ * `repo` here is the **source** repository, not the one the release is
+ * published to. release.yml lives beside the code; asking the distribution
+ * repository for a run of it lists nothing, forever, and this waits out its
+ * whole deadline on a build that already succeeded.
  */
 async function watchWorkflow({ repo, tag, onEvent, signal }) {
   const deadline = Date.now() + RELEASE_LIMITS.publishTimeoutMs;
@@ -362,7 +367,7 @@ async function watchWorkflow({ repo, tag, onEvent, signal }) {
  * still be about to fail — so it waits for the build and reports what each
  * platform actually did.
  */
-export function publishRelease({ appRoot, version, notes = "", repo, dryRun = false, onEvent, signal }) {
+export function publishRelease({ appRoot, version, notes = "", repo, sourceRepo = repo, dryRun = false, onEvent, signal }) {
   return new Promise(async (resolvePromise) => {
     const startedAt = Date.now();
     const completed = [];
@@ -463,8 +468,12 @@ export function publishRelease({ appRoot, version, notes = "", repo, dryRun = fa
         onEvent({ type: "output", id: "tag", kind: "stdout", text: `Pushed ${plan.branch} and v${version}\n` });
       });
 
+      // The tag was pushed to the source repository and the workflow runs
+      // there; the release it produces lands in the distribution repository.
+      // Those are two different names and passing the wrong one here is a
+      // silent twenty-minute wait, so they are named separately.
       await step("ci", "Build every platform on GitHub", () =>
-        watchWorkflow({ repo, tag: `v${version}`, onEvent, signal }));
+        watchWorkflow({ repo: sourceRepo, tag: `v${version}`, onEvent, signal }));
 
       /* The notes field used to collect text that went nowhere. This is where
          it lands — after CI has created the release to attach it to. */
