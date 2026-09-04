@@ -387,14 +387,33 @@ function seekTo(entry: VideoEntry, seconds: number): Promise<void> {
 
   return new Promise<void>((resolve) => {
     let settled = false;
+    let rvfcHandle: number | null = null;
     const done = () => {
       if (settled) return;
       settled = true;
       clearTimeout(timer);
+      if (rvfcHandle !== null && 'cancelVideoFrameCallback' in entry.el) {
+        try {
+          (entry.el as HTMLVideoElement & { cancelVideoFrameCallback?: (h: number) => void }).cancelVideoFrameCallback?.(rvfcHandle);
+        } catch {
+          /* ignored */
+        }
+      }
       resolve();
     };
     const timer = setTimeout(done, SEEK_TIMEOUT_MS);
     entry.seekWaiters.push(done);
+
+    if ('requestVideoFrameCallback' in entry.el) {
+      try {
+        rvfcHandle = (entry.el as HTMLVideoElement & { requestVideoFrameCallback?: (cb: () => void) => number }).requestVideoFrameCallback?.(() => {
+          updateLastFrame(entry);
+          done();
+        }) ?? null;
+      } catch {
+        /* fallback to seeked */
+      }
+    }
 
     try {
       entry.el.currentTime = seconds;

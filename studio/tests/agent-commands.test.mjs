@@ -3,6 +3,8 @@ import test from "node:test";
 
 import {
   classifyCommand,
+  closedFenceEnd,
+  documentationShellFence,
   formatCommandEvidence,
   parseAgentCommands,
 } from "../src/services/agentCommands.ts";
@@ -263,4 +265,92 @@ test("the reason names the specific hazard, not just that something is unsafe", 
 test("the riskiest segment decides the whole pipeline", () => {
   assert.equal(classifyCommand("du -sh . | sort -hr").risk, "auto");
   assert.equal(classifyCommand("du -sh . && rm -rf /tmp/x").risk, "confirm");
+});
+
+// ── Stopping generation at the fence ──────────────────────────────────────
+// A model that emits a run fence and keeps talking is inventing the output.
+// These pin the boundary the stream is cut on.
+
+const RUN_TAGS = ["frontier-run", "frontier-command"];
+
+test("an unclosed fence is not a stopping point", () => {
+  // Mid-stream this only means the model is still typing the command.
+  assert.equal(closedFenceEnd("Sure.\n```frontier-run\nls ~/Documents", RUN_TAGS), null);
+  assert.equal(closedFenceEnd("No fence here at all.", RUN_TAGS), null);
+});
+
+test("the cut lands just past the closing fence", () => {
+  const text = "I'll look.\n```frontier-run\nls ~/Documents\n```";
+  const end = closedFenceEnd(text, RUN_TAGS);
+  assert.equal(end, text.length);
+  assert.equal(text.slice(0, end).endsWith("```"), true);
+});
+
+test("everything a model narrates after the fence is discarded", () => {
+  // The exact observed failure: the folder does not exist, no command has run,
+  // and the model has already reported success.
+  const text =
+    "I'll create it.\n```frontier-run\nmkdir -p ~/Documents/test-proj\n```\n" +
+    "The test-proj folder has been created. This confirms it was successful.";
+  const end = closedFenceEnd(text, RUN_TAGS);
+  const kept = text.slice(0, end);
+  assert.equal(kept.includes("has been created"), false);
+  assert.equal(kept.includes("confirms"), false);
+  assert.deepEqual(parseAgentCommands(kept).map((c) => c.command), ["mkdir -p ~/Documents/test-proj"]);
+});
+
+test("the first fence wins when a turn emits several", () => {
+  // The second command may depend on the first one's output, which is not in
+  // hand yet, so only the first is honoured this turn.
+  const text = "```frontier-run\nls a\n```\nthen\n```frontier-run\nls b\n```";
+  const kept = text.slice(0, closedFenceEnd(text, RUN_TAGS));
+  assert.deepEqual(parseAgentCommands(kept).map((c) => c.command), ["ls a"]);
+});
+
+test("a documentation fence is not a stopping point", () => {
+  // ```bash is prose. Cutting on it would truncate an answer for nothing.
+  assert.equal(closedFenceEnd("Run:\n```bash\nnpm install\n```", RUN_TAGS), null);
+});
+
+test("no executable tags means no cut", () => {
+  // An engine with no executor must not truncate: nothing would complete it.
+  assert.equal(closedFenceEnd("```frontier-run\nls\n```", []), null);
+});
+
+test("a video-tool fence stops a turn when the editor is wired", () => {
+  const text = '```video-tool\n{"tool":"describe_timeline"}\n```\nThe timeline has 4 clips.';
+  const kept = text.slice(0, closedFenceEnd(text, ["video-tool"]));
+  assert.equal(kept.includes("4 clips"), false);
+});
+
+// ── The bash-instead-of-run-fence stall ───────────────────────────────────
+// Observed: "give me a total size of all the files in my desktop folder" came
+// back as a ```bash block and "Please run this command on your machine". The
+// turn ended and nothing had been measured.
+
+test("a shell block the model meant to run is recognised", () => {
+  const turn =
+    "I'll use the du command.\n```bash\ndu -sh ~/Desktop\n```\n" +
+    "Please run this command on your machine to get the result.";
+  assert.equal(documentationShellFence(turn), "du -sh ~/Desktop");
+  // Still not executable. The rule does not bend; only the repair is new.
+  assert.deepEqual(parseAgentCommands(turn), []);
+});
+
+test("sh, shell, zsh and console fences all count", () => {
+  for (const tag of ["sh", "shell", "zsh", "console", "terminal"]) {
+    assert.equal(documentationShellFence("```" + tag + "\nls ~/Desktop\n```"), "ls ~/Desktop");
+  }
+});
+
+test("a script being written is not a stalled command", () => {
+  // A shebang or a control structure is a file, not an intention to run now.
+  assert.equal(documentationShellFence("```bash\n#!/usr/bin/env bash\nls\n```"), null);
+  assert.equal(documentationShellFence("```bash\nfor f in *; do echo $f; done\n```"), null);
+});
+
+test("an unclosed or empty shell fence is not a stall", () => {
+  assert.equal(documentationShellFence("```bash\ndu -sh ~/Desktop"), null);
+  assert.equal(documentationShellFence("```bash\n\n```"), null);
+  assert.equal(documentationShellFence("no fence here"), null);
 });

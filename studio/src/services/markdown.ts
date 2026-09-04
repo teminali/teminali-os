@@ -22,7 +22,10 @@ const INLINE_PATTERN = new RegExp(
     "(\\*\\*[^*\\n]+\\*\\*)",              // bold
     "(~~[^~\\n]+~~)",                      // strikethrough
     "(\\*[^*\\n]+\\*)",                    // italic
-    "(_[^_\\n]+_)",                        // italic (underscore)
+    // Intraword underscores are not emphasis (CommonMark): a filename like
+    // mature_romance_comic_skill_v3.zip must survive as text, not turn into
+    // three italic runs with the underscores eaten.
+    "((?<![A-Za-z0-9_])_[^_\\n]+_(?![A-Za-z0-9_]))",
     "(\\[[^\\]\\n]*\\]\\([^)\\s]+\\))",    // link
     "(https?://[^\\s<>()]+)",              // bare url
   ].join("|"),

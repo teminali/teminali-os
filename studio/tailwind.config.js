@@ -114,6 +114,7 @@ export default {
 
         edge: {
           chrome: "var(--border-chrome)",
+          code: "var(--border-code)",
           subtle: "var(--border-subtle)",
           DEFAULT: "var(--border)",
           strong: "var(--border-strong)",

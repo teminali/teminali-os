@@ -349,6 +349,22 @@ ipcMain.handle("assistant:overlay-minimised", () => Boolean(assistantOverlay?.is
 // which is before React has subscribed to anything.
 ipcMain.handle("assistant:overlay-state", () => assistantOverlay?.getState() ?? { visible: false });
 
+ipcMain.handle("assistant:focus-studio", () => {
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    if (mainWindow.isMinimized()) mainWindow.restore();
+    mainWindow.show();
+    app.focus({ steal: true });
+    mainWindow.focus();
+    return true;
+  }
+  return false;
+});
+
+ipcMain.handle("assistant:overlay-interactive", (_event, capture) => {
+  assistantOverlay?.setInteractive(Boolean(capture));
+  return true;
+});
+
 let screenRecordingModule = null;
 const loadScreenRecording = () =>
   screenRecordingModule
@@ -681,6 +697,13 @@ ipcMain.handle("window:close", (event) => {
 });
 
 ipcMain.handle("window:is-maximized", (event) => Boolean(focusedWindow(event)?.isMaximized()));
+
+ipcMain.handle("window:set-progress-bar", (event, progress) => {
+  const target = focusedWindow(event) || mainWindow;
+  if (!target || target.isDestroyed()) return false;
+  target.setProgressBar(typeof progress === "number" && progress >= 0 ? progress : -1);
+  return true;
+});
 
 process.on("uncaughtException", (err) => {
   log("UNCAUGHT EXCEPTION:", err.stack || err.message);

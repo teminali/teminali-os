@@ -75,6 +75,31 @@ test("claiming no filesystem access while wired to a shell is a finding", () => 
   assert.ok(rules(findings).includes("deflected-to-user"));
 });
 
+test("printing the command and asking the operator to run it is deflection", () => {
+  // Verbatim from Frontier Auto: it named the right command, printed it in a
+  // ```bash block, and handed the work back. No denial, no "you can" — the
+  // original pattern matched none of it and the turn was delivered as an answer.
+  const findings = audit({
+    userPrompt: "give me a total size of all the files in my desktop folder",
+    answerText:
+      "To calculate the total size of all files in your Desktop folder, I'll use the du command.\n" +
+      "```bash\ndu -sh ~/Desktop\n```\n" +
+      "Please run this command on your machine to get the result.",
+  });
+  assert.ok(rules(findings).includes("deflected-to-user"));
+});
+
+test("an answer built from real output is not deflection", () => {
+  // The guard on the widened pattern: reporting what a command returned must
+  // stay silent, or every grounded answer costs a wasted correction turn.
+  const findings = audit({
+    userPrompt: "give me a total size of all the files in my desktop folder",
+    answerText: "I ran du -sh ~/Desktop: the Desktop holds 37 GB across 14,189 files.",
+    executions: [{ command: "du -sh ~/Desktop", executed: true, output: "37G\t/Users/t/Desktop" }],
+  });
+  assert.equal(rules(findings).includes("deflected-to-user"), false);
+});
+
 test("the same answer is not a finding when the host has no shell", () => {
   const findings = audit({
     userPrompt: "how much storage do my downloads take",

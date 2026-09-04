@@ -75,11 +75,18 @@ export const Composer: React.FC<ComposerProps> = ({
   const assistant = useAssistantSession();
 
   // Grow with content up to a ceiling, then scroll.
+  const [wrapped, setWrapped] = useState(false);
   useEffect(() => {
     const node = areaRef.current;
     if (!node) return;
     node.style.height = "auto";
-    node.style.height = `${Math.min(200, node.scrollHeight)}px`;
+    const height = Math.min(200, node.scrollHeight);
+    node.style.height = `${height}px`;
+    // A pill's radius is half its height, so a follow-up bar that grows a
+    // second line stops being a pill and becomes a lozenge. Remember that it
+    // grew, so the shell below can fall back to a fixed corner.
+    const line = parseFloat(getComputedStyle(node).lineHeight) || 20;
+    setWrapped(height > line * 1.6);
   }, [value]);
 
   useEffect(() => {
@@ -160,6 +167,17 @@ export const Composer: React.FC<ComposerProps> = ({
   const conversation = voice.mode === "conversation" && voice.state !== "idle";
   const reviewing = voice.state === "review" && voice.pending !== null;
 
+  useEffect(() => {
+    if (reviewing && voice.pending && assistant?.claimsUtterance()) {
+      void voice.approve(voice.pending.repaired);
+    }
+  }, [reviewing, voice, assistant]);
+
+  /* The follow-up bar is a true pill only while it is one row high. An
+     attachment or a wrapped line makes it tall, and half of a tall box is the
+     lozenge that pasting an image used to produce. */
+  const pill = !wrapped && (attachments?.attachments.length ?? 0) === 0;
+
   return (
     <div className={`relative w-full flex flex-col gap-2.5 ${width === "column" ? (tall ? "max-w-composerEmpty" : "max-w-composer") : ""}`}>
       {trigger && (
@@ -193,7 +211,7 @@ export const Composer: React.FC<ComposerProps> = ({
         />
       )}
 
-      {reviewing && voice.pending && (
+      {reviewing && voice.pending && !assistant?.claimsUtterance() && (
         <VoiceReviewBar
           pending={voice.pending}
           autoSendIn={voice.autoSendIn}
@@ -224,8 +242,10 @@ export const Composer: React.FC<ComposerProps> = ({
              a true pill — its radius is half its height, which is why it cannot
              be `rounded-2xl` and get there. Both sit on #212121 behind a flat
              #3a3a3a hairline, the brightest border in the window. */
-          className={`lit lit-strong lit-focus w-full bg-surface transition-colors duration-ds ease-ds ${
-            tall ? "rounded-2xl px-3.5 pt-4 pb-3" : "rounded-full px-2 py-[9px]"
+          className={`lit lit-strong lit-focus w-full bg-surface transition-[border-radius,background-color,border-color] duration-ds ease-ds ${
+            tall
+              ? "rounded-2xl px-3.5 pt-4 pb-3"
+              : `${pill ? "rounded-full" : "rounded-2xl"} px-2 py-[9px]`
           } ${attachments?.isDragging ? "lit-accent" : ""}`}
         >
           {attachments && attachments.attachments.length > 0 && (

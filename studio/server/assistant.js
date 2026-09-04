@@ -33,6 +33,7 @@ import { randomUUID } from "node:crypto";
 
 import {
   PointerError,
+  pointerActivate,
   pointerClick,
   pointerFrontmost,
   pointerKey,
@@ -618,6 +619,18 @@ export async function act(observationId, step, options = {}) {
       frontmost = await pointerFrontmost();
     } catch {
       frontmost = null;
+    }
+    if (frontmost && frontmost.pid !== observation.application.pid) {
+      try {
+        await pointerActivate(observation.application.pid);
+        for (let attempt = 0; attempt < 3; attempt += 1) {
+          await new Promise((resolve) => setTimeout(resolve, 200));
+          frontmost = await pointerFrontmost();
+          if (frontmost && frontmost.pid === observation.application.pid) break;
+        }
+      } catch {
+        /* If activation fails, let the check below judge */
+      }
     }
     if (frontmost && frontmost.pid !== observation.application.pid) {
       throw new PointerError(

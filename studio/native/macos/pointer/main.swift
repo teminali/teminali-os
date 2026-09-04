@@ -513,9 +513,18 @@ case "key":
         fail("KEY_FAILED", "The chord could not be sent.")
     }
 
+case "activate":
+    guard let pid = args.int("pid") else { fail("PID_REQUIRED", "--pid is required.") }
+    if let app = NSRunningApplication(processIdentifier: pid_t(pid)) {
+        let ok = app.activate(options: [.activateIgnoringOtherApps])
+        emit(["activated": ok, "name": app.localizedName ?? ""])
+    } else {
+        fail("APP_NOT_FOUND", "No application with pid \(pid) was found.")
+    }
+
 default:
     fail(
         "UNKNOWN_COMMAND",
-        "Expected one of: permissions, screens, cursor, frontmost, tree, move, click, scroll, type, key."
+        "Expected one of: permissions, screens, cursor, frontmost, tree, move, click, scroll, type, key, activate."
     )
 }

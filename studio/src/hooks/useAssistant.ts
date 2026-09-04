@@ -431,7 +431,19 @@ export function useAssistant(): UseAssistantResult {
       if (plan.steps.length > 0) {
         await runSteps(seen.id, plan.steps);
       }
-      if (!controller.signal.aborted) setPhase("idle");
+      if (!controller.signal.aborted) {
+        if (settingsRef.current.handsFree) {
+          pendingObservation.current = null;
+          void look(true);
+          setPhase("listening");
+          const voice = voiceRef.current;
+          if (voice && (voice.state === "idle" || voice.mode !== "conversation")) {
+            void voice.startDictation();
+          }
+        } else {
+          setPhase("idle");
+        }
+      }
     },
     [look, runSteps],
   );
@@ -446,7 +458,11 @@ export function useAssistant(): UseAssistantResult {
     const voice = voiceRef.current;
     if (!voice) return;
     setPhase("listening");
-    await voice.startDictation();
+    if (settingsRef.current.handsFree) {
+      await voice.startConversation();
+    } else {
+      await voice.startDictation();
+    }
   }, [look]);
 
   const cancel = useCallback(() => {

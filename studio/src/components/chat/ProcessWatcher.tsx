@@ -181,7 +181,7 @@ const CallRow: React.FC<{
       </button>
 
       {open && (
-        <div className="my-1 rounded-md bg-frame-bot border border-edge/50 px-2.5 py-2 animate-reveal">
+        <div className="my-1 rounded-md bg-frame-bot border border-edge-code px-2.5 py-2 animate-reveal">
           <div className="font-mono text-3xs text-ink-disabled mb-1">{call.name}</div>
           {Object.keys(call.arguments ?? {}).length > 0 && (
             <pre className="font-mono text-3xs text-ink-code/80 whitespace-pre-wrap break-words max-h-36 overflow-y-auto">

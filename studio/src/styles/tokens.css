@@ -73,6 +73,13 @@
   --border: #262626;                /* table and card edge — measured */
   --border-strong: #313131;         /* user bubble edge — measured */
   --border-popover: #3a3a3a;        /* composer edge, popover edge — measured */
+  /* Code and shell cards break the "lightened by 0x10" rule on purpose. A
+     transcript stacks many of them, and at 0x10 the run of edges reads as a
+     ladder of bright rectangles down the page — the operator sees the frames
+     before the code. Against the #151515 sunken fill this is barely a step,
+     which is the whole intent: the block is defined by its darker fill, and
+     the hairline only closes the shape. */
+  --border-code: #1c1c1c;           /* code block and shell card edge */
 
   /* ---------------------------------------------------------------------
      TEXT — a 10-step ramp. Pick by role, not by lightness.

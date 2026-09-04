@@ -80,6 +80,8 @@ export interface ExportRequest {
   range?: { startMs?: number; durationMs?: number };
   /** Super Speed Turbo engine with chunked frame batching & accelerated encoding */
   superSpeed?: boolean;
+  /** Keep rendering at full speed in background without timer throttling */
+  background?: boolean;
 }
 
 export interface ExportOutcome {
@@ -101,7 +103,13 @@ export const canExport = (): boolean => Boolean(bridge());
 
 /* ── Cooperative yielding ───────────────────────────────────────── */
 
+let activeBackgroundMode = false;
+
 function nextPaint(): Promise<void> {
+  // When in background or background rendering is active, never wait on rAF
+  if (activeBackgroundMode || (typeof document !== 'undefined' && document.hidden)) {
+    return new Promise((resolve) => setTimeout(resolve, 0));
+  }
   return new Promise((resolve) => {
     let settled = false;
     const finish = (): void => {
@@ -112,9 +120,9 @@ function nextPaint(): Promise<void> {
     /* A window that is minimised, occluded or on another Space stops
        animating. Without the timer the export would stop with it, and
        come back only when someone looked at it again. */
-    const timer = window.setTimeout(finish, PAINT_TIMEOUT_MS);
+    const timer = setTimeout(finish, PAINT_TIMEOUT_MS);
     requestAnimationFrame(() => {
-      window.clearTimeout(timer);
+      clearTimeout(timer);
       finish();
     });
   });
@@ -157,7 +165,7 @@ async function ensureFontsLoaded(tracks: Track[]): Promise<void> {
   }
 }
 
-function canvasToJpeg(canvas: HTMLCanvasElement): Promise<Uint8Array> {
+function canvasToJpeg(canvas: HTMLCanvasElement, quality: number = JPEG_QUALITY): Promise<Uint8Array> {
   return new Promise((resolve, reject) => {
     canvas.toBlob(
       (blob) => {
@@ -171,7 +179,7 @@ function canvasToJpeg(canvas: HTMLCanvasElement): Promise<Uint8Array> {
           .catch(reject);
       },
       'image/jpeg',
-      JPEG_QUALITY
+      quality
     );
   });
 }
@@ -242,6 +250,7 @@ export async function runExport(request: ExportRequest): Promise<ExportOutcome> 
   const store = useProjectStore.getState();
 
   const fail = (error: string): ExportOutcome => {
+    window.teminali?.window?.setProgressBar?.(-1);
     store.setIsExporting(false);
     store.setExportProgress(0, error, 'error', null);
     store.setActiveExportCancelHandler(null);
@@ -307,6 +316,9 @@ export async function runExport(request: ExportRequest): Promise<ExportOutcome> 
     abortIfCancelled();
 
     const isSuperSpeed = request.superSpeed !== false;
+    const isBackground = request.background !== false;
+    activeBackgroundMode = isBackground;
+    const frameQuality = isSuperSpeed ? 0.82 : JPEG_QUALITY;
     const canvas = document.createElement('canvas');
     canvas.width = width;
     canvas.height = height;
@@ -331,6 +343,7 @@ export async function runExport(request: ExportRequest): Promise<ExportOutcome> 
       outputPath: request.outputPath ?? suggestedFileName(project.name, request.codec),
       hardware: request.hardware,
       superSpeed: isSuperSpeed,
+      background: isBackground,
     });
     if (!started.sessionId) return fail(started.error ?? 'Could not start the encoder.');
     sessionId = started.sessionId;
@@ -351,13 +364,23 @@ export async function runExport(request: ExportRequest): Promise<ExportOutcome> 
       lanes: isSuperSpeed ? [{ worker: 1, chunk: 1, frames: 0, totalFrames }] : undefined,
     });
 
-    const CHUNK_SIZE = isSuperSpeed ? 4 : 1;
+    const CHUNK_SIZE = isSuperSpeed ? 8 : 1;
     const inFlightWrites: Promise<void>[] = [];
-    const MAX_IN_FLIGHT = isSuperSpeed ? 6 : 1;
+    const MAX_IN_FLIGHT = isSuperSpeed ? 8 : 1;
     let chunkBytes: Uint8Array[] = [];
+
+    // Pipeline: kick off seek for frame 0
+    let nextSeekPromise: Promise<void> | null = seekVideosForFrame(tracks, startMs);
 
     for (let frame = 0; frame < totalFrames; frame += 1) {
       abortIfCancelled();
+
+      // Await video seek for this frame
+      if (nextSeekPromise) {
+        await nextSeekPromise;
+        nextSeekPromise = null;
+        abortIfCancelled();
+      }
 
       /* Computed from the frame INDEX every time. Accumulating an
          interval instead drifts, and a drifted timestamp lands a frame
@@ -365,15 +388,20 @@ export async function runExport(request: ExportRequest): Promise<ExportOutcome> 
          the head of the incoming one. */
       const timestampMs = startMs + frame * frameIntervalMs;
 
-      await seekVideosForFrame(tracks, timestampMs);
-      abortIfCancelled();
-
       // Double buffer: alternate canvases so encoding does not stall composition
       const activeCanvas = isSuperSpeed && canvasB && ctxB && frame % 2 === 1 ? canvasB : canvas;
       const activeCtx = isSuperSpeed && canvasB && ctxB && frame % 2 === 1 ? ctxB : ctx;
 
       renderTimelineFrame(activeCtx, tracks, project, timestampMs, width, height);
-      const jpeg = await canvasToJpeg(activeCanvas);
+
+      // Concurrently kick off seek for the NEXT frame while we encode this frame to JPEG!
+      const nextFrame = frame + 1;
+      if (nextFrame < totalFrames) {
+        const nextTimestampMs = startMs + nextFrame * frameIntervalMs;
+        nextSeekPromise = seekVideosForFrame(tracks, nextTimestampMs);
+      }
+
+      const jpeg = await canvasToJpeg(activeCanvas, frameQuality);
       chunkBytes.push(jpeg);
 
       const done = frame + 1;
@@ -400,13 +428,14 @@ export async function runExport(request: ExportRequest): Promise<ExportOutcome> 
         });
 
         if (isSuperSpeed) {
-          inFlightWrites.push(writePromise);
+          let p: Promise<void>;
+          p = writePromise.finally(() => {
+            const idx = inFlightWrites.indexOf(p);
+            if (idx !== -1) inFlightWrites.splice(idx, 1);
+          });
+          inFlightWrites.push(p);
           if (inFlightWrites.length >= MAX_IN_FLIGHT) {
             await Promise.race(inFlightWrites);
-            // Clean up completed writes
-            for (let i = inFlightWrites.length - 1; i >= 0; i -= 1) {
-              /* In-flight resolution happens naturally; Promise.race unblocks */
-            }
           }
         } else {
           await writePromise;
@@ -417,10 +446,13 @@ export async function runExport(request: ExportRequest): Promise<ExportOutcome> 
       if (now - lastReportAt >= PROGRESS_INTERVAL_MS || done === totalFrames) {
         lastReportAt = now;
         const { fps, etaMs } = renderRate(done, totalFrames, now - beganAt);
-        const prefix = isSuperSpeed ? '⚡ Super Speed · ' : '';
+        const percent = renderPercent(done, totalFrames);
+        const formattedDone = done.toLocaleString();
+        const formattedTotal = totalFrames.toLocaleString();
+        const prefix = isSuperSpeed ? '⚡ Turbo · ' : '';
         store.setExportProgress(
-          renderPercent(done, totalFrames),
-          `${prefix}Rendering frame ${done} of ${totalFrames}`,
+          percent,
+          `${prefix}Rendering frame ${formattedDone} of ${formattedTotal}`,
           'rendering',
           {
             frame: done,
@@ -433,6 +465,7 @@ export async function runExport(request: ExportRequest): Promise<ExportOutcome> 
               : undefined,
           }
         );
+        window.teminali?.window?.setProgressBar?.(percent / 100);
       }
 
       /* The one place the rest of the app gets the thread back. Budgeted
@@ -468,6 +501,7 @@ export async function runExport(request: ExportRequest): Promise<ExportOutcome> 
     store.setActiveExportCancelHandler(null);
     store.setLastExportPath(result.outputPath ?? null);
     store.setExportProgress(100, `Wrote ${result.outputPath ?? 'the file'}`, 'done', null);
+    window.teminali?.window?.setProgressBar?.(-1);
 
     return {
       ok: true,
@@ -483,6 +517,7 @@ export async function runExport(request: ExportRequest): Promise<ExportOutcome> 
        running after the dialog has closed. */
     if (sessionId) void exporter.cancel(sessionId);
 
+    window.teminali?.window?.setProgressBar?.(-1);
     if (error instanceof DOMException && error.name === 'AbortError') {
       store.setIsExporting(false);
       store.setActiveExportCancelHandler(null);

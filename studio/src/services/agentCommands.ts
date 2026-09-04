@@ -18,6 +18,55 @@ export interface AgentCommandRequest {
  */
 const RUN_FENCE = /```(?:frontier-run|frontier-command)[^\n]*\n([\s\S]*?)(?:```|$)/g;
 
+/**
+ * Where the first *closed* executable fence ends, or null if none has closed.
+ *
+ * The reason this exists: a model that emits a ```frontier-run fence and then
+ * keeps generating is writing the command's output from imagination. It cannot
+ * know it — the command has not run, and in the worst case is still sitting at
+ * an approval prompt. Left alone the model narrates a success, the operator
+ * reads it, and only afterwards is asked whether to run the thing that
+ * supposedly already worked.
+ *
+ * So generation stops here. The index returned is just past the closing fence;
+ * everything after it is discarded unread, the command runs, and its real
+ * output comes back as the next observation.
+ *
+ * `RUN_FENCE` above tolerates an unterminated fence because parsing a finished
+ * turn should salvage what it can. This one must not: mid-stream, an unclosed
+ * fence only means the model is still typing it.
+ */
+/**
+ * The body of a documentation shell fence, when the turn has one.
+ *
+ * ```bash is never executed — that rule stands, because a model prints shell
+ * blocks as prose constantly and running them would execute documentation. But
+ * a model that *meant* to act and reached for ```bash out of habit has stalled:
+ * it emits the command, tells the operator to run it themselves, and nothing
+ * happens. Detecting that shape is what lets the engine say "you wanted
+ * frontier-run" instead of leaving the turn dead.
+ *
+ * Only closed fences count, and only ones whose first line reads like a command
+ * rather than a script — a shebang or a loop is a file being written, not an
+ * intention to run something now.
+ */
+export function documentationShellFence(text: string): string | null {
+  const fence = /```(?:bash|sh|shell|zsh|console|terminal)[^\n]*\n([\s\S]*?)```/.exec(text);
+  if (!fence) return null;
+  const body = fence[1].trim();
+  if (!body) return null;
+  if (body.startsWith("#!")) return null;
+  if (/^\s*(?:if|for|while|function|case)\b/.test(body)) return null;
+  return body;
+}
+
+export function closedFenceEnd(text: string, tags: readonly string[]): number | null {
+  if (tags.length === 0) return null;
+  const pattern = new RegExp("```(?:" + tags.join("|") + ")[^\\n]*\\n[\\s\\S]*?```");
+  const match = pattern.exec(text);
+  return match ? match.index + match[0].length : null;
+}
+
 // Read-only inspection and verification. Safe to run without asking because
 // they cannot mutate the workspace, the network, or the machine.
 const AUTO_COMMANDS = new Set([

@@ -213,10 +213,40 @@ export class WebSpeechProvider implements VoiceProvider {
       const match = synth.getVoices().find((voice) => voice.name === options.voice);
       if (match) utterance.voice = match;
     } else {
-      // Prefer a voice that actually speaks the requested language.
-      const prefix = utterance.lang.split("-")[0];
-      const match = synth.getVoices().find((voice) => voice.lang.startsWith(prefix));
-      if (match) utterance.voice = match;
+      const voices = synth.getVoices();
+      const prefix = (utterance.lang || "en").split("-")[0].toLowerCase();
+      const matchingVoices = voices.filter((v) => v.lang.toLowerCase().startsWith(prefix));
+
+      const NOVELTY_VOICES = new Set([
+        "bad news", "bahh", "bells", "boing", "bubbles", "cellos", "deranged",
+        "good news", "hysterical", "junior", "kathy", "organ", "pipe organ",
+        "princess", "ralph", "trinoids", "whisper", "zarvox", "albert", "fred",
+      ]);
+
+      const scoreVoice = (v: SpeechSynthesisVoice) => {
+        const name = v.name.toLowerCase();
+        if (NOVELTY_VOICES.has(name)) return -500;
+        let score = 0;
+        if (name.includes("enhanced") || name.includes("premium")) score += 100;
+        if (name.includes("siri")) score += 80;
+        if (name.includes("natural")) score += 70;
+        if (
+          name.includes("samantha") ||
+          name.includes("ava") ||
+          name.includes("zoe") ||
+          name.includes("daniel") ||
+          name.includes("serena") ||
+          name.includes("karen")
+        ) score += 50;
+        if (v.default) score += 20;
+        if (name.includes("compact")) score -= 30;
+        return score;
+      };
+
+      const sorted = [...matchingVoices].sort((a, b) => scoreVoice(b) - scoreVoice(a));
+      if (sorted.length > 0 && scoreVoice(sorted[0]) > -100) {
+        utterance.voice = sorted[0];
+      }
     }
 
     let spokenChars = 0;

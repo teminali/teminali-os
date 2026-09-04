@@ -465,7 +465,7 @@ export class VoiceEngine {
     const repaired = await this.repair(withoutWakeWord || heard);
     this.pending = repaired;
 
-    const needsApproval = this.settings.confirmBeforeSend || !repaired.clean;
+    const needsApproval = Boolean(this.settings.confirmBeforeSend);
     if (needsApproval) {
       this.setState("review");
       // In conversation mode a silent review would stall the loop, so the

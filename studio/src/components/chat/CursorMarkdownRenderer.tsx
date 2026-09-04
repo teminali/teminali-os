@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import { Maximize2, Minimize2 } from "lucide-react";
+import { ChevronDown, ChevronUp, Maximize2, Minimize2 } from "lucide-react";
 import { CodeSnippet } from "../ui/CodeSnippet";
 import { tokenizeInline } from "../../services/markdown";
 
@@ -190,12 +190,44 @@ const Inline: React.FC<{ text: string }> = ({ text }) => (
   </>
 );
 
+/* A directory listing arrives as eighty bullets and pushes the answer that
+   followed it off the screen. Long lists and tables collapse to a readable head
+   so the shape of the reply stays visible; the rest is one click away. The
+   thresholds leave ordinary prose lists — steps, options, a short table —
+   untouched, because a toggle on a five-item list is friction for nothing. */
+const LIST_COLLAPSE_AT = 12;
+const LIST_VISIBLE = 8;
+const TABLE_COLLAPSE_AT = 12;
+const TABLE_VISIBLE = 8;
+
+const OverflowToggle: React.FC<{
+  expanded: boolean;
+  hidden: number;
+  noun: string;
+  onToggle: () => void;
+}> = ({ expanded, hidden, noun, onToggle }) => (
+  <button
+    type="button"
+    onClick={onToggle}
+    aria-expanded={expanded}
+    className="mt-1 flex items-center gap-1 text-2xs font-medium text-ink-muted hover:text-ink-high transition-colors duration-ds ease-ds"
+  >
+    {expanded ? <ChevronUp size={11} aria-hidden="true" /> : <ChevronDown size={11} aria-hidden="true" />}
+    {expanded ? "Show less" : `Show ${hidden} more ${noun}${hidden === 1 ? "" : "s"}`}
+  </button>
+);
+
 export const CursorMarkdownRenderer: React.FC<CursorMarkdownRendererProps> = ({
   content,
   isStreaming = false,
   compact = false,
 }) => {
   const [expandedDiagram, setExpandedDiagram] = useState(false);
+  // Keyed by block index: block order is stable across a streaming render, so a
+  // block the reader opened stays open as later blocks arrive.
+  const [expandedBlocks, setExpandedBlocks] = useState<Record<number, boolean>>({});
+  const toggleBlock = (index: number) =>
+    setExpandedBlocks((previous) => ({ ...previous, [index]: !previous[index] }));
   const blocks = parseBlocks(content);
   const lastCodeIndex = blocks.reduce((last, block, index) => (block.kind === "code" ? index : last), -1);
   const body = compact ? "text-xs" : "text-[13px]";
@@ -250,7 +282,8 @@ export const CursorMarkdownRenderer: React.FC<CursorMarkdownRendererProps> = ({
                  uppercase mono chrome. The container is transparent — a tinted
                  fill here is what made this read as a widget dropped into the
                  reply instead of as part of it. */
-              <div key={index} className="lit my-3 rounded-xl overflow-x-auto">
+              <div key={index} className="my-3">
+              <div className="lit rounded-xl overflow-x-auto">
                 <table className="w-full text-left border-collapse text-md">
                   <thead>
                     <tr className="border-b border-edge">
@@ -267,7 +300,10 @@ export const CursorMarkdownRenderer: React.FC<CursorMarkdownRendererProps> = ({
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-edge">
-                    {block.rows.map((row, rowIndex) => (
+                    {(block.rows.length > TABLE_COLLAPSE_AT && expandedBlocks[index] !== true
+                      ? block.rows.slice(0, TABLE_VISIBLE)
+                      : block.rows
+                    ).map((row, rowIndex) => (
                       <tr key={rowIndex} className="hover:bg-surface-hover/40 transition-colors duration-ds ease-ds">
                         {row.map((cell, cellIndex) => (
                           <td
@@ -282,6 +318,15 @@ export const CursorMarkdownRenderer: React.FC<CursorMarkdownRendererProps> = ({
                     ))}
                   </tbody>
                 </table>
+              </div>
+              {block.rows.length > TABLE_COLLAPSE_AT && (
+                <OverflowToggle
+                  expanded={expandedBlocks[index] === true}
+                  hidden={block.rows.length - TABLE_VISIBLE}
+                  noun="row"
+                  onToggle={() => toggleBlock(index)}
+                />
+              )}
               </div>
             );
 
@@ -310,9 +355,13 @@ export const CursorMarkdownRenderer: React.FC<CursorMarkdownRendererProps> = ({
 
           case "list": {
             const Tag = block.ordered ? "ol" : "ul";
+            const listOpen = expandedBlocks[index] === true;
+            const listOverflows = block.items.length > LIST_COLLAPSE_AT;
+            const listItems = listOverflows && !listOpen ? block.items.slice(0, LIST_VISIBLE) : block.items;
             return (
-              <Tag key={index} className="my-2 space-y-1">
-                {block.items.map((item, itemIndex) => (
+              <div key={index}>
+              <Tag className="my-2 space-y-1">
+                {listItems.map((item, itemIndex) => (
                   <li
                     key={itemIndex}
                     className="flex gap-2 text-ink-prose"
@@ -341,6 +390,15 @@ export const CursorMarkdownRenderer: React.FC<CursorMarkdownRendererProps> = ({
                   </li>
                 ))}
               </Tag>
+              {listOverflows && (
+                <OverflowToggle
+                  expanded={listOpen}
+                  hidden={block.items.length - LIST_VISIBLE}
+                  noun="item"
+                  onToggle={() => toggleBlock(index)}
+                />
+              )}
+              </div>
             );
           }
 

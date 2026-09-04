@@ -185,6 +185,8 @@ export interface AssistantSettings {
   hotkey: string;
   /** Draw the pointer guidance on the real screen, not just in the window. */
   overlay: boolean;
+  /** Keep the voice session listening continuously for screen commands without pressing buttons. */
+  handsFree: boolean;
 }
 
 export const DEFAULT_ASSISTANT_SETTINGS: AssistantSettings = {
@@ -195,4 +197,5 @@ export const DEFAULT_ASSISTANT_SETTINGS: AssistantSettings = {
   speak: true,
   hotkey: "CommandOrControl+Shift+Space",
   overlay: true,
+  handsFree: true,
 };

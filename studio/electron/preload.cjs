@@ -63,6 +63,7 @@ contextBridge.exposeInMainWorld("teminali", {
     toggleMaximize: () => ipcRenderer.invoke("window:toggle-maximize"),
     close: () => ipcRenderer.invoke("window:close"),
     isMaximized: () => ipcRenderer.invoke("window:is-maximized"),
+    setProgressBar: (progress) => ipcRenderer.invoke("window:set-progress-bar", progress),
     /** Subscribe to maximize/unmaximize; returns an unsubscribe function. */
     onMaximizeChange: (listener) => {
       const handler = (_event, isMaximized) => listener(Boolean(isMaximized));
@@ -291,6 +292,8 @@ contextBridge.exposeInMainWorld("teminali", {
     /** Overlay window only: the current drawing, pulled on mount. */
     overlayState: () => ipcRenderer.invoke("assistant:overlay-state"),
     revealForScreenRecording: () => ipcRenderer.invoke("assistant:reveal-for-screen-recording"),
+    focusStudio: () => ipcRenderer.invoke("assistant:focus-studio"),
+    setOverlayInteractive: (interactive) => ipcRenderer.invoke("assistant:overlay-interactive", interactive),
     /** Overlay window only: what to draw. Returns an unsubscribe function. */
     onOverlay: (listener) => {
       const handler = (_event, state) => listener(state ?? { visible: false });

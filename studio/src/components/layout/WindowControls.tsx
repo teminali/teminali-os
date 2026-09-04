@@ -12,6 +12,7 @@ interface TeminaliBridge {
     toggleMaximize: () => Promise<boolean>;
     close: () => Promise<void>;
     isMaximized: () => Promise<boolean>;
+    setProgressBar?: (progress: number) => Promise<boolean>;
     onMaximizeChange: (listener: (isMaximized: boolean) => void) => () => void;
   };
   projects: {

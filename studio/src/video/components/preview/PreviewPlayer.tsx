@@ -312,6 +312,25 @@ export const PreviewPlayer: React.FC<{ headerNav?: React.ReactNode }> = ({ heade
               its place while a render is running and wears the percentage,
               because the dialog can be dismissed and the export cannot: a
               running render with nowhere on screen is one nobody cancels. */}
+          {isExporting && (
+            <button
+              type="button"
+              onClick={() => setExportModalOpen(true)}
+              className="flex items-center gap-1.5 px-2 py-0.5 rounded bg-emerald-500/10 hover:bg-emerald-500/20 border border-emerald-500/25 text-emerald-400 text-xs transition-colors cursor-pointer"
+              title={`Exporting: ${Math.round(exportProgress)}% — click to view`}
+            >
+              <div className="w-10 h-1 bg-black/40 rounded-full overflow-hidden">
+                <div
+                  className="h-full bg-emerald-400 rounded-full transition-all"
+                  style={{ width: `${Math.max(4, Math.min(100, Math.round(exportProgress)))}%` }}
+                />
+              </div>
+              <span className="text-[10px] font-mono font-semibold tabular-nums">
+                {Math.round(exportProgress)}%
+              </span>
+            </button>
+          )}
+
           <button
             onClick={() => setExportModalOpen(true)}
             className={`pro-btn editor-tool-btn relative ${isExporting ? 'pro-btn-active' : ''}`}

@@ -31,6 +31,7 @@ reachable as ordinary utilities:
 | Table and card edge | `border-edge` | `#262626` |
 | User-bubble edge, outline pills | `border-edge-strong` | `#313131` |
 | Composer edge (brightest in the window) | `border-edge-popover` | `#3a3a3a` |
+| Code block and shell card edge | `border-edge-code` | `#1c1c1c` |
 | Headings, `strong`, active labels | `text-ink-bright` | `#f0f0f0` |
 | Chat paragraphs | `text-ink-prose` | `#cbcbcb` |
 | Sidebar rows, icons, secondary | `text-ink-muted` | `#b8b8b8` |
@@ -57,6 +58,13 @@ Motion is one curve — `--ease: cubic-bezier(.2,.7,.2,1)` — at three speeds
   `text-md` 14 (chat body and headings).
 
 ---
+
+`border-edge-code` is the one border that does **not** follow "the fill it sits
+on, lightened by roughly 0x10". A transcript stacks code and shell cards one
+after another, and at a full step the run of edges reads as a ladder of bright
+rectangles down the page — the operator sees the frames before the code. Against
+the `#151515` sunken fill it is barely a step, which is the intent: the darker
+fill defines the block and the hairline only closes the shape.
 
 ## 1. Zero-Slop Design Principles
 
@@ -383,6 +391,8 @@ A turn is read in a fixed order, and the components are laid out to enforce it:
 | Code card | `chat/FileActionCard.tsx` | A 28px row that opens onto the code. |
 | Waiting line | `chat/ThinkingIndicator.tsx` | The gap before the first token. |
 | Review dock | `chat/ChangeReviewDock.tsx` | Accept / reject what was written to disk. |
+| Markdown | `chat/CursorMarkdownRenderer.tsx`, `services/markdown.ts` | Blocks and inline tokens. No `innerHTML`. |
+| Composer | `chat/Composer.tsx`, `chat/AttachmentStrip.tsx` | The prompt field and what is attached to it. |
 | Pending set | `store/changeStore.ts`, `services/changeSet.ts` | The changes, and the arithmetic behind them. |
 
 **One line per thing that happened, not per event.** `groupActivity` collapses
@@ -406,6 +416,27 @@ under every reply at full contrast is what made the column feel like a log.
 `--text-soft` through `--text-bright`. It was a cyan → violet → amber gradient,
 which made a background process the brightest object in a window whose entire
 palette is five greys.
+
+**A long block collapses instead of burying the answer.** A directory listing
+comes back as eighty bullets and pushes the sentence that followed it off the
+screen. `CursorMarkdownRenderer` renders the first 8 of a list over 12 items,
+and the first 8 rows of a table over 12, behind a "Show N more items" toggle —
+the thresholds are `LIST_COLLAPSE_AT` / `TABLE_COLLAPSE_AT` in that file, and
+they are set so an ordinary prose list of steps or options is never touched. A
+toggle on a five-item list is friction for nothing. Expansion is keyed by block
+index, so a block the reader opens stays open as later blocks stream in. Code
+blocks were already capped, by `CodeSnippet`'s 200px scroll.
+
+**Intraword underscores are not emphasis.** `mature_romance_skill_v3.zip` is a
+filename, not three italic runs with the underscores eaten. The inline pattern
+in `services/markdown.ts` guards `_` with a word-boundary lookaround, per
+CommonMark; `*` is left alone, where intraword emphasis is legal.
+
+**The composer is a pill only while it is one row high.** A pill's radius is
+half its height, so a follow-up bar that gained an attachment card or a wrapped
+second line turned into a lozenge. `Composer.tsx` derives `pill` from the
+measured field height and the attachment count, and falls back to `rounded-2xl`
+the moment the bar grows. The collapsed bar is unchanged.
 
 ### Accept and reject (`chat/ChangeReviewDock.tsx`, `store/changeStore.ts`)
 

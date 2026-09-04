@@ -24,6 +24,8 @@ export interface ExportStartOptions {
   bitrateMbps?: number;
   /** Super Speed Turbo engine with chunked frame batching & accelerated encoding */
   superSpeed?: boolean;
+  /** Keep rendering at full speed in the background without timer throttling */
+  background?: boolean;
 }
 
 export interface ExportStartResult {

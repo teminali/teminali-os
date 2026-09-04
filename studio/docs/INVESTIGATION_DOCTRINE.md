@@ -102,6 +102,37 @@ The audit surfaces as a `frontier.review_investigation` tool call, so the user c
 | `unverified-destructive-advice` | Delete advised on lookalike names, no checksum/diff/stat run |
 | `undisclosed-units` | A `du`/`df` size with no GiB-vs-GB disclosure |
 
+Alongside the audit, `frontierEngine.ts` repairs one protocol miss directly. A
+model that reaches for ```bash out of habit prints the command, tells the
+operator to run it, and ends the turn — observed on "give me a total size of all
+the files in my desktop folder", which came back as a shell block and "Please
+run this command on your machine to get the result". ```bash stays
+non-executable; the engine instead returns a `frontier.correct_protocol` notice
+carrying the same command back inside a ```frontier-run fence. The notice also
+offers the other reading — that the block was an example to keep — so a genuine
+code sample costs one turn and is not forced into being run.
+
+Two patterns were widened after that exchange, both from observed text rather
+than imagination: `deflected-to-user` now matches the imperative hand-back
+("please run this command on your machine"), which the original "you can run"
+phrasing missed entirely, and `MEASUREMENT_INTENT` now matches the instruction
+form of a measurement ("give me a total size of…") beside the question form
+("how much…").
+
+**The doctrine grants action, not just inspection.** Rule 1 of the injected
+prompt used to say the model could run *read-only* commands, which taught it to
+refuse anything that changed state — asked to create a folder it handed back
+`mkdir` for the operator to run. It now says the model acts through the fence:
+read-only commands run on their own, state-changing ones run once the operator
+approves them, and a request to do something is done rather than explained.
+
+**A turn ends at the closing fence.** The stream is cut there by
+`frontierEngine.ts` (`closedFenceEnd` in `services/agentCommands.ts`). Anything
+a model writes after asking to run something is invented — the command has not
+run, and may still be sitting at an approval prompt — so it is neither shown to
+the operator nor kept in the transcript. Rule 5 states the same contract in
+prose, but the cut is what enforces it.
+
 **Every rule requires positive evidence that something was skipped.** A false finding costs a full generation turn on a local model, so the bias is toward silence. Two consequences worth knowing:
 
 - A question needs *both* an intent to measure and something concrete to measure it on. "How many ways could I refactor this" trips the quantifier and is correctly ignored.

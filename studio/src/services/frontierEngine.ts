@@ -18,6 +18,8 @@ import { RuntimeTelemetryService } from "./runtimeTelemetryService";
 import { VISION_MODEL } from "./attachmentPolicy";
 import {
   buildCommandEvidence,
+  closedFenceEnd,
+  documentationShellFence,
   hasExecutableCommands,
   runAgentCommands,
   type AgentCommandRequest,
@@ -183,6 +185,13 @@ async function streamFromOllama(
   let firstTokenAt: number | null = null;
   let accumulated = "";
   let finalChunk: OllamaStreamChunk = {};
+  // Fence tags this exchange can actually execute. A turn stops the instant one
+  // of them closes, so the model never gets to narrate a result it has not been
+  // given. Only tags backed by a real executor qualify: stopping at a fence
+  // nothing will run would truncate an answer with no follow-up to complete it.
+  const stopTags: string[] = [];
+  if (capabilities.runCommand) stopTags.push("frontier-run", "frontier-command");
+  if (capabilities.runVideoTool) stopTags.push("video-tool");
   let groundedPrompt = userPrompt;
   if (attachedImages.length > 0) {
     const visionToolId = `tool-vision-${id}`;
@@ -360,14 +369,29 @@ You operate as a synchronized multi-agent engineering team:
     const reader = response.body.getReader();
     const decoder = new TextDecoder();
     let buffer = "";
+    // Set once a closed executable fence has been seen. Everything the model
+    // would say next is about a command that has not run yet, so it is neither
+    // streamed to the operator nor kept as part of the turn.
+    let cutAtFence = false;
     const consume = (line: string) => {
       if (!line.trim()) return;
       const chunk = JSON.parse(line) as OllamaStreamChunk;
       if (chunk.error) throw new GatewayError(chunk.error, "OLLAMA_ERROR", 502);
       if (chunk.message?.content) {
         if (firstTokenAt === null) firstTokenAt = performance.now();
-        accumulated += chunk.message.content;
-        callbacks.onToken(chunk.message.content);
+        let text = chunk.message.content;
+        if (!cutAtFence && stopTags.length > 0) {
+          const alreadyThisTurn = accumulated.length - startedLength;
+          const end = closedFenceEnd(accumulated.slice(startedLength) + text, stopTags);
+          if (end !== null) {
+            text = text.slice(0, Math.max(0, end - alreadyThisTurn));
+            cutAtFence = true;
+          }
+        }
+        if (text) {
+          accumulated += text;
+          callbacks.onToken(text);
+        }
         resetWatchdog(90_000);
       }
       if (chunk.done) finalChunk = chunk;
@@ -379,10 +403,20 @@ You operate as a synchronized multi-agent engineering team:
       buffer += decoder.decode(value, { stream: true });
       const lines = buffer.split("\n");
       buffer = lines.pop() || "";
-      for (const line of lines) consume(line);
+      for (const line of lines) {
+        consume(line);
+        if (cutAtFence) break;
+      }
+      if (cutAtFence) break;
     }
-    buffer += decoder.decode();
-    if (buffer.trim()) consume(buffer);
+    if (cutAtFence) {
+      // Nothing further is wanted from this generation; releasing the reader
+      // lets the model stop producing tokens no one will read.
+      await reader.cancel().catch(() => {});
+    } else {
+      buffer += decoder.decode();
+      if (buffer.trim()) consume(buffer);
+    }
     return accumulated.slice(startedLength);
   };
 
@@ -527,6 +561,39 @@ You operate as a synchronized multi-agent engineering team:
             observation = CompletenessEngine.formatAuditBrief(findings);
             qualityCorrections += 1;
           }
+        }
+      }
+
+      // A shell block where a run fence belonged. The model reached for ```bash
+      // out of habit, printed the command and told the operator to run it — the
+      // turn is over and nothing happened. ```bash stays non-executable, so the
+      // repair is to ask for the command again in the fence that does run.
+      if (
+        !observation &&
+        capabilities.runCommand &&
+        !hasExecutableCommands(turnText) &&
+        correctionTurns < MAX_AGENT_COMMAND_TURNS
+      ) {
+        const shellBlock = documentationShellFence(turnText);
+        if (shellBlock) {
+          callbacks.onToolCall?.({
+            id: `tool-protocol-${id}-${iteration}`,
+            name: "frontier.correct_protocol",
+            arguments: { fence: "bash" },
+            status: "completed",
+            result: "A shell block was printed instead of an executable fence.",
+          });
+          observation =
+            "[PROTOCOL NOTICE] You printed that command in a ```bash block, which is " +
+            "documentation and is never executed, and then asked the operator to run it. " +
+            "You have the shell.\n" +
+            "If you meant to run it, emit it now in a ```frontier-run fence and stop there — " +
+            "the real output comes back to you before you answer again:\n" +
+            "```frontier-run\n" +
+            `${shellBlock}\n` +
+            "```\n" +
+            "If that block was only an example for the operator to keep, say so plainly and do not repeat it.";
+          correctionTurns += 1;
         }
       }
 

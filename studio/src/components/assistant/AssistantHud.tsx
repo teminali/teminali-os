@@ -1,5 +1,5 @@
-import React from "react";
-import { AlertTriangle, Check, Eye, Loader2, MousePointer2, SkipForward, X } from "lucide-react";
+import React, { useEffect } from "react";
+import { AlertTriangle, Check, Eye, Loader2, MousePointer2, SkipForward, X, ArrowLeft, RotateCw, Mic, MicOff } from "lucide-react";
 import { Button } from "../ui/Button";
 import { StatusDot } from "../ui/Primitives";
 import { describeStep } from "../../services/assistant/plan";
@@ -86,6 +86,18 @@ function accessibilityHelp(): string {
 
 export const AssistantHud: React.FC<AssistantHudProps> = ({ assistant, transcript, voiceState }) => {
   const { phase, turn, capabilities, settings, awaiting } = assistant;
+
+  // Allow closing via Escape key
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape" && assistant.open) {
+        assistant.dismiss();
+      }
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [assistant]);
+
   if (!assistant.open) return null;
 
   const busy = phase !== "idle";
@@ -102,24 +114,60 @@ export const AssistantHud: React.FC<AssistantHudProps> = ({ assistant, transcrip
     missing.push(capabilities.detail ?? "Screen control is not available on this system.");
   }
 
+  const handleBackToStudio = () => {
+    void (window as unknown as { teminali?: { assistant?: { focusStudio?: () => Promise<void> } } }).teminali?.assistant?.focusStudio?.();
+  };
+
+  const handleRetry = () => {
+    if (turn?.question) {
+      void assistant.ask(turn.question);
+    }
+  };
+
+  const hasFailedStep = turn && (turn.error || turn.outcomes.some((o) => o.status === "failed") || turn.rejected.length > 0);
+
   return (
-    <div className="w-full max-w-composer rounded-2xl bg-surface border border-edge-popover overflow-hidden">
+    <div className="w-full max-w-composer rounded-2xl bg-surface border border-edge-popover overflow-hidden shadow-xl animate-fadeIn">
       {/* Header — always says which of the seven things is happening. */}
-      <div className="flex items-center gap-2 px-3.5 h-9 border-b border-edge">
+      <div className="flex items-center gap-2 px-3.5 h-10 border-b border-edge bg-surface-raised/40">
         <StatusDot tone={PHASE_TONE[phase]} pulse={busy} />
-        <span className="text-sm text-ink-high">{heading}</span>
+        <span className="text-sm font-medium text-ink-high">{heading}</span>
         <span className="text-2xs text-ink-faint">
           {settings.mode === "dictate" ? "Dictation" : settings.mode === "talk" ? "Talk" : "Agent"}
           {" · "}
           {settings.engine === "frontier" ? `Frontier ${settings.frontierMode}` : settings.engine === "claude" ? "Claude Code" : "Codex"}
         </span>
         <div className="flex-1" />
+
+        {/* Hands-Free continuous voice mode toggle */}
+        <button
+          type="button"
+          onClick={() => assistant.update({ handsFree: !settings.handsFree })}
+          className={`flex items-center gap-1.5 px-2 py-1 rounded-md text-2xs font-medium transition-colors ${
+            settings.handsFree
+              ? "bg-accent/15 text-accent border border-accent/30 hover:bg-accent/25"
+              : "bg-surface-hover text-ink-faint hover:text-ink-muted border border-edge"
+          }`}
+          title={settings.handsFree ? "Hands-free continuous commanding is ON" : "Hands-free continuous commanding is OFF"}
+        >
+          {settings.handsFree ? <Mic size={11} className="text-accent animate-pulse" /> : <MicOff size={11} />}
+          <span>{settings.handsFree ? "Hands-Free" : "Push-to-Talk"}</span>
+        </button>
+
         {busy && (
           <Button variant="ghost" size="xs" onClick={assistant.cancel} icon={<X size={12} />}>
             Stop
           </Button>
         )}
-        <Button variant="ghost" size="xs" onClick={assistant.dismiss} aria-label="Close the assistant" icon={<X size={12} />} />
+        <Button
+          variant="ghost"
+          size="xs"
+          onClick={assistant.dismiss}
+          aria-label="Dismiss assistant"
+          icon={<X size={13} />}
+        >
+          Dismiss
+        </Button>
       </div>
 
       {/* Permissions. Named individually, because each one loses a different
@@ -242,6 +290,39 @@ export const AssistantHud: React.FC<AssistantHudProps> = ({ assistant, transcrip
             {assistant.observation.truncated ? " (partial)" : ""}
             {assistant.observation.sceneDescription ? " · described" : ""}
           </p>
+        )}
+
+        {/* Action bar for user controls: Back to Teminali Code, Retry, Dismiss */}
+        {turn && (
+          <div className="flex items-center justify-between pt-2.5 border-t border-edge/60 mt-1">
+            <div className="flex items-center gap-2">
+              <Button
+                variant="secondary"
+                size="xs"
+                onClick={handleBackToStudio}
+                icon={<ArrowLeft size={12} />}
+              >
+                Back to Teminali Code
+              </Button>
+              {turn.question && (
+                <Button
+                  variant="ghost"
+                  size="xs"
+                  onClick={handleRetry}
+                  icon={<RotateCw size={12} />}
+                >
+                  Take Another Look
+                </Button>
+              )}
+            </div>
+            <Button
+              variant="ghost"
+              size="xs"
+              onClick={assistant.dismiss}
+            >
+              Dismiss
+            </Button>
+          </div>
         )}
       </div>
     </div>

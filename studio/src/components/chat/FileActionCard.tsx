@@ -51,7 +51,7 @@ export const FileActionCard: React.FC<FileActionCardProps> = ({
   };
 
   return (
-    <div className="rounded-lg border border-edge/70 bg-surface-sunken overflow-hidden">
+    <div className="rounded-lg border border-edge-code bg-surface-sunken overflow-hidden">
       <div className="group h-8 flex items-center gap-2 px-2 hover:bg-surface-hover/50 transition-colors duration-ds ease-ds">
         <button
           type="button"
@@ -94,7 +94,7 @@ export const FileActionCard: React.FC<FileActionCardProps> = ({
 
       {open && (
         <pre
-          className="border-t border-edge/60 px-3 py-2.5 overflow-x-auto font-mono text-2xs leading-[1.75] text-ink-code animate-reveal"
+          className="border-t border-edge-code px-3 py-2.5 overflow-x-auto font-mono text-2xs leading-[1.75] text-ink-code animate-reveal"
           dangerouslySetInnerHTML={{ __html: highlightCode(code, language) }}
         />
       )}

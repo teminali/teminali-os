@@ -83,3 +83,16 @@ test("conversational wrappers around unfenced code are trimmed", () => {
   const reply = "Sure, here is the fix.\nconst value = compute(input);\nThis handles the edge case.";
   assert.equal(extractCodeFromResponse(reply), "const value = compute(input);");
 });
+
+test("intraword underscores are not emphasis", () => {
+  // A filename must survive verbatim: the chat surface was eating the
+  // underscores and italicising the middle of `mature_romance_skill_v3.zip`.
+  assert.deepEqual(kinds("16K: mature_romance_comic_skill_v3.zip"), [
+    "text:16K: mature_romance_comic_skill_v3.zip",
+  ]);
+  assert.deepEqual(kinds("new_beats.json and _real_ emphasis"), [
+    "text:new_beats.json and ",
+    "italic:real",
+    "text: emphasis",
+  ]);
+});

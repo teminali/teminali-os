@@ -249,6 +249,12 @@ export async function pointerTree({ pid = null, max = POINTER_LIMITS.maxElements
   return runPointer("tree", args, options);
 }
 
+/** Activate an application by its pid so it becomes frontmost. */
+export function pointerActivate(pid, options = {}) {
+  if (!Number.isInteger(pid) || pid <= 0) throw new PointerError("PID_REQUIRED", "A positive integer pid is required.");
+  return runPointer("activate", ["--pid", String(pid)], options);
+}
+
 /* ── Acting ──────────────────────────────────────────────────────────────── */
 
 function point(x, y) {

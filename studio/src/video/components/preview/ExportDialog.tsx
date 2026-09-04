@@ -90,6 +90,7 @@ export const ExportDialog: React.FC = () => {
   const [codec, setCodec] = useState<ExportCodec>('h264');
   const [hardware, setHardware] = useState(true);
   const [superSpeed, setSuperSpeed] = useState(true);
+  const [backgroundRender, setBackgroundRender] = useState(true);
   const [useRange, setUseRange] = useState(false);
   const [destination, setDestination] = useState<string | null>(null);
 
@@ -129,7 +130,15 @@ export const ExportDialog: React.FC = () => {
   const { width, height } = outputDimensions(project, resolution);
 
   const start = async (): Promise<void> => {
-    const outcome = await runExport({ resolution, codec, hardware, outputPath: destination ?? undefined, range, superSpeed });
+    const outcome = await runExport({
+      resolution,
+      codec,
+      hardware,
+      outputPath: destination ?? undefined,
+      range,
+      superSpeed,
+      background: backgroundRender,
+    });
     if (outcome.ok) {
       const written = outcome.outputPath;
       /* Longer than the usual 3.2s: this one is offering a button, and a
@@ -177,19 +186,39 @@ export const ExportDialog: React.FC = () => {
         className="relative w-[min(420px,100%)] max-h-full overflow-auto rounded-squircle-md border border-line bg-spectrum-panel shadow-pop"
       >
         <div className="h-9 px-3 flex items-center justify-between border-b border-line bg-spectrum-panelHeader">
-          <span className="panel-title">
-            {isExporting ? 'Exporting' : finished ? 'Export finished' : 'Export video'}
-          </span>
-          <button onClick={close} className="pro-btn editor-tool-btn" title="Hide" aria-label="Hide">
+          <div className="flex items-center gap-2">
+            <span className="panel-title">
+              {isExporting ? 'Exporting' : finished ? 'Export finished' : 'Export video'}
+            </span>
+            {isExporting && superSpeed && (
+              <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-semibold bg-cyan-500/15 text-cyan-400 border border-cyan-500/30 font-mono">
+                <Zap className="w-2.5 h-2.5 text-yellow-300 fill-current" />
+                TURBO
+              </span>
+            )}
+            {isExporting && backgroundRender && (
+              <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] text-spectrum-textDim border border-line/60 font-mono">
+                BG
+              </span>
+            )}
+          </div>
+          <button onClick={close} className="pro-btn editor-tool-btn" title="Hide dialog (export continues)" aria-label="Hide">
             <X className="w-3.5 h-3.5" />
           </button>
         </div>
 
         {isExporting ? (
           <div className="p-3 flex flex-col gap-3">
-            <div className="flex items-center gap-2 text-ui-sm">
-              <Loader2 className="w-3.5 h-3.5 animate-spin text-spectrum-accent" />
-              <span className="truncate">{statusText || 'Rendering…'}</span>
+            <div className="flex items-center justify-between text-ui-sm">
+              <div className="flex items-center gap-2 truncate">
+                <Loader2 className="w-3.5 h-3.5 animate-spin text-spectrum-accent flex-shrink-0" />
+                <span className="truncate">{statusText || 'Rendering…'}</span>
+              </div>
+              {superSpeed && telemetry?.lanes && (
+                <span className="text-[10px] text-spectrum-textDim font-mono flex-shrink-0 ml-2">
+                  Chunk {telemetry.lanes[0]?.chunk ?? 1}
+                </span>
+              )}
             </div>
 
             <div className="h-1.5 rounded-full bg-spectrum-sunken overflow-hidden">
@@ -198,18 +227,6 @@ export const ExportDialog: React.FC = () => {
                 style={{ width: `${Math.max(1, Math.min(100, progress))}%` }}
               />
             </div>
-
-            {superSpeed && (
-              <div className="flex items-center justify-between rounded bg-cyan-950/40 border border-cyan-500/30 px-2 py-1 text-ui-xs text-cyan-300">
-                <div className="flex items-center gap-1.5 font-medium">
-                  <Zap className="w-3.5 h-3.5 text-yellow-300 animate-pulse" weight="fill" />
-                  <span>⚡ Super Speed Turbo Engine</span>
-                </div>
-                <span className="text-[10px] text-cyan-400 font-mono uppercase tracking-wider">
-                  {telemetry?.lanes ? `Chunk ${telemetry.lanes[0]?.chunk ?? 1}` : 'Burst Mode'}
-                </span>
-              </div>
-            )}
 
             <div className="grid grid-cols-3 gap-2 text-ui-xs font-mono tabular text-spectrum-textDim">
               <Stat label="Progress" value={`${Math.round(progress)}%`} />
@@ -283,28 +300,22 @@ export const ExportDialog: React.FC = () => {
               ))}
             </div>
 
-            {/* 2026 Super Speed Turbo Render Badge & Toggle */}
-            <div
-              className={`relative overflow-hidden rounded-squircle-sm border p-2.5 transition-all ${
-                superSpeed
-                  ? 'border-cyan-500/40 bg-gradient-to-r from-cyan-950/40 via-blue-950/30 to-purple-950/30 shadow-[0_0_15px_rgba(6,182,212,0.15)]'
-                  : 'border-line bg-spectrum-sunken/50'
-              }`}
-            >
+            {/* Turbo Render & Background Rendering Options */}
+            <div className="rounded-squircle-sm border border-line bg-spectrum-sunken/40 p-2.5 space-y-2">
               <div className="flex items-center justify-between gap-2">
                 <div className="flex items-center gap-2 min-w-0">
                   <span
-                    className={`inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-black uppercase tracking-wider text-white shadow-sm ${
+                    className={`inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-semibold tracking-wide ${
                       superSpeed
-                        ? 'bg-gradient-to-r from-cyan-500 to-blue-600 animate-pulse'
-                        : 'bg-zinc-700 text-zinc-300'
+                        ? 'bg-cyan-500/15 text-cyan-400 border border-cyan-500/30'
+                        : 'bg-zinc-800 text-zinc-400 border border-zinc-700'
                     }`}
                   >
-                    <Zap className={`w-3 h-3 ${superSpeed ? 'text-yellow-300' : 'text-zinc-400'}`} weight="fill" />
-                    SUPER SPEED
+                    <Zap className={`w-2.5 h-2.5 ${superSpeed ? 'text-yellow-300' : 'text-zinc-400'}`} weight="fill" />
+                    TURBO
                   </span>
-                  <span className="text-ui-xs font-semibold text-spectrum-text truncate">
-                    Turbo Chunk Engine
+                  <span className="text-ui-xs font-medium text-spectrum-text truncate">
+                    Turbo Rendering
                   </span>
                 </div>
                 <label className="flex items-center gap-1.5 text-ui-xs font-medium cursor-pointer select-none">
@@ -315,13 +326,26 @@ export const ExportDialog: React.FC = () => {
                     className="accent-cyan-500 cursor-pointer"
                   />
                   <span className={superSpeed ? 'text-cyan-400' : 'text-spectrum-textDim'}>
-                    {superSpeed ? 'Active' : 'Off'}
+                    {superSpeed ? 'On' : 'Off'}
                   </span>
                 </label>
               </div>
-              <div className="mt-1 flex items-center justify-between text-[11px] text-spectrum-textDim">
-                <span>Parallel chunk streaming & GPU burst acceleration</span>
-                {superSpeed && <span className="text-cyan-400 font-mono text-[10px] font-semibold">~4x faster</span>}
+
+              <div className="flex items-center justify-between gap-2 pt-1 border-t border-line/40">
+                <span className="text-ui-xs text-spectrum-textDim">
+                  Keep rendering in background
+                </span>
+                <label className="flex items-center gap-1.5 text-ui-xs font-medium cursor-pointer select-none">
+                  <input
+                    type="checkbox"
+                    checked={backgroundRender}
+                    onChange={(e) => setBackgroundRender(e.target.checked)}
+                    className="accent-spectrum-accent cursor-pointer"
+                  />
+                  <span className={backgroundRender ? 'text-spectrum-text' : 'text-spectrum-textDim'}>
+                    {backgroundRender ? 'On' : 'Off'}
+                  </span>
+                </label>
               </div>
             </div>
 

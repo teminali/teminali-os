@@ -100,7 +100,7 @@ function attachAssistantOverlay({ devUrl, indexPath, log = () => {} }) {
       return null;
     }
 
-    window.setIgnoreMouseEvents(true, { forward: false });
+    window.setIgnoreMouseEvents(true, { forward: true });
     window.setAlwaysOnTop(true, "screen-saver");
     try {
       window.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
@@ -233,7 +233,12 @@ function attachAssistantOverlay({ devUrl, indexPath, log = () => {} }) {
     return lastState ?? { visible: false };
   }
 
-  return { show, hide, destroy, getState, setAppFocused, setMinimized, isMinimized };
+  function setInteractive(capture) {
+    if (!window || window.isDestroyed()) return;
+    window.setIgnoreMouseEvents(!capture, { forward: true });
+  }
+
+  return { show, hide, destroy, getState, setAppFocused, setMinimized, isMinimized, setInteractive };
 }
 
 module.exports = { attachAssistantOverlay };

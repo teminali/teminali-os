@@ -266,8 +266,8 @@ export const StudioChat: React.FC<{
       }
       sendRef.current(text);
     },
-    lastAssistantText: () => lastAssistant,
-    isBusy: () => isStreaming,
+    lastAssistantText: () => assistantRef.current.turn?.say || lastAssistant,
+    isBusy: () => isStreaming || (assistantRef.current.claimsUtterance() && assistantRef.current.phase !== "idle"),
     // The addressing tiebreak and the transcript polish both run on the same
     // local engine as the chat, so neither costs anything or leaves the machine.
     complete: async (prompt, signal) => {

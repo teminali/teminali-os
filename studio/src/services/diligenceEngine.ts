@@ -60,6 +60,11 @@ const MEASUREMENT_INTENT = new RegExp(
     "\\b(?:is|are)\\b.{0,30}\\b(?:installed|running|failing|passing|up to date|outdated)\\b",
     "\\bwhy is\\b.{0,40}\\b(?:slow|failing|large|big|broken|empty)\\b",
     "\\bcheck\\b.{0,30}\\b(?:if|whether|the|my)\\b",
+    // An imperative ask for a figure. "How much" is the question form of the
+    // same intent; "give me a total size of all the files in my desktop folder"
+    // is the instruction form, and matched nothing until it was seen in use.
+    "\\b(?:give|get|tell|show)\\b.{0,20}\\b(?:total|size|count|breakdown|number of)\\b",
+    "\\btotal (?:size|count|number|space|files?)\\b",
   ].join("|"),
   "i",
 );
@@ -108,7 +113,7 @@ const CAPABILITY_DENIAL =
 
 /** Deflecting the work back to the user instead of doing it. */
 const DEFLECTION =
-  /\byou can (?:use|run|try|check)\b|\bhere(?:'s| are| is) (?:how|some) (?:you|to)\b|\bon (?:windows|macos|linux)\b.{0,40}\b(?:open|navigate|right-click)\b/i;
+  /\byou can (?:use|run|try|check)\b|\bhere(?:'s| are| is) (?:how|some) (?:you|to)\b|\bon (?:windows|macos|linux)\b.{0,40}\b(?:open|navigate|right-click)\b|\b(?:please |just |simply )?run (?:this|the following|that) (?:command|in)\b|\b(?:you(?:'ll| will)? (?:need|have) to|try) run(?:ning)?\b|\brun (?:it|this) (?:on|in) your\b|\bexecute the following\b/i;
 
 /** Advice that destroys something. Matched on the imperative, not on prose. */
 const DESTRUCTIVE_ADVICE =
@@ -168,11 +173,11 @@ export class DiligenceEngine {
    * what actually holds the behaviour. This is the reminder, not the guarantee.
    */
   private static DOCTRINE = `[FRONTIER INVESTIGATION DOCTRINE — APPLIES TO EVERY TASK]:
-1. You can run read-only commands on this machine with a \`\`\`frontier-run fence. When a question is about real state — sizes, counts, ports, processes, versions, dependencies, failing tests — measure it. Never answer that you lack access, and never hand the user instructions for checking it themselves. You have the shell; use it.
+1. You act on this machine with a \`\`\`frontier-run fence — you are not a chat assistant handing out instructions. Read-only commands run on their own; anything that changes state runs as soon as the operator approves it. When a question is about real state, measure it; when the user asks you to do something, do it in a fence. Never answer that you lack access, and never tell the user to run a command themselves.
 2. Do not stop at the headline number. Decompose a total until the answer names the specific items the user would act on.
 3. Verify before you recommend anything irreversible. Two things with similar names are not the same thing until a checksum, a diff, or a stat says so.
 4. Say what your number measures. A size from \`du\` is binary (GiB) while Finder shows decimal (GB); a count from \`find\` may include symlinks. Name the caveat so a mismatch does not read as an error.
-5. Report the commands you actually ran and what they returned. Never describe the result of a command whose output you did not receive.`;
+5. Report the commands you actually ran and what they returned. Never describe the result of a command whose output you did not receive — end your turn at the closing fence and wait, because the real output comes back to you before you answer again.`;
 
   public static wrapSystemPrompt(basePrompt: string): string {
     return `${basePrompt}\n\n${this.DOCTRINE}`;
