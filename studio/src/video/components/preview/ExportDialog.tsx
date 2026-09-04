@@ -28,7 +28,16 @@ import {
   type ExportResolution,
 } from '../../engine/exportPlan';
 import { Button, Select } from '../ui/Primitives';
-import { Check, Download, FolderOpen, Loader2, X, Zap } from '../ui/icons';
+import {
+  Activity,
+  Check,
+  Download,
+  Film,
+  FolderOpen,
+  Loader2,
+  Minimize2,
+  Zap,
+} from 'lucide-react';
 import { formatTimecode } from '../../utils/time';
 
 const RESOLUTIONS: { value: ExportResolution; label: string }[] = [
@@ -69,6 +78,24 @@ const REVEAL_LABEL =
 const revealExport = (path: string): void => {
   void window.teminali?.videoProjects?.reveal(path);
 };
+
+const PIPELINE_STAGES = [
+  { id: 'preflight', name: 'Preflight' },
+  { id: 'composite', name: 'Composite' },
+  { id: 'stream', name: 'Frame Stream' },
+  { id: 'audio', name: 'Audio Mix' },
+  { id: 'package', name: 'Package' },
+];
+
+function getActiveStage(phase: string, progress: number): number {
+  if (phase === 'preparing') return 0;
+  if (phase === 'rendering') {
+    return progress < 45 ? 1 : 2;
+  }
+  if (phase === 'muxing') return 3;
+  if (phase === 'encoding' || phase === 'done') return 4;
+  return 1;
+}
 
 export const ExportDialog: React.FC = () => {
   const isOpen = useProjectStore((s) => s.isExportModalOpen);
@@ -167,6 +194,7 @@ export const ExportDialog: React.FC = () => {
   };
 
   const close = (): void => setOpen(false);
+  const activeStage = getActiveStage(phase, progress);
 
   return (
     <div className="absolute inset-0 z-50 flex items-center justify-center p-4">
@@ -176,79 +204,196 @@ export const ExportDialog: React.FC = () => {
         type="button"
         aria-label="Close export"
         onClick={close}
-        className="absolute inset-0 bg-black/55 backdrop-blur-[2px]"
+        className="absolute inset-0 bg-black/65 backdrop-blur-[4px] transition-opacity"
       />
 
       <div
         role="dialog"
         aria-modal="false"
         aria-label="Export video"
-        className="relative w-[min(420px,100%)] max-h-full overflow-auto rounded-squircle-md border border-line bg-spectrum-panel shadow-pop"
+        className="relative w-[min(520px,100%)] max-h-full overflow-hidden rounded-2xl border border-white/[0.12] bg-[#0c0d0e]/95 backdrop-blur-2xl shadow-2xl flex flex-col text-white select-none animate-in fade-in zoom-in-95 duration-150"
       >
-        <div className="h-9 px-3 flex items-center justify-between border-b border-line bg-spectrum-panelHeader">
-          <div className="flex items-center gap-2">
-            <span className="panel-title">
-              {isExporting ? 'Exporting' : finished ? 'Export finished' : 'Export video'}
-            </span>
+        {/* ── Apple Window Header ─────────────────────────────────────── */}
+        <div className="h-11 px-3.5 flex items-center justify-between border-b border-white/[0.08] bg-white/[0.02]">
+          <div className="flex items-center gap-3">
+            {/* Apple window close and green minimize buttons */}
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={isExporting ? cancelActiveExport : close}
+                title={isExporting ? 'Cancel export' : 'Close dialog'}
+                aria-label={isExporting ? 'Cancel export' : 'Close dialog'}
+                className="group relative w-3 h-3 rounded-full flex items-center justify-center transition-all duration-150 hover:brightness-110 active:brightness-90 cursor-pointer shadow-sm"
+                style={{
+                  background: 'linear-gradient(180deg, #ff5f57 0%, #eb4d4b 100%)',
+                  border: '0.5px solid rgba(0, 0, 0, 0.35)',
+                }}
+              >
+                <svg
+                  viewBox="0 0 12 12"
+                  aria-hidden="true"
+                  className="w-2 h-2 opacity-0 group-hover:opacity-100 transition-opacity duration-100 text-[#4c0002]"
+                >
+                  <path
+                    d="M2.5 2.5 L9.5 9.5 M9.5 2.5 L2.5 9.5"
+                    stroke="currentColor"
+                    strokeWidth="1.8"
+                    strokeLinecap="round"
+                  />
+                </svg>
+              </button>
+
+              <button
+                type="button"
+                onClick={close}
+                title="Minimize to background (rendering continues at full speed)"
+                aria-label="Minimize to background (rendering continues at full speed)"
+                className="group relative w-3 h-3 rounded-full flex items-center justify-center transition-all duration-150 hover:brightness-110 active:brightness-90 cursor-pointer shadow-sm"
+                style={{
+                  background: 'linear-gradient(180deg, #28c840 0%, #20a033 100%)',
+                  border: '0.5px solid rgba(0, 0, 0, 0.35)',
+                }}
+              >
+                <svg
+                  viewBox="0 0 12 12"
+                  aria-hidden="true"
+                  className="w-2 h-2 opacity-0 group-hover:opacity-100 transition-opacity duration-100 text-[#024a0d]"
+                >
+                  <path
+                    d="M2 5 L5 2 M5 2 L2.5 2 M5 2 L5 4.5 M10 7 L7 10 M7 10 L9.5 10 M7 10 L7 7.5"
+                    stroke="currentColor"
+                    strokeWidth="1.4"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  />
+                </svg>
+              </button>
+            </div>
+
+            <div className="flex items-center gap-2">
+              <Film size={13} className="text-zinc-400" />
+              <span className="panel-title font-sans text-xs font-medium text-zinc-200 tracking-wide">
+                {isExporting ? 'Exporting' : finished ? 'Export finished' : 'Export video'}
+              </span>
+            </div>
+          </div>
+
+          {/* Right badges */}
+          <div className="flex items-center gap-1.5">
             {isExporting && superSpeed && (
-              <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-semibold bg-cyan-500/15 text-cyan-400 border border-cyan-500/30 font-mono">
-                <Zap className="w-2.5 h-2.5 text-yellow-300 fill-current" />
+              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-mono font-semibold tracking-wider bg-cyan-500/15 text-cyan-300 border border-cyan-500/30 uppercase">
+                <Activity size={11} className="animate-pulse text-cyan-400" />
                 TURBO
               </span>
             )}
             {isExporting && backgroundRender && (
-              <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] text-spectrum-textDim border border-line/60 font-mono">
-                BG
+              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-mono font-semibold tracking-wider bg-emerald-500/15 text-emerald-300 border border-emerald-500/30 uppercase">
+                BG ACTIVE
               </span>
             )}
           </div>
-          <button onClick={close} className="pro-btn editor-tool-btn" title="Hide dialog (export continues)" aria-label="Hide">
-            <X className="w-3.5 h-3.5" />
-          </button>
         </div>
 
+        {/* ── Content ─────────────────────────────────────────────────── */}
         {isExporting ? (
-          <div className="p-3 flex flex-col gap-3">
-            <div className="flex items-center justify-between text-ui-sm">
-              <div className="flex items-center gap-2 truncate">
-                <Loader2 className="w-3.5 h-3.5 animate-spin text-spectrum-accent flex-shrink-0" />
-                <span className="truncate">{statusText || 'Rendering…'}</span>
-              </div>
-              {superSpeed && telemetry?.lanes && (
-                <span className="text-[10px] text-spectrum-textDim font-mono flex-shrink-0 ml-2">
-                  Chunk {telemetry.lanes[0]?.chunk ?? 1}
-                </span>
-              )}
+          <div className="p-4 flex flex-col gap-4">
+            {/* 1. Complete Process Pipeline Visualizer */}
+            <div className="grid grid-cols-5 gap-1.5 p-1 rounded-xl bg-white/[0.03] border border-white/[0.06]">
+              {PIPELINE_STAGES.map((st, idx) => {
+                const isPast = idx < activeStage;
+                const isCurrent = idx === activeStage;
+                return (
+                  <div
+                    key={st.id}
+                    className={`flex flex-col items-center py-2 px-1 rounded-lg text-center transition-all ${
+                      isCurrent
+                        ? 'bg-emerald-500/15 border border-emerald-500/35 text-emerald-300 shadow-sm'
+                        : isPast
+                          ? 'text-zinc-400 opacity-90'
+                          : 'text-zinc-600 opacity-50'
+                    }`}
+                  >
+                    <span className="text-[9px] font-mono font-bold tracking-wider uppercase">
+                      {idx + 1}. {st.name}
+                    </span>
+                    {isCurrent && (
+                      <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 mt-1 animate-pulse" />
+                    )}
+                  </div>
+                );
+              })}
             </div>
 
-            <div className="h-1.5 rounded-full bg-spectrum-sunken overflow-hidden">
-              <div
-                className="h-full bg-spectrum-accent transition-[width] duration-150"
-                style={{ width: `${Math.max(1, Math.min(100, progress))}%` }}
+            {/* 2. Hero Progress Section */}
+            <div className="space-y-2 rounded-xl bg-white/[0.02] border border-white/[0.06] p-3.5">
+              <div className="flex items-baseline justify-between">
+                <div className="flex items-center gap-2 truncate text-xs text-zinc-300">
+                  <Loader2 className="w-3.5 h-3.5 animate-spin text-emerald-400 flex-shrink-0" />
+                  <span className="truncate font-medium">{statusText || 'Rendering…'}</span>
+                </div>
+                <span className="font-mono text-2xl font-bold tracking-tight text-white tabular-nums">
+                  {Math.round(progress)}%
+                </span>
+              </div>
+
+              {/* Glowing cinematic progress track */}
+              <div className="h-2 rounded-full bg-black/60 border border-white/10 overflow-hidden relative p-[1px]">
+                <div
+                  className="h-full rounded-full bg-gradient-to-r from-emerald-500 via-teal-400 to-cyan-400 transition-all duration-150 shadow-[0_0_12px_rgba(52,211,153,0.35)]"
+                  style={{ width: `${Math.max(2, Math.min(100, progress))}%` }}
+                />
+              </div>
+            </div>
+
+            {/* 3. Complete Telemetry Dashboard Grid */}
+            <div className="grid grid-cols-3 gap-2 text-xs font-mono tabular-nums">
+              <Stat label="Speed" value={telemetry ? `${telemetry.fps.toFixed(1)} fps` : '—'} highlight />
+              <Stat label="Time Left" value={formatEta(telemetry?.etaMs ?? null)} />
+              <Stat
+                label="Frames"
+                value={
+                  telemetry
+                    ? `${telemetry.frame.toLocaleString()} / ${telemetry.totalFrames.toLocaleString()}`
+                    : `${Math.round((progress / 100) * bounds.totalFrames).toLocaleString()} / ${bounds.totalFrames.toLocaleString()}`
+                }
+              />
+              <Stat label="Output" value={`${width}×${height}`} />
+              <Stat label="Codec" value={`${codec.toUpperCase()} · ${project.fps}fps`} />
+              <Stat
+                label="Engine"
+                value={superSpeed ? (telemetry?.lanes ? `Turbo Chk ${telemetry.lanes[0]?.chunk ?? 1}` : 'Turbo Stream') : 'Standard'}
               />
             </div>
 
-            <div className="grid grid-cols-3 gap-2 text-ui-xs font-mono tabular text-spectrum-textDim">
-              <Stat label="Progress" value={`${Math.round(progress)}%`} />
-              <Stat label="Speed" value={telemetry ? `${telemetry.fps.toFixed(1)} fps` : '—'} />
-              <Stat label="Left" value={formatEta(telemetry?.etaMs ?? null)} />
-            </div>
+            {/* 4. Background Rendering Notice & Footer Actions */}
+            <div className="rounded-xl border border-white/[0.06] bg-white/[0.02] p-3 space-y-3">
+              <div className="flex items-center justify-between text-xs text-zinc-400">
+                <span className="text-[11px] leading-relaxed">
+                  Export continues at full speed in the background without timer throttling.
+                </span>
+              </div>
 
-            {/* Hiding is not cancelling, and the two are one click apart, so
-                the destructive one says what it destroys. */}
-            <div className="flex items-center justify-between gap-2 pt-1">
-              <span className="text-ui-xs text-spectrum-textDim">
-                Hiding this leaves the export running.
-              </span>
-              <Button variant="danger" onClick={cancelActiveExport}>
-                Cancel export
-              </Button>
+              <div className="flex items-center justify-between gap-2 pt-1 border-t border-white/[0.06]">
+                <button
+                  type="button"
+                  onClick={close}
+                  className="flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-medium text-emerald-300 bg-emerald-500/10 hover:bg-emerald-500/20 border border-emerald-500/30 transition-all cursor-pointer"
+                  title="Minimize dialog and keep rendering in background"
+                >
+                  <Minimize2 size={12} className="text-emerald-400" />
+                  Minimize to Background
+                </button>
+
+                <Button variant="danger" onClick={cancelActiveExport}>
+                  Cancel export
+                </Button>
+              </div>
             </div>
           </div>
         ) : finished ? (
-          <div className="p-3 flex flex-col gap-3">
-            <div className="flex items-center gap-2 text-ui-sm">
-              <Check className="w-3.5 h-3.5 flex-shrink-0 text-spectrum-green" />
+          <div className="p-4 flex flex-col gap-4">
+            <div className="flex items-center gap-2.5 text-sm text-emerald-300 font-medium">
+              <Check className="w-4 h-4 flex-shrink-0 text-emerald-400" />
               <span>Export finished</span>
             </div>
 
@@ -256,13 +401,13 @@ export const ExportDialog: React.FC = () => {
                 has to find this file by hand needs the directory, and an
                 ellipsis eats exactly that half. */}
             <div
-              className="rounded-squircle-sm bg-spectrum-sunken px-2.5 py-2 text-ui-xs font-mono tabular text-spectrum-textDim break-all"
+              className="rounded-xl bg-white/[0.03] border border-white/[0.08] p-3 text-xs font-mono tabular-nums text-zinc-300 break-all leading-relaxed"
               title={finished}
             >
               {finished}
             </div>
 
-            <div className="flex items-center justify-between gap-2 pt-1">
+            <div className="flex items-center justify-between gap-2 pt-1 border-t border-white/[0.06]">
               <Button variant="ghost" onClick={() => setFinished(null)}>
                 Export again
               </Button>
@@ -277,13 +422,14 @@ export const ExportDialog: React.FC = () => {
             </div>
           </div>
         ) : (
-          <div className="p-3 flex flex-col gap-3">
+          <div className="p-4 flex flex-col gap-3.5">
             {!canExport() && (
-              <p className="text-ui-xs text-spectrum-amber">
+              <p className="text-xs text-amber-400 bg-amber-500/10 border border-amber-500/20 rounded-lg p-2.5">
                 Export needs the desktop app. A browser cannot write video files.
               </p>
             )}
 
+            {/* Presets */}
             <div className="flex flex-wrap gap-1.5">
               {PRESETS.map((preset) => (
                 <Button
@@ -300,49 +446,49 @@ export const ExportDialog: React.FC = () => {
               ))}
             </div>
 
-            {/* Turbo Render & Background Rendering Options */}
-            <div className="rounded-squircle-sm border border-line bg-spectrum-sunken/40 p-2.5 space-y-2">
+            {/* Turbo Render & Background Rendering Controls */}
+            <div className="rounded-xl border border-white/[0.08] bg-white/[0.02] p-3 space-y-2.5">
               <div className="flex items-center justify-between gap-2">
                 <div className="flex items-center gap-2 min-w-0">
                   <span
-                    className={`inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-semibold tracking-wide ${
+                    className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-mono font-semibold tracking-wider ${
                       superSpeed
-                        ? 'bg-cyan-500/15 text-cyan-400 border border-cyan-500/30'
+                        ? 'bg-cyan-500/15 text-cyan-300 border border-cyan-500/30'
                         : 'bg-zinc-800 text-zinc-400 border border-zinc-700'
                     }`}
                   >
-                    <Zap className={`w-2.5 h-2.5 ${superSpeed ? 'text-yellow-300' : 'text-zinc-400'}`} weight="fill" />
+                    <Zap size={10} className={superSpeed ? 'text-cyan-400 fill-current' : 'text-zinc-500'} />
                     TURBO
                   </span>
-                  <span className="text-ui-xs font-medium text-spectrum-text truncate">
+                  <span className="text-xs font-medium text-zinc-200 truncate">
                     Turbo Rendering
                   </span>
                 </div>
-                <label className="flex items-center gap-1.5 text-ui-xs font-medium cursor-pointer select-none">
+                <label className="flex items-center gap-1.5 text-xs font-medium cursor-pointer select-none">
                   <input
                     type="checkbox"
                     checked={superSpeed}
                     onChange={(e) => setSuperSpeed(e.target.checked)}
                     className="accent-cyan-500 cursor-pointer"
                   />
-                  <span className={superSpeed ? 'text-cyan-400' : 'text-spectrum-textDim'}>
+                  <span className={superSpeed ? 'text-cyan-400' : 'text-zinc-500'}>
                     {superSpeed ? 'On' : 'Off'}
                   </span>
                 </label>
               </div>
 
-              <div className="flex items-center justify-between gap-2 pt-1 border-t border-line/40">
-                <span className="text-ui-xs text-spectrum-textDim">
+              <div className="flex items-center justify-between gap-2 pt-2 border-t border-white/[0.06]">
+                <span className="text-xs text-zinc-400">
                   Keep rendering in background
                 </span>
-                <label className="flex items-center gap-1.5 text-ui-xs font-medium cursor-pointer select-none">
+                <label className="flex items-center gap-1.5 text-xs font-medium cursor-pointer select-none">
                   <input
                     type="checkbox"
                     checked={backgroundRender}
                     onChange={(e) => setBackgroundRender(e.target.checked)}
-                    className="accent-spectrum-accent cursor-pointer"
+                    className="accent-emerald-500 cursor-pointer"
                   />
-                  <span className={backgroundRender ? 'text-spectrum-text' : 'text-spectrum-textDim'}>
+                  <span className={backgroundRender ? 'text-emerald-400' : 'text-zinc-500'}>
                     {backgroundRender ? 'On' : 'Off'}
                   </span>
                 </label>
@@ -374,26 +520,26 @@ export const ExportDialog: React.FC = () => {
                 merely ignored there, it is not offered. */}
             {codec !== 'prores' && (
               <Field label="Hardware">
-                <label className="flex items-center gap-2 text-ui-sm cursor-pointer">
+                <label className="flex items-center gap-2 text-xs text-zinc-300 cursor-pointer">
                   <input
                     type="checkbox"
                     checked={hardware}
                     onChange={(e) => setHardware(e.target.checked)}
-                    className="accent-[var(--accent)]"
+                    className="accent-emerald-500"
                   />
-                  Use the GPU encoder when there is one
+                  Use GPU hardware acceleration
                 </label>
               </Field>
             )}
 
             {hasRange && (
               <Field label="Range">
-                <label className="flex items-center gap-2 text-ui-sm cursor-pointer">
+                <label className="flex items-center gap-2 text-xs text-zinc-300 cursor-pointer">
                   <input
                     type="checkbox"
                     checked={useRange}
                     onChange={(e) => setUseRange(e.target.checked)}
-                    className="accent-[var(--accent)]"
+                    className="accent-emerald-500"
                   />
                   In to out only
                 </label>
@@ -402,7 +548,7 @@ export const ExportDialog: React.FC = () => {
 
             <Field label="Save to">
               <div className="flex items-center gap-2 min-w-0">
-                <span className="text-ui-xs text-spectrum-textDim truncate flex-1" title={destination ?? undefined}>
+                <span className="text-xs text-zinc-400 truncate flex-1" title={destination ?? undefined}>
                   {destination ?? 'Your Videos folder'}
                 </span>
                 <Button variant="ghost" icon={FolderOpen} onClick={() => void chooseDestination()}>
@@ -411,7 +557,7 @@ export const ExportDialog: React.FC = () => {
               </div>
             </Field>
 
-            <div className="rounded-squircle-sm bg-spectrum-sunken px-2.5 py-2 text-ui-xs font-mono tabular text-spectrum-textDim">
+            <div className="rounded-xl bg-white/[0.03] border border-white/[0.06] p-2.5 text-xs font-mono tabular-nums text-zinc-400">
               {width}×{height} · {project.fps} fps · {bounds.totalFrames} frames ·{' '}
               {formatTimecode(bounds.renderMs, project.fps)}
             </div>
@@ -419,15 +565,15 @@ export const ExportDialog: React.FC = () => {
             {lastExportPath && (
               <button
                 onClick={() => revealExport(lastExportPath)}
-                className="flex items-center gap-1.5 text-ui-xs text-spectrum-textDim hover:text-spectrum-text min-w-0"
+                className="flex items-center gap-1.5 text-xs text-zinc-400 hover:text-zinc-200 min-w-0 cursor-pointer"
                 title={lastExportPath}
               >
-                <Check className="w-3 h-3 flex-shrink-0 text-spectrum-green" />
+                <Check className="w-3.5 h-3.5 flex-shrink-0 text-emerald-400" />
                 <span className="truncate">Last export · reveal</span>
               </button>
             )}
 
-            <div className="flex items-center justify-end gap-2 pt-1">
+            <div className="flex items-center justify-end gap-2 pt-2 border-t border-white/[0.06]">
               <Button variant="ghost" onClick={close}>
                 Cancel
               </Button>
@@ -439,7 +585,7 @@ export const ExportDialog: React.FC = () => {
         )}
 
         {phase === 'error' && !isExporting && statusText && (
-          <p className="px-3 pb-3 text-ui-xs text-spectrum-red">{statusText}</p>
+          <p className="px-4 pb-4 text-xs text-rose-400 font-medium">{statusText}</p>
         )}
       </div>
     </div>
@@ -448,14 +594,14 @@ export const ExportDialog: React.FC = () => {
 
 const Field: React.FC<{ label: string; children: React.ReactNode }> = ({ label, children }) => (
   <div className="flex items-center justify-between gap-3">
-    <span className="text-ui-sm text-spectrum-textDim flex-shrink-0">{label}</span>
+    <span className="text-xs text-zinc-400 flex-shrink-0">{label}</span>
     {children}
   </div>
 );
 
-const Stat: React.FC<{ label: string; value: string }> = ({ label, value }) => (
-  <div className="rounded-squircle-sm bg-spectrum-sunken px-2 py-1.5">
-    <div className="text-micro uppercase tracking-[0.08em]">{label}</div>
-    <div className="text-spectrum-text">{value}</div>
+const Stat: React.FC<{ label: string; value: string; highlight?: boolean }> = ({ label, value, highlight }) => (
+  <div className="rounded-xl bg-white/[0.03] border border-white/[0.06] px-2.5 py-2">
+    <div className="text-[10px] font-mono uppercase tracking-wider text-zinc-500">{label}</div>
+    <div className={`mt-0.5 text-xs font-medium ${highlight ? 'text-emerald-400' : 'text-zinc-200'}`}>{value}</div>
   </div>
 );

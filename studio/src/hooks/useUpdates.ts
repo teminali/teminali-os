@@ -21,6 +21,11 @@ const CHECK_INTERVAL_MS = 6 * 60 * 60 * 1000;
 
 export type UpdatePhase = "idle" | "downloading" | "ready" | "opening" | "installed" | "failed";
 
+export interface InstallProgressInfo {
+  percent: number;
+  statusText: string;
+}
+
 export interface UseUpdatesResult {
   status: UpdateStatus | null;
   phase: UpdatePhase;
@@ -39,6 +44,8 @@ export interface UseUpdatesResult {
    * rollback has to be able to say which build it is installing.
    */
   target: string | null;
+  /** Progress during the installation phase (percent 0-100 and description) */
+  installProgress: InstallProgressInfo | null;
 
   check: () => Promise<void>;
   download: () => Promise<void>;
@@ -70,8 +77,50 @@ export function useUpdates(): UseUpdatesResult {
   const [dismissed, setDismissed] = useState(false);
   const [checking, setChecking] = useState(false);
   const [target, setTarget] = useState<string | null>(null);
+  const [installProgress, setInstallProgress] = useState<InstallProgressInfo | null>(null);
 
   const abortRef = useRef<AbortController | null>(null);
+
+  useEffect(() => {
+    if (phase !== "opening") {
+      setInstallProgress(null);
+      if (phase === "installed") {
+        void window.teminali?.window?.setProgressBar?.(-1);
+      }
+      return;
+    }
+
+    setInstallProgress({ percent: 12, statusText: "Preparing update package…" });
+    void window.teminali?.window?.setProgressBar?.(0.12);
+
+    const cleanupListener = window.teminali?.updates?.onInstallProgress?.((info) => {
+      setInstallProgress({ percent: info.percent, statusText: info.status });
+      void window.teminali?.window?.setProgressBar?.(Math.min(1, Math.max(0, info.percent / 100)));
+    });
+
+    let current = 12;
+    const interval = setInterval(() => {
+      current = Math.min(94, current + (current < 40 ? 5 : current < 75 ? 3 : 1));
+      const statusText =
+        current < 35
+          ? "Expanding update package…"
+          : current < 65
+          ? "Preparing application bundle…"
+          : current < 85
+          ? "Writing updated application files…"
+          : "Refreshing security signatures…";
+      setInstallProgress((prev) => {
+        if (prev && prev.percent > current) return prev;
+        return { percent: current, statusText };
+      });
+      void window.teminali?.window?.setProgressBar?.(current / 100);
+    }, 400);
+
+    return () => {
+      cleanupListener?.();
+      clearInterval(interval);
+    };
+  }, [phase]);
 
   const check = useCallback(async () => {
     setChecking(true);
@@ -231,6 +280,7 @@ export function useUpdates(): UseUpdatesResult {
     awaitingRestart,
     checking,
     target,
+    installProgress,
     check,
     download,
     install,

@@ -26,6 +26,7 @@ interface TeminaliBridge {
   updates?: {
     install: (filePath: string) => Promise<{ ok: boolean; reason?: string }>;
     restart: () => Promise<boolean>;
+    onInstallProgress?: (listener: (info: { percent: number; status: string }) => void) => () => void;
   };
   /**
    * Screen recording. Optional for the same reason as the assistant: a

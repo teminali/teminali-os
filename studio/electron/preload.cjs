@@ -109,6 +109,11 @@ contextBridge.exposeInMainWorld("teminali", {
   updates: {
     install: (filePath) => ipcRenderer.invoke("updates:install", filePath),
     restart: () => ipcRenderer.invoke("updates:restart"),
+    onInstallProgress: (callback) => {
+      const listener = (_event, info) => callback(info);
+      ipcRenderer.on("updates:install-progress", listener);
+      return () => ipcRenderer.removeListener("updates:install-progress", listener);
+    },
   },
   /**
    * The screen recorder.

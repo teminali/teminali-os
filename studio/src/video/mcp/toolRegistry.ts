@@ -33,6 +33,7 @@ import { useTimelineStore, findClipById, getContentEndMs } from '../store/timeli
 import { useProjectStore } from '../store/projectStore';
 import type { ClipType, MediaAsset } from '../types/edl';
 import { describeClipProperties } from '../engine/propertyPath';
+import { runCaptionWorkflow } from '../engine/captionWorkflow';
 
 /* ── Tool definition ────────────────────────────────────────────── */
 
@@ -733,12 +734,91 @@ defineTool({
 });
 
 /* ═══════════════════════════════════════════════════════════════════
+   CAPTIONS — generate, verify, and perfect subtitles in one shot
+   ═══════════════════════════════════════════════════════════════════ */
+
+const captionShape = {
+  action: z.enum(['generate', 'verify', 'perfect', 'all']).optional()
+    .describe('Operation: "generate" (from text/subtitles), "verify" (inspect timing/overlaps/overruns), "perfect" (clean/reflow/balance/fix), or "all" (complete workflow, default)'),
+  subtitles: z.string().optional()
+    .describe('Raw subtitle text in SRT, WebVTT, ASS, SBV or JSON format to parse and perfect'),
+  text: z.string().optional()
+    .describe('Plain transcript or script text to segment, balance, and time across the timeline'),
+  clipId: z.string().optional()
+    .describe('Id of a video or audio clip on the timeline to derive duration and alignment from'),
+  trackId: z.string().optional()
+    .describe('Text/caption track id to read from or place captions onto'),
+  language: z.string().optional()
+    .describe('Language code, e.g. "en", "sw", "fr", "es" (default "en")'),
+  maxCharsPerLine: z.number().optional()
+    .describe('Maximum characters per line (default 42, standard broadcast limit)'),
+  minDurationMs: z.number().optional()
+    .describe('Minimum display duration per cue in ms (default 300ms)'),
+  offsetMs: z.number().optional()
+    .describe('Time shift in ms to sync audio with captions (+ to delay, - to advance)'),
+  stylePreset: z.enum(['broadcast', 'kinetic', 'minimal']).optional()
+    .describe('Visual styling preset for timeline caption clips (default "broadcast")'),
+  replaceExisting: z.boolean().optional()
+    .describe('Replace existing clips on the target caption track (default true)'),
+  applyToTimeline: z.boolean().optional()
+    .describe('Whether to apply perfected captions directly to the video timeline (default true)'),
+};
+
+function captionContext() {
+  const state = timeline();
+  return {
+    getTimelineCues: (trackId?: string) => {
+      const track = trackId
+        ? state.tracks.find((t) => t.id === trackId)
+        : state.tracks.find((t) => t.type === 'text' || /caption|subtitle/i.test(t.name));
+      if (!track || track.clips.length === 0) return null;
+      const sortedClips = [...track.clips].sort((a, b) => a.startTimeMs - b.startTimeMs);
+      const cues = sortedClips.map((c, i) => ({
+        index: i + 1,
+        startMs: c.startTimeMs,
+        endMs: c.startTimeMs + c.durationMs,
+        text: c.textStyle?.text ?? c.name,
+        align: c.textStyle?.align ?? 'center',
+      }));
+      return { trackId: track.id, cues };
+    },
+    importCaptions: (cues: any, opts: any) => timeline().importCaptions(cues, opts),
+    projectDurationMs: project().project?.durationMs || getContentEndMs(state.tracks) || 10000,
+  };
+}
+
+defineTool({
+  name: 'perfect_captions',
+  category: 'graphics',
+  description:
+    'Generate, verify, and perfect subtitles/captions on the video timeline. ' +
+    'Parses SRT/VTT/ASS/JSON or plain text, verifies overlaps and line length limits (>42 chars), ' +
+    'balances lines, enforces minimum readable duration, shifts sync offsets, and places formatted clips onto the timeline.',
+  schema: z.object(captionShape),
+  handler: (args) => {
+    return asOneEdit('Perfect captions', () => runCaptionWorkflow(args, captionContext()));
+  },
+});
+
+defineTool({
+  name: 'generate_captions',
+  category: 'graphics',
+  description:
+    'Generate timed, balanced subtitles from script text or subtitle files and place them on the video timeline.',
+  schema: z.object(captionShape),
+  handler: (args) => {
+    return asOneEdit('Generate captions', () => runCaptionWorkflow({ ...args, action: args.action ?? 'generate' }, captionContext()));
+  },
+});
+
+/* ═══════════════════════════════════════════════════════════════════
    EXECUTION
    ═══════════════════════════════════════════════════════════════════ */
 
 export const KERF_TOOLS: readonly KerfTool[] = tools;
 
 export function getTool(name: string): KerfTool | undefined {
+  if (name === 'verify_captions') return tools.find((t) => t.name === 'perfect_captions');
   return tools.find((t) => t.name === name);
 }
 
@@ -775,6 +855,8 @@ export const EXPOSED_TOOLS: readonly string[] = [
   'list_media_pool',
   'import_media_from_path',
   'ffmpeg_process',
+  'perfect_captions',
+  'generate_captions',
 ];
 
 /**

@@ -434,7 +434,17 @@ ipcMain.handle("updates:install", async (_event, filePath) => {
     // levels above the executable.
     const bundlePath = path.resolve(app.getPath("exe"), "..", "..", "..");
     const { installMacUpdate } = await loadMacInstaller();
-    const result = await installMacUpdate({ zipPath: filePath, bundlePath });
+    const result = await installMacUpdate({
+      zipPath: filePath,
+      bundlePath,
+      onProgress: (info) => {
+        try {
+          _event.sender.send("updates:install-progress", info);
+        } catch {
+          /* window may have closed */
+        }
+      },
+    });
     if (!result.ok) log("The update was not installed:", result.message);
     return result.ok ? { ok: true } : { ok: false, reason: result.message };
   }

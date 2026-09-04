@@ -97,6 +97,7 @@ export function useTransportShortcuts(
         case ' ':
           // A focused button is the browser's to activate.
           if (isActivatable(target)) return;
+          if (useProjectStore.getState().isExporting) return;
           timeline.togglePlay(durationMs);
           break;
         case 'Home':

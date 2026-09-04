@@ -69,13 +69,14 @@ function rmTree(target) {
  * Resolves to `{ ok, message }` rather than throwing, because the caller is an
  * IPC handler whose answer is rendered as it stands.
  */
-export async function installMacUpdate({ zipPath, bundlePath, runImpl = run }) {
+export async function installMacUpdate({ zipPath, bundlePath, runImpl = run, onProgress }) {
   if (typeof zipPath !== "string" || !zipPath) return { ok: false, message: "No downloaded update to install." };
   if (typeof bundlePath !== "string" || !bundlePath.endsWith(".app")) {
     return { ok: false, message: "This build is not running from an .app bundle, so it cannot replace itself." };
   }
   if (!fs.existsSync(zipPath)) return { ok: false, message: "The downloaded update is no longer on disk." };
 
+  onProgress?.({ percent: 10, status: "Expanding update package…" });
   const target = resolve(bundlePath);
   const work = await mkdtemp(join(tmpdir(), "teminali-swap-"));
   const aside = `${target}.old-${Date.now()}`;
@@ -99,6 +100,7 @@ export async function installMacUpdate({ zipPath, bundlePath, runImpl = run }) {
     return { ok: false, message: `The download could not be expanded. ${err.message}` };
   }
 
+  onProgress?.({ percent: 45, status: "Preparing application bundle…" });
   const found = fs.readdirSync(staged).find((name) => name.endsWith(".app"));
   if (!found) {
     cleanup();
@@ -110,6 +112,7 @@ export async function installMacUpdate({ zipPath, bundlePath, runImpl = run }) {
     return { ok: false, message: "The downloaded bundle is not shaped like an app." };
   }
 
+  onProgress?.({ percent: 60, status: "Replacing application files…" });
   try {
     fs.renameSync(target, aside);
   } catch (err) {
@@ -120,6 +123,7 @@ export async function installMacUpdate({ zipPath, bundlePath, runImpl = run }) {
 
   try {
     await runImpl(CP, ["-a", fresh, target]);
+    onProgress?.({ percent: 85, status: "Refreshing security signatures…" });
     // Best effort, both of them: an update that is in place and running is
     // worth more than one refused because a signature could not be refreshed.
     // Without them the new bundle is merely as awkward as the old one was.
@@ -149,6 +153,7 @@ export async function installMacUpdate({ zipPath, bundlePath, runImpl = run }) {
   // bundle the running one — and what gets the Screen Recording, Accessibility
   // and Microphone prompts asked again, since those grants are keyed to a
   // signature that has just changed.
+  onProgress?.({ percent: 100, status: "Installation complete." });
   try {
     rmTree(aside);
   } catch {

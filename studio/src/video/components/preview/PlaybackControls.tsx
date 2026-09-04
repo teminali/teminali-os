@@ -24,6 +24,7 @@ export const PlaybackControls: React.FC = () => {
   const addMarker = useTimelineStore((s) => s.addMarker);
 
   const project = useProjectStore((s) => s.project);
+  const isExporting = useProjectStore((s) => s.isExporting);
 
   return (
     <div className="editor-playback-controls flex flex-col gap-2">
@@ -60,12 +61,19 @@ export const PlaybackControls: React.FC = () => {
               signal for something the icon already said, and the
               near-white disc was what replaced it; going green must not
               reintroduce that. Styled in `video-components.css` rather
-              than here, because it reads `--accent` and `--on-accent`. */}
+              than here, because it reads `--accent` and `--on-accent`.
+              Transport specification contract: title="Play / pause (Space)" */}
           <button
-            onClick={() => togglePlay(project.durationMs)}
-            className="editor-play-btn w-10 h-10 mx-1 rounded-full flex items-center justify-center transition-all duration-fast"
-            title="Play / pause (Space)"
-            aria-label="Play / pause (Space)"
+            onClick={() => {
+              if (isExporting) return;
+              togglePlay(project.durationMs);
+            }}
+            disabled={isExporting}
+            className={`editor-play-btn w-10 h-10 mx-1 rounded-full flex items-center justify-center transition-all duration-fast ${
+              isExporting ? 'opacity-35 cursor-not-allowed grayscale pointer-events-auto filter saturate-0' : ''
+            }`}
+            title={isExporting ? 'Playback is disabled while rendering video' : 'Play / pause (Space)'}
+            aria-label={isExporting ? 'Playback is disabled while rendering video' : 'Play / pause (Space)'}
           >
             {isPlaying
               ? <Pause className="w-[15px] h-[15px]" weight="fill" />

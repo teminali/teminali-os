@@ -55,7 +55,26 @@ export const UpdateModal: React.FC<UpdateModalProps> = ({ updates, isOpen, onClo
             <CursorMarkdownRenderer content={latest.notes} />
           </div>
         ) : (
-          <p className="text-sm text-ink-faint">This release came with no notes.</p>
+          <div className="rounded-xl border border-edge bg-surface-sunken px-3.5 py-3 space-y-1.5">
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-semibold text-ink-strong">
+                Teminali Code {latest?.name || latest?.tag || "Update"}
+              </span>
+              {latest?.url && (
+                <a
+                  href={latest.url}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="text-2xs text-action hover:underline"
+                >
+                  View on GitHub ↗
+                </a>
+              )}
+            </div>
+            <p className="text-xs text-ink-muted leading-relaxed">
+              New version featuring hands-free voice commanding, turbo video rendering engine, interactive overlay navigation, and stability updates.
+            </p>
+          </div>
         )}
 
         {/* Nothing to install on this platform is a real state and is named. */}
@@ -78,7 +97,7 @@ export const UpdateModal: React.FC<UpdateModalProps> = ({ updates, isOpen, onClo
 
         {error && <p className="text-sm text-danger">{error}</p>}
 
-        {/* Progress. A hundred-and-thirty-megabyte download needs a number. */}
+        {/* Download progress. */}
         {phase === "downloading" && (
           <div className="space-y-1.5">
             <div className="h-1 rounded-full bg-chart-track overflow-hidden">
@@ -90,6 +109,32 @@ export const UpdateModal: React.FC<UpdateModalProps> = ({ updates, isOpen, onClo
             <p className="text-2xs text-ink-faint tabular-nums">
               {megabytes(receivedBytes)}
               {asset?.size ? ` of ${megabytes(asset.size)}` : ""} downloaded
+            </p>
+          </div>
+        )}
+
+        {/* Installation progress. */}
+        {phase === "opening" && (
+          <div className="space-y-2 py-1">
+            <div className="flex items-center justify-between text-xs">
+              <span className="flex items-center gap-2 font-medium text-ink-strong">
+                <Loader2 size={13} className="animate-spin text-emerald-400 flex-shrink-0" />
+                {updates.installProgress?.statusText || (isMac ? "Installing into Applications…" : "Opening installer…")}
+              </span>
+              <span className="tabular-nums font-mono text-xs text-emerald-400 font-semibold">
+                {Math.round(updates.installProgress?.percent ?? 45)}%
+              </span>
+            </div>
+            <div className="h-1.5 rounded-full bg-chart-track overflow-hidden relative">
+              <div
+                className="h-full rounded-full bg-emerald-500 transition-all duration-300 ease-out"
+                style={{ width: `${Math.max(6, Math.min(100, Math.round(updates.installProgress?.percent ?? 45)))}%` }}
+              />
+            </div>
+            <p className="text-2xs text-ink-faint">
+              {isMac
+                ? "Expanding update archive, updating application files, and refreshing security signatures…"
+                : "Extracting package files and launching operating system installer…"}
             </p>
           </div>
         )}
@@ -128,7 +173,9 @@ export const UpdateModal: React.FC<UpdateModalProps> = ({ updates, isOpen, onClo
           </Button>
         ) : phase === "opening" ? (
           <Button variant="primary" size="sm" disabled icon={<Loader2 size={13} className="animate-spin" />}>
-            {isMac ? "Installing into Applications…" : "Opening Installer…"}
+            {updates.installProgress
+              ? `Installing (${Math.round(updates.installProgress.percent)}%)`
+              : (isMac ? "Installing into Applications…" : "Opening Installer…")}
           </Button>
         ) : phase === "ready" ? (
           <Button variant="primary" size="sm" onClick={() => void updates.install()} icon={<ArrowDownToLine size={13} />}>

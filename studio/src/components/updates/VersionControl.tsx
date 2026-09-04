@@ -239,8 +239,7 @@ export const VersionControl: React.FC<VersionControlProps> = ({ updates, onOpenU
             </>
           )}
 
-          {/* One progress bar for whichever direction is being taken. A 130 MB
-              transfer with no number is a control that looks broken. */}
+          {/* Progress bar for download */}
           {phase === "downloading" && (
             <div className="px-2.5 pt-1.5 pb-1 space-y-1.5">
               <div className="h-1 rounded-full bg-chart-track overflow-hidden">
@@ -254,6 +253,27 @@ export const VersionControl: React.FC<VersionControlProps> = ({ updates, onOpenU
                 <button type="button" onClick={updates.cancel} className="text-ink-faint hover:text-ink-body">
                   Cancel
                 </button>
+              </div>
+            </div>
+          )}
+
+          {/* Progress bar for installation */}
+          {phase === "opening" && (
+            <div className="px-2.5 pt-1.5 pb-1 space-y-1.5">
+              <div className="h-1 rounded-full bg-chart-track overflow-hidden">
+                <div
+                  className="h-full rounded-full bg-emerald-500 transition-all duration-300 ease-out"
+                  style={{ width: `${Math.max(6, Math.min(100, Math.round(updates.installProgress?.percent ?? 45)))}%` }}
+                />
+              </div>
+              <div className="flex items-center justify-between text-2xs text-ink-soft tabular-nums">
+                <span className="truncate flex items-center gap-1.5">
+                  <Loader2 size={10} className="animate-spin text-emerald-400" />
+                  {updates.installProgress?.statusText || "Installing…"}
+                </span>
+                <span className="font-mono text-emerald-400">
+                  {Math.round(updates.installProgress?.percent ?? 45)}%
+                </span>
               </div>
             </div>
           )}

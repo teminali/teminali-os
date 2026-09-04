@@ -63,13 +63,6 @@ export const StudioTitleBar: React.FC<StudioTitleBarProps> = ({
 
   const { sessionHistory, sessionHistoryIndex, goBackSession, goForwardSession } = useStudioStore();
   const [isAdmin, setIsAdmin] = useState(false);
-  const {
-    isExporting,
-    exportProgress,
-    exportStatusText,
-    exportTelemetry,
-    setExportModalOpen,
-  } = useProjectStore();
 
   useEffect(() => {
     const controller = new AbortController();
@@ -163,37 +156,6 @@ export const StudioTitleBar: React.FC<StudioTitleBarProps> = ({
           className="flex items-center gap-3 font-mono text-xs text-ink-muted"
           style={{ WebkitAppRegion: "no-drag" } as React.CSSProperties}
         >
-          {isExporting && (
-            <>
-              <button
-                type="button"
-                onClick={() => {
-                  focusOrOpen({ kind: "video" });
-                  setExportModalOpen(true);
-                }}
-                title={`Exporting: ${Math.round(exportProgress)}% (${exportStatusText || "Rendering..."}) — Click to view`}
-                className="flex items-center gap-2 px-2.5 py-1 rounded-full bg-emerald-500/10 hover:bg-emerald-500/20 border border-emerald-500/30 text-emerald-400 text-xs font-sans transition-all cursor-pointer shadow-sm"
-              >
-                <Loader2 size={12} className="animate-spin text-emerald-400 flex-shrink-0" />
-                <span className="font-semibold text-[11px] tabular-nums text-emerald-300">
-                  {Math.round(exportProgress)}%
-                </span>
-                <div className="w-16 h-1.5 bg-black/40 rounded-full overflow-hidden border border-emerald-500/20 flex-shrink-0">
-                  <div
-                    className="h-full bg-emerald-400 rounded-full transition-all duration-150"
-                    style={{ width: `${Math.max(4, Math.min(100, Math.round(exportProgress)))}%` }}
-                  />
-                </div>
-                {exportTelemetry?.fps ? (
-                  <span className="text-[10px] text-emerald-300/80 font-mono flex-shrink-0">
-                    {exportTelemetry.fps.toFixed(1)} fps
-                  </span>
-                ) : null}
-              </button>
-              <span className="w-px h-3 bg-edge-strong flex-shrink-0" aria-hidden="true" />
-            </>
-          )}
-
           {/*
             The editor sits beside the IDE because the two are the same kind of
             verb — "take this conversation somewhere it can be worked on". The

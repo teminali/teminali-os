@@ -246,6 +246,11 @@ function summarize(tool: string, data: unknown, durationMs: number): string {
   if (typeof data.param === "string") {
     return `${String(data.effect)}.${data.param} = ${JSON.stringify(data.value)} · ${suffix}`;
   }
+  if (typeof data.captionCount === "number" || Array.isArray(data.cues)) {
+    const count = typeof data.captionCount === "number" ? data.captionCount : (data.cues as unknown[]).length;
+    const action = typeof data.action === "string" ? data.action : "captions";
+    return `${count} captions · ${action} · ${suffix}`;
+  }
   return suffix;
 }
 
