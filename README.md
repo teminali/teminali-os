@@ -2,16 +2,18 @@
 
 The monorepo behind **Teminali Code** — an autonomous AI code studio that runs
 on your machine. Local models, local speech, local screen understanding; hosted
-providers available and never required.
+providers available and never required. Since v1.2.0 it also records the screen
+and edits what it recorded: a screen recorder that hands its take to a timeline
+already cut, and an exporter that renders that timeline back out to a file.
 
 The product ships as a desktop application from
 [`teminali/teminalicode`](https://github.com/teminali/teminalicode/releases)
-(currently **v1.1.1**). Everything below is how it is built.
+(currently **v1.2.0**). Everything below is how it is built.
 
-> The repository directory is still named `frontier` and the internal package is
-> `@teminali/core`. "Frontier" survives as the name of the routing gateway and
-> the local model wrapper (Frontier Flash / Auto / Max); the *product* is
-> Teminali Code.
+> The repository directory is `teminaliCode`, under `my_projects/teminali/`, and
+> the internal package is `@teminali/core`. "Frontier" survives as the name of
+> the routing gateway and the local model wrapper (Frontier Flash / Auto / Max);
+> the *product* is Teminali Code.
 
 ## Repository layout
 

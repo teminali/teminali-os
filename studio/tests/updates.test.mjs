@@ -154,13 +154,41 @@ test("no assets at all is an answer, not a crash", () => {
 
 /* ── Checking ─────────────────────────────────────────────────────────────── */
 
+/**
+ * The running build, read from package.json, is what every fixture here is
+ * measured against.
+ *
+ * Derived rather than written down. A tag hardcoded as "the newer release"
+ * stops being newer the first time the app is versioned past it, and the
+ * suite then fails on the release commit — the one change that did nothing
+ * wrong — instead of on whatever actually broke the update check.
+ */
+const RUNNING = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8")).version;
+const [RUNNING_MAJOR, RUNNING_MINOR, RUNNING_PATCH] = RUNNING.split(".").map(Number);
+
+/** One minor above whatever is running: an update this machine should be offered. */
+const NEWER = `v${RUNNING_MAJOR}.${RUNNING_MINOR + 1}.0`;
+
+/**
+ * The nearest version below the running one, whatever shape it has.
+ *
+ * Stepping the patch down is only correct while the patch is non-zero — on a
+ * `.0` it lands back on the running version and the rollback test starts
+ * asserting that the current build is older than itself.
+ */
+const OLDER = RUNNING_PATCH > 0
+  ? `v${RUNNING_MAJOR}.${RUNNING_MINOR}.${RUNNING_PATCH - 1}`
+  : RUNNING_MINOR > 0
+    ? `v${RUNNING_MAJOR}.${RUNNING_MINOR - 1}.0`
+    : `v${Math.max(0, RUNNING_MAJOR - 1)}.0.0`;
+
 function release(overrides = {}) {
   return {
-    tag_name: "v1.2.0",
-    name: "Teminali Code v1.2.0",
+    tag_name: NEWER,
+    name: `Teminali Code ${NEWER}`,
     body: "Notes",
     published_at: "2026-09-02T00:00:00Z",
-    html_url: "https://github.com/teminali/teminalicode/releases/tag/v1.2.0",
+    html_url: `https://github.com/teminali/teminalicode/releases/tag/${NEWER}`,
     draft: false,
     prerelease: false,
     assets: MAC_RELEASE,
@@ -183,7 +211,7 @@ test("a newer release is reported with the file this machine should take", async
     appRoot, repo: "x/y", platform: "darwin", arch: "arm64", fetchImpl: stubFetch(200, release()),
   });
   assert.equal(result.updateAvailable, true);
-  assert.equal(result.latest.tag, "v1.2.0");
+  assert.equal(result.latest.tag, NEWER);
   assert.equal(result.asset.name, "Teminali.Code-1.0.1-macOS-arm64.zip");
 });
 
@@ -229,17 +257,13 @@ test("an update with no build for this platform says which platform", async () =
 
 /* ── What the version control can offer ───────────────────────────────────── */
 
-/** The running build, read from package.json, is what everything is measured against. */
-const RUNNING = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8")).version;
-
 function listing(tags) {
   return tags.map((tag) => release({ tag_name: tag, name: `Teminali Code ${tag}`, html_url: `https://github.com/x/y/releases/tag/${tag}` }));
 }
 
 test("every release is placed relative to the build that is running", async () => {
-  const [major, minor, patch] = RUNNING.split(".").map(Number);
-  const newer = `v${major}.${minor + 1}.0`;
-  const older = `v${major}.${minor}.${patch}`.replace(/\d+$/, String(Math.max(0, patch - 1)));
+  const newer = NEWER;
+  const older = OLDER;
 
   const result = await listReleases({
     appRoot, repo: "x/y", platform: "darwin", arch: "arm64",
