@@ -120,7 +120,7 @@ is the complete list.
 | | Path | Auth | |
 | --- | --- | --- | --- |
 | `GET` | `/api/voice/status` | bearer | Whether the VibeVoice sidecar is up, and whether it offers ASR, TTS or both. Reports `gated: "voice.vibevoice"` when the plan cannot reach the sidecar tier. |
-| `POST` | `/api/voice/transcribe` | bearer | Speech to text. Refused when no ASR is available at all; served by whisper.cpp rather than the sidecar when the plan does not carry `voice.vibevoice`. |
+| `POST` | `/api/voice/transcribe` | bearer | Speech to text. Refused when no ASR is available at all; served by whisper.cpp rather than the sidecar when the plan does not carry `voice.vibevoice`. Multipart fields: `audio`, `language` (`auto` guesses, and guesses badly on short or non-English takes), and `maxSegmentChars` — pass it and the local engine returns `segments` with real millisecond `startMs`/`endMs`, which is what a caption track needs. The sidecar returns none. |
 | `POST` | `/api/voice/speak` | bearer | Text to speech. Refused when no TTS is available at all; served by the system voices rather than the sidecar when the plan does not carry `voice.vibevoice`. |
 
 ### Entitlement

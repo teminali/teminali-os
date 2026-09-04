@@ -152,8 +152,12 @@ export async function localTtsStatus() {
  * so anything that is not already a WAV goes through ffmpeg first. When ffmpeg
  * is missing and the input is not WAV, that is reported rather than producing
  * an empty transcript.
+ *
+ * @param maxSegmentChars split the transcript into segments of at most this
+ *   many characters, for a caller laying SUBTITLES down. 0 leaves whisper's
+ *   own segmentation, which is one cue per utterance and too long to read.
  */
-export async function transcribeLocal(buffer, { language = "auto" } = {}) {
+export async function transcribeLocal(buffer, { language = "auto", maxSegmentChars = 0 } = {}) {
   const status = await localAsrStatus();
   if (!status.available) {
     throw Object.assign(new Error(status.detail), { status: 503, code: "LOCAL_ASR_UNAVAILABLE" });
@@ -193,7 +197,18 @@ export async function transcribeLocal(buffer, { language = "auto" } = {}) {
         "-l", requested,
         "-oj",                 // JSON output, so we get the detected language too
         "-of", outputBase,
-        "-nt",                 // no timestamps in the plain text
+        /*
+          `-nt` used to be here and had to go. It is documented as
+          suppressing timestamps in the PLAIN TEXT output, which this
+          code does not read — but it also collapses the JSON to a
+          single segment spanning the whole 30-second decode window.
+          Measured on this machine: a 3.8s utterance came back as one
+          cue with `offsets` 0..30000. Every one of those numbers was
+          invented, and a caption track built on them would have sat on
+          screen for half a minute. Without the flag the same utterance
+          reports 0..3840, which is what the audio actually is.
+        */
+        ...(maxSegmentChars > 0 ? ["-ml", String(maxSegmentChars)] : []),
         "-t", String(Math.max(2, Math.min(8, os.cpus().length - 2))),
       ],
       { timeout: TRANSCRIBE_TIMEOUT_MS, maxBuffer: 16 * 1024 * 1024 },
@@ -219,6 +234,24 @@ export function parseWhisperJson(parsed, requestedLanguage = "auto") {
     .replace(/\s+/g, " ")
     .trim();
 
+  /*
+    The timings, which this function used to throw away.
+
+    `offsets` is whisper.cpp's own millisecond pair and is the only
+    reason subtitles are possible at all — the `timestamps` field beside
+    it is the same numbers formatted for a human, and reparsing a string
+    we already have as a number would be silly. A segment with no text
+    is dropped rather than laid down as an empty cue.
+  */
+  const cues = segments
+    .map((segment) => ({
+      startMs: Math.max(0, Math.round(Number(segment?.offsets?.from ?? NaN))),
+      endMs: Math.max(0, Math.round(Number(segment?.offsets?.to ?? NaN))),
+      text: String(segment?.text ?? "").trim(),
+    }))
+    .filter((cue) => cue.text.length > 0 && Number.isFinite(cue.startMs) && Number.isFinite(cue.endMs)
+      && cue.endMs > cue.startMs);
+
   const detected = parsed?.result?.language ?? null;
   // whisper.cpp reports a bare ISO-639-1 code; the studio speaks BCP-47.
   const language = detected
@@ -234,6 +267,7 @@ export function parseWhisperJson(parsed, requestedLanguage = "auto") {
     // agreed "not reported" value rather than a fabricated number.
     confidence: -1,
     model: parsed?.model?.type ?? null,
+    segments: cues,
   };
 }
 

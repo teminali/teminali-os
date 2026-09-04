@@ -152,11 +152,13 @@ export function forgetVoiceStatus() {
 }
 
 /** Forward a recorded utterance for transcription. */
-export async function transcribe(config, { body, contentType, language = "auto", allowVibeVoice = true }) {
+export async function transcribe(config, {
+  body, contentType, language = "auto", maxSegmentChars = 0, allowVibeVoice = true,
+}) {
   const status = await voiceStatus(config, { allowVibeVoice });
   // The local engine takes a raw audio buffer, not a multipart envelope.
   if (status.engine === "local") {
-    return transcribeLocal(extractAudio(body, contentType), { language });
+    return transcribeLocal(extractAudio(body, contentType), { language, maxSegmentChars });
   }
 
   const { signal, done } = timeoutSignal(config.voiceTimeoutMs);

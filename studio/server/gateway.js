@@ -1314,8 +1314,16 @@ export async function createGateway(options = {}) {
           throw new GatewayError(error.status || 400, error.code || "VOICE_AUDIO_INVALID", error.message);
         }
         try {
-          const language = /name="language"[\s\S]{0,120}?\r\n\r\n([^\r]+)/.exec(audio.toString("latin1"))?.[1]?.trim() ?? "auto";
-          const result = await transcribe(config, { body: audio, contentType, language, allowVibeVoice });
+          const fields = audio.toString("latin1");
+          const field = (name) =>
+            new RegExp(`name="${name}"[\\s\\S]{0,120}?\\r\\n\\r\\n([^\\r]+)`).exec(fields)?.[1]?.trim();
+          const language = field("language") ?? "auto";
+          /* Caption-shaped segments, for a caller laying subtitles down.
+             Absent means whisper's own segmentation, one cue an utterance. */
+          const maxSegmentChars = Math.max(0, Math.min(120, Number(field("maxSegmentChars")) || 0));
+          const result = await transcribe(config, {
+            body: audio, contentType, language, maxSegmentChars, allowVibeVoice,
+          });
           await audit.write({
             event: "voice-transcribed",
             correlationId,

@@ -13,11 +13,18 @@
    time, and the source list is the only part that genuinely cannot be
    remembered (a window id is only valid for as long as that window is).
 
-   ── What is deliberately not here yet ────────────────────────────────
-   The auto-edit stack — zooms on clicks, the cinematic frame, click
-   ticks, captions — has not been ported, so none of its settings are
-   remembered here either. A sticky setting nothing reads is a promise
-   the panel cannot keep. They arrive with the modules that honour them.
+   ── Two kinds of setting, and why both are sticky ───────────────────
+   Above `detachNarration` is what the CAPTURE does: fps, devices, the
+   countdown. Those are final the moment the take stops. Below it is
+   what the BUILD makes of the take — the zooms, the frame, the
+   camera's choreography — and every one of those can be changed and
+   the same files rebuilt. The panel splits them for that reason:
+   capture setup asks the first set before recording, the review screen
+   asks the second immediately before opening on the timeline.
+
+   Both persist. A sticky setting nothing reads would be a promise the
+   panel cannot keep, so each one arrived with the module that honours
+   it; `openOnTimeline` is where they all land.
    ═══════════════════════════════════════════════════════════════════ */
 
 import { create } from 'zustand';
@@ -34,6 +41,9 @@ import {
   assembleRecording, RAW_ASSEMBLE, TUTORIAL_ASSEMBLE,
   type AssembleOptions, type AssembleReport,
 } from '../engine/recordingProject';
+import { zoomStyleShape, type ZoomStyleId } from '../engine/cursorZoom';
+import type { CameraShape } from '../engine/cameraChoreography';
+import type { BackdropId } from '../engine/cinematicLook';
 
 export type RecorderPhase =
   | 'setup'
@@ -78,6 +88,26 @@ export interface StickySettings {
   sound: boolean;
   /** Drop a timeline marker on every moment the detector found. */
   markMoments: boolean;
+
+  /* ── The look, and the camera's choreography ────────────────────
+     Chosen on the review screen, immediately before the build, rather
+     than in capture setup: none of it changes the FILES, so an
+     operator who guessed wrong has a rebuild rather than a reshoot.
+     They live here anyway, so the next take opens with the same
+     answers already given.                                       */
+
+  /** Which backdrop `cinematic` sets the picture on. */
+  backdrop: BackdropId;
+  /** How the zoom moves between framings — or `none`, which is no zooms. */
+  zoomStyle: ZoomStyleId;
+  /** Lay the camera down at all. Distinct from a take that has no camera. */
+  includeCamera: boolean;
+  /** What the inset is cut to: the whole frame, a rounded one, a square, a circle. */
+  cameraShape: CameraShape;
+  /** Move the inset to the other side when the pointer settles under it. */
+  cameraDodge: boolean;
+  /** Hand the camera the whole frame while the operator is explaining. */
+  cameraOnExplaining: boolean;
 }
 
 const STORAGE_KEY = 'teminali.recorder.v1';
@@ -109,6 +139,16 @@ const DEFAULT_STICKY: StickySettings = {
   cinematic: TUTORIAL_ASSEMBLE.cinematic,
   sound: TUTORIAL_ASSEMBLE.sound,
   markMoments: TUTORIAL_ASSEMBLE.markMoments,
+  /* Also from `TUTORIAL_ASSEMBLE`, for the same reason. `zoomStyle` is
+     the one that cannot be read off a field, because the assemble
+     stores the SHAPE and this stores the name of it; `smooth` is the
+     name of the shape it stores. */
+  backdrop: TUTORIAL_ASSEMBLE.look.backdrop,
+  zoomStyle: 'smooth',
+  includeCamera: TUTORIAL_ASSEMBLE.includeCamera,
+  cameraShape: TUTORIAL_ASSEMBLE.cameraShape,
+  cameraDodge: TUTORIAL_ASSEMBLE.cameraDodge,
+  cameraOnExplaining: TUTORIAL_ASSEMBLE.cameraOnExplaining,
 };
 
 function loadSticky(): StickySettings {
@@ -631,13 +671,23 @@ export const useRecorderStore = create<RecorderState>((set, get) => ({
         cameraSizePct: settings.cameraSizePct,
         cameraCorner: settings.cameraCorner,
         mirrorCamera: settings.mirrorCamera,
-        autoZoom: settings.autoZoom,
-        zoomShape: TUTORIAL_ASSEMBLE.zoomShape,
+        includeCamera: settings.includeCamera,
+        cameraShape: settings.cameraShape,
+        cameraDodge: settings.cameraDodge,
+        cameraOnExplaining: settings.cameraOnExplaining,
+        /*
+          `none` is not a shape, it is the absence of the pass, so it
+          turns the switch off rather than selecting a fourth curve.
+          The shape still has to be a valid object: `assembleRecording`
+          reads fields off it before it checks the switch.
+        */
+        autoZoom: settings.autoZoom && settings.zoomStyle !== 'none',
+        zoomShape: zoomStyleShape(settings.zoomStyle),
         drawCursor: settings.drawCursor,
         motionBlur: settings.motionBlur,
         markMoments: settings.markMoments,
         cinematic: settings.cinematic,
-        look: TUTORIAL_ASSEMBLE.look,
+        look: { ...TUTORIAL_ASSEMBLE.look, backdrop: settings.backdrop },
         sound: settings.sound,
         soundOptions: TUTORIAL_ASSEMBLE.soundOptions,
       });

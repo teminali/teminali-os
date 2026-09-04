@@ -918,6 +918,41 @@ export const SMOOTH_SHAPE: ZoomShape = {
   curve: GLIDE_CURVE,
 };
 
+/* ── Naming the three, for the panel ────────────────────────────────
+
+   The shapes above are the tuned constants and the reasoning that got
+   them there. What an operator choosing between them before a build
+   needs is a name, a sentence, and a fourth option that is not a shape
+   at all — leaving the picture alone.
+
+   The list lives here rather than in the panel because the shapes do:
+   a fifth shape should arrive with its label, not require someone to
+   remember there is a menu elsewhere that also has to learn about it.
+
+   `none` carries no shape. It is `autoZoom: false`, and the resolver
+   below returns the default rather than null so a caller that ignores
+   the switch still gets a valid object instead of a crash. */
+
+export type ZoomStyleId = 'smooth' | 'cut' | 'classic' | 'none';
+
+export const ZOOM_STYLES: { id: ZoomStyleId; label: string; hint: string }[] = [
+  { id: 'smooth', label: 'Glide', hint: 'Moves between framings. Easiest to read on text.' },
+  { id: 'cut', label: 'Cut', hint: 'Jumps straight to the next framing, no travel.' },
+  { id: 'classic', label: 'Ease', hint: 'Pulls out to wide between pushes.' },
+  { id: 'none', label: 'None', hint: 'No pushes at all. The frame stays where it is.' },
+];
+
+/** The shape a style id names. `none` has none, and answers the default. */
+export function zoomStyleShape(id: ZoomStyleId): ZoomShape {
+  switch (id) {
+    case 'cut': return CUT_SHAPE;
+    case 'classic': return DEFAULT_SHAPE;
+    case 'smooth':
+    case 'none':
+    default: return SMOOTH_SHAPE;
+  }
+}
+
 /** One point on the planned move, before it becomes keyframes. */
 export interface Stop {
   tMs: number;

@@ -275,6 +275,44 @@ all**: its `blob:` URL dies with the page, so the save refuses by name instead
 of writing a file that is already broken. A successful save or open records the
 folder in My Projects without rebinding the workspace root.
 
+**The camera is choreographed, not parked.** Three things move the inset
+after a take, all of them keyframes on the camera clip rather than anything
+baked into a picture: it is cut to a **shape** (the whole frame, a rounded
+one, a square, or a circle — a circle squeezes the mask on one axis, because
+an ellipse over a 16:9 layer is an oval); it **dodges**, crossing to the other
+side of the frame when the pointer settles under it and coming back when the
+pointer leaves; and it **takes the whole frame while you are explaining**.
+
+That last one used to need a transcript, which is why it was absent. It does
+not: the question is not "is there speech here" but "is the screen still the
+subject", and the hands answer that better than the words do. Presenting
+drives the interface — clicks, scrolls, a pointer going somewhere. Explaining
+lets go of it. So the takeover is placed on input silence over a live
+microphone, and the microphone is the half that keeps it honest — quiet hands
+with no narration is someone who walked away, and a take whose camera has no
+audio gets no takeover at all. It is bounded to match the weaker evidence: no
+stretch past 12s, never more than 35% of the take, never the closing seconds.
+See `src/video/engine/cameraChoreography.ts`; the numbers are tested against
+the cases that break them in `tests/camera-choreography.test.mjs`.
+
+A take recorded without a webcam skips all of it, and so does one where the
+camera is switched off before the build.
+
+**The build is chosen on the review screen, not in setup.** The rail beside the
+take carries the arguments to the assemble — the **backdrop** (nine, drawn as
+swatches painting their own gradient, one of which is None), **how the zoom
+moves** (Glide, Cut, Ease, or None, which is no zooms at all), whether to
+**include the camera**, the camera's **shape**, and the two choreography
+switches above. They are asked here rather than before recording because none
+of them touch the files: a backdrop you did not want costs one rebuild, where a
+wrong frame rate costs the take. Every list is exported by the engine module
+that honours it, so a new preset arrives in the picker with its own label.
+
+A take with no webcam is not shown four dead camera controls — the group says
+there was no camera and stops. The full-frame switch is drawn disabled when the
+camera clip carries no sound, because that is the evidence the takeover runs
+on. The answers persist, so the next take opens with them already given.
+
 **The transport has keys**, and its play disc is centred on the picture rather
 than on what is left of the row. `Space` plays and pauses — and replays, when the
 playhead is parked at the end — `Home` / `End` jump to the in and out points,
@@ -480,7 +518,7 @@ ollama serve              # local models on 127.0.0.1:11434
 
 ```bash
 npm run typecheck   # tsc --noEmit
-npm test            # 712 tests, 0 failures
+npm test            # 775 tests, 0 failures
 npm run build       # tsc && vite build
 npm run verify:core # all three
 ```
@@ -587,8 +625,67 @@ Everything is optional; every default is loopback.
 | `TEMINALI_LICENCE_STORE` | `benchmark-results/licence.json` (written `0600`) |
 | `TEMINALI_BILLING_URL` | unset — no billing service, so the app runs as free |
 | `TEMINALI_LICENCE_PUBLIC_KEYS` | unset — JSON `{"kid": "<PEM>"}`, staging and tests only |
+| `FFMPEG_PATH` | unset — an explicit ffmpeg binary, tried before every search location |
 
 Non-loopback values are rejected at startup rather than accepted and ignored.
+
+### Finding ffmpeg
+
+The recorder's remux and the media tools need an ffmpeg, and `findFfmpeg` in
+`electron/mediaAccess.cjs` is the one place that looks for it. It tries
+`FFMPEG_PATH`, then the install directories the platform's package managers
+actually use — Homebrew (Apple silicon and Intel), MacPorts and `/usr/bin` on
+macOS; `C:\ffmpeg\bin`, `%ProgramFiles%`, Chocolatey, Scoop and winget's Links
+directory on Windows; the usual `bin` directories plus `/snap/bin` on Linux —
+and only then walks `PATH`.
+
+`PATH` is searched **last**, which is the opposite of what a shell does, for the
+reason the list exists at all: a GUI app does not inherit the shell's `PATH`. On
+macOS it gets launchd's, which has no `/opt/homebrew/bin`; on Windows it gets
+whatever Explorer started with, so an ffmpeg installed since the last sign-in is
+invisible. The fixed list is ordered by preference, and putting `PATH` first
+would let an arbitrary earlier entry outrank a deliberate one.
+
+`ffmpegInstallHint()` names the package manager the operator is actually likely
+to have (`brew`, `winget`, `apt`), because sending a Windows operator to
+Homebrew is worse than saying nothing.
+
+### Exporting video — pipeline built, no UI yet
+
+The encode path exists in the main process and is reachable over the bridge as
+`window.teminali.exporter`, but **nothing in the interface calls it yet**:
+there is no Export button and no renderer driver, so an operator cannot start
+an export from the app. What follows describes the contract that is in place,
+not a feature that has shipped.
+
+`electron/videoExport.cjs` keeps one ffmpeg per export with `image2pipe` on
+its stdin. The renderer draws each frame to an off-DOM canvas and sends it as
+one complete JPEG — `image2pipe` finds frame boundaries by scanning for JPEG
+markers, so a partial write corrupts the stream from that point on.
+
+| Channel | Does |
+| --- | --- |
+| `export:start` | Opens a session; returns `{sessionId}` or `{error}` |
+| `export:frame` | Writes one JPEG; waits only when the pipe is full |
+| `export:finish` | Mixes audio, muxes, returns where the file went |
+| `export:cancel` | Kills ffmpeg and removes the temp directory |
+
+Audio never goes down the frame pipe. `export:finish` mixes it in a second
+ffmpeg pass straight from the source files, so audio already on disk is not
+re-encoded through a canvas. Sources are probed first: one unreadable URL
+would otherwise fail the whole filtergraph and ship a silent file with nothing
+to say about why, so `finish` returns a per-clip `audio` report instead.
+
+The mux caps `-t` at the video's own duration and never uses `-shortest`,
+which cuts to the shortest *input* — a short music bed once truncated a
+16-second sequence to 5.5 seconds.
+
+`electron/exportFilters.cjs` holds the pure argv and filtergraph builders,
+separately from anything that spawns a process, so `tests/video-export.test.mjs`
+can assert the strings without a binary. Hardware encoders are chosen by
+`electron/hardwareEncoder.cjs` (VideoToolbox on macOS, NVENC/QSV/AMF on
+Windows) and are given a bitrate rather than a CRF, which means nothing to
+them.
 
 ### The Pro entitlement
 

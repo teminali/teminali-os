@@ -14,19 +14,21 @@
    choosing a source is not a step you do while a take is running, and
    showing the grid greyed out behind a timer would only invite it.
 
-   ── What is deliberately not here yet ────────────────────────────────
-   The review opens the take on the timeline as a RAW assemble — screen,
-   camera, narration, nothing interpreted. The Cut's Tutorial skill,
-   which places zooms on real clicks and captions the narration, needs a
-   speech model this app does not ship and half a dozen engine modules
-   it does not have; it is not ported, so it is not offered. A button
-   that cannot do the thing it names is worse than no button.
+   ── The review is a second decision, not a confirmation ─────────────
+   The review does not just show the take and offer a button. It opens
+   it as an INTERPRETED assemble — zooms on the real clicks, the drawn
+   pointer, the cinematic frame, the camera's choreography — and the
+   rail carries the arguments to that build (`BuildOptions`). They are
+   asked here rather than in setup because none of them change the
+   files: a wrong backdrop or a circular webcam you did not want costs
+   one rebuild, where a wrong fps costs the take.
    ═══════════════════════════════════════════════════════════════════ */
 
 import React from 'react';
 import { useRecorderStore } from '../../store/recorderStore';
 import { SourceGrid } from './SourceGrid';
 import { CaptureOptions } from './CaptureOptions';
+import { BuildOptions } from './BuildOptions';
 import { formatDuration, formatFileSize } from '../../utils/time';
 import {
   Record, Pause, Play, Square, Loader2, AlertTriangle, CheckCircle2, X,
@@ -533,6 +535,11 @@ const Review: React.FC<{ stacked: boolean; onOpened?: () => void }> = ({ stacked
               ))}
             </div>
           )}
+
+          {/* Only when there is a screen to build from. Without one there
+              is no build, and a rail of build options above a disabled
+              button is an offer that cannot be taken. */}
+          {take.screen && <BuildOptions take={take} />}
 
           {/* The take is on disk whatever happens next, and a build can be
               thrown away and rebuilt, so both facts are worth stating
