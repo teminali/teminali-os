@@ -98,8 +98,14 @@ bytes the gateway already returns under its 8 MB cap. Neither is writable, so
 nothing can overwrite a picture with text. Files whose whole name is their
 extension — `.gitignore`, `Dockerfile`, `Makefile` — are visible to the tree,
 the editor, search and the review dock for the first time; `.env` is
-deliberately still excluded. Spreadsheets and video are not viewable yet and
-say so rather than looking broken.
+deliberately still excluded. An `.xlsx` is drawn as a grid — every sheet on a
+tab strip, formula cells showing their results, capped at 200 × 50 cells with
+the cut stated on screen — by [ExcelJS](https://www.npmjs.com/package/exceljs),
+loaded on demand so a reader who never opens a spreadsheet never downloads the
+parser. Legacy `.xls` is a different format (BIFF) and the pane says to save it
+as `.xlsx`; the one `.xls` that does open is the HTML table many web apps export
+under that name, which the gateway sniffs and treats as text. Video and audio
+are not viewable yet and say so rather than looking broken.
 
 It is also where you **drop** a file. Drag a row out of the Explorer, or a file
 out of Finder or Windows Explorer, and it opens in the panel. A file from
@@ -626,7 +632,7 @@ ollama serve              # local models on 127.0.0.1:11434
 
 ```bash
 npm run typecheck   # tsc --noEmit
-npm test            # 1241 tests, 0 failures
+npm test            # 1252 tests, 0 failures
 npm run build       # tsc && vite build
 npm run verify:core # all three
 ```

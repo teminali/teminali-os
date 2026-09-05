@@ -469,6 +469,32 @@ distinguishes the composer, the media panel, the timeline and the file pane from
 the chrome around them. Overriding `dropEffect` on a claimed drag would stop
 Chromium delivering their `drop` event at all.
 
+### A spreadsheet is drawn, not decoded (`services/sheetPreview.ts`, `panels/SheetPreview.tsx`)
+
+An `.xlsx` arrives as base64 like a PDF does, and becomes a grid. ExcelJS parses
+it — chosen over SheetJS because the npm `xlsx` package is frozen at 0.18.5,
+the release covered by CVE-2023-30533, and the vendor's current builds ship only
+from their own CDN; a registry dependency with an ordinary supply chain was the
+operator's call. It is imported **dynamically** and by nothing else: it is close
+to a megabyte, the bundle already trips Vite's 500 kB warning, and a reader who
+never opens a spreadsheet must not pay for one. `tests/sheet-preview.test.mjs`
+pins the dynamic import.
+
+What lives outside the parser is what would otherwise be untestable in a
+component. A formula cell shows its *result*, because a grid of `=SUM(B2:B9)` is
+not a view of the data; an error cell shows `#DIV/0!` rather than looking empty;
+rich text, hyperlinks and dates each have one reading, and an unknown shape is
+blank rather than `[object Object]`. The grid is bounded at **200 × 50** — the
+same 8 MB file can hold a hundred thousand rows, and drawing that hangs the
+window — and what is cut is stated on the tab strip, since a viewer that quietly
+shows two thirds of the data is worse than one that refuses.
+
+Legacy `.xls` is BIFF, a different format ExcelJS does not read, and the pane
+names the conversion that fixes it rather than saying "unsupported". The server
+predicate is untouched on purpose: an `.xls` that is really an HTML table is
+sniffed as text by `server/workspace.js` and opens in the editor, and narrowing
+`BINARY_PREVIEW_EXTENSIONS` would have refused it before the sniff ran.
+
 ### What the workspace will open (`server/workspace.js`, `panels/FilePane.tsx`)
 
 One predicate answers "is this text?" — `isTextFile` — and the tree, the reader,

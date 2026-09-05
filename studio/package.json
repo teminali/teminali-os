@@ -41,6 +41,7 @@
     "@types/file-saver": "^2.0.7",
     "@types/prismjs": "^1.26.6",
     "clsx": "^2.1.1",
+    "exceljs": "^4.4.0",
     "file-saver": "^2.0.5",
     "framer-motion": "^12.4.7",
     "immer": "^10.1.1",

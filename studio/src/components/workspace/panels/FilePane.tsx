@@ -7,6 +7,7 @@ import { usePanelStore, type PanelTab } from "../../../store/panelStore";
 import { useStudioStore } from "../../../store/studioStore";
 import { formatBytes } from "../../../services/guardianService";
 import { describesWorkspaceDrop, resolveWorkspaceDrop, workspaceRelative } from "../../../services/workspaceDrop";
+import { SheetPreview } from "./SheetPreview";
 
 /**
  * File viewer and editor.
@@ -53,6 +54,9 @@ const LANGUAGES: Record<string, string> = {
   svg: "markup", md: "markdown", py: "python", sql: "sql", yml: "yaml",
   yaml: "yaml", sh: "bash", bash: "bash", zsh: "bash",
 };
+
+/** What `server/workspace.js` labels an .xlsx as. Spelled once. */
+const XLSX_MIME = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
 
 function languageOf(path: string): string {
   const extension = path.split(".").pop()?.toLowerCase() ?? "";
@@ -388,8 +392,10 @@ export const FilePane: React.FC<{ panel: PanelTab }> = ({ panel }) => {
  * it the frame renders blank rather than failing loudly, which is why the
  * flag and this component have to move together.
  *
- * Anything else that arrives as bytes — a spreadsheet today — says so plainly
- * instead of pretending to be broken.
+ * A spreadsheet is drawn as a grid by `SheetPreview`, which loads its parser on
+ * demand rather than in the main bundle. Anything else that arrives as bytes
+ * says so plainly, and names what it would take to read it, instead of
+ * pretending to be broken.
  */
 const PreviewSurface: React.FC<{ preview: Preview; path?: string }> = ({ preview, path }) => {
   if (preview.mimeType.startsWith("image/")) {
@@ -404,11 +410,32 @@ const PreviewSurface: React.FC<{ preview: Preview; path?: string }> = ({ preview
     return <iframe src={preview.url} title={path ?? "PDF preview"} className="flex-1 min-h-0 w-full border-0 bg-surface-sunken" />;
   }
 
+  if (preview.mimeType === XLSX_MIME) {
+    return <SheetPreview url={preview.url} />;
+  }
+
+  /*
+    Legacy `.xls` is BIFF, not OOXML, and ExcelJS reads only the latter. The
+    fix is a conversion the operator has to make, so it is named — a viewer
+    that said "unsupported" would leave them guessing which half was wrong.
+    The `.xls` that *is* readable never reaches here: an HTML table saved under
+    that extension is sniffed as text by server/workspace.js and edited.
+  */
+  if (preview.mimeType === "application/vnd.ms-excel") {
+    return (
+      <EmptyState
+        icon={<AlertTriangle size={26} strokeWidth={1.6} />}
+        title="Legacy .xls cannot be read here"
+        detail={`${formatBytes(preview.size)}. Save it as .xlsx — the viewer reads the modern format only.`}
+      />
+    );
+  }
+
   return (
     <EmptyState
       icon={<AlertTriangle size={26} strokeWidth={1.6} />}
       title="No viewer for this format yet"
-      detail={`${preview.mimeType} · ${formatBytes(preview.size)}. It opens in an external application until a viewer lands here.`}
+      detail={`${preview.mimeType} · ${formatBytes(preview.size)}. Video and audio are the next formats to land here.`}
     />
   );
 };
