@@ -84,7 +84,7 @@ export function useVoice(host: VoiceHost): UseVoiceResult {
   const engine = useMemo(
     () =>
       new VoiceEngine({
-        submit: (text) => hostRef.current.submit(text),
+        submit: (text, options) => hostRef.current.submit(text, options),
         lastAssistantText: () => hostRef.current.lastAssistantText(),
         isBusy: () => hostRef.current.isBusy(),
         interrupt: () => hostRef.current.interrupt?.(),

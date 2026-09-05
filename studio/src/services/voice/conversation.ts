@@ -43,6 +43,7 @@ import {
   type AmbientSound,
   type RecognitionSession,
   type RepairedTranscript,
+  type SubmitOptions,
   type SynthesisHandle,
   type VoiceMode,
   type VoiceSettings,
@@ -51,8 +52,14 @@ import {
 
 /** What the engine needs from the application around it. */
 export interface VoiceHost {
-  /** Hand an approved utterance to the chat. */
-  submit: (text: string) => void | Promise<void>;
+  /**
+   * Hand an approved utterance to the chat.
+   *
+   * The second argument tells the host the words were heard, not typed, so the
+   * turn can be framed as a transcript. It is optional on purpose: a host that
+   * ignores it keeps working exactly as it did.
+   */
+  submit: (text: string, options?: SubmitOptions) => void | Promise<void>;
   /** The assistant's most recent reply, for follow-up and barge-in context. */
   lastAssistantText: () => string;
   /** True while the chat engine is generating. */
@@ -945,7 +952,9 @@ export class VoiceEngine {
 
     this.setState("sending");
     try {
-      await this.host.submit(value);
+      // Every utterance that leaves here was heard through a microphone, so
+      // the chat is told as much and can frame it as a transcript.
+      await this.host.submit(value, { origin: "voice" });
     } catch (error) {
       this.fail(new VoiceError(`The message could not be sent: ${(error as Error).message}`, "ASR_FAILED"));
       return;

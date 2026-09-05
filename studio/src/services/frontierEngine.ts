@@ -35,6 +35,7 @@ import {
   runVideoToolCalls,
   type VideoToolExecutor,
 } from "./videoToolCalls";
+import { transcriptNotice, type TurnOrigin } from "./voice/types";
 import type { ChatMessage, InferenceTelemetry, ModelModeId, ToolCall } from "../types";
 
 /** What the host lets the engine do. Absent capabilities simply stay unused. */
@@ -178,6 +179,7 @@ async function streamFromOllama(
   skill?: { id: string; name: string; description?: string } | null,
   approveCommand?: (request: AgentCommandRequest) => Promise<boolean>,
   capabilities: EngineCapabilities = {},
+  origin: TurnOrigin = "text",
 ): Promise<void> {
   const id = requestId();
   const started = performance.now();
@@ -307,11 +309,17 @@ You operate as a synchronized multi-agent engineering team:
 2. IMPLEMENTATION: Emit production-grade, complete files with explicit path="..." attributes. Never truncate, never use placeholder comments (e.g. '// ... rest of code'), and preserve all existing unaffected methods.
 3. VERIFICATION: Verify your work by running project tests or type-checks with \`\`\`frontier-run (e.g. \`npm test\`, \`npx tsc --noEmit\`) to confirm zero regressions.`;
 
+  /*
+    What the model is told when the turn was spoken rather than typed.
+    Empty for a typed turn, so a keyboard prompt gets the prompt it always got.
+  */
+  const transcriptInstruction = transcriptNotice(origin);
+
   const messages = [
     {
       role: "system",
       content: DiligenceEngine.wrapSystemPrompt(CompletenessEngine.wrapSystemPrompt(
-        `You are Teminali ${selection.label}. Be precise, disclose uncertainty, and never claim a tool or test ran unless its result is present in the conversation. When the user asks you to edit workspace files, emit every intended final file as a complete fenced block with path="workspace/relative/path.ext" directly on the code fence tag (e.g. \`\`\`html path="outputs/live-edit-vision-canary.html" or \`\`\`ts path="src/example.ts"). Use one explicit path block per file, never an ambiguous patch fragment, so Teminali can apply, display, and verify the edits safely. To actually run a workspace command, emit it in a \`\`\`frontier-run fence (one command per line); its real output is returned to you before you answer again. A \`\`\`bash or \`\`\`sh block is documentation and is never executed. Read-only checks such as npm test, npx tsc, and git status run automatically; anything that changes state waits for the user, so never assume it ran.${skillInstruction}${editorInstruction}${multiAgentPrompt}`,
+        `You are Teminali ${selection.label}. Be precise, disclose uncertainty, and never claim a tool or test ran unless its result is present in the conversation. When the user asks you to edit workspace files, emit every intended final file as a complete fenced block with path="workspace/relative/path.ext" directly on the code fence tag (e.g. \`\`\`html path="outputs/live-edit-vision-canary.html" or \`\`\`ts path="src/example.ts"). Use one explicit path block per file, never an ambiguous patch fragment, so Teminali can apply, display, and verify the edits safely. To actually run a workspace command, emit it in a \`\`\`frontier-run fence (one command per line); its real output is returned to you before you answer again. A \`\`\`bash or \`\`\`sh block is documentation and is never executed. Read-only checks such as npm test, npx tsc, and git status run automatically; anything that changes state waits for the user, so never assume it ran.${skillInstruction}${editorInstruction}${multiAgentPrompt}${transcriptInstruction}`,
       )),
     },
     ...history.slice(-6).map((message) => ({

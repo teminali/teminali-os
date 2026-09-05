@@ -25,6 +25,7 @@ import {
   speakableText,
   summariseProgress,
   type RunProgress,
+  type SubmitOptions,
 } from "../../services/voice";
 import { FrontierEngine } from "../../services/frontierEngine";
 import { useGitHubStatus } from "../../hooks/useGitHubStatus";
@@ -149,7 +150,7 @@ export const StudioChat: React.FC<{
 
   // Held in a ref so the voice engine, which is created once, always calls the
   // current version rather than the one captured at mount.
-  const sendRef = useRef<(text: string) => Promise<void>>(async () => {});
+  const sendRef = useRef<(text: string, options?: SubmitOptions) => Promise<void>>(async () => {});
   const voiceRef = useRef<UseVoiceResult | null>(null);
   const spokenFor = useRef<string | null>(null);
   // What the current run has done so far — the tool calls and the prose — so
@@ -226,7 +227,7 @@ export const StudioChat: React.FC<{
   const isSpeakingStreaming = useRef(false);
 
   const send = useCallback(
-    async (text: string) => {
+    async (text: string, options?: SubmitOptions) => {
       const ready = attachments.attachments.filter((entry) => entry.status === "ready");
       const typed = text.trim();
       // An attachment alone is a valid turn: dropping a PDF and pressing enter
@@ -436,6 +437,9 @@ export const StudioChat: React.FC<{
         {
           mode: currentProfile,
           signal: controller.signal,
+          // A spoken turn is a transcript. The engine frames it as one so a
+          // misheard filename is investigated rather than taken literally.
+          origin: options?.origin ?? "text",
           // Only meaningful for the agent engines; the local engine ignores them.
           agentModel: agentSelection?.model ?? null,
           agentPermission: agentPermission ?? undefined,
@@ -488,9 +492,12 @@ export const StudioChat: React.FC<{
      * the screen and goes to the assistant instead. This is the seam that lets
      * the composer's microphone *be* the assistant rather than sit beside it.
      */
-    submit: (text) => {
-      // Direct bridge to normal chatbox — voice does not have its own workflow
-      sendRef.current(text);
+    submit: (text, options) => {
+      // Direct bridge to normal chatbox — voice does not have its own workflow.
+      // The origin rides along so the turn reaches the model marked as heard,
+      // not typed: the words are a transcript and the names in them are its
+      // best guess, not the operator's spelling.
+      sendRef.current(text, options);
     },
     interrupt: () => {
       turnIdRef.current += 1;

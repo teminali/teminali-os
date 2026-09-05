@@ -357,3 +357,40 @@ export const DEFAULT_VOICE_SETTINGS: VoiceSettings = {
   speakGreeting: true,
   ambientMemory: true,
 };
+
+/* ────────────────────────────────────────────────────────────────────────────
+   Turn origin
+   ──────────────────────────────────────────────────────────────────────────── */
+
+/**
+ * Where the words in a chat turn came from.
+ *
+ * A typed turn is what the operator meant, character for character. A spoken
+ * one is a recogniser's best guess at it, and the two must not be read the
+ * same way — see `VOICE_TRANSCRIPT_NOTICE`.
+ */
+export type TurnOrigin = "text" | "voice";
+
+/** What the host learns about an utterance beyond its words. */
+export interface SubmitOptions {
+  origin: TurnOrigin;
+}
+
+/**
+ * What the model is told when the turn it is reading was heard, not typed.
+ *
+ * Written after a real session: the recogniser heard a folder name that does
+ * not exist, the agent ran `du -sh` on it, got "No such file or directory",
+ * and answered "it does not exist, please verify" without ever listing the
+ * directory it had just been standing in. The transcript was wrong; the answer
+ * was worse. Kept to a handful of lines because Flash runs an 8k window.
+ */
+export const VOICE_TRANSCRIPT_NOTICE = `[SPOKEN TURN — THIS MESSAGE IS A TRANSCRIPT]
+The user spoke this; speech recognition wrote it down and may have got words wrong, especially proper nouns, file and directory names, paths, commands and technical identifiers. Treat the words as approximate and the intent as exact.
+When a name you were given is not found, look at what IS there before you say anything: list the directory, or search the workspace. Then either act on the obvious near-match, saying which name you used, or ask one specific question naming the candidates you found.
+Never end a turn with "it does not exist, please verify the name" — that is a transcription error report, not an answer, and you have the shell to check.`;
+
+/** The prompt fragment for a turn of this origin. Empty for anything typed. */
+export function transcriptNotice(origin: TurnOrigin | undefined): string {
+  return origin === "voice" ? `\n\n${VOICE_TRANSCRIPT_NOTICE}` : "";
+}

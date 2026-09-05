@@ -13,6 +13,7 @@ import { TerminalService } from "./terminalService";
 import { FrontierEngine, type EngineCapabilities, type StreamCallbacks, type VideoToolSummary } from "./frontierEngine";
 import { executeTool, getToolManifest } from "../video/mcp/toolRegistry";
 import type { AgentCommandRequest } from "./agentCommands";
+import type { TurnOrigin } from "./voice/types";
 import type { ChatMessage, ModelModeId } from "../types";
 
 export type { StreamCallbacks } from "./frontierEngine";
@@ -21,6 +22,11 @@ export { FLASH_MODEL, MAX_MODEL } from "./frontierEngine";
 export interface StreamRequestOptions {
   mode?: ModelModeId;
   signal?: AbortSignal;
+  /**
+   * Where the user's words came from. Defaults to "text"; "voice" tells the
+   * engine the prompt is a transcript and may have misheard names in it.
+   */
+  origin?: TurnOrigin;
   skill?: { id: string; name: string; description?: string } | null;
   /** Approval gate for state-changing commands the agent asks to run. */
   approveCommand?: (request: AgentCommandRequest) => Promise<boolean>;
@@ -129,6 +135,7 @@ export class AIService {
           options.skill,
           options.approveCommand,
           studioCapabilities(options.workingDirectory),
+          options.origin ?? "text",
         );
         return;
       }

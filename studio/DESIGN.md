@@ -1953,3 +1953,61 @@ the caption under the orb.
 
 Tests: `tests/turn-taking.test.mjs` (19); the endpointer cases in
 `tests/voice.test.mjs` are unchanged and still pass.
+
+### 6.7 A spoken turn is a transcript, and the model is told so (2026-09-05)
+
+The operator asked, out loud, for the size of a folder. Recognition heard a
+name that is not on the Desktop. The agent ran `du -sh ~/Desktop/"5 zone"`
+verbatim, got "No such file or directory", and answered *"It appears that the
+'5 zone' folder does not exist on your desktop. Please verify the folder name
+and try again."* — five steps and 28 s to report a transcription error as a
+fact about the filesystem, without once listing the directory it was already
+standing in.
+
+The words were the recogniser's guess; the agent read them as the operator's
+spelling. So the origin now travels with the turn:
+
+- `VoiceHost.submit` (`conversation.ts`) takes an optional second argument,
+  `SubmitOptions { origin: TurnOrigin }` — `"text" | "voice"`, declared in
+  `types.ts`. Optional on purpose: a host that ignores it behaves exactly as
+  before, and `send()` passes `{ origin: "voice" }` because everything leaving
+  there came through a microphone.
+- `useVoice.ts` forwards the second argument instead of dropping it — the same
+  bug §6 already paid for once with `progressSummary`.
+- `StudioChat.tsx`'s host hands it to `sendRef`, and `send` puts
+  `origin: options?.origin ?? "text"` into the existing `StreamRequestOptions`.
+- `aiService.ts` passes it to `FrontierEngine.streamLocal`, whose last
+  parameter is now `origin: TurnOrigin = "text"`.
+
+No new transport, and no second prompt channel: `frontierEngine.ts` builds
+`transcriptInstruction = transcriptNotice(origin)` beside the skill, editor and
+multi-agent sections and interpolates it into the one system message it already
+assembles. For a typed turn the fragment is the empty string, so a keyboard
+prompt gets byte-for-byte the prompt it got before. For a spoken one the model
+reads `VOICE_TRANSCRIPT_NOTICE` (`types.ts`):
+
+> **[SPOKEN TURN — THIS MESSAGE IS A TRANSCRIPT]**
+> The user spoke this; speech recognition wrote it down and may have got words
+> wrong, especially proper nouns, file and directory names, paths, commands and
+> technical identifiers. Treat the words as approximate and the intent as exact.
+> When a name you were given is not found, look at what IS there before you say
+> anything: list the directory, or search the workspace. Then either act on the
+> obvious near-match, saying which name you used, or ask one specific question
+> naming the candidates you found.
+> Never end a turn with "it does not exist, please verify the name" — that is a
+> transcription error report, not an answer, and you have the shell to check.
+
+Four lines because Flash runs an 8k window, and the last line names the exact
+sentence that failed rather than a principle it might be derived from.
+
+**Not yet true:** only the local Frontier lane is framed. The Claude Code and
+Codex lanes in `aiService.ts` hand the prompt to an external CLI with no system
+prompt of ours to extend, so a spoken turn routed to an agent tab still arrives
+unmarked. Nor is there automatic grounding — nothing runs an `ls` for the model
+when a path in a command fails. That would need a shell-command path parser and
+a second execution channel outside the approval gate in `agentCommands.ts`;
+it is a subsystem, not a helper, and was deliberately not built.
+
+Tests: `tests/voice-origin.test.mjs` (9) — the fragment present for `"voice"`,
+empty for `"text"` and for an origin-less caller, its wording, and the
+threading at each of the five hops.
