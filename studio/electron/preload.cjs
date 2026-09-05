@@ -305,5 +305,11 @@ contextBridge.exposeInMainWorld("teminali", {
       ipcRenderer.on("assistant:overlay-state", handler);
       return () => ipcRenderer.removeListener("assistant:overlay-state", handler);
     },
+    /** Where the real mouse is, ~60fps, only while the overlay is drawn. */
+    onOverlayCursor: (fn) => {
+      const handler = (_event, point) => fn(point);
+      ipcRenderer.on("assistant:overlay-cursor", handler);
+      return () => ipcRenderer.removeListener("assistant:overlay-cursor", handler);
+    },
   },
 });

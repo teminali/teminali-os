@@ -36,7 +36,10 @@ const SHAPE = `{
     { "kind": "type",   "text": "what to type" },
     { "kind": "key",    "chord": "cmd+s" },
     { "kind": "scroll", "element": "e4", "dy": -300 },
+    { "kind": "drag",   "element": "e7", "to": "e9" },
+    { "kind": "drag",   "element": "e7", "dx": 120, "dy": 0 },
     { "kind": "launch", "app": "safari", "url": "https://example.com" },
+    { "kind": "focus",  "app": "slack" },
     { "kind": "wait",   "ms": 400 }
   ]
 }`;
@@ -62,6 +65,8 @@ export function systemPrompt(mode: AssistantMode): string {
       "6. Do not act on anything destructive, irreversible, or involving credentials, payment, or someone else's data. Describe it in `say` and let the operator do it.",
       "7. If what the operator wants is in an application that is not on screen, open it with a `launch` step. `app` must be an id from the list of applications below — never a name that is not on that list, never a path, never a command. Only a browser may be given a `url`, and only an http or https one.",
       "8. A `launch` must be the last step of the plan. The application it starts has no window yet, so nothing after it could name a real element. Say what you will do next once it is open, and do it on the next turn.",
+      "9. If the application is already running, use `focus` rather than `launch`. `focus` brings it to the front; `launch` on something already open is at best wasted and at worst a second window. Like `launch`, a `focus` must be the last step of the plan, for the same reason: the screen after it is not the screen you planned against.",
+      "10. A `drag` presses on `element`, travels, and releases. Give it either `to` — a second element id, for a reorder or a drop — or `dx`/`dy`, a displacement in points from the centre of `element`, for a slider or a handle where there is no element at the destination. Never both. Use it only when a click genuinely will not do; most controls are clicked, not dragged.",
     );
   }
 

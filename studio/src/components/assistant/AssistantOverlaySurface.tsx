@@ -57,10 +57,22 @@ interface AssistantBridge {
   hideOverlay?: () => Promise<void>;
   focusStudio?: () => Promise<void>;
   setOverlayInteractive?: (interactive: boolean) => Promise<void>;
+  onOverlayCursor?: (fn: (point: { x: number; y: number }) => void) => () => void;
 }
+
+/**
+ * How big the drawn pointer is, in points.
+ *
+ * Chosen against the system arrow rather than against the screen: at 64 it is
+ * roughly three times the size of the real cursor, which is the point at which
+ * the eye can follow it crossing a 27-inch display without it covering the
+ * control it is about to click.
+ */
+const CURSOR_SIZE = 64;
 
 export const AssistantOverlaySurface: React.FC = () => {
   const [state, setState] = useState<OverlayState>(EMPTY);
+  const [cursor, setCursor] = useState<{ x: number; y: number } | null>(null);
   const dismissTimerRef = useRef<number | null>(null);
 
   const getBridge = (): AssistantBridge | undefined =>
@@ -78,9 +90,16 @@ export const AssistantOverlaySurface: React.FC = () => {
     void bridge?.overlayState?.().then((current) => {
       setState((previous) => (previous.visible ? previous : { ...EMPTY, ...current }));
     });
-    return bridge?.onOverlay?.((next) => {
+    const stopState = bridge?.onOverlay?.((next) => {
       setState({ ...EMPTY, ...next });
     });
+    const stopCursor = bridge?.onOverlayCursor?.((point) => {
+      setCursor(point);
+    });
+    return () => {
+      stopState?.();
+      stopCursor?.();
+    };
   }, []);
 
   useEffect(() => {
@@ -144,8 +163,74 @@ export const AssistantOverlaySurface: React.FC = () => {
       }
     : null;
 
+  // Window-relative, because the window covers one display and the pointer is
+  // reported in global screen points like every other coordinate here.
+  const pointer = cursor
+    ? { left: cursor.x - state.origin.x, top: cursor.y - state.origin.y }
+    : null;
+
   return (
     <div className="fixed inset-0 pointer-events-none select-none font-sans">
+      {/* The assistant's own pointer, drawn over the operating system's.
+          Same doctrine as the ring: a dark stroke outside a light fill, so it
+          reads over a white document and over a black terminal without a glow,
+          a blur or a gradient — none of which this design system has. The tip
+          of the arrow sits exactly on the real hot spot, which is why the SVG
+          is anchored at its top-left corner and not centred. */}
+      {pointer && (
+        <div
+          className="absolute pointer-events-none transition-transform duration-100"
+          style={{
+            left: pointer.left,
+            top: pointer.top,
+            width: CURSOR_SIZE,
+            height: CURSOR_SIZE,
+            transform: state.acting ? "scale(1.15)" : "scale(1)",
+            transformOrigin: "top left",
+          }}
+        >
+          {/* A halo behind the arrow, so the eye catches the movement itself
+              rather than having to find the arrow first. */}
+          <span
+            className={`absolute rounded-full ${
+              state.acting ? "bg-warning/25 animate-ping" : "bg-accent/15"
+            }`}
+            style={{
+              left: -CURSOR_SIZE * 0.35,
+              top: -CURSOR_SIZE * 0.35,
+              width: CURSOR_SIZE * 0.9,
+              height: CURSOR_SIZE * 0.9,
+            }}
+          />
+          <svg
+            width={CURSOR_SIZE}
+            height={CURSOR_SIZE}
+            viewBox="0 0 24 24"
+            className="absolute inset-0"
+            aria-hidden="true"
+          >
+            {/* Drawn twice, dark first: the outer stroke is what keeps the
+                arrow visible on a white page, where a white-edged one would
+                vanish. Painting it underneath rather than over means the fill
+                stays the colour it is supposed to be. */}
+            <path
+              d="M4 2 L4 19 L8.6 14.8 L11.4 21.4 L14.6 20 L11.9 13.6 L18 13.3 Z"
+              fill="none"
+              stroke="rgba(0,0,0,0.55)"
+              strokeWidth={3.2}
+              strokeLinejoin="round"
+            />
+            <path
+              d="M4 2 L4 19 L8.6 14.8 L11.4 21.4 L14.6 20 L11.9 13.6 L18 13.3 Z"
+              className={state.acting ? "fill-warning" : "fill-accent"}
+              stroke="white"
+              strokeWidth={1.1}
+              strokeLinejoin="round"
+            />
+          </svg>
+        </div>
+      )}
+
       {target && box && (
         <div
           key={`${box.left},${box.top},${box.width}`}

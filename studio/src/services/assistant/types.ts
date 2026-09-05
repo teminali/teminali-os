@@ -128,6 +128,20 @@ export type PlanStep =
   | { kind: "key"; chord: string }
   | { kind: "scroll"; element: string; dx?: number; dy?: number }
   /**
+   * Press on one element, travel, and release.
+   *
+   * The destination is expressed one of two ways, never both. `to` names a
+   * second element, which is what a reorder or a drop onto a target is. `dx`/
+   * `dy` is a displacement in points from the centre of `element`, which is
+   * what a slider is: there is no element at "seventy percent along the
+   * track", only a distance from where the thumb is now.
+   *
+   * A displacement is not a coordinate read off a screenshot. The origin still
+   * comes from the accessibility API, and the offset is arithmetic on it, so
+   * this stays inside the rule that no position is ever derived from pixels.
+   */
+  | { kind: "drag"; element: string; to?: string; dx?: number; dy?: number; button?: "left" | "right" }
+  /**
    * Start an application, optionally at a web address.
    *
    * The one step that does not name an element, because the whole point of it
@@ -137,6 +151,17 @@ export type PlanStep =
    * same way an invented element id clicks nothing.
    */
   | { kind: "launch"; app: string; url?: string }
+  /**
+   * Bring an application that is already running to the front.
+   *
+   * The sibling of `launch`, and separate from it because starting a program
+   * and switching to one are different acts with different costs. `launch` on
+   * something already open is at best a no-op and at worst a second window;
+   * `focus` on something that is not running fails honestly rather than
+   * quietly starting it. Like `launch` it names an application rather than an
+   * element, because the thing it wants is by definition not on this screen.
+   */
+  | { kind: "focus"; app: string }
   | { kind: "wait"; ms: number };
 
 export type PlanStepKind = PlanStep["kind"];

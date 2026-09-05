@@ -2,6 +2,8 @@ const { BrowserWindow, screen } = require("electron");
 
 /** How long a bubble may go without a fresh state before it hides itself. */
 const STALE_AFTER_MS = 45_000;
+/** How often the drawn cursor catches up with the real one. ~60fps. */
+const CURSOR_POLL_MS = 16;
 const path = require("path");
 
 /**
@@ -49,6 +51,26 @@ function attachAssistantOverlay({ devUrl, indexPath, log = () => {} }) {
   let expiry = null;
   /** Put away by hand. Survives new messages until it is brought back. */
   let minimized = false;
+  /**
+   * The timer that follows the pointer.
+   *
+   * The assistant moves the real mouse, and on a large display a 24-pixel
+   * system arrow travelling across it is genuinely hard to follow — the
+   * operator watches a control get clicked without ever seeing what clicked
+   * it. So the overlay draws its own, much larger cursor on top of the real
+   * one.
+   *
+   * `screen.getCursorScreenPoint()` rather than asking the pointer helper:
+   * this runs sixty times a second, and the helper is a process spawn. This is
+   * an in-process read of something Electron already knows, and it costs
+   * nothing worth measuring.
+   *
+   * It exists only while the overlay is visible. A timer that polls the mouse
+   * for the life of the application would be a battery cost paid for a drawing
+   * nobody is looking at.
+   */
+  let cursorTimer = null;
+  let lastCursor = null;
 
   function targetDisplay(point) {
     try {
@@ -148,14 +170,42 @@ function attachAssistantOverlay({ devUrl, indexPath, log = () => {} }) {
     if (typeof expiry.unref === "function") expiry.unref();
   }
 
+  function stopFollowingCursor() {
+    if (cursorTimer) clearInterval(cursorTimer);
+    cursorTimer = null;
+    lastCursor = null;
+  }
+
+  function followCursor() {
+    if (cursorTimer) return;
+    cursorTimer = setInterval(() => {
+      if (!window || window.isDestroyed() || !window.isVisible()) return;
+      let point;
+      try {
+        point = screen.getCursorScreenPoint();
+      } catch {
+        return;
+      }
+      // Only when it actually moved. A still pointer would otherwise send
+      // sixty identical messages a second across the context bridge.
+      if (lastCursor && lastCursor.x === point.x && lastCursor.y === point.y) return;
+      lastCursor = point;
+      window.webContents.send("assistant:overlay-cursor", point);
+    }, CURSOR_POLL_MS);
+    // Never hold the event loop open just to draw a cursor.
+    if (typeof cursorTimer.unref === "function") cursorTimer.unref();
+  }
+
   function apply() {
     if (!window || window.isDestroyed()) return;
     const wanted = Boolean(lastState) && !minimized && !appFocused;
     if (wanted) {
       // showInactive, never show: the overlay must not become the key window.
       if (!window.isVisible()) window.showInactive();
-    } else if (window.isVisible()) {
-      window.hide();
+      followCursor();
+    } else {
+      stopFollowingCursor();
+      if (window.isVisible()) window.hide();
     }
   }
 
@@ -196,6 +246,7 @@ function attachAssistantOverlay({ devUrl, indexPath, log = () => {} }) {
   function hide() {
     lastState = null;
     clearExpiry();
+    stopFollowingCursor();
     if (!window || window.isDestroyed()) return;
     window.webContents.send("assistant:overlay-state", { visible: false });
     window.hide();
@@ -203,6 +254,7 @@ function attachAssistantOverlay({ devUrl, indexPath, log = () => {} }) {
 
   function destroy() {
     clearExpiry();
+    stopFollowingCursor();
     if (window && !window.isDestroyed()) {
       window.destroy();
     }

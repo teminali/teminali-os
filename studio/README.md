@@ -160,8 +160,8 @@ Hold the global shortcut, or press the microphone in any composer. It looks at
 your screen and either explains it or acts on it.
 
 - **Modes:** `dictate` (into the composer) · `talk` (explains and points) ·
-  `agent` (may click, type, scroll and open applications). The default is
-  **`agent`**.
+  `agent` (may click, drag, type, scroll, switch between and open
+  applications). The default is **`agent`**.
 - **Autonomy:** `guide` · `confirm` · `auto`. The default is **`auto`**, chosen
   by the operator on 2026-09-03; the two safer rungs are one switch away.
 - **Opening applications.** A `launch` step starts an application, and a browser
@@ -169,6 +169,23 @@ your screen and either explains it or acts on it.
   in `src/services/assistant/apps.ts` — never a path, never a command, and no
   terminal is in it. A launch is always the last step of a plan, because what it
   opens has no window to plan against yet.
+- **Dragging.** A `drag` step presses on an element, walks the path, and
+  releases — a path rather than a down-and-up, because a slider or a reorderable
+  list reads the events in between and a two-event drag does nothing at all. The
+  destination is either a second element (`to`) or a displacement in points from
+  the first (`dx`/`dy`), never both, and both ends must land on a connected
+  screen.
+- **Switching applications.** A `focus` step brings an application that is
+  *already running* to the front. It never starts anything — that is `launch`,
+  and it has a different cost — and like `launch` it ends the plan.
+- **Coming back.** When a turn moves you into another application, the assistant
+  decides whether to return here: it stays if the plan moved you there on
+  purpose, comes back if something only this window can show needs reading, and
+  otherwise returns you to wherever you were when you asked.
+- **A much bigger pointer.** While a turn is running the overlay draws its own
+  64-point cursor over the system arrow so you can follow what the assistant is
+  doing. It exists only while the overlay is on screen, and changes nothing
+  about your Mac's own pointer settings.
 - **A vision model is never asked where anything is.** The screenshot is
   context; positions come from the macOS accessibility tree via the Swift helper
   in `native/macos/pointer/`. `PlanStep` carries no coordinate field on any
@@ -558,7 +575,7 @@ ollama serve              # local models on 127.0.0.1:11434
 
 ```bash
 npm run typecheck   # tsc --noEmit
-npm test            # 1102 tests, 0 failures
+npm test            # 1112 tests, 0 failures
 npm run build       # tsc && vite build
 npm run verify:core # all three
 ```

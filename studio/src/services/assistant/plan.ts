@@ -30,10 +30,18 @@ export const PLAN_LIMITS = Object.freeze({
   maxSayLength: 600,
   maxScroll: 4_000,
   maxWaitMs: 5_000,
+  /**
+   * How far a drag may travel as a bare displacement, in points.
+   *
+   * Generous enough to cross a wide slider or a long list, short enough that a
+   * model which has confused points for pixels — or invented a number — cannot
+   * sweep a selection across the whole desktop before anyone can stop it.
+   */
+  maxDrag: 2_000,
 });
 
 /** Steps that change the world. Everything else only draws. */
-const ACTING: ReadonlySet<string> = new Set(["click", "type", "key", "scroll", "launch"]);
+const ACTING: ReadonlySet<string> = new Set(["click", "drag", "type", "key", "scroll", "launch", "focus"]);
 
 const MODIFIERS = new Set(["cmd", "command", "meta", "shift", "ctrl", "control", "alt", "opt", "option"]);
 
@@ -262,6 +270,46 @@ export function validatePlan(parsed: unknown, options: ValidateOptions): Validat
         break;
       }
 
+      case "drag": {
+        const element = resolve(index, step);
+        if (!element) break;
+        const button = step.button === "right" ? "right" : "left";
+
+        // A destination given twice is a destination given badly: one of the
+        // two was meant and there is no way to tell which, so neither is used.
+        const named = typeof step.to === "string" && step.to.trim() ? step.to.trim() : "";
+        const hasOffset = step.dx !== undefined || step.dy !== undefined;
+        if (named && hasOffset) {
+          reject(index, "the drag named both a destination element and an offset; it can have one", step);
+          break;
+        }
+
+        if (named) {
+          const destination = resolve(index, { ...step, element: named });
+          if (!destination) break;
+          if (destination.id === element.id) {
+            reject(index, "the drag started and ended on the same element", step);
+            break;
+          }
+          steps.push({ kind: "drag", element: element.id, to: destination.id, button });
+          break;
+        }
+
+        const clamp = (value: unknown) => {
+          const parsedValue = Number(value);
+          if (!Number.isFinite(parsedValue)) return 0;
+          return Math.max(-PLAN_LIMITS.maxDrag, Math.min(PLAN_LIMITS.maxDrag, Math.round(parsedValue)));
+        };
+        const dx = clamp(step.dx);
+        const dy = clamp(step.dy);
+        if (dx === 0 && dy === 0) {
+          reject(index, "the drag had nowhere to go: no destination element and no offset", step);
+          break;
+        }
+        steps.push({ kind: "drag", element: element.id, dx, dy, button });
+        break;
+      }
+
       case "type": {
         const text = typeof step.text === "string" ? step.text : "";
         if (!text) {
@@ -334,6 +382,20 @@ export function validatePlan(parsed: unknown, options: ValidateOptions): Validat
         break;
       }
 
+      case "focus": {
+        const app = resolveLaunchApp(step.app);
+        if (!app) {
+          const named = typeof step.app === "string" && step.app.trim() ? `"${step.app.trim().slice(0, 40)}"` : "that";
+          reject(index, `${named} is not an application this assistant knows`, step);
+          break;
+        }
+        // Same reasoning as `launch`: whatever is planned after this was
+        // planned against the screen that is about to be replaced.
+        steps.push({ kind: "focus", app: app.id });
+        launched = app.name;
+        break;
+      }
+
       case "wait": {
         const ms = Number(step.ms);
         if (!Number.isFinite(ms) || ms <= 0) {
@@ -387,10 +449,19 @@ export function describeStep(step: PlanStep, elements: ScreenElement[]): string 
       return `Press ${step.chord}`;
     case "scroll":
       return `Scroll ${name(step.element)} by ${step.dx ?? 0}, ${step.dy ?? 0}`;
+    case "drag": {
+      const verb = step.button === "right" ? "Right-drag" : "Drag";
+      if (step.to) return `${verb} ${name(step.element)} onto ${name(step.to)}`;
+      return `${verb} ${name(step.element)} by ${step.dx ?? 0}, ${step.dy ?? 0}`;
+    }
     case "launch": {
       const app = resolveLaunchApp(step.app);
       const label = app ? app.name : step.app;
       return step.url ? `Open ${label} at ${step.url}` : `Open ${label}`;
+    }
+    case "focus": {
+      const app = resolveLaunchApp(step.app);
+      return `Switch to ${app ? app.name : step.app}`;
     }
     case "wait":
       return `Wait ${step.ms}ms`;

@@ -294,6 +294,48 @@ func click(at point: CGPoint, button: CGMouseButton, count: Int) {
     }
 }
 
+/// A drag is not a click with a different destination.
+///
+/// An application that implements one watches the stream of `mouseDragged`
+/// events between the press and the release: a slider reads each intermediate
+/// position, a list reorders against the row currently under the pointer, a
+/// selection rectangle is drawn from the path. Posting only a down at the
+/// origin and an up at the target gives all of them nothing to work with, and
+/// the gesture silently does nothing at all. So the path is walked, and the
+/// press is held long enough to be registered as a pickup rather than a click.
+func drag(from origin: CGPoint, to destination: CGPoint, button: CGMouseButton, steps: Int, holdMs: Int) {
+    let down: CGEventType = button == .right ? .rightMouseDown : .leftMouseDown
+    let dragged: CGEventType = button == .right ? .rightMouseDragged : .leftMouseDragged
+    let up: CGEventType = button == .right ? .rightMouseUp : .leftMouseUp
+    let hold = useconds_t(max(0, holdMs) * 1000)
+
+    move(to: origin)
+    let downEvent = CGEvent(mouseEventSource: nil, mouseType: down, mouseCursorPosition: origin, mouseButton: button)
+    downEvent?.setIntegerValueField(.mouseEventClickState, value: 1)
+    post(downEvent)
+    usleep(hold)
+
+    let count = max(1, steps)
+    for index in 1...count {
+        let progress = Double(index) / Double(count)
+        let point = CGPoint(
+            x: origin.x + (destination.x - origin.x) * progress,
+            y: origin.y + (destination.y - origin.y) * progress
+        )
+        let move = CGEvent(mouseEventSource: nil, mouseType: dragged, mouseCursorPosition: point, mouseButton: button)
+        move?.setIntegerValueField(.mouseEventClickState, value: 1)
+        post(move)
+        usleep(8000)
+    }
+
+    // Released where the last drag event landed, not where the caller asked, so
+    // the two can never disagree by a rounding error.
+    usleep(hold)
+    let upEvent = CGEvent(mouseEventSource: nil, mouseType: up, mouseCursorPosition: destination, mouseButton: button)
+    upEvent?.setIntegerValueField(.mouseEventClickState, value: 1)
+    post(upEvent)
+}
+
 func scroll(at point: CGPoint, dx: Int32, dy: Int32) {
     move(to: point)
     post(CGEvent(scrollWheelEvent2Source: nil, units: .pixel, wheelCount: 2, wheel1: dy, wheel2: dx, wheel3: 0))
@@ -486,6 +528,26 @@ case "click":
     click(at: point, button: button, count: count)
     emit(["clicked": ["x": point.x, "y": point.y, "count": count, "button": args.string("button") ?? "left"]])
 
+case "drag":
+    requireAccessibility()
+    let origin = requirePoint()
+    guard let toX = args.double("tox"), let toY = args.double("toy") else {
+        fail("DESTINATION_REQUIRED", "Both --tox and --toy are required.")
+    }
+    let destination = CGPoint(x: toX, y: toY)
+    let dragButton: CGMouseButton = args.string("button") == "right" ? .right : .left
+    let dragSteps = min(200, max(2, args.int("steps") ?? 24))
+    let holdMs = min(2000, max(0, args.int("holdms") ?? 90))
+    drag(from: origin, to: destination, button: dragButton, steps: dragSteps, holdMs: holdMs)
+    emit([
+        "dragged": [
+            "from": ["x": origin.x, "y": origin.y],
+            "to": ["x": destination.x, "y": destination.y],
+            "button": args.string("button") == "right" ? "right" : "left",
+            "steps": dragSteps,
+        ],
+    ])
+
 case "scroll":
     requireAccessibility()
     let point = requirePoint()
@@ -514,17 +576,37 @@ case "key":
     }
 
 case "activate":
-    guard let pid = args.int("pid") else { fail("PID_REQUIRED", "--pid is required.") }
-    if let app = NSRunningApplication(processIdentifier: pid_t(pid)) {
-        let ok = app.activate(options: [.activateIgnoringOtherApps])
-        emit(["activated": ok, "name": app.localizedName ?? ""])
+    // Addressable two ways because the callers want two different things. The
+    // gateway restores an observation's own application and knows its pid; a
+    // `focus` step names a catalogue application and only knows its bundle id,
+    // because the whole point is that it is somebody else's process.
+    let target: NSRunningApplication?
+    if let pid = args.int("pid") {
+        target = NSRunningApplication(processIdentifier: pid_t(pid))
+    } else if let bundle = args.string("bundle") {
+        // Newest first: when an application is somehow running twice, the one
+        // the operator most recently started is the one they mean.
+        target = NSRunningApplication.runningApplications(withBundleIdentifier: bundle)
+            .sorted { ($0.launchDate ?? .distantPast) > ($1.launchDate ?? .distantPast) }
+            .first
     } else {
-        fail("APP_NOT_FOUND", "No application with pid \(pid) was found.")
+        fail("PID_REQUIRED", "Either --pid or --bundle is required.")
+    }
+    if let app = target {
+        let ok = app.activate(options: [.activateIgnoringOtherApps])
+        emit([
+            "activated": ok,
+            "name": app.localizedName ?? "",
+            "bundleId": app.bundleIdentifier ?? "",
+            "pid": Int(app.processIdentifier),
+        ])
+    } else {
+        fail("APP_NOT_RUNNING", "That application is not running.")
     }
 
 default:
     fail(
         "UNKNOWN_COMMAND",
-        "Expected one of: permissions, screens, cursor, frontmost, tree, move, click, scroll, type, key, activate."
+        "Expected one of: permissions, screens, cursor, frontmost, tree, move, click, drag, scroll, type, key, activate."
     )
 }

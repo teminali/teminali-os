@@ -121,6 +121,57 @@ function turnId(): string {
   return typeof crypto !== "undefined" && "randomUUID" in crypto ? crypto.randomUUID() : `turn-${Date.now()}`;
 }
 
+/**
+ * Bring Teminali Code to the front.
+ *
+ * Reaching through `window.teminali` rather than taking a prop because the
+ * decision to come back is made here, in the turn, and threading a callback
+ * down for it would put the policy in whatever component happened to own the
+ * hook. Outside Electron the whole chain is undefined and this is a no-op,
+ * which is the right answer for a browser tab.
+ */
+function focusStudio(): void {
+  void (
+    window as unknown as { teminali?: { assistant?: { focusStudio?: () => Promise<void> } } }
+  ).teminali?.assistant?.focusStudio?.();
+}
+
+/**
+ * Whether the assistant should come back to Teminali Code once a turn ends.
+ *
+ * The assistant genuinely drives other applications now, so "where should the
+ * operator be looking when this finishes" stopped being obvious. Three
+ * questions settle it, in this order:
+ *
+ *  1. **Did the plan move them somewhere on purpose?** A `launch` or a `focus`
+ *     is the operator asking to be in another application. Dragging them back
+ *     out of it a second later would undo the only thing the step was for.
+ *  2. **Is there something only this window can show?** A step that failed, a
+ *     step that was thrown out, an action withheld because the mode does not
+ *     act — all of that is rendered here and nowhere else. An explanation the
+ *     operator cannot see is not an explanation, so come back regardless of
+ *     where they started.
+ *  3. **Otherwise, did they start here?** If they were in this window when
+ *     they asked, they expect to end in it. If they called from a global
+ *     hotkey while working somewhere else, they did not, and stealing focus
+ *     would interrupt exactly the work they were narrating.
+ */
+export function shouldReturnToStudio(state: {
+  relocated: boolean;
+  failed: boolean;
+  rejected: number;
+  actionsWithheld: boolean;
+  startedInStudio: boolean;
+  handsFree: boolean;
+}): boolean {
+  if (state.relocated) return false;
+  if (state.failed || state.rejected > 0 || state.actionsWithheld) return true;
+  // Hands-free is a conversation, not a window: the answer is spoken, and the
+  // operator has not necessarily looked at the screen at all.
+  if (state.handsFree) return false;
+  return state.startedInStudio;
+}
+
 export function useAssistant(): UseAssistantResult {
   const [settings, setSettings] = useState<AssistantSettings>(loadSettings);
   const [capabilities, setCapabilities] = useState<AssistantCapabilities | null>(null);
@@ -243,17 +294,21 @@ export function useAssistant(): UseAssistantResult {
   const runSteps = useCallback(
     async (observationId: string, steps: PlanStep[]) => {
       const autonomy = settingsRef.current.autonomy;
+      /** Whether the plan deliberately put the operator in another application. */
+      let relocated = false;
+      let failed = false;
 
       for (let index = 0; index < steps.length; index += 1) {
-        if (abortRef.current?.signal.aborted) return;
+        if (abortRef.current?.signal.aborted) return { relocated, failed };
         const step = steps[index];
 
         // Pointing is how this assistant answers, so the ring is drawn for
         // every step regardless of whether the step will be executed.
         if ("element" in step) setTargetId(step.element);
-        // A launch replaces the screen the ring was drawn on, so stop drawing it
-        // rather than leaving a highlight over a window that is going away.
-        else if (step.kind === "launch") setTargetId(null);
+        // A launch or a focus replaces the screen the ring was drawn on, so stop
+        // drawing it rather than leaving a highlight over a window that is
+        // going away.
+        else if (step.kind === "launch" || step.kind === "focus") setTargetId(null);
 
         const mark = (status: StepOutcome["status"], detail?: string) => {
           setTurn((previous) =>
@@ -277,6 +332,11 @@ export function useAssistant(): UseAssistantResult {
 
         const acts = step.kind !== "point" && step.kind !== "wait";
         if (acts && autonomy === "confirm") {
+          // The prompt is drawn in this window. A previous step may have left
+          // the operator in another application, where they would be waiting
+          // on a question they cannot see — so come back before asking, not
+          // after being answered.
+          if (relocated || !document.hasFocus()) focusStudio();
           const decision = await waitForOperator(index);
           if (decision === "skip") {
             mark("skipped", "Skipped by you");
@@ -288,17 +348,26 @@ export function useAssistant(): UseAssistantResult {
         mark("running");
         try {
           const result = await AssistantService.act(observationId, step, abortRef.current?.signal);
-          if (step.kind === "launch") {
-            // The gateway drops the observation on a launch, because the screen
-            // it described has been replaced. Drop the cached look with it, or
-            // the next sentence would be answered against the application the
-            // operator was in before this step opened a new one.
+          if (step.kind === "launch" || step.kind === "focus") {
+            // The gateway drops the observation on a launch or a focus, because
+            // the screen it described has been replaced. Drop the cached look
+            // with it, or the next sentence would be answered against the
+            // application the operator was in before this step moved them.
             pendingObservation.current = null;
-            mark("done", result?.frontmost === false ? "Opening — it has not come to the front yet" : undefined);
+            relocated = true;
+            mark(
+              "done",
+              result?.frontmost === false
+                ? step.kind === "focus"
+                  ? "Asked for — it has not come to the front yet"
+                  : "Opening — it has not come to the front yet"
+                : undefined,
+            );
             continue;
           }
           mark("done");
         } catch (error) {
+          failed = true;
           const message = error instanceof Error ? error.message : "The step could not be run.";
           mark("failed", message);
           // A failed step invalidates every step after it: they were planned
@@ -315,9 +384,10 @@ export function useAssistant(): UseAssistantResult {
                 }
               : previous,
           );
-          return;
+          return { relocated, failed };
         }
       }
+      return { relocated, failed };
     },
     [waitForOperator],
   );
@@ -335,6 +405,10 @@ export function useAssistant(): UseAssistantResult {
 
       const active = settingsRef.current;
       const mode: AssistantMode = active.mode === "dictate" ? "talk" : active.mode;
+      // Read before anything is drawn or focused: once the overlay is up and
+      // steps are running, "were they looking at us when they asked" is no
+      // longer answerable. This is the operator's seat for the whole turn.
+      const startedInStudio = document.hasFocus();
       const id = turnId();
       setOpen(true);
       setTargetId(null);
@@ -428,8 +502,23 @@ export function useAssistant(): UseAssistantResult {
       }
       if (controller.signal.aborted) return;
 
+      let walked = { relocated: false, failed: false };
       if (plan.steps.length > 0) {
-        await runSteps(seen.id, plan.steps);
+        walked = (await runSteps(seen.id, plan.steps)) ?? walked;
+      }
+      if (!controller.signal.aborted) {
+        if (
+          shouldReturnToStudio({
+            relocated: walked.relocated,
+            failed: walked.failed,
+            rejected: plan.rejected.length,
+            actionsWithheld: plan.actionsWithheld,
+            startedInStudio,
+            handsFree: settingsRef.current.handsFree,
+          })
+        ) {
+          focusStudio();
+        }
       }
       if (!controller.signal.aborted) {
         if (settingsRef.current.handsFree) {

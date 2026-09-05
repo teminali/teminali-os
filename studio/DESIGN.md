@@ -1530,6 +1530,103 @@ growing a second surface. With no gate wired the answer is deny **at once** —
 the same rule the media-consent gate above states: a gate that cannot ask must
 not grant, and refusing in a second beats refusing in five minutes.
 
+### A drag is a path, not a slow click (2026-09-05)
+
+`PlanStep` gained `drag`, and the helper gained the `drag` command behind it
+(`native/macos/pointer/main.swift`). The naive implementation — a `mouseDown` at
+the origin and a `mouseUp` at the destination — does nothing at all in most
+applications, because an application that implements a drag reads the
+`mouseDragged` events *between* the two: a slider tracks each intermediate
+position, a list reorders against whatever row is currently under the pointer, a
+marquee is drawn from the path. So the helper walks the line in `steps`
+(default 24) and holds the press either side (`holdMs`, default 90) so it
+registers as a pickup rather than a click.
+
+The destination is given one of two ways and never both:
+
+- **`to`** — a second element id. A reorder, or a drop onto a target.
+- **`dx`/`dy`** — a displacement in points from the centre of `element`. A
+  slider, where there is genuinely no element at "seventy percent along the
+  track".
+
+The offset does not break §5's founding rule. The origin still comes from the
+accessibility API; `dx`/`dy` is arithmetic on it, not a position read off a
+screenshot. Both ends are checked against the connected screens, not just the
+start — a drag that releases outside every display drops whatever it picked up
+somewhere nobody can see. Clamped to `maxDrag` (2,000 points) at both the
+renderer's validator and the gateway, because `act()` is reachable over HTTP.
+
+### Switching to an application is not starting one (2026-09-05)
+
+`PlanStep` gained `focus`, and `pointerActivate` became addressable by bundle id
+as well as by pid (`--bundle` in the helper). `activate` already existed and was
+already used internally by `act()` to restore an observation's own application,
+but nothing exposed it to a plan, so the assistant could only reach a running
+application by launching it again — at best wasted, at worst a second window.
+
+`focus` refuses to start anything: an application that is not running fails with
+`APP_NOT_RUNNING` rather than being quietly opened. That is a different act with
+a different cost, and it has its own step. Like `launch`, `focus` is answered
+above the frontmost-application guard (changing what is in front is the whole
+point of it), it must be the last step of a plan, and it forgets the observation
+— the screen that was described is not the screen that follows.
+
+### Knowing when to come back (2026-09-05)
+
+Once the assistant genuinely drives other applications, "where should the
+operator be looking when this finishes" stops being obvious. `shouldReturnToStudio`
+(`src/hooks/useAssistant.ts`) answers it from three questions, in order:
+
+1. **Did the plan move them somewhere on purpose?** A `launch` or a `focus` is
+   the operator asking to be in another application. Pulling them back out of it
+   a second later would undo the only thing the step was for. Stay.
+2. **Is there something only this window can show?** A step that failed, a step
+   that was rejected, an action withheld because the mode does not act — all of
+   that is rendered here and nowhere else. Come back regardless of where they
+   started, because an explanation the operator cannot see is not one.
+3. **Otherwise, did they start here?** `document.hasFocus()` is read at the top
+   of the turn, before the overlay is drawn or any step runs, because afterwards
+   the question is no longer answerable. If they were in this window when they
+   asked, they expect to end in it; if they called from the global hotkey while
+   working somewhere else, they did not, and stealing focus would interrupt
+   exactly the work they were narrating.
+
+Hands-free is treated as a conversation rather than a window: the answer is
+spoken, so the turn ends where it is. Separately, a `confirm` prompt brings the
+window forward **before** waiting rather than after being answered — the prompt
+is drawn here, and a previous step may have left the operator somewhere they
+cannot see it. That is the same failure as the CLI permission stall below, and
+it is refused the same way.
+
+### The assistant draws its own pointer (2026-09-05)
+
+The assistant moves the real mouse — `move(to:)` posts a `.mouseMoved` CGEvent,
+and click, scroll and drag all move first, because some applications track hover
+and a click that teleports lands on a control that never saw the pointer. On a
+large display a 24-point system arrow crossing it is genuinely hard to follow:
+the operator watches a control get clicked without ever seeing what clicked it.
+
+So the overlay draws its own cursor at `CURSOR_SIZE` (64 points, ~3× the system
+arrow), anchored at the tip so it sits on the real hot spot, with a halo behind
+it so the eye catches the movement rather than having to find the arrow first.
+It follows the same two-stroke rule as the target ring — a dark stroke painted
+underneath a light-edged fill — so it reads over a white document and a black
+terminal without a glow, a blur or a gradient, none of which this design system
+has. It turns `warning`-coloured and grows while `acting`.
+
+The position comes from `screen.getCursorScreenPoint()` polled in the main
+process at `CURSOR_POLL_MS` (16ms), not from the pointer helper: this runs sixty
+times a second and the helper is a process spawn. Identical points are not sent.
+The timer exists **only while the overlay is visible** — a poll running for the
+life of the application would be battery spent on a drawing nobody is looking
+at — and is torn down in `hide()`, `destroy()` and every `apply()` that resolves
+to hidden.
+
+The alternative considered and rejected was enlarging the macOS pointer through
+Accessibility → Pointer size. That is a system-wide preference affecting every
+application at all times and persisting after Teminali Code quits; this is
+app-local, themed, and gone the moment the turn ends.
+
 ## 6. Voice (`studio/src/services/voice/`)
 
 Two tiers: the browser engine (always available) and **VibeVoice** run locally

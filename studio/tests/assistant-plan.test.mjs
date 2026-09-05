@@ -119,8 +119,85 @@ test("click defaults to one left button press and clamps a silly count", () => {
 });
 
 test("an unknown verb is refused by name", () => {
-  const result = agent({ steps: [{ kind: "drag", element: "e0" }] });
-  assert.match(result.rejected[0].reason, /"drag" is not something this assistant can do/);
+  // Deliberately not a verb anyone is planning to add. This test used to name
+  // `drag`, which stopped being unknown the day drag was implemented — and a
+  // test whose subject can graduate out from under it fails for the one reason
+  // that is not a bug.
+  const result = agent({ steps: [{ kind: "teleport", element: "e0" }] });
+  assert.match(result.rejected[0].reason, /"teleport" is not something this assistant can do/);
+});
+
+test("a drag onto another element keeps both ends", () => {
+  const step = agent({ steps: [{ kind: "drag", element: "e0", to: "e1" }] }).steps[0];
+  assert.equal(step.kind, "drag");
+  assert.equal(step.element, "e0");
+  assert.equal(step.to, "e1");
+  assert.equal(step.button, "left");
+});
+
+test("a drag by an offset keeps the offset and names no destination", () => {
+  const step = agent({ steps: [{ kind: "drag", element: "e0", dx: 120, dy: -40 }] }).steps[0];
+  assert.equal(step.to, undefined);
+  assert.equal(step.dx, 120);
+  assert.equal(step.dy, -40);
+});
+
+test("a drag given both a destination and an offset is refused rather than guessed at", () => {
+  const result = agent({ steps: [{ kind: "drag", element: "e0", to: "e1", dx: 40 }] });
+  assert.equal(result.steps.length, 0);
+  assert.match(result.rejected[0].reason, /one/);
+});
+
+test("a drag that goes nowhere is refused", () => {
+  const result = agent({ steps: [{ kind: "drag", element: "e0", dx: 0, dy: 0 }] });
+  assert.equal(result.steps.length, 0);
+  assert.match(result.rejected[0].reason, /nowhere to go/);
+});
+
+test("a drag onto itself is refused", () => {
+  const result = agent({ steps: [{ kind: "drag", element: "e0", to: "e0" }] });
+  assert.equal(result.steps.length, 0);
+  assert.match(result.rejected[0].reason, /same element/);
+});
+
+test("a drag offset is clamped rather than trusted", () => {
+  const step = agent({ steps: [{ kind: "drag", element: "e0", dx: 999_999 }] }).steps[0];
+  assert.equal(step.dx, PLAN_LIMITS.maxDrag);
+});
+
+test("a drag to an element that is not on screen is refused", () => {
+  const result = agent({ steps: [{ kind: "drag", element: "e0", to: "nope" }] });
+  assert.equal(result.steps.length, 0);
+  assert.match(result.rejected[0].reason, /not an element that was found on screen/);
+});
+
+test("a focus resolves an application and ends the plan", () => {
+  const result = agent({
+    steps: [
+      { kind: "focus", app: "safari" },
+      { kind: "click", element: "e0" },
+    ],
+  });
+  assert.equal(result.steps.length, 1);
+  assert.equal(result.steps[0].kind, "focus");
+  assert.equal(result.steps[0].app, "safari");
+  // Everything after it was planned against a screen that is about to change.
+  assert.equal(result.rejected.length, 1);
+});
+
+test("a focus on something outside the catalogue is refused", () => {
+  const result = agent({ steps: [{ kind: "focus", app: "/bin/sh" }] });
+  assert.equal(result.steps.length, 0);
+  assert.match(result.rejected[0].reason, /not an application this assistant knows/);
+});
+
+test("talk mode withholds a drag and a focus rather than running them", () => {
+  const dragged = talk({ steps: [{ kind: "drag", element: "e0", to: "e1" }] });
+  assert.equal(dragged.steps.length, 0);
+  assert.equal(dragged.actionsWithheld, true);
+  const focused = talk({ steps: [{ kind: "focus", app: "safari" }] });
+  assert.equal(focused.steps.length, 0);
+  assert.equal(focused.actionsWithheld, true);
 });
 
 test("typed text is bounded", () => {

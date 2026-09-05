@@ -249,10 +249,23 @@ export async function pointerTree({ pid = null, max = POINTER_LIMITS.maxElements
   return runPointer("tree", args, options);
 }
 
-/** Activate an application by its pid so it becomes frontmost. */
-export function pointerActivate(pid, options = {}) {
-  if (!Number.isInteger(pid) || pid <= 0) throw new PointerError("PID_REQUIRED", "A positive integer pid is required.");
-  return runPointer("activate", ["--pid", String(pid)], options);
+/**
+ * Bring an application to the front, addressed by pid or by bundle id.
+ *
+ * Two addresses because there are two callers with two different pieces of
+ * knowledge. `act()` restores the application an observation was taken of and
+ * holds its pid. A `focus` step names an application from the catalogue and
+ * holds only its bundle id, because the whole point is that the process
+ * belongs to somebody else and was not started by us.
+ */
+export function pointerActivate(target, options = {}) {
+  if (Number.isInteger(target) && target > 0) {
+    return runPointer("activate", ["--pid", String(target)], options);
+  }
+  if (typeof target === "string" && target.trim()) {
+    return runPointer("activate", ["--bundle", target.trim()], options);
+  }
+  throw new PointerError("PID_REQUIRED", "A positive integer pid or a bundle identifier is required.");
 }
 
 /* ── Acting ──────────────────────────────────────────────────────────────── */
@@ -271,6 +284,27 @@ export function pointerClick(x, y, { button = "left", count = 1, ...options } = 
   if (button === "right") args.push("--button", "right");
   if (count > 1) args.push("--count", String(Math.min(3, count)));
   return runPointer("click", args, options);
+}
+
+/**
+ * Press at one point, travel to another, release.
+ *
+ * The path is the payload. An application that implements a drag reads the
+ * intermediate positions — a slider tracks each one, a list reorders against
+ * whatever row is under the pointer — so a down at the origin and an up at the
+ * destination is not a slow click, it is a gesture that does nothing at all.
+ * The helper walks the line; this only decides how finely.
+ */
+export function pointerDrag(x, y, toX, toY, { button = "left", steps = 24, holdMs = 90, ...options } = {}) {
+  const args = [...point(x, y)];
+  if (!Number.isFinite(toX) || !Number.isFinite(toY)) {
+    throw new PointerError("POINT_REQUIRED", "A finite destination is required.");
+  }
+  args.push("--tox", String(Math.round(toX)), "--toy", String(Math.round(toY)));
+  if (button === "right") args.push("--button", "right");
+  args.push("--steps", String(Math.min(200, Math.max(2, Math.round(steps)))));
+  args.push("--holdms", String(Math.min(2_000, Math.max(0, Math.round(holdMs)))));
+  return runPointer("drag", args, options);
 }
 
 export function pointerScroll(x, y, { dx = 0, dy = 0, ...options } = {}) {

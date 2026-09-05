@@ -35,6 +35,7 @@ import {
   PointerError,
   pointerActivate,
   pointerClick,
+  pointerDrag,
   pointerFrontmost,
   pointerKey,
   pointerMove,
@@ -56,6 +57,8 @@ export const ASSISTANT_LIMITS = Object.freeze({
   captureTimeoutMs: 8_000,
   visionTimeoutMs: 45_000,
   maxTypeLength: 2_000,
+  /** How far a drag may travel as a bare displacement, in points. */
+  maxDrag: 2_000,
   /** How long `open` gets to hand the request to LaunchServices. */
   launchTimeoutMs: 10_000,
   /**
@@ -602,6 +605,32 @@ export async function act(observationId, step, options = {}) {
    * turn the operator started, rather than being a bare POST that opens
    * applications on somebody's machine.
    */
+  /*
+   * A `focus` sits beside `launch` for the same reason and answers above the
+   * same check: changing which application is in front is the thing it is for,
+   * so the guard that refuses every other step for doing so cannot apply.
+   *
+   * It differs from `launch` in refusing to start anything. An application the
+   * operator does not have open is not brought to the front by opening it —
+   * that is a different act, with a different cost, and it has its own step.
+   */
+  if (kind === "focus") {
+    const app = LAUNCHABLE_APPS.find((entry) => entry.id === (typeof step.app === "string" ? step.app : ""));
+    if (!app) throw new PointerError("APP_NOT_ALLOWED", `"${step.app}" is not an application this assistant knows.`);
+    let activated;
+    try {
+      activated = await pointerActivate(app.bundleId);
+    } catch (error) {
+      if (error instanceof PointerError && error.code === "APP_NOT_RUNNING") {
+        throw new PointerError("APP_NOT_RUNNING", `${app.name} is not running, so it cannot be brought to the front.`);
+      }
+      throw error;
+    }
+    const frontmost = await waitForFront(app.bundleId, { timeoutMs: ASSISTANT_LIMITS.launchSettleMs });
+    forgetObservation(observation.id);
+    return { kind, app: app.id, name: activated?.name ?? app.name, bundleId: app.bundleId, frontmost };
+  }
+
   if (kind === "launch") {
     const launched = await launchApplication(typeof step.app === "string" ? step.app : "", {
       url: typeof step.url === "string" && step.url ? step.url : null,
@@ -682,6 +711,43 @@ export async function act(observationId, step, options = {}) {
     case "scroll":
       await pointerScroll(point.x, point.y, { dx: Number(step.dx) || 0, dy: Number(step.dy) || 0 });
       return { kind, element: element.id, point };
+    case "drag": {
+      // Two ways to say where, and exactly one of them may be used — the same
+      // rule the renderer's validator applies, applied again because this
+      // function is reachable over HTTP and the renderer is not its only caller.
+      const named = typeof step.to === "string" && step.to ? step.to : null;
+      const hasOffset = Number.isFinite(Number(step.dx)) || Number.isFinite(Number(step.dy));
+      if (named && hasOffset) {
+        throw new PointerError("INVALID_STEP", "A drag can name a destination element or an offset, not both.");
+      }
+
+      let destination;
+      if (named) {
+        const target = observation.elements.find((entry) => entry.id === named);
+        if (!target) throw new PointerError("UNKNOWN_ELEMENT", `"${named}" is not an element from that look at the screen.`);
+        destination = centre(target.frame);
+      } else {
+        const clamp = (value) => {
+          const parsed = Number(value);
+          if (!Number.isFinite(parsed)) return 0;
+          return Math.max(-ASSISTANT_LIMITS.maxDrag, Math.min(ASSISTANT_LIMITS.maxDrag, Math.round(parsed)));
+        };
+        const dx = clamp(step.dx);
+        const dy = clamp(step.dy);
+        if (dx === 0 && dy === 0) throw new PointerError("INVALID_STEP", "The drag had nowhere to go.");
+        destination = { x: point.x + dx, y: point.y + dy };
+      }
+
+      // Both ends are checked, not just the start. A drag that releases off
+      // every screen drops whatever it picked up somewhere nobody can see.
+      if (!onAnyScreen(observation.screens, destination)) {
+        throw new PointerError("OFF_SCREEN", "That drag would end outside every connected screen.");
+      }
+      await pointerDrag(point.x, point.y, destination.x, destination.y, {
+        button: step.button === "right" ? "right" : "left",
+      });
+      return { kind, element: element.id, point, to: destination };
+    }
     default:
       throw new PointerError("INVALID_STEP", `"${kind}" is not something this assistant can do.`);
   }
