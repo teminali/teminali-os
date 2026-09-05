@@ -402,7 +402,7 @@ A turn is read in a fixed order, and the components are laid out to enforce it:
 | Turn | `chat/MessageBlock.tsx` | Prompt, reply, code cards, hover telemetry. |
 | Code card | `chat/FileActionCard.tsx` | A 28px row that opens onto the code. |
 | Waiting line | `chat/ThinkingIndicator.tsx` | The gap before the first token. |
-| Review dock | `chat/ChangeReviewDock.tsx` | Accept / reject what was written to disk. |
+| Review dock | `chat/ChangeReviewDock.tsx` | Accept / reject what was written to disk, by the chat pane or by an agent CLI. |
 | Markdown | `chat/CursorMarkdownRenderer.tsx`, `services/markdown.ts` | Blocks and inline tokens. No `innerHTML`. |
 | Composer | `chat/Composer.tsx`, `chat/AttachmentStrip.tsx` | The prompt field and what is attached to it. |
 | Pending set | `store/changeStore.ts`, `services/changeSet.ts` | The changes, and the arithmetic behind them. |
@@ -462,12 +462,41 @@ is on disk, it is listed above the composer, and one click puts the file back.
   reviewable change whose `before` is still what was on disk when the turn
   started, so a reject restores the file the operator actually had — not the
   state halfway through the turn. Tested in `tests/change-review.test.mjs`.
-* **Accept cannot fail.** The bytes are already written; accepting is the
-  operator saying they have seen them.
+* **Accept cannot fail, and it is the default in every direction.** The bytes
+  are already written; accepting is the operator saying they have seen them.
+  Ignoring the dock keeps the change, closing the app keeps it, and a set that
+  outgrows its budget keeps it. Nothing here un-writes a file except `reject`,
+  which the operator asked for by name.
+* **The set is bounded, and overflow is an accept** (`trimChanges`,
+  `MAX_PENDING_CHANGES` = 100, `MAX_PENDING_BYTES` = 32 MB). Both sides of every
+  change are held in full so a reject can be exact, so an unreviewed session
+  would otherwise grow without limit in the renderer. The oldest rows age out —
+  their bytes stay on disk, only the offer to revert them goes — and the dock
+  says how many, including after a "reject all" that would otherwise read as a
+  clean slate it is not. One change larger than the whole budget is still shown.
+* **Reject decides before it destroys** (`planReject`, tested). A row describes
+  a transition: `before` became `after`. Reject is only meaningful while the
+  second half is still true, so the file is re-read first and compared against
+  `after`. If it has moved on — the operator saved over it, a later agent turn
+  touched it, git checked something out underneath — the reject is **refused**
+  and says why, because `before` is no longer the state immediately prior to
+  what is there, and writing it would silently discard whatever came after. The
+  write that follows is conditional on the mtime just read (`expectedModified`,
+  409 from the gateway), which closes the gap between the read and the write. A
+  file the assistant *created* that is already gone needs no write at all; a
+  file it *edited* that has since been deleted is re-created, which destroys
+  nothing.
 * **Reject is a real write.** It restores `before`, or calls
   `POST /api/workspace/delete` when the assistant created the file — blanking a
   file the operator never asked for is not a restore. A row disappears only
-  after the disk agrees; a reject that fails leaves the row and says why.
+  after the disk agrees; a reject that fails leaves the row and says why. One
+  runs at a time, and every row's buttons are disabled while one is in flight:
+  two in parallel would each read the disk before the other wrote it. `Reject
+  all` reports every refusal, not just the last — each reject clears the
+  previous one's error on its way past.
+* **A dirty tab is never closed or written over by a reject.** Its buffer is the
+  operator's own unsaved text; discarding that to undo the assistant would trade
+  one loss for another.
 * **An edit that lands the file back on its original content is not a change**
   and drops out of the set.
 * **Nothing is persisted.** A `before` snapshot is only true of the disk it was
@@ -479,11 +508,38 @@ is on disk, it is listed above the composer, and one click puts the file back.
   (`panels/SideChatPane.tsx`, `panels/AgentPane.tsx`, both `width="fill"`) —
   and shows the same rows in each. A change made in one pane cannot be walked
   past by typing in another. The dock renders nothing when the set is empty.
-* **The boundary, stated plainly:** this covers the local Frontier engine's own
-  writes, which go through `liveEditService`. An agent CLI (Claude Code, Codex)
-  writes files in its own process; the shell never sees the pre-edit bytes, so
-  those edits are reported in the process strip but are **not** listed here.
-  Use git for those.
+* **Agent CLIs are in it too, by a different road** (`server/agent-edits.js`).
+  The Frontier engine authors its edits and hands both sides to
+  `liveEditService`. Claude Code and Codex write in their own process and only
+  *tell* us afterwards, so the pair is recovered from their tool stream instead:
+  a watcher beside the CLI's stdout reads the file in the same tick the tool
+  line is parsed, reads it again when the tool settles, and puts an
+  `{ type: "edit", path, before, after, existedBefore, size, modified }` event
+  on the run's own NDJSON stream. `panels/AgentPane.tsx` records it with
+  `origin: "agent"` and opens the file, so the edit appears in the editor as it
+  does for the chat pane. Reading on the server is the earliest snapshot anyone
+  can take, and it is still a race — so it is checked rather than trusted:
+    * `Edit` and `MultiEdit` are literal substitutions and therefore
+      *invertible*. If the snapshot no longer contains `old_string` the write
+      won, and `before` is reconstructed by undoing the edit on the result. An
+      edit is exact either way.
+    * A reversal that would be a guess is refused: `new_string` empty (the
+      insertion site is gone from the result) or appearing more than once
+      (which copy the tool wrote is unknowable). The change is dropped rather
+      than shown wrong — a bad `before` looks like a clean diff and, on reject,
+      writes a file that never existed.
+    * `Write` replaces the whole file and has no inverse. A lost race there
+      yields `before === after`, and that is dropped rather than listed as an
+      empty diff.
+    * Only paths `writeWorkspaceFile` would accept are watched — a row promises
+      that reject restores the file, and an extension outside its text set is a
+      promise the dock cannot keep. Paths outside the workspace root are never
+      watched at all. **Known gap:** extension-less files (`.gitignore`,
+      `Dockerfile`) are therefore invisible to the dock until the workspace
+      allowlists widen.
+    * 1 MB a side, not the workspace API's 8 MB: both sides travel the stream.
+  Tested in `tests/agent-edits.test.mjs` (29) and end to end over a real spawn
+  and a real file in `tests/agent-cli.test.mjs`.
 
 ### Agent tabs (`server/agent-cli.js`, `panels/AgentPane.tsx`)
 

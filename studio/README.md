@@ -148,6 +148,13 @@ the real workspace with their own auth, tools and resumable sessions, driven
 headless and normalised to one event shape. Neither may default to its most
 permissive permission rung.
 
+Because they write to the working tree themselves, the studio recovers each
+edit from their tool stream rather than being handed it: the file the agent
+opens in a tab, updates as it is written, and lists in the accept/reject dock
+above the composer, the same dock the chat pane uses. See
+`server/agent-edits.js` and `studio/DESIGN.md` §3 for how a `before` is
+recovered — and for the two cases where it is dropped rather than guessed.
+
 **Hosted providers.** Anthropic, OpenAI and Google, each with a light lane for
 everyday turns and a heavy lane for hard ones. The flagship of each (Opus 5, o3,
 Gemini 2.5 Ultra) is listed and **never selected automatically**. Keys are
@@ -600,7 +607,7 @@ ollama serve              # local models on 127.0.0.1:11434
 
 ```bash
 npm run typecheck   # tsc --noEmit
-npm test            # 1163 tests, 0 failures
+npm test            # 1205 tests, 0 failures
 npm run build       # tsc && vite build
 npm run verify:core # all three
 ```

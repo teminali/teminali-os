@@ -2,15 +2,7 @@ import React, { useEffect, useRef, useSyncExternalStore } from "react";
 import { useStudioStore } from "../../store/studioStore";
 import { LiveEditService } from "../../services/liveEditService";
 import { useChangeStore } from "../../store/changeStore";
-
-function languageForPath(path: string) {
-  const extension = path.split(".").pop()?.toLowerCase();
-  return ({
-    css: "css", html: "html", htm: "html", js: "javascript", jsx: "javascriptreact", json: "json",
-    md: "markdown", mjs: "javascript", py: "python", svg: "xml", ts: "typescript", tsx: "typescriptreact",
-    xml: "xml", yaml: "yaml", yml: "yaml",
-  } as Record<string, string>)[extension || ""] || "plaintext";
-}
+import { languageForPath } from "../../services/language";
 
 export const CopilotLiveEditController: React.FC = () => {
   const snapshot = useSyncExternalStore(LiveEditService.subscribe, LiveEditService.getSnapshot, LiveEditService.getSnapshot);

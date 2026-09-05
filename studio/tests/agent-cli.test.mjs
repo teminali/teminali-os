@@ -386,3 +386,70 @@ test("a zero cache field is counted as zero, not treated as missing", async () =
   assert.equal(u.cacheReadTokens, 0);
   assert.equal(u.inputTokens, 5);
 });
+
+/* ── Edits on their way to the review dock ───────────────────────────────── */
+
+/**
+ * The end of the wiring, over a real spawn and a real file.
+ *
+ * The fake agent below does what a real one does and the canned-line fakes
+ * above cannot: it announces a tool call, then actually writes the file, then
+ * reports the result. That ordering is the whole reason the snapshot is taken
+ * on the server — see server/agent-edits.js.
+ */
+function fakeEditingAgent(target, { before, after, delayMs = 60 }) {
+  writeFileSync(target, before);
+  const announce = { type: "assistant", message: { content: [{ type: "tool_use", id: "t1", name: "Edit", input: { file_path: target, old_string: before.trim(), new_string: after.trim() } }] } };
+  const settle = { type: "user", message: { content: [{ type: "tool_result", tool_use_id: "t1", content: "ok" }] } };
+  const file = join(root, `fake-edit-${randomUUID()}.mjs`);
+  writeFileSync(
+    file,
+    [
+      `#!${process.execPath}`,
+      `import { writeFileSync } from "node:fs";`,
+      `process.stdout.write(${JSON.stringify(`${JSON.stringify(announce)}\n`)});`,
+      `setTimeout(() => {`,
+      `  writeFileSync(${JSON.stringify(target)}, ${JSON.stringify(after)});`,
+      `  process.stdout.write(${JSON.stringify(`${JSON.stringify(settle)}\n`)});`,
+      `  process.exit(0);`,
+      `}, ${delayMs});`,
+      "",
+    ].join("\n"),
+    { mode: 0o755 },
+  );
+  return file;
+}
+
+test("a file the agent writes mid-turn comes back as an edit, both sides of it", async () => {
+  const target = join(root, "reviewed.ts");
+  const events = [];
+  await runAgentTurn({
+    engine: "claude",
+    prompt: "test",
+    root,
+    bin: fakeEditingAgent(target, { before: "const a = 1;\n", after: "const a = 2;\n" }),
+    onEvent: (event) => events.push(event),
+  });
+
+  const edit = events.find((event) => event.type === "edit");
+  assert.ok(edit, "the turn produced no edit event");
+  assert.equal(edit.path, "reviewed.ts", "the dock addresses files the way the workspace API does");
+  assert.equal(edit.before, "const a = 1;\n");
+  assert.equal(edit.after, "const a = 2;\n");
+  assert.equal(edit.existedBefore, true);
+  // After the tool it describes: the pane draws the step, then the dock row.
+  assert.ok(events.indexOf(edit) > events.findIndex((event) => event.type === "tool"));
+});
+
+test("a turn with no workspace root watches nothing rather than guessing a path", async () => {
+  const target = join(root, "unrooted.ts");
+  const events = [];
+  await runAgentTurn({
+    engine: "claude",
+    prompt: "test",
+    root: "",
+    bin: fakeEditingAgent(target, { before: "const a = 1;\n", after: "const a = 3;\n" }),
+    onEvent: (event) => events.push(event),
+  });
+  assert.equal(events.some((event) => event.type === "edit"), false);
+});

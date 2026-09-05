@@ -6,17 +6,7 @@ import {
 import type { FileItem } from "../../types";
 import { useStudioStore } from "../../store/studioStore";
 import { WorkspaceService } from "../../services/workspaceService";
-
-function languageFor(name: string) {
-  const extension = name.split(".").pop()?.toLowerCase();
-  const languages: Record<string, string> = {
-    css: "css", csv: "plaintext", html: "html", htm: "html", js: "javascript", jsx: "javascript",
-    json: "json", md: "markdown", mjs: "javascript", py: "python", rs: "rust", sh: "shell",
-    sql: "sql", svg: "xml", toml: "toml", ts: "typescript", tsx: "typescript", txt: "plaintext",
-    xml: "xml", yaml: "yaml", yml: "yaml",
-  };
-  return languages[extension || ""] || "plaintext";
-}
+import { languageForPath as languageFor } from "../../services/language";
 
 /**
  * A file's glyph, tinted in its language colour.

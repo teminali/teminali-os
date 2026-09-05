@@ -34,6 +34,16 @@ export function resolveWorkspacePath(root, requestedPath = "") {
   return candidate;
 }
 
+/**
+ * True when `writeWorkspaceFile` would accept this path.
+ *
+ * Exported because a caller that records a change has to know, before it
+ * offers a reject, whether the restore behind that button can run at all.
+ */
+export function isWritableWorkspaceFile(path) {
+  return TEXT_EXTENSIONS.has(extname(path).toLowerCase());
+}
+
 function fileKind(name) {
   const extension = extname(name).toLowerCase();
   if (TEXT_EXTENSIONS.has(extension) || BINARY_PREVIEW_EXTENSIONS.has(extension)) return extension;

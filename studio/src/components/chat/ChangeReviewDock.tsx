@@ -16,6 +16,13 @@ import { splitPath, type FileChange } from "../../services/changeSet";
  * operation: it writes the captured pre-edit content back, or removes the file
  * if the assistant created it. Nothing here is optimistic; a row disappears
  * only after the disk agrees.
+ *
+ * Ignoring the dock is therefore safe, and that is deliberate: a change nobody
+ * rules on stays written. The one thing that must not be silent is the set
+ * ageing its oldest rows out under `MAX_PENDING_CHANGES` — those edits are on
+ * disk and staying there, but the offer to revert them is gone, so the dock
+ * says so instead of quietly shortening its own list. It keeps saying so after
+ * a "reject all", which would otherwise read as a clean slate it is not.
  */
 
 export const ChangeReviewDock: React.FC<{ width?: "column" | "fill" }> = ({ width = "column" }) => {
@@ -24,7 +31,8 @@ export const ChangeReviewDock: React.FC<{ width?: "column" | "fill" }> = ({ widt
   const error = useChangeStore((state) => state.error);
   const expanded = useChangeStore((state) => state.expanded);
   const openPath = useChangeStore((state) => state.openPath);
-  const { accept, acceptAll, reject, rejectAll, setExpanded, toggleOpen } = useChangeStore.getState();
+  const autoAccepted = useChangeStore((state) => state.autoAccepted);
+  const { accept, acceptAll, reject, rejectAll, setExpanded, toggleOpen, dismissAutoAccepted } = useChangeStore.getState();
 
   const totals = useMemo(
     () => ({
@@ -35,13 +43,14 @@ export const ChangeReviewDock: React.FC<{ width?: "column" | "fill" }> = ({ widt
     [changes],
   );
 
-  if (changes.length === 0) return null;
+  if (changes.length === 0 && autoAccepted === 0) return null;
 
   return (
     <section
       aria-label="Changed files awaiting review"
       className={`w-full ${width === "column" ? "max-w-composer" : ""} rounded-xl border border-edge bg-surface-sunken overflow-hidden animate-in`}
     >
+      {changes.length > 0 && (
       <header className="h-9 flex items-center gap-2 pl-2 pr-1.5">
         <button
           type="button"
@@ -78,16 +87,35 @@ export const ChangeReviewDock: React.FC<{ width?: "column" | "fill" }> = ({ widt
           Accept all
         </button>
       </header>
+      )}
+
+      {autoAccepted > 0 && (
+        <p className="flex items-center gap-2 px-3 py-2 text-2xs text-ink-dim">
+          <span className="flex-1">
+            {autoAccepted} earlier {autoAccepted === 1 ? "change is" : "changes are"} no longer revertable here — still
+            written, just past what the dock can hold.
+          </span>
+          <button
+            type="button"
+            onClick={dismissAutoAccepted}
+            aria-label="Dismiss"
+            className="h-5 w-5 shrink-0 grid place-items-center rounded text-ink-faint hover:text-ink-high transition-colors duration-ds ease-ds"
+          >
+            <X size={11} />
+          </button>
+        </p>
+      )}
 
       {error && <p className="px-3 pb-2 text-2xs text-danger">{error}</p>}
 
-      {expanded && (
+      {changes.length > 0 && expanded && (
         <ul className="border-t border-edge/60 max-h-56 overflow-y-auto">
           {changes.map((change) => (
             <ChangeRow
               key={change.path}
               change={change}
               busy={busyPath === change.path}
+              locked={busyPath !== null}
               open={openPath === change.path}
               onToggle={() => toggleOpen(change.path)}
               onAccept={() => accept(change.path)}
@@ -114,11 +142,13 @@ const Stat: React.FC<{ additions: number; deletions: number; approximate?: boole
 const ChangeRow: React.FC<{
   change: FileChange;
   busy: boolean;
+  /** A reject is in flight somewhere in the dock; the store takes one at a time. */
+  locked: boolean;
   open: boolean;
   onToggle: () => void;
   onAccept: () => void;
   onReject: () => void;
-}> = ({ change, busy, open, onToggle, onAccept, onReject }) => {
+}> = ({ change, busy, locked, open, onToggle, onAccept, onReject }) => {
   const { name, directory } = splitPath(change.path);
 
   return (
@@ -142,16 +172,18 @@ const ChangeRow: React.FC<{
             <button
               type="button"
               onClick={onReject}
+              disabled={locked}
               title={change.existedBefore ? "Reject — restore the file as it was" : "Reject — remove the file the assistant created"}
-              className="w-6 h-6 rounded-md flex items-center justify-center text-ink-muted hover:text-danger hover:bg-danger/10 transition-colors duration-ds ease-ds"
+              className="w-6 h-6 rounded-md flex items-center justify-center text-ink-muted hover:text-danger hover:bg-danger/10 disabled:opacity-40 disabled:hover:text-ink-muted disabled:hover:bg-transparent transition-colors duration-ds ease-ds"
             >
               {change.existedBefore ? <RotateCcw size={12} /> : <X size={12} />}
             </button>
             <button
               type="button"
               onClick={onAccept}
+              disabled={locked}
               title="Accept — keep the change"
-              className="w-6 h-6 rounded-md flex items-center justify-center text-ink-muted hover:text-success hover:bg-success/10 transition-colors duration-ds ease-ds"
+              className="w-6 h-6 rounded-md flex items-center justify-center text-ink-muted hover:text-success hover:bg-success/10 disabled:opacity-40 disabled:hover:text-ink-muted disabled:hover:bg-transparent transition-colors duration-ds ease-ds"
             >
               <Check size={12} />
             </button>

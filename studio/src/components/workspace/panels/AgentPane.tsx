@@ -14,6 +14,8 @@ import { composePrompt } from "../../../services/fileService";
 import { MessageBlock } from "../../chat/MessageBlock";
 import { Composer } from "../../chat/Composer";
 import { ChangeReviewDock } from "../../chat/ChangeReviewDock";
+import { useChangeStore } from "../../../store/changeStore";
+import { languageForPath } from "../../../services/language";
 import { BrandGlyph, EmptyState } from "../../ui";
 import type { ChatMessage } from "../../../types";
 
@@ -111,11 +113,14 @@ export const AgentPane: React.FC<{ panel: PanelTab & { kind: AgentEngine } }> = 
 
     const { prompt } = composePrompt(typed, attachments.attachments);
     const stamp = new Date().toISOString();
+    // One id for the turn, so a change recorded from it can be traced back to
+    // the reply that produced it rather than to a second call of `Date.now()`.
+    const turnId = `${engine}-${Date.now()}`;
 
     setMessages((previous) => [
       ...previous,
-      { id: `${engine}-${Date.now()}`, role: "user", content: typed || ready.map((r) => r.name).join(", "), timestamp: stamp },
-      { id: `${engine}-${Date.now()}-reply`, role: "assistant", content: "", timestamp: stamp, isStreaming: true },
+      { id: turnId, role: "user", content: typed || ready.map((r) => r.name).join(", "), timestamp: stamp },
+      { id: `${turnId}-reply`, role: "assistant", content: "", timestamp: stamp, isStreaming: true },
     ]);
     setInput("");
     attachments.clear();
@@ -187,6 +192,43 @@ export const AgentPane: React.FC<{ panel: PanelTab & { kind: AgentEngine } }> = 
             const store = useStudioStore.getState();
             if (event.action === "reveal") store.revealPath(event.path);
             else store.setWorkspacePath(event.path);
+          },
+          /*
+            Every file the agent wrote becomes a row in the dock below.
+
+            The same treatment the built-in chat has had all along, reached by a
+            different road: the chat authors its edits and hands both sides to
+            `LiveEditService`, whereas an agent writes to disk itself and the
+            gateway recovers the pair from its tool stream. `record` folds
+            repeat writes to one path into a single reviewable change whose
+            `before` is still what was on disk when the turn started.
+          */
+          onEdit: (event) => {
+            useChangeStore.getState().record({
+              path: event.path,
+              before: event.before,
+              after: event.after,
+              existedBefore: event.existedBefore,
+              origin: "agent",
+              requestId: `${turnId}-reply`,
+            });
+            /*
+              And the file itself comes to the front, as it does when the chat
+              pane edits one. Watching a diff appear in the editor is the point
+              of the feature; a dock entry the operator has to go and find is
+              not the same thing. `openFile` reuses an existing tab, and leaves
+              a dirty one alone rather than overwriting unsaved work.
+            */
+            useStudioStore.getState().openFile({
+              path: event.path,
+              name: event.path.split("/").pop() || event.path,
+              content: event.after,
+              language: languageForPath(event.path),
+              encoding: "utf8",
+              mimeType: "text/plain",
+              size: event.size ?? undefined,
+              modified: event.modified ?? undefined,
+            });
           },
         },
       );

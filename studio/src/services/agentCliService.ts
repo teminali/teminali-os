@@ -100,6 +100,11 @@ type AgentEvent =
      the file tree, or the whole workspace switched to another project. The
      run's own stream is the only channel back to this window during a turn —
      see `emitToRun` in server/permission-bridge.js. */
+  /* One file the agent wrote, with both sides of it, so the review dock can
+     offer accept/reject for an agent turn the way it already does for the
+     built-in chat. Assembled on the server beside the CLI's stdout — see
+     server/agent-edits.js for why the "before" is read there and not here. */
+  | { type: "edit"; path: string; before: string; after: string; existedBefore: boolean; size: number | null; modified: string | null }
   | { type: "workspace"; action: "reveal"; path: string }
   | { type: "workspace"; action: "open-project"; path: string; name: string }
   // Recorded by the gateway into the plan store, not consumed here — the pane
@@ -129,6 +134,7 @@ export type AgentStreamCallbacks = StreamCallbacks & {
   onPermission?: (request: PermissionRequest) => void;
   onPermissionResolved?: (id: string) => void;
   onWorkspace?: (event: Extract<AgentEvent, { type: "workspace" }>) => void;
+  onEdit?: (event: Extract<AgentEvent, { type: "edit" }>) => void;
 };
 
 export class AgentCliService {
@@ -286,6 +292,9 @@ export class AgentCliService {
           break;
         case "workspace":
           callbacks.onWorkspace?.(event);
+          break;
+        case "edit":
+          callbacks.onEdit?.(event);
           break;
         case "notice":
         case "limits":

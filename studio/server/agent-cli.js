@@ -36,6 +36,7 @@ import { screenMcpArgs } from "./screen-mcp.js";
 import { workspaceMcpArgs } from "./workspace-mcp.js";
 import { briefingArgs } from "./agent-briefing.js";
 import { closeRun, openRun } from "./permission-bridge.js";
+import { createEditWatcher } from "./agent-edits.js";
 import { resolve, sep } from "node:path";
 
 export const AGENT_LIMITS = Object.freeze({
@@ -173,6 +174,7 @@ function argsFor(engine, { prompt, cwd, sessionId, model, permission, approval =
      { type: "reasoning", text }        thinking, as it arrives
      { type: "tool",      id, name, input, status, output, isError }
      { type: "result",    ok, durationMs, costUsd, sessionId, usage, text }
+     { type: "edit",      path, before, after, existedBefore, size, modified }
      { type: "error",     code, message }
    ------------------------------------------------------------------------- */
 
@@ -574,6 +576,8 @@ export function runAgentTurn(options) {
       // Whatever ends the turn ends its prompts: an approval whose agent has
       // exited can never be delivered anywhere.
       if (runId) closeRun(runId);
+      // A tool the turn never finished has no "after" and never will.
+      editWatcher?.close();
       resolvePromise({
         sessionId: state.sessionId,
         durationMs: Date.now() - startedAt,
@@ -606,6 +610,21 @@ export function runAgentTurn(options) {
       }
     };
 
+    /*
+      What the agent writes, on its way to the review dock.
+
+      Both CLIs edit the working tree in their own process, so the studio only
+      learns of a write from the tool line reporting it. The watcher reads the
+      file here, in the tick that line is parsed — the earliest moment anyone
+      has — and puts an `edit` event carrying both sides on this same stream.
+      See server/agent-edits.js for why that snapshot is checked rather than
+      trusted, and why a `Write` whose snapshot lost the race is dropped.
+
+      No root, no watching: a turn with nowhere to resolve a path against
+      cannot say which file was touched, and must not guess.
+    */
+    const editWatcher = root ? createEditWatcher({ root, emit }) : null;
+
     const consumeLine = (line) => {
       const text = line.trim();
       if (!text) return;
@@ -619,7 +638,10 @@ export function runAgentTurn(options) {
         return;
       }
       const events = engine === "claude" ? normaliseClaude(parsed, state) : normaliseCodex(parsed, state);
-      for (const event of events) emit(event);
+      for (const event of events) {
+        emit(event);
+        if (event.type === "tool") editWatcher?.onTool(event);
+      }
     };
 
     child.stdout.on("data", (chunk) => {
