@@ -19,7 +19,8 @@
  *
  * ## The entitlement, and why it downgrades rather than refuses
  *
- * The sidecar tier is `voice.vibevoice`, which Pro carries and free does not.
+ * The sidecar tier is `voice.vibevoice`, which every plan carries since
+ * 2026-09-05; see licence/entitlements.js for why it stopped being Pro-only.
  * Every function here therefore takes `allowVibeVoice`, and when it is false
  * the sidecar is not probed at all — the request is served by the local
  * engines instead. Not refused: served. The sidecar runs on the user's own

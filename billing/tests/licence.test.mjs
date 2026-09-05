@@ -47,7 +47,7 @@ test("a freshly signed Pro licence verifies and grants escalation", () => {
   assert.ok(licenceGrants(result, "frontier.escalation"));
 });
 
-test("a free licence does not grant escalation, but keeps the local lanes", () => {
+test("a free licence does not grant escalation, but keeps every local lane", () => {
   const token = issueLicence({
     subject: "user_2",
     plan: "free",
@@ -59,11 +59,12 @@ test("a free licence does not grant escalation, but keeps the local lanes", () =
   const result = verifyLicence(token, publicKeys, { now: NOW + 60 });
   assert.equal(result.state, "valid");
   assert.equal(licenceGrants(result, "frontier.escalation"), false);
-  assert.equal(licenceGrants(result, "voice.vibevoice"), false);
   // The point of the whole design: paying nothing still leaves a working
-  // product. Max runs on the user's own hardware and stays free; the two Pro
-  // capabilities both have a free substitute (Flash, and the built-in voices).
+  // product. Both local capabilities run on the user's own hardware and stay
+  // free; only escalation, which bills per turn, has a price. Escalation has a
+  // free substitute in Flash, which is what makes refusing it fair.
   assert.ok(licenceGrants(result, "frontier.max"));
+  assert.ok(licenceGrants(result, "voice.vibevoice"));
 });
 
 test("a tampered payload fails the signature rather than granting anything", () => {
@@ -147,7 +148,7 @@ test("the profile gate follows the capability, not the plan name", () => {
   const free = capabilitiesForPlan("free");
   const pro = capabilitiesForPlan("pro");
 
-  // Escalation and the speech tier are what Pro buys today.
+  // Hosted escalation is what Pro buys today, and the only thing.
   assert.equal(profileAllowed("auto", free), false);
   assert.equal(profileAllowed("claude-sonnet", free), false);
   assert.equal(profileAllowed("claude-opus", free), false);
@@ -157,11 +158,13 @@ test("the profile gate follows the capability, not the plan name", () => {
   assert.ok(profileAllowed("local", free));
   assert.ok(profileAllowed("local-expert", free));
 
-  // The speech tier is Pro, but the floor beneath it is not: an unentitled
-  // caller is served `builtin` rather than refused, so this pair is the
-  // difference between a paywall and a downgrade.
-  assert.equal(voiceTierAllowed("vibevoice", free), false);
+  // The speech sidecar is open to every plan since 2026-09-05: on Windows
+  // there is no built-in engine beneath it, so gating it left a free user with
+  // no voice at all. The downgrade machinery is kept rather than deleted, so
+  // withdrawing the capability still degrades instead of refusing.
+  assert.ok(voiceTierAllowed("vibevoice", free));
   assert.ok(voiceTierAllowed("vibevoice", pro));
+  assert.equal(voiceTierAllowed("vibevoice", ["frontier.max"]), false);
   assert.ok(voiceTierAllowed("builtin", free));
   assert.ok(voiceTierAllowed("local", free));
 

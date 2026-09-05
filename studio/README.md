@@ -814,7 +814,7 @@ Pro carries two capabilities, and they behave differently on purpose:
 | Capability | What it unlocks | Without it |
 | --- | --- | --- |
 | `frontier.escalation` | Frontier Auto's escalation to Claude Sonnet, and the `claude-sonnet` / `claude-opus` profiles | **Refused.** `POST /api/frontier/resolve-mode` answers `402 PLAN_UPGRADE_REQUIRED` with the capability and plan in `details` |
-| `voice.vibevoice` | The VibeVoice sidecar tier for speech | **Downgraded.** The voice routes serve the built-in engines instead and report `gated: "voice.vibevoice"` in `/api/voice/status` |
+| `voice.vibevoice` | The local speech sidecar | **Not gated since 2026-09-05** — granted to every plan, because on Windows there is no built-in engine to fall back to. The downgrade path below still exists and still reports `gated: "voice.vibevoice"` if the capability is ever withdrawn |
 
 The difference is the cost, not the policy. Escalation spends money per turn
 against a hosted API and has no local substitute, so a free caller is refused.

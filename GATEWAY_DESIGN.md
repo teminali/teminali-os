@@ -217,10 +217,12 @@ reads only the local gateway access token from the environment. The original
   payment rails live in `billing/`, a separate deployable service, which the
   `/api/entitlement/*` routes relay device-code sign-in and licence refresh to
   — a relay, not a rail: no amount, instrument or card ever passes through the
-  gateway. Not every gate refuses: `voice.vibevoice` is Pro, and a caller
-  without it is served the built-in speech engines rather than a 402, because
-  the sidecar it gates runs locally and has a free substitute. See
-  `licence/entitlements.js` for the plan/capability registry.
+  gateway. Not every gate refuses: a caller
+  without `voice.vibevoice` is served the built-in speech engines rather than a
+  402, because the sidecar it gates runs locally. That capability is granted to
+  every plan since 2026-09-05 — the free substitute it assumed does not exist
+  on Windows — but the downgrade path is kept rather than deleted. See
+  `licence/entitlements.js` for the plan/capability registry and the reasoning.
 - No browser dashboard.
 - No automatic account creation or credential acquisition.
 - No pooling of credentials without each owner's explicit authorization.

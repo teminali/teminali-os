@@ -87,11 +87,16 @@ test("the status cache does not serve one plan's answer to the other", async () 
   });
 });
 
-test("free carries the local lanes and neither Pro capability", () => {
+// Both local capabilities are granted to free for the same reason: they run on
+// hardware the user already owns, and gating them would mean the offline half
+// of the product is the half that stops working. `voice.vibevoice` joined them
+// on 2026-09-05 — see licence/entitlements.js. Only hosted escalation, which
+// bills per turn, is still Pro.
+test("free carries both local lanes; only the metered capability is Pro", () => {
   const free = capabilitiesForPlan("free");
   assert.ok(free.includes("frontier.max"));
+  assert.ok(free.includes("voice.vibevoice"));
   assert.equal(free.includes("frontier.escalation"), false);
-  assert.equal(free.includes("voice.vibevoice"), false);
 });
 
 test("a refusal names the capability that was missing, not a generic plan pitch", () => {

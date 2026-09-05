@@ -27,12 +27,18 @@
  *     against `ANTHROPIC_API_KEY` on every call. Subscription revenue offsets
  *     an actual unit cost. A free user asking for it is REFUSED — 402, with an
  *     upgrade path — because there is no cheaper way to answer the request.
- *   - **`voice.vibevoice` is a quality tier, not a cost.** The sidecar runs on
- *     the user's own machine, so this gate prices the feature rather than the
- *     compute. Because a cheaper answer exists, a free user is not refused:
- *     they are served the built-in engines (whisper.cpp and the system voices)
- *     and the status route reports that tier honestly. Speech keeps working;
- *     it is merely the ordinary one.
+ *   - **`voice.vibevoice` was a quality tier, and is now granted to FREE**
+ *     (2026-09-05). The argument for gating it was that a free user still had
+ *     working speech — whisper.cpp and the system voices — so the gate priced
+ *     the feature rather than any compute, since the sidecar runs on the
+ *     user's own machine. That argument held only on macOS. On Windows
+ *     `speech-local.js` returns unavailable, there is no `say`, and
+ *     `webSpeech.ts#probe` disables the Chromium recogniser inside Electron:
+ *     the "cheaper answer" does not exist and a free Windows user had no voice
+ *     at all. Gating it there contradicted the principle in the paragraph
+ *     below — the offline half of the product must not be the half that stops
+ *     working. The capability is still registered rather than deleted, so
+ *     licences already signed with it stay valid and re-gating stays possible.
  *
  * `frontier.max` is registered but granted to FREE, and that is also economic:
  * the Qwen3.8 27B expert burns the user's own electricity. Gating it would
@@ -59,8 +65,9 @@ export const CAPABILITIES = Object.freeze({
     description: "The local Qwen3.8 27B expert profile. Runs on your machine at no per-token cost.",
   },
   "voice.vibevoice": {
-    label: "VibeVoice",
-    description: "The VibeVoice speech tier, in place of the built-in Web Speech voices.",
+    label: "Local speech sidecar",
+    description:
+      "Recognition and synthesis from a sidecar on your own machine, in place of the built-in Web Speech voices. Granted to every plan; the key is kept for licences already signed with it.",
   },
 });
 
@@ -76,7 +83,7 @@ export const PLANS = Object.freeze({
   free: Object.freeze({
     id: "free",
     label: "Free",
-    capabilities: Object.freeze(["frontier.max"]),
+    capabilities: Object.freeze(["frontier.max", "voice.vibevoice"]),
   }),
   pro: Object.freeze({
     id: "pro",
