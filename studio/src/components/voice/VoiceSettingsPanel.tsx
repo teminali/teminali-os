@@ -1,4 +1,4 @@
-import React from "react";
+import React, { useEffect, useState } from "react";
 import { Cpu, Globe, Languages, Zap } from "lucide-react";
 import { VOICE_LANGUAGES, type ProviderCapabilities, type VoiceSettings, type VoiceTier } from "../../services/voice";
 import { VoiceEnrolment } from "./VoiceEnrolment";
@@ -70,6 +70,52 @@ export const VoiceSettingsPanel: React.FC<VoiceSettingsPanelProps> = ({
   clearEnrolment,
   onProbe,
 }) => {
+  const [availableVoices, setAvailableVoices] = useState<SpeechSynthesisVoice[]>([]);
+
+  useEffect(() => {
+    if (typeof window === "undefined" || !("speechSynthesis" in window)) return;
+    const load = () => {
+      const all = window.speechSynthesis.getVoices();
+      const filtered = all.filter((v) => {
+        const n = v.name.toLowerCase();
+        return (
+          !n.includes("bad news") &&
+          !n.includes("bells") &&
+          !n.includes("boing") &&
+          !n.includes("bubbles") &&
+          !n.includes("cellos") &&
+          !n.includes("deranged") &&
+          !n.includes("good news") &&
+          !n.includes("hysterical") &&
+          !n.includes("organ") &&
+          !n.includes("whisper") &&
+          !n.includes("zarvox") &&
+          !n.includes("albert") &&
+          !n.includes("fred") &&
+          !n.includes("alex") &&
+          !n.includes("victoria") &&
+          !n.includes("wobble") &&
+          !n.includes("jester") &&
+          !n.includes("superstar") &&
+          !n.includes("grandma") &&
+          !n.includes("grandpa") &&
+          !n.includes("rocko") &&
+          !n.includes("compact")
+        );
+      });
+      setAvailableVoices(filtered);
+    };
+    load();
+    window.speechSynthesis.onvoiceschanged = load;
+  }, []);
+  // Apple's compact voices are what every Mac ships with, and they are the
+  // robotic ones. The natural voices are a download the operator has to make.
+  const hasNaturalVoice = availableVoices.some((v) =>
+    /premium|enhanced|natural|google|siri|neural/i.test(`${v.name} ${v.voiceURI}`),
+  );
+  const voiceHint = hasNaturalVoice
+    ? "Choose between Google neural voices or Apple natural voices."
+    : "Only Apple's compact voices are installed. For a natural voice, download a Premium voice in System Settings › Accessibility › Read & Speak (Spoken Content on older macOS) › System Voice › Manage Voices, then restart and leave Auto or pick it here.";
   const vibe = capabilities?.vibevoice;
   const strongMatching = Boolean(vibe?.speakerEmbedding && vibe.asr && activeAsrTier === "vibevoice");
 
@@ -195,7 +241,15 @@ export const VoiceSettingsPanel: React.FC<VoiceSettingsPanelProps> = ({
           </div>
         </Row>
 
-        <Row label="Let me interrupt" hint="Talking over a spoken reply stops it immediately and starts your turn.">
+        <Row label="Narrate progress" hint="While an agent run is working, say a short line when it starts something notable — “running the tests”. Never more than one every few seconds, and only when nothing else is being said.">
+          <Toggle checked={settings.narrateProgress} onChange={(value) => update({ narrateProgress: value })} />
+        </Row>
+
+        <Row label="Summarise long replies" hint="Read the first few sentences as they arrive, then a two-sentence spoken summary of the rest instead of the whole answer. The full text is always in the chat.">
+          <Toggle checked={settings.summariseLongReplies} onChange={(value) => update({ summariseLongReplies: value })} />
+        </Row>
+
+        <Row label="Let me interrupt" hint="Talking over a spoken reply stops it immediately and starts your turn. Praise, “keep going” and “how's it going?” do not cancel a run; a new instruction or “stop” does.">
           <Toggle checked={settings.allowBargeIn} onChange={(value) => update({ allowBargeIn: value })} />
         </Row>
 
@@ -226,6 +280,20 @@ export const VoiceSettingsPanel: React.FC<VoiceSettingsPanelProps> = ({
             <option value="600">Snappy — 0.6s</option>
             <option value="900">Balanced — 0.9s</option>
             <option value="1400">Patient — 1.4s</option>
+          </Select>
+        </Row>
+
+        <Row label="Voice" hint={voiceHint}>
+          <Select
+            value={settings.ttsVoice ?? "auto"}
+            onChange={(event) => update({ ttsVoice: event.target.value === "auto" ? null : event.target.value })}
+          >
+            <option value="auto">Natural AI (Auto-selected)</option>
+            {availableVoices.map((v: SpeechSynthesisVoice) => (
+              <option key={v.name} value={v.name}>
+                {v.name} ({v.lang})
+              </option>
+            ))}
           </Select>
         </Row>
 

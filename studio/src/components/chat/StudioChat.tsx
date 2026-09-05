@@ -4,7 +4,7 @@ import { AIService } from "../../services/aiService";
 import { useStudioStore, PROFILES_LIST } from "../../store/studioStore";
 import { usePanelStore } from "../../store/panelStore";
 import { useRecorderDialogStore } from "../../store/recorderDialogStore";
-import { useVoice } from "../../hooks/useVoice";
+import { useVoice, type UseVoiceResult } from "../../hooks/useVoice";
 import { useAttachments } from "../../hooks/useAttachments";
 import { composePrompt } from "../../services/fileService";
 import { useCommandApproval } from "../../hooks/useCommandApproval";
@@ -12,12 +12,23 @@ import { CommandApprovalPrompt } from "./CommandApprovalPrompt";
 import { Composer } from "./Composer";
 import { MessageBlock } from "./MessageBlock";
 import { ChangeReviewDock } from "./ChangeReviewDock";
-import { speakableText } from "../../services/voice";
+import {
+  DIGEST_TIMEOUT_MS,
+  STREAMED_SENTENCE_LIMIT,
+  describeToolCall,
+  digestPrompt,
+  planSpokenDigest,
+  speakableText,
+  summariseProgress,
+  tidyDigest,
+  type RunProgress,
+} from "../../services/voice";
 import { useGitHubStatus } from "../../hooks/useGitHubStatus";
 import { useProjectLibrary } from "../../hooks/useProjectLibrary";
 import { UsageService } from "../../services/usageService";
 import { AssistantHud } from "../assistant/AssistantHud";
 import { BrandGlyph } from "../ui/BrandGlyph";
+import { VoiceOrb } from "../voice";
 import type { UseAssistantResult } from "../../hooks/useAssistant";
 import type { ChatMessage } from "../../types";
 
@@ -32,6 +43,32 @@ import type { ChatMessage } from "../../types";
  * back to be read aloud.
  */
 
+
+/**
+ * Generates an immediate conversational verbal acknowledgment ("On it", "Looking into that now", etc.)
+ * based on the user's spoken or typed prompt so the assistant acknowledges the task without dead silence.
+ */
+function getImmediateAcknowledgment(text: string): string | null {
+  const t = text.toLowerCase().trim();
+  // 1. Simple greetings - answer directly without filler
+  if (/^(hi|hello|hey|greetings|howdy|good\s+(morning|afternoon|evening)|how\s+are\s+you)\b/i.test(t)) {
+    return null;
+  }
+  // 2. Affirmations / direct confirmations
+  if (/^(yes|yeah|yep|sure|ok|okay|go\s+ahead|do\s+it|please\s+do|proceed)\b/i.test(t)) {
+    const acks = ["Sure thing, on it.", "Right away.", "On it."];
+    return acks[Math.floor(Math.random() * acks.length)];
+  }
+  // 3. Search / inspection / explanations / queries
+  const queryWords = ["what", "why", "how", "where", "which", "who", "check", "inspect", "find", "search", "explain", "show", "tell", "read", "can you", "could you"];
+  if (queryWords.some((w) => t.startsWith(w) || t.includes(` ${w} `))) {
+    const queryAcks = ["Looking into that now.", "Let's take a look.", "Let me check that.", "Checking that now."];
+    return queryAcks[Math.floor(Math.random() * queryAcks.length)];
+  }
+  // 4. Action / code / build / fix / changes
+  const actionAcks = ["On it.", "I'm on it.", "Getting right on that.", "Working on it."];
+  return actionAcks[Math.floor(Math.random() * actionAcks.length)];
+}
 
 export const StudioChat: React.FC<{
   /** The one screen assistant, created by the shell. */
@@ -109,6 +146,61 @@ export const StudioChat: React.FC<{
   // Held in a ref so the voice engine, which is created once, always calls the
   // current version rather than the one captured at mount.
   const sendRef = useRef<(text: string) => Promise<void>>(async () => {});
+  const voiceRef = useRef<UseVoiceResult | null>(null);
+  const spokenFor = useRef<string | null>(null);
+  // What the current run has done so far — the tool calls and the prose — so
+  // the voice layer can answer "how's it going?" from facts rather than filler.
+  const runRef = useRef<RunProgress | null>(null);
+
+  /**
+   * Speak the part of a reply that was not read out while it streamed. Short:
+   * verbatim. Long: a two-sentence summary from the local Flash lane, with a
+   * rule-based line if the model is slow. The full text is in the chat either
+   * way. See `spokenDigest.ts` for the policy and its limits.
+   */
+  const speakRemainder = useCallback(async (currentVoice: UseVoiceResult, remaining: string, turnId: number) => {
+    const plan = planSpokenDigest(speakableText(remaining), currentVoice.settings.summariseLongReplies);
+    if (plan.mode === "silent") {
+      void currentVoice.enqueueSpeechChunk("", true);
+      return;
+    }
+    if (plan.mode === "verbatim") {
+      void currentVoice.enqueueSpeechChunk(plan.fallback, true);
+      return;
+    }
+    currentVoice.noteDigesting();
+    let summary = "";
+    const controller = new AbortController();
+    const timer = window.setTimeout(() => controller.abort(), DIGEST_TIMEOUT_MS);
+    try {
+      let output = "";
+      await AIService.streamMessage(
+        "frontier",
+        digestPrompt(remaining),
+        [],
+        {
+          onToken: (token) => {
+            output += token;
+          },
+          onComplete: (result) => {
+            output = result.fullText;
+          },
+        },
+        [],
+        { mode: "flash", signal: controller.signal },
+      );
+      summary = tidyDigest(output);
+    } catch {
+      summary = "";
+    } finally {
+      window.clearTimeout(timer);
+    }
+    // A newer turn started while the summary was being made; it owns the voice now.
+    if (turnId !== turnIdRef.current) return;
+    void currentVoice.enqueueSpeechChunk(summary || plan.fallback, true);
+  }, []);
+  const turnIdRef = useRef(0);
+  const isSpeakingStreaming = useRef(false);
 
   const send = useCallback(
     async (text: string) => {
@@ -116,7 +208,20 @@ export const StudioChat: React.FC<{
       const typed = text.trim();
       // An attachment alone is a valid turn: dropping a PDF and pressing enter
       // should ask about the PDF.
-      if ((!typed && ready.length === 0) || isStreaming || attachments.busy) return;
+      if ((!typed && ready.length === 0) || attachments.busy) return;
+
+      // Universal Interruption: cleanly abort ongoing generation and proceed immediately
+      if (isStreaming) {
+        abortRef.current?.abort();
+        voiceRef.current?.silence();
+        updateLastMessageInEngine("frontier", (msg) => ({
+          isStreaming: false,
+          content: msg.content.trim() ? msg.content : "Interrupted.",
+        }));
+      }
+
+      turnIdRef.current += 1;
+      const currentTurnId = turnIdRef.current;
 
       const { prompt, images } = composePrompt(typed, attachments.attachments);
       setInput("");
@@ -132,6 +237,7 @@ export const StudioChat: React.FC<{
         images: images.length > 0 ? images : undefined,
         tokensCount: Math.max(1, Math.ceil(prompt.length / 4)),
       });
+      isSpeakingStreaming.current = false;
       addMessageToEngine("frontier", {
         role: "assistant",
         content: "",
@@ -141,22 +247,84 @@ export const StudioChat: React.FC<{
         costLabel: profile.costLabel,
       });
       setStreaming(true);
+      runRef.current = {
+        startedAt: Date.now(),
+        engine: agentSelection?.engine ?? "frontier",
+        toolCalls: [],
+        lastText: "",
+      };
+
+      // Immediate verbal acknowledgment based on prompt intent (e.g. "On it.", "Looking into that now.")
+      const currentVoice = voiceRef.current;
+      if (
+        currentVoice &&
+        currentVoice.mode === "conversation" &&
+        currentVoice.state !== "idle" &&
+        currentVoice.settings.speakReplies &&
+        typed
+      ) {
+        const ack = getImmediateAcknowledgment(typed);
+        if (ack) {
+          isSpeakingStreaming.current = true;
+          void currentVoice.enqueueSpeechChunk(ack, false);
+        }
+      }
 
       let accumulated = "";
+      let spokenLength = 0;
+      let streamedSentences = 0;
       await AIService.streamMessage(
         agentSelection?.engine ?? "frontier",
         prompt,
         history,
         {
           onToken: (token) => {
+            if (currentTurnId !== turnIdRef.current) return;
             accumulated += token;
             updateLastMessageInEngine("frontier", () => ({
               content: accumulated,
               tokensCount: Math.max(1, Math.ceil(accumulated.length / 4)),
               isStreaming: true,
             }));
+
+            if (runRef.current) runRef.current.lastText = accumulated;
+
+            // Streaming speech: say the opening sentences as they arrive rather
+            // than waiting for the whole message. After the first few, hold the
+            // rest — a long answer is summarised at the end, not read in full.
+            const currentVoice = voiceRef.current;
+            if (
+              currentVoice &&
+              currentVoice.mode === "conversation" &&
+              currentVoice.state !== "idle" &&
+              currentVoice.settings.speakReplies &&
+              (!currentVoice.settings.summariseLongReplies || streamedSentences < STREAMED_SENTENCE_LIMIT)
+            ) {
+              const pending = accumulated.slice(spokenLength);
+              // Match completed sentences or paragraph breaks
+              const sentenceMatch = pending.match(/^([\s\S]+?[.!?](?:\s+|$)|[\s\S]+?\n\n+)/);
+              if (sentenceMatch) {
+                const sentence = sentenceMatch[1];
+                spokenLength += sentence.length;
+                streamedSentences += 1;
+                isSpeakingStreaming.current = true;
+                void currentVoice.enqueueSpeechChunk(sentence, false);
+              }
+            }
           },
           onToolCall: (call) => {
+            if (currentTurnId !== turnIdRef.current) return;
+            const run = runRef.current;
+            if (run) {
+              const at = run.toolCalls.findIndex((entry) => entry.id === call.id);
+              run.toolCalls = at >= 0
+                ? run.toolCalls.map((entry, position) => (position === at ? call : entry))
+                : [...run.toolCalls, call];
+            }
+            // The voice layer's running commentary: one plain line when a step
+            // starts, and the outcome of a test or build run.
+            const line = describeToolCall(call);
+            if (line) voiceRef.current?.noteProgress(line);
             // Replace in place when the same call transitions running →
             // completed, so a step updates rather than duplicating.
             updateLastMessageInEngine("frontier", (message) => {
@@ -169,6 +337,7 @@ export const StudioChat: React.FC<{
             });
           },
           onComplete: (data) => {
+            if (currentTurnId !== turnIdRef.current) return;
             // Agent turns are recorded by the gateway, which sees them whether
             // or not this window survives. A local turn counts its tokens here,
             // so here is the only place it can be recorded from.
@@ -194,12 +363,49 @@ export const StudioChat: React.FC<{
               engineUsed: data.engineUsed,
             }));
             setStreaming(false);
+
+            if (runRef.current) runRef.current.finishedAt = Date.now();
+            runRef.current = null;
+
+            // What is left to say: the part that was not read while streaming.
+            const currentVoice = voiceRef.current;
+            if (
+              currentVoice &&
+              currentVoice.mode === "conversation" &&
+              currentVoice.state !== "idle" &&
+              currentVoice.settings.speakReplies
+            ) {
+              const full = data.fullText || accumulated;
+              const remaining = full.slice(spokenLength);
+              spokenLength = full.length;
+              // The streaming path owns the read-back from here. Without this
+              // flag the settle effect below read short replies a second time.
+              isSpeakingStreaming.current = true;
+              void speakRemainder(currentVoice, remaining, currentTurnId);
+            }
           },
           onError: (failure) => {
-            updateLastMessageInEngine("frontier", () => ({
-              content: `Error: ${failure.message || "The request failed."}`,
-              isStreaming: false,
-            }));
+            if (currentTurnId !== turnIdRef.current) return;
+            runRef.current = null;
+            const currentVoice = voiceRef.current;
+            if (currentVoice && currentVoice.mode === "conversation" && currentVoice.state !== "idle") {
+              currentVoice.silence();
+            }
+            const isAbort =
+              controller.signal.aborted ||
+              failure.name === "AbortError" ||
+              /aborted|cancelled|stopped by the user/i.test(failure.message);
+            if (isAbort) {
+              updateLastMessageInEngine("frontier", (msg) => ({
+                isStreaming: false,
+                content: msg.content.trim() ? msg.content : "Interrupted.",
+              }));
+            } else {
+              updateLastMessageInEngine("frontier", () => ({
+                content: `Error: ${failure.message || "The request failed."}`,
+                isStreaming: false,
+              }));
+            }
             setStreaming(false);
           },
         },
@@ -228,7 +434,7 @@ export const StudioChat: React.FC<{
     [
       messages, isStreaming, addMessageToEngine, updateLastMessageInEngine, setStreaming,
       currentProfile, activeSkill, screenshotToCodeStack, commandApproval.approveCommand, profile.costLabel,
-      attachments,
+      attachments, speakRemainder,
     ],
   );
 
@@ -260,14 +466,25 @@ export const StudioChat: React.FC<{
      * the composer's microphone *be* the assistant rather than sit beside it.
      */
     submit: (text) => {
-      if (assistantRef.current.claimsUtterance()) {
-        void assistantRef.current.ask(text);
-        return;
-      }
+      // Direct bridge to normal chatbox — voice does not have its own workflow
       sendRef.current(text);
     },
-    lastAssistantText: () => assistantRef.current.turn?.say || lastAssistant,
-    isBusy: () => isStreaming || (assistantRef.current.claimsUtterance() && assistantRef.current.phase !== "idle"),
+    interrupt: () => {
+      turnIdRef.current += 1;
+      runRef.current = null;
+      abortRef.current?.abort();
+      setStreaming(false);
+      updateLastMessageInEngine("frontier", (msg) => ({
+        isStreaming: false,
+        content: msg.content.trim() ? msg.content : "Interrupted.",
+      }));
+      voiceRef.current?.silence();
+    },
+    lastAssistantText: () => lastAssistant,
+    isBusy: () => isStreaming,
+    // "How's it going?" mid-run is answered from what the run has actually
+    // done, without stopping it.
+    progressSummary: () => (runRef.current ? summariseProgress(runRef.current) : null),
     // The addressing tiebreak and the transcript polish both run on the same
     // local engine as the chat, so neither costs anything or leaves the machine.
     complete: async (prompt, signal) => {
@@ -294,6 +511,8 @@ export const StudioChat: React.FC<{
   // The assistant has no microphone of its own; this is the one. Lending it
   // here is what makes the composer's mic, the global shortcut and the menu bar
   // item three doors into one session rather than three recorders.
+  voiceRef.current = voice;
+
   useEffect(() => {
     assistant.attachVoice(voice);
     return () => assistant.attachVoice(null);
@@ -301,16 +520,18 @@ export const StudioChat: React.FC<{
 
   // When a reply settles during a hands-free turn, read it back. Not while the
   // assistant is speaking: two voices over one another is worse than either.
-  const spokenFor = useRef<string | null>(null);
   useEffect(() => {
-    if (assistant.claimsUtterance()) return;
     if (isStreaming || voice.mode !== "conversation" || voice.state === "idle") return;
     const last = messages[messages.length - 1];
     if (!last || last.role !== "assistant" || !last.content) return;
     if (spokenFor.current === last.id) return;
     spokenFor.current = last.id;
+    if (isSpeakingStreaming.current) {
+      isSpeakingStreaming.current = false;
+      return;
+    }
     void voice.speakReply(speakableText(last.content));
-  }, [assistant, isStreaming, messages, voice]);
+  }, [isStreaming, messages, voice]);
 
   /* ── Scrolling ─────────────────────────────────────────────────────────── */
 
@@ -330,9 +551,14 @@ export const StudioChat: React.FC<{
   };
 
   const stop = React.useCallback(() => {
+    turnIdRef.current += 1;
+    runRef.current = null;
     abortRef.current?.abort();
     setStreaming(false);
-    updateLastMessageInEngine("frontier", () => ({ isStreaming: false }));
+    updateLastMessageInEngine("frontier", (msg) => ({
+      isStreaming: false,
+      content: msg.content.trim() ? msg.content : "Interrupted.",
+    }));
     voice.silence();
   }, [setStreaming, updateLastMessageInEngine, voice]);
 
@@ -381,9 +607,31 @@ export const StudioChat: React.FC<{
            headline, no gradient. The two ambient orbs that used to live here
            are not coming back. */
         <div className="flex-1 flex flex-col items-center justify-center gap-2.5 px-8">
-          <div className="flex flex-col items-center gap-2 mb-7 select-none">
-            <BrandGlyph brand="teminali" size={52} className="rounded-xl" />
-            <span className="text-sm text-ink-muted tracking-tight">Teminali Code</span>
+          <div className="relative z-10 flex flex-col items-center select-none overflow-visible pt-2 pb-1 mb-6">
+            <div className="relative p-4 overflow-visible flex items-center justify-center min-h-[105px]">
+              <VoiceOrb
+                size={68}
+                state={voice.state}
+                level={voice.level}
+                badge={
+                  voice.state === "idle"
+                    ? 'Say "Hey Temy"'
+                    : voice.state === "speaking"
+                      ? "Temy is speaking"
+                      : voice.state === "hearing"
+                        ? "Listening to you…"
+                        : "Listening…"
+                }
+                onClick={() => {
+                  if (voice.state === "idle") {
+                    void voice.startConversation();
+                  } else {
+                    void voice.stop();
+                  }
+                }}
+                title={voice.state === "idle" ? 'Tap or say "Hey Temy" to talk' : "Tap to end voice conversation"}
+              />
+            </div>
           </div>
 
           <div className="w-full max-w-composerEmpty flex items-center gap-4 text-sm text-ink-muted pl-1">
@@ -395,11 +643,7 @@ export const StudioChat: React.FC<{
             <Picker label="This Mac" icon={<Laptop size={14} />} title="Turns run locally on this machine" />
           </div>
 
-          {assistant.open && (
-            <div className="w-full flex justify-center">
-              <AssistantHud assistant={assistant} transcript={voice.transcript} voiceState={voice.state} />
-            </div>
-          )}
+
 
           <div className="w-full flex justify-center">
             <ChangeReviewDock />
@@ -503,7 +747,6 @@ export const StudioChat: React.FC<{
           </div>
 
           <div className="flex-shrink-0 flex flex-col items-center gap-2 px-8 pt-2.5 pb-4">
-            {assistant.open && <AssistantHud assistant={assistant} transcript={voice.transcript} voiceState={voice.state} />}
             {/* Directly above the composer: the last thing between an edit that
                 is already on disk and the next prompt. */}
             <ChangeReviewDock />

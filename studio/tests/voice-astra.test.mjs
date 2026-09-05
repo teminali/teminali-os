@@ -1,0 +1,237 @@
+import assert from "node:assert/strict";
+import test from "node:test";
+
+import { classifyTurnIntent } from "../src/services/voice/turnIntent.ts";
+import { EchoGuard, stripSelfEcho } from "../src/services/voice/echoGuard.ts";
+import { describeToolCall, summariseProgress, summariseOutcome, speakablePath } from "../src/services/voice/progressNarration.ts";
+import { planSpokenDigest, fallbackDigest, tidyDigest, digestPrompt } from "../src/services/voice/spokenDigest.ts";
+import { scoreAddressing } from "../src/services/voice/addressing.ts";
+
+/* ── Turn intent ──────────────────────────────────────────────────────────── */
+
+const busy = { busy: true, speaking: false };
+const talking = { busy: true, speaking: true };
+const idle = { busy: false, speaking: false };
+
+test("encouragement while a run is in flight does not become an instruction", () => {
+  for (const line of ["Excellent, excellent, great, keep going.", "nice", "okay cool carry on", "sawa endelea", "love it, go ahead"]) {
+    assert.equal(classifyTurnIntent(line, busy).intent, "acknowledge", line);
+  }
+});
+
+test("the same words with nothing running go to the chat", () => {
+  assert.equal(classifyTurnIntent("yes", idle).intent, "instruction");
+  assert.equal(classifyTurnIntent("keep going", idle).intent, "instruction");
+});
+
+test("status questions are answered, not sent", () => {
+  for (const line of [
+    "How's it going?",
+    "is it live on GitHub and Vercel yet",
+    "are you done",
+    "what are you doing now",
+    "any update?",
+    "did the tests pass",
+    "where are we at",
+    "umefika wapi",
+  ]) {
+    assert.equal(classifyTurnIntent(line, busy).intent, "status", line);
+  }
+});
+
+test("a bare stop cancels; a stop with an object is an instruction", () => {
+  assert.equal(classifyTurnIntent("stop", busy).intent, "stop");
+  assert.equal(classifyTurnIntent("okay wait, hold on", talking).intent, "stop");
+  assert.equal(classifyTurnIntent("no no no stop", busy).intent, "stop");
+  assert.equal(classifyTurnIntent("Temy, stop talking", talking).intent, "stop");
+  assert.equal(classifyTurnIntent("stop the dev server and restart it", busy).intent, "instruction");
+  assert.equal(classifyTurnIntent("stop", idle).intent, "stop");
+});
+
+test("a new instruction during a run is still an instruction", () => {
+  assert.equal(classifyTurnIntent("also rename the component to VoicePanel", busy).intent, "instruction");
+  assert.equal(classifyTurnIntent("make the orb bigger", talking).intent, "instruction");
+  assert.equal(classifyTurnIntent("great, now add a dark mode toggle", busy).intent, "instruction");
+});
+
+/* ── Self-echo guard ──────────────────────────────────────────────────────── */
+
+const spoken = ["I'll run the test suite now and report back.", "Editing Composer dot tsx."];
+
+test("the assistant's own words coming back through the microphone are dropped", () => {
+  const verdict = stripSelfEcho("I'll run the test suite now and report back", spoken, "speaking");
+  assert.equal(verdict.echoed, true);
+  assert.equal(verdict.text, "");
+});
+
+test("an echoed tail followed by real speech keeps only the real speech", () => {
+  const verdict = stripSelfEcho("run the test suite now and report back also check the build", spoken, "speaking");
+  assert.equal(verdict.echoed, true);
+  assert.equal(verdict.text, "also check the build");
+});
+
+test("a person repeating the assistant's question as an answer gets through once it is quiet", () => {
+  const asked = ["Should I run the tests?"];
+  const quiet = stripSelfEcho("run the tests", asked, "quiet");
+  assert.equal(quiet.echoed, false);
+  assert.equal(quiet.text, "run the tests");
+  // But the same words while the assistant is mid-sentence are echo.
+  const during = stripSelfEcho("run the tests", asked, "speaking");
+  assert.equal(during.echoed, true);
+});
+
+test("unrelated speech is untouched whatever the phase", () => {
+  for (const phase of ["speaking", "tail", "quiet"]) {
+    const verdict = stripSelfEcho("open the settings panel please", spoken, phase);
+    assert.equal(verdict.echoed, false, phase);
+    assert.equal(verdict.text, "open the settings panel please");
+  }
+});
+
+test("EchoGuard forgets lines after the window and tracks the tail after speech ends", () => {
+  const guard = new EchoGuard();
+  guard.remember("Reading the composer now.", 1000);
+  assert.equal(guard.phase(1500), "speaking");
+  guard.markEnded(2000);
+  assert.equal(guard.phase(2500), "tail");
+  assert.equal(guard.phase(2000 + 5000), "quiet");
+  assert.deepEqual(guard.recent(3000), ["Reading the composer now."]);
+  assert.deepEqual(guard.recent(1000 + 40_000), []);
+});
+
+/* ── Progress narration ───────────────────────────────────────────────────── */
+
+test("tool calls narrate as one plain present-tense line", () => {
+  assert.equal(
+    describeToolCall({ id: "1", name: "Read", arguments: { file_path: "/x/studio/src/components/chat/Composer.tsx" }, status: "running" }),
+    "Reading Composer dot tsx.",
+  );
+  assert.equal(
+    describeToolCall({ id: "2", name: "Edit", arguments: { file_path: "src/hooks/useVoice.ts" }, status: "running" }),
+    "Editing useVoice dot ts.",
+  );
+  assert.equal(describeToolCall({ id: "3", name: "Bash", arguments: { command: "npm test" }, status: "running" }), "Running the tests.");
+  assert.equal(describeToolCall({ id: "4", name: "Grep", arguments: { pattern: "commitTurn" }, status: "running" }), "Searching for commitTurn.");
+  assert.equal(describeToolCall({ id: "5", name: "Read", arguments: { file_path: "a.ts" }, status: "completed" }), null);
+});
+
+test("a finished test run reports its outcome", () => {
+  assert.equal(
+    describeToolCall({ id: "6", name: "Bash", arguments: { command: "npm test" }, status: "completed", result: "ℹ tests 871\nℹ pass 871\nℹ fail 0" }),
+    "Tests passed.",
+  );
+  assert.equal(
+    describeToolCall({ id: "7", name: "Bash", arguments: { command: "npm test" }, status: "completed", result: "3 failing\nAssertionError" }),
+    "Tests failed — looking at that.",
+  );
+});
+
+test("a status answer is short and built from what actually happened", () => {
+  const run = {
+    startedAt: 100_000,
+    engine: "claude",
+    lastText: "I'm updating the voice engine so that praise no longer cancels a run.",
+    toolCalls: [
+      { id: "1", name: "Read", arguments: { file_path: "conversation.ts" }, status: "completed" },
+      { id: "2", name: "Read", arguments: { file_path: "addressing.ts" }, status: "completed" },
+      { id: "3", name: "Edit", arguments: { file_path: "conversation.ts" }, status: "completed" },
+      { id: "4", name: "Bash", arguments: { command: "npm test" }, status: "running" },
+    ],
+  };
+  const summary = summariseProgress(run, 100_000 + 95_000);
+  assert.match(summary, /about 2 minutes in/i);
+  assert.match(summary, /read 2 files/);
+  assert.match(summary, /edited conversation dot ts/);
+  assert.match(summary, /Right now: running the tests/);
+  assert.ok(summary.split(/[.!?]\s/).length <= 4, summary);
+});
+
+test("with no tool calls yet the status answer falls back to the latest note", () => {
+  const summary = summariseProgress({ startedAt: 0, engine: "frontier", lastText: "Looking at how the composer renders the orb. Then I'll change it.", toolCalls: [] }, 12_000);
+  assert.match(summary, /Looking at how the composer renders the orb\./);
+  assert.doesNotMatch(summary, /Then I'll/);
+});
+
+test("the outcome line names what changed", () => {
+  const line = summariseOutcome({
+    startedAt: 0,
+    engine: "codex",
+    lastText: "All green.",
+    toolCalls: [{ id: "1", name: "Write", arguments: { path: "src/voice/echoGuard.ts" }, status: "completed" }],
+  });
+  assert.equal(line, "Done. I changed echoGuard dot ts. All green.");
+  assert.equal(speakablePath("/a/b/my-file_name.test.ts"), "my file name dot test dot ts");
+});
+
+/* ── Spoken digest ────────────────────────────────────────────────────────── */
+
+test("a short remainder is read out; a long one is summarised with a spoken fallback", () => {
+  assert.equal(planSpokenDigest("").mode, "silent");
+  assert.deepEqual(planSpokenDigest("Two files changed. Tests pass."), { mode: "verbatim", fallback: "Two files changed. Tests pass." });
+  const long = `${"The migration touches the schema, the repository layer and both API routes. ".repeat(8)}Nothing else changed.`;
+  const plan = planSpokenDigest(long);
+  assert.equal(plan.mode, "summarise");
+  assert.equal(plan.fallback, "The migration touches the schema, the repository layer and both API routes. The rest is in the chat.");
+  assert.equal(planSpokenDigest(long, false).mode, "verbatim");
+});
+
+test("digest prompt and tidy keep the model on a short leash", () => {
+  assert.match(digestPrompt("hello"), /at most two short sentences/i);
+  assert.equal(tidyDigest("Summary: I **fixed** the `echo` bug and the tests pass."), "I fixed the echo bug and the tests pass.");
+  assert.equal(tidyDigest("ok"), "");
+  assert.equal(fallbackDigest("Short one. Then more."), "Short one. The rest is in the chat.");
+});
+
+/* ── Addressing in an open hands-free session ─────────────────────────────── */
+
+const openSession = {
+  assistantAskedQuestion: false,
+  msSinceAssistantTurn: 60_000,
+  speakerMatch: null,
+  hasProfile: false,
+  requireWakeWord: false,
+  requireSpeakerMatch: false,
+  wakeWords: ["temy", "teminali"],
+  windowFocused: true,
+};
+
+test("in an open session an ordinary sentence is for the assistant without a model call", () => {
+  for (const line of ["what does this component do", "that table needs another column", "make the orb a bit smaller", "can we ship this today"]) {
+    const { verdict, needsClassifier } = scoreAddressing(line, openSession);
+    assert.equal(verdict.directed, true, line);
+    assert.equal(needsClassifier, false, line);
+  }
+});
+
+test("talking to someone else is still dropped in an open session", () => {
+  const { verdict } = scoreAddressing("tell her I'll be there in ten minutes", openSession);
+  assert.equal(verdict.directed, false);
+});
+
+test("a lone stray word in an open session is not a turn unless it answers a question", () => {
+  assert.equal(scoreAddressing("okay", openSession).verdict.directed, false);
+  assert.equal(
+    scoreAddressing("okay", { ...openSession, assistantAskedQuestion: true, msSinceAssistantTurn: 800 }).verdict.directed,
+    true,
+  );
+});
+
+/* ── Host wiring ──────────────────────────────────────────────────────────── */
+
+// `useVoice` rebuilds the engine's host by hand, one method at a time, so a
+// method added to `VoiceHost` and passed by the chat can still never reach the
+// engine. That is how "how's it going?" got its canned fallback in the
+// 2026-09-05 live check: `progressSummary` was declared, implemented, passed —
+// and not forwarded. Every member of the interface must be forwarded.
+test("useVoice forwards every VoiceHost method to the engine", async () => {
+  const { readFile } = await import("node:fs/promises");
+  const contract = await readFile(new URL("../src/services/voice/conversation.ts", import.meta.url), "utf8");
+  const hook = await readFile(new URL("../src/hooks/useVoice.ts", import.meta.url), "utf8");
+  const block = contract.match(/export interface VoiceHost \{([\s\S]*?)\n\}/);
+  assert.ok(block, "VoiceHost interface not found");
+  const members = [...block[1].matchAll(/^  (\w+)\??:/gm)].map((m) => m[1]);
+  assert.ok(members.includes("progressSummary"), "expected progressSummary on VoiceHost");
+  for (const name of members) {
+    assert.match(hook, new RegExp(`hostRef\\.current\\.${name}\\b`), `useVoice does not forward VoiceHost.${name}`);
+  }
+});

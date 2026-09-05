@@ -1506,12 +1506,124 @@ Two tiers: the browser engine (always available) and **VibeVoice** run locally
 through a sidecar (see `studio/docs/VOICE_SIDECAR.md`). Two modes:
 push-to-talk dictation, and hands-free conversation with barge-in.
 
-**The default is `conversation`, with `requireWakeWord` on** (2026-09-03). The
-assistant listens continuously and speaks every reply, and answers only when
-addressed by name — `teminali`, `frontier` or `studio`. The wake word is what
-makes always-on listening tolerable: without it the room's conversation is
-addressed to the assistant. `speakReply` is a no-op outside `conversation`
-mode, so this default is also what makes the assistant talk back at all.
+**The default is `conversation`, with `requireWakeWord` off** (changed
+2026-09-05; the 2026-09-03 default had it on). The assistant listens
+continuously and speaks every reply. Opening a hands-free session is itself the
+address: in `addressing.ts` an ordinary sentence of two or more words scores as
+directed without a model call, a lone stray word ("okay") does not unless it
+answers a question we just asked, and third-party markers ("tell her…") still
+drop it. The local classifier is now a rescue for borderline *negatives* only
+(score 0.42–0.62), with a 1.5 s cap — it used to run on nearly every sentence
+and was the seconds of "deciding…" that read as the assistant not answering.
+Turning `requireWakeWord` on restores name-only answering — `temy`,
+`teminali`, `frontier`, `studio`. `speakReply` is a no-op outside
+`conversation` mode, so this default is also what makes the assistant talk back
+at all.
+
+### 6.1 Turn semantics while a run is in flight (2026-09-05)
+
+A directed utterance is not automatically an instruction. `turnIntent.ts`
+reads each committed turn against the state of the work — rules only, no model —
+and `conversation.ts#commitTurn` acts on the verdict:
+
+| Heard while busy | Intent | What happens |
+| --- | --- | --- |
+| "excellent, keep going", "sawa endelea" | `acknowledge` | Nothing is cancelled. If the assistant was mid-sentence it finishes the sentence; otherwise it says "Still on it." at most once per 20 s. |
+| "how's it going?", "is it live yet?", "did the tests pass?" | `status` | Answered from the live run via `VoiceHost.progressSummary` (`progressNarration.ts#summariseProgress`), then whatever was being said resumes. The run is untouched. |
+| "stop", "wait, hold on", "never mind" | `stop` | Speech is dropped and the run is aborted; "Okay, stopped." only if a run was actually cancelled. "Stop the server" is an instruction, not a stop. |
+| anything else | `instruction` | The previous behaviour: the run is aborted and the utterance is sent. |
+
+With nothing running, `acknowledge` and `status` are instructions — "yes" is
+the answer to a question, "how's it going" is a greeting — so they reach the
+chat. `host.interrupt` is called only when a run or speech was actually in
+flight; before this it fired on every directed turn.
+
+**Self-echo guard.** The built-in recogniser hears the speakers. `echoGuard.ts`
+remembers every line the synthesiser plays for 25 s and strips a transcript
+that is mostly those content words: 60 % overlap while speaking, 75 % in the
+1.6 s tail after it stops, and only a six-word verbatim run once quiet — so a
+person answering "run the tests" to "should I run the tests?" gets through. A
+leading echoed run of three or more words followed by new speech keeps the new
+speech. Applied per recogniser result and once more on the assembled turn.
+
+**Running commentary.** `StudioChat` feeds every tool call through
+`describeToolCall` into `VoiceEngine.noteProgress`. The line always reaches the
+HUD caption under the orb; it is spoken only when nothing else is queued, a run
+is actually busy, not within 2.5 s of the operator's own turn, and at most
+every 9 s. Test and build commands also narrate their outcome ("Tests passed.").
+`narrateProgress` turns the spoken part off; the caption stays.
+
+**Spoken digest.** The streaming reader speaks the first three sentences of a
+reply as they arrive, then holds the rest. On completion a remainder of up to
+320 characters is read verbatim; anything longer becomes a two-sentence spoken
+summary from the Flash lane (`spokenDigest.ts`, 7 s cap, first-sentence
+fallback: "… The rest is in the chat."). `summariseLongReplies` turns this off
+and reads everything. The settle effect no longer re-reads a reply the streaming
+path already spoke. While the summary is being made the orb shows *thinking*
+(`VoiceEngine.noteDigesting`), not a silent *speaking*, captioned "Summing up
+the reply."; the digest chunk puts it back to *speaking*, and an empty digest
+returns it to *listening*. The final chunk also clears `narration`, so the
+run's last step line ("Reading types dot ts") does not caption the reply being
+read — the reply is in the chat and needs no caption.
+
+**Pace.** `DEFAULT_VOICE_SETTINGS.ttsRate` is 1.15 (was 1.02 until
+2026-09-05; a saved 1.02 is treated as never chosen and migrated by
+`useVoice.ts#loadSettings`). Each chunk is read at
+`speakable.ts#paceFor(ttsRate, text)`: at or under 12 words the base rate, ramping
+linearly to 1.15× the base at 40 words and capped there — an acknowledgement
+keeps the operator's pace, a long passage is read faster. The result is clamped
+to 0.5–2.0. Both providers take the same `rate`. Tests: `tests/voice.test.mjs`.
+
+**Voice choice.** The built-in tier is the browser's `speechSynthesis`, which on
+macOS exposes only the voices installed in System Settings — every Mac ships
+with the *compact* voices, which are the robotic ones; the natural *Enhanced*
+and *Premium* voices are a per-voice download, and Siri voices are never
+exposed. `webSpeech.ts#scoreVoice` prefers Google neural, Siri, Premium,
+Enhanced and Natural voices in that order, reading the tier from the name and
+the `voiceURI`. When no such voice is installed the voice row in
+`VoiceSettingsPanel.tsx` says so and names the download path. A voice beyond
+what macOS ships needs the sidecar tier (`docs/VOICE_SIDECAR.md`).
+
+**Explainability.** `VoiceSnapshot.narration` and `VoiceSnapshot.lastIntent`
+drive the caption under the orb: "Heard “keep going” — carrying on". A turn that
+is reinterpreted must be visible, or it is indistinguishable from a dead
+microphone. A fresh `acknowledge` (`lastIntent.at` within 6 s,
+`Composer.tsx#INTENT_CAPTION_MS`) outranks the running commentary in the
+caption; otherwise narration wins while the run is busy. Tests:
+`tests/voice-astra.test.mjs`.
+
+**Talking over the commentary.** A barge-in while an interjection is playing
+(`interjecting`) does not put that line aside for later: "Reading types dot ts"
+from before the operator spoke is stale by the time the turn is decided, so
+`handleBargeIn` drops it and keeps only a reply an earlier barge-in had already
+suspended. Barge-in over a reply still suspends and resumes it.
+
+**Live check (2026-09-05).** Exercised in scripted Google Chrome against the
+vite dev server with a fake microphone file (Chrome's
+`--use-file-for-fake-audio-capture`), the real ASR tier and a real Claude Code
+run: a spoken sentence was sent with no classifier pause; "Excellent, great,
+keep going" was read as `acknowledge` and the run continued; "How is it going?"
+was read as `status`, answered aloud, and the run continued; "Okay, stop, stop"
+was read as `stop`, the run was cancelled and "Okay, stopped." was spoken.
+Zero console errors. One gap from that run, since fixed: the status answer was
+the canned "Still working on it" line. The run state was intact; the cause was
+`useVoice.ts`, which rebuilds the engine's host method by method and did not
+forward `progressSummary`, so the engine always saw `undefined`. The hook now
+forwards it, and `tests/voice-astra.test.mjs` checks that every `VoiceHost`
+member is forwarded so the next added method cannot go missing the same way.
+Re-run the same day after that fix: "How is it going?" was answered "30 seconds
+in. So far it has read 11 files and run 1 command. Latest: …" with the run
+continuing; the "Heard “Excellent, great, keep going!” — carrying on" caption
+held for 6 s; no earlier step lines replayed after the barge-in. A third run
+with a long reply showed *thinking* / "Summing up the reply." for the digest
+wait, then *speaking* with no stale caption, then *listening*. That run also
+surfaced a `400` from `POST /api/audit`: `frontierEngine.ts` was posting
+`inference.started` / `inference.completed` objects the gateway's metadata-only
+allowlist rejects (`server/validation.js#validateClientAuditEvent`), and
+`recordAudit` swallows the failure, so no local-turn audit had ever landed. It
+now posts `prompt` and `model_call` events with provider, status and duration.
+Still observed, not changed: the Flash digest hit its 7 s cap in every run, so
+the spoken summary was the rule-based fallback after a 7 s wait.
 
 Non-negotiables:
 

@@ -19,7 +19,7 @@
  */
 
 import { AudioGraph, encodeWav, type AudioFrame } from "./audioGraph";
-import { speakableText } from "./speakable";
+import { speakableText, paceFor } from "./speakable";
 import { Endpointer, DEFAULT_ENDPOINTER } from "./turnTaking";
 import {
   applyClassifier,
@@ -30,7 +30,9 @@ import {
   type AddressingContext,
 } from "./addressing";
 import { SpeakerProfile, type EnrolledProfile } from "./speakerProfile";
-import { polishIsTrustworthy, polishPrompt, repairDeterministic, withPolish } from "./transcriptRepair";
+import { classifyTurnIntent, type TurnIntentVerdict } from "./turnIntent";
+import { EchoGuard } from "./echoGuard";
+import { cleanTranscript, isNonSpeechOrBlank, polishIsTrustworthy, polishPrompt, repairDeterministic, withPolish } from "./transcriptRepair";
 import { createRoster, probeAll, resolve, type ProviderRoster, type ResolvedProviders } from "./providers";
 import {
   DEFAULT_VOICE_SETTINGS,
@@ -52,6 +54,8 @@ export interface VoiceHost {
   lastAssistantText: () => string;
   /** True while the chat engine is generating. */
   isBusy: () => boolean;
+  /** Cancel any active in-flight assistant generation or task. */
+  interrupt?: () => void;
   /**
    * Run a short local completion. Used for the addressing tiebreak and the
    * transcript polish. Optional: without it both fall back to the rule layer.
@@ -59,6 +63,11 @@ export interface VoiceHost {
   complete?: (prompt: string, signal?: AbortSignal) => Promise<string>;
   /** Terms the recogniser should bias toward — open filenames, symbols. */
   hints?: () => string[];
+  /**
+   * One short spoken answer to "how's it going?" while a run is in flight,
+   * built from what the run has actually done. Null when nothing is running.
+   */
+  progressSummary?: () => string | null;
 }
 
 export interface VoiceSnapshot {
@@ -83,12 +92,24 @@ export interface VoiceSnapshot {
   /** True when a spoken reply was cut short by the operator. */
   interrupted: boolean;
   hasProfile: boolean;
+  /** The latest progress or interjection line — what the assistant last said about the run. */
+  narration: string | null;
+  /** How the last committed utterance was read: stop, acknowledge, status, or instruction. */
+  lastIntent: (TurnIntentVerdict & { text: string; at: number }) | null;
 }
 
 type Listener = (snapshot: VoiceSnapshot) => void;
 
 /** Sustained speech needed to count as a barge-in rather than a cough. */
-const BARGE_IN_FRAMES = 5;
+const BARGE_IN_FRAMES = 10;
+/** Minimum gap between spoken progress lines, so a busy run is not a running commentary. */
+const PROGRESS_GAP_MS = 9000;
+/** No progress line this soon after the operator spoke; the reply to them comes first. */
+const PROGRESS_AFTER_TURN_MS = 2500;
+/** "Still on it." is said at most this often, however much encouragement arrives. */
+const ACK_REPLY_GAP_MS = 20_000;
+/** The local addressing tiebreak gets this long before the rule verdict stands. */
+const CLASSIFIER_TIMEOUT_MS = 1500;
 
 export class VoiceEngine {
   private readonly roster: ProviderRoster = createRoster();
@@ -112,6 +133,24 @@ export class VoiceEngine {
   private lastRejected: VoiceSnapshot["lastRejected"] = null;
   private error: VoiceError | null = null;
   private interrupted = false;
+  private speechQueue: string[] = [];
+  private isProcessingSpeechQueue = false;
+  private isStreamDone = false;
+  private suspendedSpeech: string[] | null = null;
+  private currentlySpeakingText: string | null = null;
+  private readonly echo = new EchoGuard();
+  private narration: string | null = null;
+  private lastIntent: VoiceSnapshot["lastIntent"] = null;
+  /** A one-off line (status answer, "still on it") is playing ahead of the queue. */
+  private interjecting = false;
+  /** The streamed sentences are spoken; the host is still making the digest of the rest. */
+  private digesting = false;
+  private lastProgressSpokenAt = 0;
+  private lastAckSpokenAt = 0;
+  private lastUserTurnAt = 0;
+  private lastActivityAt = Date.now();
+  private isGoingToSleep = false;
+  public static readonly INACTIVITY_SLEEP_MS = 60000; // 1 minute sweet spot
 
   private autoSendTimer: number | null = null;
   private autoSendDeadline: number | null = null;
@@ -162,6 +201,8 @@ export class VoiceEngine {
       speaking: this.state === "speaking",
       interrupted: this.interrupted,
       hasProfile: this.profile !== null,
+      narration: this.narration,
+      lastIntent: this.lastIntent,
     };
   }
 
@@ -248,6 +289,13 @@ export class VoiceEngine {
     this.finalTranscript = "";
     this.pending = null;
     this.verdict = null;
+    this.narration = null;
+    this.lastIntent = null;
+    this.interjecting = false;
+    this.lastProgressSpokenAt = 0;
+    this.lastAckSpokenAt = 0;
+    this.lastUserTurnAt = 0;
+    this.echo.clear();
     this.endpointer.reset();
     this.abort = new AbortController();
 
@@ -319,6 +367,16 @@ export class VoiceEngine {
   }
 
   async stop(): Promise<void> {
+    this.suspendedSpeech = null;
+    this.currentlySpeakingText = null;
+    this.speechQueue = [];
+    this.isProcessingSpeechQueue = false;
+    this.isStreamDone = false;
+    this.interjecting = false;
+    this.digesting = false;
+    this.narration = null;
+    this.lastIntent = null;
+    this.echo.clear();
     this.clearAutoSend();
     this.stopTicker();
     this.awaitingFinal = false;
@@ -346,10 +404,14 @@ export class VoiceEngine {
 
   private onFrame(frame: AudioFrame): void {
     this.level = frame.level;
+    if (frame.voiced || this.state === "speaking" || this.state === "thinking" || this.state === "sending") {
+      this.lastActivityAt = Date.now();
+    }
 
-    // While the assistant is speaking we are not endpointing, we are watching
-    // for an interruption.
-    if (this.state === "speaking") {
+    // While the assistant is speaking, thinking, or the chat is busy,
+    // we watch for an interruption / barge-in.
+    const isAssistantBusy = this.state === "speaking" || this.state === "thinking" || (this.host.isBusy?.() && this.state !== "hearing" && this.state !== "deciding");
+    if (isAssistantBusy) {
       if (!this.settings.allowBargeIn) return;
       this.bargeInRun = frame.voiced ? this.bargeInRun + 1 : 0;
       if (this.bargeInRun >= BARGE_IN_FRAMES) {
@@ -375,7 +437,23 @@ export class VoiceEngine {
       this.setState("hearing");
     } else if (event?.type === "speech-end") {
       if (this.streamingAsr) {
-        void this.commitTurn();
+        if (this.transcript.trim()) {
+          void this.commitTurn();
+        } else {
+          // Speech ended, wait for final transcript from recogniser
+          this.awaitingFinal = true;
+          this.setState("deciding");
+          window.setTimeout(() => {
+            if (this.awaitingFinal && this.state === "deciding") {
+              this.awaitingFinal = false;
+              if (this.transcript.trim()) {
+                void this.commitTurn();
+              } else {
+                this.setState(this.mode === "conversation" ? "listening" : "idle");
+              }
+            }
+          }, 1200);
+        }
       } else {
         // Close the recording so the engine can transcribe it; onResult will
         // commit once the text actually exists.
@@ -392,14 +470,25 @@ export class VoiceEngine {
   }
 
   private onResult(transcript: string, isFinal: boolean, _language: string): void {
-    if (isFinal) this.finalTranscript = this.finalTranscript ? `${this.finalTranscript} ${transcript}` : transcript;
-    this.transcript = isFinal ? this.finalTranscript : `${this.finalTranscript} ${transcript}`.trim();
+    // The recogniser hears the speakers as well as the operator. Anything that
+    // is the assistant's own voice coming back is removed before it can become
+    // part of a turn.
+    const cleanPart = this.withoutEcho(cleanTranscript(transcript));
+    if (!cleanPart && !this.transcript) {
+      if (isFinal && (this.awaitingFinal || this.state === "deciding")) {
+        this.awaitingFinal = false;
+        this.setState(this.mode === "conversation" ? "listening" : "idle");
+      }
+      return;
+    }
+
+    if (isFinal) this.finalTranscript = this.finalTranscript ? `${this.finalTranscript} ${cleanPart}`.trim() : cleanPart;
+    this.transcript = isFinal ? this.finalTranscript : `${this.finalTranscript} ${cleanPart}`.trim();
     if (this.state === "listening" && this.transcript) this.setState("hearing");
     this.emit();
 
-    // The one-shot path: the turn already ended, and this is the text it was
-    // waiting for.
-    if (isFinal && this.awaitingFinal) {
+    // The one-shot path or delayed ASR stream: the turn already ended, and this is the text it was waiting for.
+    if ((isFinal || this.transcript.trim()) && (this.awaitingFinal || this.state === "deciding")) {
       this.awaitingFinal = false;
       void this.commitTurn();
     }
@@ -433,15 +522,44 @@ export class VoiceEngine {
 
   /* ── Turn commitment ───────────────────────────────────────────────────── */
 
+  private resumeSuspendedSpeech(): void {
+    const suspended = this.suspendedSpeech;
+    this.suspendedSpeech = null;
+    this.endpointer.reset();
+
+    if (suspended && suspended.length > 0) {
+      this.speechQueue = [...suspended, ...this.speechQueue];
+      this.setState("speaking");
+      void this.processSpeechQueue();
+      return;
+    }
+
+    if (this.host.isBusy?.()) {
+      this.setState("thinking");
+    } else {
+      this.graph.setDucked(false);
+      this.assistantTurnEndedAt = Date.now();
+      this.setState(this.mode === "conversation" ? "listening" : "idle");
+    }
+    this.emit();
+  }
+
   private async commitTurn(): Promise<void> {
     this.awaitingFinal = false;
-    const heard = this.transcript.trim();
+    const raw = cleanTranscript(this.transcript);
     this.transcript = "";
     this.finalTranscript = "";
     this.endpointer.reset();
 
-    if (!heard) {
-      this.setState(this.mode === "conversation" ? "listening" : "idle");
+    // Each partial result was filtered as it arrived; the assembled utterance
+    // is checked once more as a whole, because echo spread across several
+    // partials can pass each of them and still be nothing but echo.
+    const echo = this.echo.filter(raw);
+    const heard = echo.echoed ? echo.text : raw;
+
+    if (!heard || isNonSpeechOrBlank(heard)) {
+      // Non-speech, blank audio, or our own voice. Resume where we left off.
+      this.resumeSuspendedSpeech();
       return;
     }
 
@@ -454,15 +572,86 @@ export class VoiceEngine {
     // Push-to-talk is an explicit request; the operator is holding the button,
     // so the addressing gate does not apply.
     if (this.mode === "conversation" && !verdict.directed) {
+      // Meant for someone else. Note it, and carry on with what we were saying.
       this.lastRejected = { text: heard, verdict };
-      this.setState("listening");
-      this.emit();
+      this.resumeSuspendedSpeech();
       return;
     }
 
+    const { text: withoutWakeWord, matched: wakeWordMatched } = stripWakeWord(heard, this.settings.wakeWords);
+
+    // It was for us. The next question is what it asks of the work in flight:
+    // a redirect replaces the run, but praise, a status check and "stop" do
+    // not — before this gate "great, keep going" cancelled the build it was
+    // praising, because every directed turn was an interruption.
+    const hostBusy = Boolean(this.host.isBusy?.());
+    const wasSpeaking = this.suspendedSpeech !== null && this.suspendedSpeech.length > 0;
+    const intent: TurnIntentVerdict =
+      this.mode === "conversation"
+        ? classifyTurnIntent(withoutWakeWord || heard, { busy: hostBusy, speaking: wasSpeaking })
+        : { intent: "instruction", reason: "Dictated." };
+    this.lastIntent = { ...intent, text: heard, at: Date.now() };
+    this.lastUserTurnAt = Date.now();
+
+    if (intent.intent === "stop") {
+      this.dropSpeech();
+      if (hostBusy) this.callInterrupt();
+      this.assistantTurnEndedAt = Date.now();
+      if (hostBusy) {
+        this.speakInterjection("Okay, stopped.");
+      } else {
+        this.narration = null;
+        this.setState(this.mode === "conversation" ? "listening" : "idle");
+        this.emit();
+      }
+      return;
+    }
+
+    if (intent.intent === "acknowledge") {
+      if (wasSpeaking) {
+        // "yes, go on" — agreement with what was being said. Finish saying it.
+        this.resumeSuspendedSpeech();
+        return;
+      }
+      this.suspendedSpeech = null;
+      const now = Date.now();
+      if (hostBusy && now - this.lastAckSpokenAt > ACK_REPLY_GAP_MS) {
+        this.lastAckSpokenAt = now;
+        this.speakInterjection("Still on it.");
+      } else {
+        this.setState(hostBusy ? "thinking" : this.mode === "conversation" ? "listening" : "idle");
+        this.emit();
+      }
+      return;
+    }
+
+    if (intent.intent === "status") {
+      // Answer, then pick up whatever was being said before the question.
+      const resume = this.suspendedSpeech ?? [];
+      this.suspendedSpeech = null;
+      this.speechQueue = [...resume, ...this.speechQueue];
+      const summary = this.host.progressSummary?.() ?? "Still working on it. I'll tell you as soon as it's done.";
+      this.speakInterjection(summary);
+      return;
+    }
+
+    // A real instruction: it replaces whatever was being said or done.
+    this.dropSpeech();
+    this.interrupted = true;
+    if (hostBusy || wasSpeaking) this.callInterrupt();
+
     this.setState("repairing");
-    const { text: withoutWakeWord } = stripWakeWord(heard, this.settings.wakeWords);
-    const repaired = await this.repair(withoutWakeWord || heard);
+
+    // Direct wake-word greeting: e.g. "Hey Temy", "Temy", "Hey Teminali"
+    if (wakeWordMatched && !withoutWakeWord) {
+      const greetingReply = this.settings.greeting?.trim()
+        ? this.settings.greeting.trim()
+        : "Hey! What are we building today?";
+      await this.speakReply(greetingReply);
+      return;
+    }
+
+    const repaired = repairDeterministic(withoutWakeWord || heard);
     this.pending = repaired;
 
     const needsApproval = Boolean(this.settings.confirmBeforeSend);
@@ -498,10 +687,7 @@ export class VoiceEngine {
     if (!needsClassifier || !this.host.complete) return verdict;
 
     try {
-      const reply = await this.host.complete(
-        classifierPrompt(text, this.host.lastAssistantText()),
-        this.abort?.signal,
-      );
+      const reply = await this.completeWithin(classifierPrompt(text, this.host.lastAssistantText()), CLASSIFIER_TIMEOUT_MS);
       const adjustment = parseClassifier(reply);
       return adjustment === null ? verdict : applyClassifier(verdict, adjustment);
     } catch {
@@ -611,19 +797,22 @@ export class VoiceEngine {
 
     this.setState("speaking");
     this.graph.setDucked(true);
+    this.echo.remember(this.settings.greeting);
     try {
       this.synthesis = await tts.speak({
         text: this.settings.greeting.trim(),
         language: this.settings.language === "auto" ? navigator.language : this.settings.language,
         voice: this.settings.ttsVoice ?? undefined,
-        rate: this.settings.ttsRate,
+        rate: paceFor(this.settings.ttsRate, this.settings.greeting),
         onEnd: () => {
           this.synthesis = null;
+          this.echo.markEnded();
           this.graph.setDucked(false);
           if (this.state === "speaking") this.setState("listening");
         },
       });
     } catch {
+      this.echo.markEnded();
       this.graph.setDucked(false);
       if (this.state === "speaking") this.setState("listening");
     }
@@ -633,10 +822,124 @@ export class VoiceEngine {
    * Called by the host when the assistant's reply is complete. In conversation
    * mode this reads it back and then returns to listening.
    */
-  async speakReply(text: string): Promise<void> {
-    this.assistantAskedQuestion = /\?\s*$/.test(text.trim());
+  /**
+   * Enqueue a sentence chunk to be spoken on the fly as it streams from the model.
+   * This lets the assistant explain on the go instead of waiting for the full generation.
+   */
+  async enqueueSpeechChunk(chunk: string, isFinal: boolean): Promise<void> {
+    // Whatever arrives now is the digest (or the end of the reply); the wait is over.
+    const wasDigesting = this.digesting;
+    this.digesting = false;
+    // The run is over: its last "Reading types dot ts" must not caption the
+    // reply being read out, which is in the chat and needs no caption.
+    if (isFinal) this.narration = null;
+    if (this.mode !== "conversation" || !this.settings.speakReplies) {
+      if (isFinal) {
+        this.assistantTurnEndedAt = Date.now();
+        if (this.state !== "idle") this.setState("listening");
+      }
+      return;
+    }
 
-    if (this.mode !== "conversation" || !this.settings.speakReplies || !text.trim()) {
+    const clean = speakableText(chunk).trim();
+    if (clean && !isNonSpeechOrBlank(clean)) {
+      if (this.suspendedSpeech !== null) {
+        this.suspendedSpeech.push(clean);
+      } else {
+        this.speechQueue.push(clean);
+      }
+      this.assistantAskedQuestion = /\?\s*$/.test(clean);
+    }
+
+    if (isFinal) {
+      this.isStreamDone = true;
+    }
+
+    if (this.suspendedSpeech === null && !this.isProcessingSpeechQueue && this.speechQueue.length > 0) {
+      void this.processSpeechQueue();
+    } else if (isFinal && this.speechQueue.length === 0 && !this.isProcessingSpeechQueue && this.suspendedSpeech === null) {
+      this.graph.setDucked(false);
+      this.assistantTurnEndedAt = Date.now();
+      if (this.state === "speaking" || (wasDigesting && this.state === "thinking")) this.setState("listening");
+    }
+  }
+
+  private async processSpeechQueue(): Promise<void> {
+    if (this.speechQueue.length === 0) {
+      this.isProcessingSpeechQueue = false;
+      this.currentlySpeakingText = null;
+      this.echo.markEnded();
+      if (this.interjecting && !this.isStreamDone) {
+        // A one-off line has finished; the run it commented on is still going.
+        this.interjecting = false;
+        this.graph.setDucked(false);
+        this.assistantTurnEndedAt = Date.now();
+        if (this.state === "speaking") {
+          this.setState(this.host.isBusy?.() ? "thinking" : this.mode === "conversation" ? "listening" : "idle");
+        }
+        this.emit();
+        return;
+      }
+      this.interjecting = false;
+      if (this.isStreamDone) {
+        this.isStreamDone = false;
+        this.graph.setDucked(false);
+        this.assistantTurnEndedAt = Date.now();
+        if (this.state === "speaking") this.setState("listening");
+        if (!this.streamingAsr && this.mode === "conversation" && !this.session?.active) void this.reopen();
+      } else if (this.digesting && this.state === "speaking") {
+        // The streamed sentences are spoken and the summary of the rest is still
+        // being made: a pause the orb must show as thinking, not as speech.
+        this.setState("thinking");
+      }
+      return;
+    }
+
+    this.isProcessingSpeechQueue = true;
+    const text = this.speechQueue.shift()!;
+    this.currentlySpeakingText = text;
+    const tts = this.providers?.tts;
+    if (!tts || !text) {
+      this.currentlySpeakingText = null;
+      void this.processSpeechQueue();
+      return;
+    }
+
+    this.interrupted = false;
+    this.setState("speaking");
+    this.graph.setDucked(true);
+    this.echo.remember(text);
+
+    try {
+      this.synthesis = await tts.speak({
+        text,
+        language: this.settings.language === "auto" ? navigator.language : this.settings.language,
+        voice: this.settings.ttsVoice ?? undefined,
+        rate: paceFor(this.settings.ttsRate, text),
+        onEnd: () => {
+          this.currentlySpeakingText = null;
+          this.synthesis = null;
+          this.echo.markEnded();
+          void this.processSpeechQueue();
+        },
+      });
+    } catch {
+      this.currentlySpeakingText = null;
+      this.synthesis = null;
+      this.echo.markEnded();
+      void this.processSpeechQueue();
+    }
+  }
+
+  async speakReply(text: string): Promise<void> {
+    const spoken = speakableText(text).trim();
+    if (!spoken || isNonSpeechOrBlank(spoken)) {
+      this.assistantTurnEndedAt = Date.now();
+      if (this.state !== "idle") this.setState("listening");
+      return;
+    }
+
+    if (this.mode !== "conversation" || !this.settings.speakReplies) {
       this.assistantTurnEndedAt = Date.now();
       if (this.state !== "idle") this.setState("listening");
       return;
@@ -649,32 +952,27 @@ export class VoiceEngine {
       return;
     }
 
-    const spoken = speakableText(text);
-    this.interrupted = false;
-    this.setState("speaking");
-    // Raise the VAD threshold so our own audio, past the browser's echo
-    // canceller, does not register as the operator speaking.
-    this.graph.setDucked(true);
+    // Split into sentences so that if the user coughs or makes an ambient sound,
+    // speech can pause and resume cleanly right from the current sentence!
+    const sentences = spoken.match(/[^.!?\n]+(?:[.!?]+|\n+|$)/g) || [spoken];
+    this.speechQueue = [];
+    this.suspendedSpeech = null;
+    this.currentlySpeakingText = null;
+    for (const s of sentences) {
+      const trimmed = s.trim();
+      if (trimmed && !isNonSpeechOrBlank(trimmed)) {
+        this.speechQueue.push(trimmed);
+      }
+    }
+    this.isStreamDone = true;
+    this.digesting = false;
+    this.assistantAskedQuestion = /\?\s*$/.test(spoken);
 
-    try {
-      this.synthesis = await tts.speak({
-        text: spoken,
-        language: this.settings.language === "auto" ? navigator.language : this.settings.language,
-        voice: this.settings.ttsVoice ?? undefined,
-        rate: this.settings.ttsRate,
-        onEnd: () => {
-          this.synthesis = null;
-          this.graph.setDucked(false);
-          this.assistantTurnEndedAt = Date.now();
-          if (this.state === "speaking") this.setState("listening");
-          // A one-shot engine's session ended with the previous turn.
-          if (!this.streamingAsr && this.mode === "conversation" && !this.session?.active) void this.reopen();
-        },
-      });
-    } catch {
-      this.graph.setDucked(false);
+    if (this.speechQueue.length > 0) {
+      void this.processSpeechQueue();
+    } else {
       this.assistantTurnEndedAt = Date.now();
-      this.setState("listening");
+      if (this.state !== "idle") this.setState("listening");
     }
   }
 
@@ -713,18 +1011,20 @@ export class VoiceEngine {
 
     const restore = () => {
       this.synthesis = null;
+      this.echo.markEnded();
       if (!inSession) return;
       this.graph.setDucked(false);
       this.assistantTurnEndedAt = Date.now();
       if (this.state === "speaking") this.setState("listening");
     };
 
+    this.echo.remember(spoken);
     try {
       this.synthesis = await tts.speak({
         text: spoken,
         language: this.settings.language === "auto" ? navigator.language : this.settings.language,
         voice: this.settings.ttsVoice ?? undefined,
-        rate: this.settings.ttsRate,
+        rate: paceFor(this.settings.ttsRate, spoken),
         onEnd: restore,
       });
     } catch {
@@ -738,22 +1038,190 @@ export class VoiceEngine {
    * was actually heard so the conversation history can reflect that rather than
    * pretending the whole thing was delivered.
    */
-  private handleBargeIn(): void {
+  /* ── Running commentary ────────────────────────────────────────────────── */
+
+  /**
+   * The host reports something notable the run just started — "Running the
+   * tests." The line always reaches the HUD. It is spoken only when the
+   * assistant is otherwise quiet, a run is actually in flight, not on the
+   * heels of the operator's own turn, and at most every PROGRESS_GAP_MS — a
+   * colleague's occasional "tests are running now", not a commentary track.
+   */
+  noteProgress(line: string): void {
+    const clean = line.trim();
+    if (!clean || this.state === "idle") return;
+    this.narration = clean;
+
+    const now = Date.now();
+    const quiet = this.suspendedSpeech === null && !this.isProcessingSpeechQueue && this.speechQueue.length === 0;
+    const allowed =
+      this.mode === "conversation" &&
+      this.settings.speakReplies &&
+      this.settings.narrateProgress &&
+      quiet &&
+      Boolean(this.host.isBusy?.()) &&
+      (this.state === "thinking" || this.state === "listening") &&
+      now - this.lastProgressSpokenAt >= PROGRESS_GAP_MS &&
+      now - this.lastUserTurnAt >= PROGRESS_AFTER_TURN_MS;
+
+    if (allowed) {
+      this.lastProgressSpokenAt = now;
+      this.speakInterjection(clean);
+      return;
+    }
+    this.emit();
+  }
+
+  /**
+   * The host has spoken what streamed and is now making the spoken summary of
+   * the rest (`spokenDigest.ts`, up to 7 s). Until it arrives through
+   * `enqueueSpeechChunk` the orb shows "thinking", not a silent "speaking".
+   * If sentences are still being read the switch waits for the queue to drain.
+   */
+  noteDigesting(): void {
+    if (this.mode !== "conversation" || !this.settings.speakReplies || this.isStreamDone) return;
+    this.digesting = true;
+    // Caption for the wait; the step commentary it replaces is finished.
+    this.narration = "Summing up the reply.";
+    const quiet = this.suspendedSpeech === null && !this.isProcessingSpeechQueue && this.speechQueue.length === 0;
+    if (quiet && this.state === "speaking") this.setState("thinking");
+  }
+
+  /** Say one line now, ahead of anything queued, then return to whatever the run is doing. */
+  private speakInterjection(text: string): void {
+    const clean = speakableText(text).trim();
+    if (!clean || this.mode !== "conversation" || !this.settings.speakReplies || !this.providers?.tts) {
+      this.setState(this.host.isBusy?.() ? "thinking" : this.mode === "conversation" ? "listening" : "idle");
+      this.emit();
+      return;
+    }
+    this.narration = clean;
+    this.interjecting = true;
+    this.speechQueue.unshift(clean);
+    if (!this.isProcessingSpeechQueue) void this.processSpeechQueue();
+    this.emit();
+  }
+
+  /** Stop talking and forget what was queued. The run itself is untouched. */
+  private dropSpeech(): void {
+    this.suspendedSpeech = null;
+    this.speechQueue = [];
+    this.isProcessingSpeechQueue = false;
+    this.interjecting = false;
+    this.digesting = false;
+    this.currentlySpeakingText = null;
     this.synthesis?.cancel();
     this.synthesis = null;
+    this.echo.markEnded();
+  }
+
+  private callInterrupt(): void {
+    try {
+      this.host.interrupt?.();
+    } catch {
+      // The host's failure to stop is not the microphone's problem.
+    }
+  }
+
+  /** Remove the assistant's own voice from a recogniser result; "" when it was all echo. */
+  private withoutEcho(text: string): string {
+    if (!text) return text;
+    const verdict = this.echo.filter(text);
+    return verdict.echoed ? verdict.text : text;
+  }
+
+  /** A local completion that gives up — and cancels — after `ms`. */
+  private async completeWithin(prompt: string, ms: number): Promise<string> {
+    if (!this.host.complete) return "";
+    const controller = new AbortController();
+    const onAbort = () => controller.abort();
+    this.abort?.signal.addEventListener("abort", onAbort, { once: true });
+    const timer = window.setTimeout(() => controller.abort(), ms);
+    try {
+      return await this.host.complete(prompt, controller.signal);
+    } finally {
+      window.clearTimeout(timer);
+      this.abort?.signal.removeEventListener("abort", onAbort);
+    }
+  }
+
+  private handleBargeIn(): void {
+    // Preserve in-flight and queued speech so that if the sound turns out to be
+    // non-speech or unrelated noise (cough, keyboard clicks, breathing), the
+    // assistant can cleanly resume talking right where it left off.
+    if (this.interjecting) {
+      // Running commentary is disposable: "Reading types dot ts" from before the
+      // operator spoke is stale by the time the turn is decided. A reply that an
+      // earlier barge-in already put aside is kept.
+      this.suspendedSpeech = this.suspendedSpeech ?? [];
+      this.speechQueue = [];
+      this.currentlySpeakingText = null;
+    } else if (this.currentlySpeakingText) {
+      this.suspendedSpeech = [this.currentlySpeakingText, ...this.speechQueue];
+      this.speechQueue = [];
+      this.currentlySpeakingText = null;
+    } else if (this.speechQueue.length > 0) {
+      this.suspendedSpeech = [...this.speechQueue];
+      this.speechQueue = [];
+    } else {
+      this.suspendedSpeech = [];
+    }
+
+    this.isProcessingSpeechQueue = false;
+    this.interjecting = false;
+    this.synthesis?.cancel();
+    this.synthesis = null;
+    this.echo.markEnded();
     this.graph.setDucked(false);
-    this.interrupted = true;
-    this.assistantTurnEndedAt = Date.now();
+    // Note: Do NOT abort the chat turn yet! We listen to what was said first.
     this.endpointer.reset();
     this.setState("hearing");
     this.turnStartedAt = Date.now();
   }
 
+  /** Reset the 1-minute inactivity timer (called on user typing, click, or speech). */
+  touch(): void {
+    this.lastActivityAt = Date.now();
+  }
+
+  /**
+   * Called when the session has been completely inactive for 1 minute.
+   * Plays a natural, casual chill/sleep template line and transitions to idle.
+   */
+  private async goToSleep(): Promise<void> {
+    if (this.isGoingToSleep || this.state !== "listening") return;
+    this.isGoingToSleep = true;
+    const templates = [
+      "I'm going to chill for now. Just say 'Hey Temy' when you need me.",
+      "Going into chill mode. Say 'Hey Temy' whenever you're ready.",
+      "I'll take a breather and let you focus. Just say 'Hey Temy' if you need a hand.",
+      "Heading to sleep for a bit. Say 'Hey Temy' to wake me up.",
+      "Stepping aside for now. Holler with 'Hey Temy' whenever you want to jump back in.",
+      "I'll hang out in the background. Just say 'Hey Temy' when you need me.",
+    ];
+    const farewell = templates[Math.floor(Math.random() * templates.length)];
+    try {
+      await this.speakAside(farewell);
+    } finally {
+      this.isGoingToSleep = false;
+      await this.stop();
+    }
+  }
+
   /** Host hook: stop speaking without it counting as an interruption. */
   silence(): void {
+    this.suspendedSpeech = null;
+    this.currentlySpeakingText = null;
+    this.speechQueue = [];
+    this.isProcessingSpeechQueue = false;
+    this.isStreamDone = false;
+    this.interjecting = false;
+    this.digesting = false;
     this.synthesis?.cancel();
     this.synthesis = null;
+    this.echo.markEnded();
     this.graph.setDucked(false);
+    this.assistantTurnEndedAt = Date.now();
     if (this.state === "speaking") this.setState("listening");
   }
 
@@ -761,10 +1229,21 @@ export class VoiceEngine {
 
   private startTicker(): void {
     this.stopTicker();
-    // Drives the auto-send countdown in the HUD.
+    this.lastActivityAt = Date.now();
+    this.isGoingToSleep = false;
+    // Drives the auto-send countdown in the HUD and checks 1-minute inactivity sleep.
     this.tickTimer = window.setInterval(() => {
       if (this.autoSendDeadline) this.emit();
-    }, 100);
+
+      if (
+        this.mode === "conversation" &&
+        this.state === "listening" &&
+        !this.isGoingToSleep &&
+        Date.now() - this.lastActivityAt >= VoiceEngine.INACTIVITY_SLEEP_MS
+      ) {
+        void this.goToSleep();
+      }
+    }, 500);
   }
 
   private stopTicker(): void {

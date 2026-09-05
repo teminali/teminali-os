@@ -324,16 +324,12 @@ You operate as a synchronized multi-agent engineering team:
     },
   ];
 
-  await GatewayClient.recordAudit({
-    type: "inference.started",
-    requestId: id,
-    mode,
-    routeReason: selection.reason,
-    model: selection.model,
-    historyMessages: history.length,
-    imageCount: attachedImages.length,
-    promptCharacters: groundedPrompt.length,
-  });
+  // The gateway's audit ingest is metadata-only and allowlisted (see
+  // `server/validation.js#validateClientAuditEvent`): an event name from its
+  // vocabulary, a provider, and sizes or timings. The model, mode and route
+  // reason stay in `RuntimeTelemetryService`; sent here they were rejected
+  // with 400 on every local turn, and `recordAudit` swallows that.
+  await GatewayClient.recordAudit({ event: "prompt", provider: "ollama" });
 
   const controller = new AbortController();
   let timedOut = false;
@@ -667,12 +663,10 @@ You operate as a synchronized multi-agent engineering team:
   };
   RuntimeTelemetryService.record(telemetry);
   await GatewayClient.recordAudit({
-    type: "inference.completed",
-    requestId: id,
-    mode,
-    routeReason: selection.reason,
-    telemetry,
-    doneReason: finalChunk.done_reason,
+    event: "model_call",
+    provider: "ollama",
+    status: 200,
+    durationMs: telemetry.totalDurationMs,
   });
   callbacks.onComplete({
     fullText: accumulated,
@@ -799,7 +793,12 @@ async function streamFromAnthropic(
     source: "anthropic",
   };
   RuntimeTelemetryService.record(telemetry);
-  await GatewayClient.recordAudit({ type: "inference.completed", requestId: id, telemetry });
+  await GatewayClient.recordAudit({
+    event: "model_call",
+    provider: "anthropic",
+    status: 200,
+    durationMs: telemetry.totalDurationMs,
+  });
   callbacks.onComplete({
     fullText: accumulated,
     costUsd: 0,

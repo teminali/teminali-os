@@ -1,4 +1,46 @@
 /**
+ * Patterns matching Whisper or other ASR non-speech artifact tokens.
+ * These are emitted on silence, room noise, or pauses and should never reach the assistant.
+ */
+export const BLANK_AUDIO_PATTERN =
+  /^\s*[\(\[][^()\[\]]{1,120}[\)\]]\s*$|\[[^\]]*(?:blank[_\s-]*audio|silence|music|clicking|typing|keyboard|applause|laughter|giggle|chuckle|cough|sigh|snort|groan|gasp|throat[_\s-]*clearing|whispering|inaudible|noise|background[_\s-]*noise|ambient|sound|tone|beep|static|screaming|cheering)[^\]]*\]|\([^)]*(?:blank[_\s-]*audio|silence|music|clicking|typing|keyboard|applause|laughter|cough|sigh|inaudible|noise|ambient|sound|tone|beep|static|screaming|cheering|gentle|upbeat|muffled)[^)]*\)|\*[^*]*(?:blank[_\s-]*audio|silence|music|clicking|typing|keyboard|applause|laughter)[^*]*\*|[♪♫♬♩]/gi;
+
+export function cleanTranscript(text: string): string {
+  if (!text) return "";
+  let cleaned = text.replace(BLANK_AUDIO_PATTERN, " ").replace(/\s{2,}/g, " ").trim();
+  // If the entire text was parenthesized or bracketed (e.g. "(upbeat music)", "[keyboard clicking]")
+  if (/^\s*[\(\[][^()\[\]]+[\)\]]\s*$/.test(cleaned)) {
+    return "";
+  }
+  // Strip strings that consist solely of standalone punctuation
+  cleaned = cleaned.replace(/^[.\s,;!?:—–-]+$/, "").trim();
+  return cleaned;
+}
+
+export function isNonSpeechOrBlank(text: string): boolean {
+  const cleaned = cleanTranscript(text);
+  if (cleaned.length === 0) return true;
+  // If fewer than 2 letters/numbers, not meaningful speech
+  const alphanumeric = cleaned.replace(/[^\p{L}\p{N}]/gu, "");
+  if (alphanumeric.length < 2) return true;
+
+  // Known ambient noise descriptions without parentheses
+  const lower = cleaned.toLowerCase().trim();
+  const ambientPhrases = [
+    "keyboard clicking", "upbeat music", "gentle music", "background noise",
+    "typing sounds", "mouse clicking", "ambient audio", "only ambient audio",
+    "music playing", "blank audio", "silence", "keyboard typing",
+    "cough", "coughing", "coughs", "throat clearing", "throat clear",
+    "sniffle", "sniffling", "breathing", "heavy breathing", "keyboard clicks",
+    "mouse click", "mouse clicks", "clicking", "typing"
+  ];
+  if (ambientPhrases.some((p) => lower === p || lower === `${p}.`)) {
+    return true;
+  }
+  return false;
+}
+
+/**
  * Transcript repair — nothing reaches the chat until it has been cleaned and,
  * optionally, shown back to the operator for approval.
  *
@@ -120,7 +162,17 @@ const FILLER_PATTERN = new RegExp(
  */
 export function repairDeterministic(raw: string): RepairedTranscript {
   const edits: RepairedTranscript["edits"] = [];
-  let text = raw;
+  const cleanedRaw = cleanTranscript(raw);
+  if (!cleanedRaw) {
+    return {
+      raw,
+      repaired: "",
+      language: "",
+      edits: raw.trim() ? [{ from: raw.trim(), to: "", kind: "filler" }] : [],
+      clean: false,
+    };
+  }
+  let text = cleanedRaw;
 
   const record = (kind: RepairKind, before: string, after: string) => {
     if (before !== after) edits.push({ from: before.trim(), to: after.trim(), kind });

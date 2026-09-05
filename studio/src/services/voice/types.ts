@@ -283,6 +283,10 @@ export interface VoiceSettings {
   endpointSilenceMs: number;
   /** Let the operator talk over a spoken reply. */
   allowBargeIn: boolean;
+  /** Say a short line when an agent run starts something notable — "running the tests". */
+  narrateProgress: boolean;
+  /** Read the first few sentences of a long reply, then a spoken summary of the rest. */
+  summariseLongReplies: boolean;
   ttsVoice: string | null;
   ttsRate: number;
   /** Spoken when hands-free conversation starts, so you know it is listening. */
@@ -300,11 +304,13 @@ export const DEFAULT_VOICE_SETTINGS: VoiceSettings = {
   autoSendAfterMs: 0,
   requireSpeakerMatch: false,
   requireWakeWord: false,
-  wakeWords: ["teminali", "frontier", "studio"],
+  wakeWords: ["temy", "teminali", "frontier", "studio"],
   endpointSilenceMs: 900,
   allowBargeIn: true,
+  narrateProgress: true,
+  summariseLongReplies: true,
   ttsVoice: null,
-  ttsRate: 1.02,
-  greeting: "Hey there",
+  ttsRate: 1.15,
+  greeting: "Hey! What are we building today?",
   speakGreeting: true,
 };

@@ -7,7 +7,7 @@ import {
 } from "../src/services/voice/transcriptRepair.ts";
 import { scoreAddressing, stripWakeWord, parseClassifier, applyClassifier } from "../src/services/voice/addressing.ts";
 import { completenessScore, Endpointer } from "../src/services/voice/turnTaking.ts";
-import { speakableText } from "../src/services/voice/speakable.ts";
+import { speakableText, paceFor, PACE_SHORT_WORDS, PACE_LONG_WORDS, PACE_LONG_BOOST } from "../src/services/voice/speakable.ts";
 import { normaliseAddress } from "../src/utils/address.ts";
 import { segment } from "../src/utils/segment.ts";
 
@@ -84,6 +84,24 @@ test("a wake word inside a sentence is left alone", () => {
   assert.equal(matched, false);
 });
 
+test("an exact wake word greeting like Hey Temy is matched and stripped cleanly", () => {
+  const r1 = stripWakeWord("Hey Temy", ["temy", "teminali"]);
+  assert.equal(r1.matched, true);
+  assert.equal(r1.text, "");
+
+  const r2 = stripWakeWord("Hey Temy!", ["temy", "teminali"]);
+  assert.equal(r2.matched, true);
+  assert.equal(r2.text, "");
+
+  const r3 = stripWakeWord("Temy", ["temy", "teminali"]);
+  assert.equal(r3.matched, true);
+  assert.equal(r3.text, "");
+
+  const r4 = stripWakeWord("Hey Temy, build a landing page", ["temy", "teminali"]);
+  assert.equal(r4.matched, true);
+  assert.equal(r4.text, "build a landing page");
+});
+
 /* ── Addressing ───────────────────────────────────────────────────────────── */
 
 const baseContext = {
@@ -99,6 +117,15 @@ const baseContext = {
 
 test("being addressed by name is accepted", () => {
   const { verdict } = scoreAddressing("Teminali, run the tests", baseContext);
+  assert.equal(verdict.directed, true);
+  assert.equal(verdict.signals.wakeWord, true);
+});
+
+test("Saying Hey Temy directly addresses the assistant", () => {
+  const { verdict } = scoreAddressing("Hey Temy", {
+    ...baseContext,
+    wakeWords: ["temy", "teminali"],
+  });
   assert.equal(verdict.directed, true);
   assert.equal(verdict.signals.wakeWord, true);
 });
@@ -300,4 +327,22 @@ test("asking for the browser tier when it cannot recognise still yields a workin
   // And the downgrade is stated, not hidden.
   assert.equal(resolved.downgradedFrom, "builtin");
   assert.ok(resolved.downgradeReason);
+});
+
+/* ── Pace ─────────────────────────────────────────────────────────────────── */
+
+test("short lines keep the operator's rate; long prose is read faster", () => {
+  assert.equal(paceFor(1.15, "Okay, stopped."), 1.15);
+  assert.equal(paceFor(1.15, Array(PACE_SHORT_WORDS).fill("word").join(" ")), 1.15);
+  const long = Array(PACE_LONG_WORDS).fill("word").join(" ");
+  assert.equal(paceFor(1.15, long), Math.round(1.15 * PACE_LONG_BOOST * 100) / 100);
+  const mid = Array(Math.round((PACE_SHORT_WORDS + PACE_LONG_WORDS) / 2)).fill("word").join(" ");
+  assert.ok(paceFor(1.15, mid) > 1.15 && paceFor(1.15, mid) < paceFor(1.15, long), "ramps between the two");
+  assert.equal(paceFor(1.15, Array(200).fill("word").join(" ")), paceFor(1.15, long), "capped at the long boost");
+});
+
+test("pace stays inside what a speech engine reads naturally", () => {
+  assert.equal(paceFor(0.1, "hi"), 0.5);
+  assert.equal(paceFor(1.9, Array(80).fill("word").join(" ")), 2);
+  assert.equal(paceFor(1, ""), 1);
 });

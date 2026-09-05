@@ -63,6 +63,61 @@ const ERROR_MESSAGES: Record<string, string> = {
   "no-speech": "No speech was detected.",
 };
 
+const NOVELTY_VOICES = new Set([
+  "albert", "bad news", "bahh", "bells", "boing", "bubbles", "cellos",
+  "deranged", "good news", "hysterical", "jester", "organ", "pipe organ",
+  "princess", "superstar", "trinoids", "whisper", "wobble", "zarvox",
+]);
+
+/**
+ * Eloquence and pre-Vocalizer MacinTalk voices: intelligible but flat, so they
+ * lose to a real voice without being scored out. "Alex" is on neither list —
+ * it is Apple's flagship US male voice and the largest asset macOS ships.
+ * Mirrors LEGACY_VOICES in server/speech-local.js.
+ */
+const LEGACY_VOICES = new Set([
+  "eddy", "flo", "grandma", "grandpa", "reed", "rocko", "sandy", "shelley",
+  "agnes", "bruce", "fred", "junior", "kathy", "ralph", "vicki", "victoria",
+]);
+
+let cachedVoices: SpeechSynthesisVoice[] = [];
+if (typeof window !== "undefined" && "speechSynthesis" in window) {
+  cachedVoices = window.speechSynthesis.getVoices();
+  window.speechSynthesis.onvoiceschanged = () => {
+    cachedVoices = window.speechSynthesis.getVoices();
+  };
+}
+
+async function getAvailableVoices(synth: SpeechSynthesis): Promise<SpeechSynthesisVoice[]> {
+  const current = synth.getVoices();
+  if (current.length > 0) {
+    cachedVoices = current;
+    return current;
+  }
+  if (cachedVoices.length > 0) return cachedVoices;
+
+  return new Promise((resolve) => {
+    let resolved = false;
+    const timer = setTimeout(() => {
+      if (!resolved) {
+        resolved = true;
+        resolve(synth.getVoices());
+      }
+    }, 350);
+
+    const onVoices = () => {
+      if (!resolved) {
+        resolved = true;
+        clearTimeout(timer);
+        cachedVoices = synth.getVoices();
+        synth.removeEventListener("voiceschanged", onVoices);
+        resolve(cachedVoices);
+      }
+    };
+    synth.addEventListener("voiceschanged", onVoices);
+  });
+}
+
 export class WebSpeechProvider implements VoiceProvider {
   capabilities: ProviderCapabilities = {
     tier: "builtin",
@@ -198,6 +253,7 @@ export class WebSpeechProvider implements VoiceProvider {
     };
   }
 
+
   async speak(options: SpeakOptions): Promise<SynthesisHandle> {
     if (typeof window === "undefined" || !("speechSynthesis" in window)) {
       throw new VoiceError("This browser cannot synthesise speech.", "TTS_FAILED", false);
@@ -206,45 +262,60 @@ export class WebSpeechProvider implements VoiceProvider {
     const synth = window.speechSynthesis;
     const utterance = new SpeechSynthesisUtterance(options.text);
     utterance.lang = options.language || DEFAULT_LANGUAGE;
-    utterance.rate = options.rate ?? 1;
-    utterance.pitch = options.pitch ?? 1;
+    utterance.rate = options.rate ?? 1.0;
+    utterance.pitch = options.pitch ?? 1.0;
+
+    const voices = await getAvailableVoices(synth);
 
     if (options.voice) {
-      const match = synth.getVoices().find((voice) => voice.name === options.voice);
+      const match = voices.find((voice) => voice.name === options.voice);
       if (match) utterance.voice = match;
-    } else {
-      const voices = synth.getVoices();
+    }
+
+    if (!utterance.voice && voices.length > 0) {
       const prefix = (utterance.lang || "en").split("-")[0].toLowerCase();
       const matchingVoices = voices.filter((v) => v.lang.toLowerCase().startsWith(prefix));
 
-      const NOVELTY_VOICES = new Set([
-        "bad news", "bahh", "bells", "boing", "bubbles", "cellos", "deranged",
-        "good news", "hysterical", "junior", "kathy", "organ", "pipe organ",
-        "princess", "ralph", "trinoids", "whisper", "zarvox", "albert", "fred",
-      ]);
-
       const scoreVoice = (v: SpeechSynthesisVoice) => {
-        const name = v.name.toLowerCase();
-        if (NOVELTY_VOICES.has(name)) return -500;
+        // macOS reports the quality tier in the URI as often as in the name.
+        const name = `${v.name} ${v.voiceURI}`.toLowerCase();
+        for (const novelty of NOVELTY_VOICES) {
+          if (name.includes(novelty)) return -1000;
+        }
+        if (name.includes("compact")) return -300;
+
         let score = 0;
-        if (name.includes("enhanced") || name.includes("premium")) score += 100;
-        if (name.includes("siri")) score += 80;
-        if (name.includes("natural")) score += 70;
-        if (
-          name.includes("samantha") ||
-          name.includes("ava") ||
-          name.includes("zoe") ||
-          name.includes("daniel") ||
-          name.includes("serena") ||
-          name.includes("karen")
-        ) score += 50;
-        if (v.default) score += 20;
-        if (name.includes("compact")) score -= 30;
+        for (const legacy of LEGACY_VOICES) {
+          if (name.includes(legacy)) {
+            score -= 200;
+            break;
+          }
+        }
+        // Chrome built-in Google neural voices are high-quality, human-sounding and smooth
+        if (name.includes("google")) {
+          score += 450;
+          if (name.includes("us english") || name.includes("uk english female")) score += 60;
+        }
+        // Apple Siri voices
+        if (name.includes("siri")) score += 400;
+        // Premium & enhanced Apple voices
+        if (name.includes("premium")) score += 350;
+        if (name.includes("enhanced")) score += 320;
+        if (name.includes("natural")) score += 280;
+
+        // Named high-quality natural voices
+        if (name.includes("ava")) score += 220;
+        if (name.includes("zoe")) score += 200;
+        if (name.includes("samantha")) score += 180;
+        if (name.includes("daniel") || name.includes("allison") || name.includes("serena")) score += 160;
+        if (name.includes("karen")) score += 140;
+
         return score;
       };
 
-      const sorted = [...matchingVoices].sort((a, b) => scoreVoice(b) - scoreVoice(a));
-      if (sorted.length > 0 && scoreVoice(sorted[0]) > -100) {
+      const pool = matchingVoices.length > 0 ? matchingVoices : voices;
+      const sorted = [...pool].sort((a, b) => scoreVoice(b) - scoreVoice(a));
+      if (sorted.length > 0 && scoreVoice(sorted[0]) > -500) {
         utterance.voice = sorted[0];
       }
     }

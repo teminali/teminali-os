@@ -24,7 +24,15 @@ function loadSettings(): VoiceSettings {
   try {
     const raw = localStorage.getItem(SETTINGS_KEY);
     if (!raw) return { ...DEFAULT_VOICE_SETTINGS };
-    return { ...DEFAULT_VOICE_SETTINGS, ...(JSON.parse(raw) as Partial<VoiceSettings>) };
+    const parsed = JSON.parse(raw) as Partial<VoiceSettings>;
+    // Settings are saved whole, so a default that changes is pinned at its old
+    // value on every existing machine. 1.02 was the shipped rate until
+    // 2026-09-05; only that exact value is treated as "never chosen".
+    if (parsed.ttsRate === 1.02) delete parsed.ttsRate;
+    const wakeWords = Array.isArray(parsed.wakeWords)
+      ? Array.from(new Set(["temy", "teminali", ...parsed.wakeWords]))
+      : DEFAULT_VOICE_SETTINGS.wakeWords;
+    return { ...DEFAULT_VOICE_SETTINGS, ...parsed, wakeWords };
   } catch {
     return { ...DEFAULT_VOICE_SETTINGS };
   }
@@ -46,11 +54,19 @@ export interface UseVoiceResult extends VoiceSnapshot {
   recoverRejected: () => Promise<void>;
   /** Stop a spoken reply without it counting as an interruption. */
   silence: () => void;
+  /** Reset the 1-minute inactivity sleep timer. */
+  touch: () => void;
   update: (patch: Partial<VoiceSettings>) => void;
   /** Tell the engine a reply is ready to be read aloud. */
   speakReply: (text: string) => Promise<void>;
+  /** Enqueue a sentence chunk to explain on the go during live token streaming. */
+  enqueueSpeechChunk: (chunk: string, isFinal: boolean) => Promise<void>;
   /** Speak a line outside a voice turn — the screen assistant's path. */
   speakAside: (text: string) => Promise<void>;
+  /** Tell the voice layer what the run just started doing, for the HUD and the occasional spoken line. */
+  noteProgress: (line: string) => void;
+  /** The streamed part of a reply is spoken; the digest of the rest is being made. */
+  noteDigesting: () => void;
   captureEnrolmentClip: (seconds?: number) => Promise<{ samples: Float32Array; sampleRate: number }>;
   finishEnrolment: (clips: Array<{ samples: Float32Array; sampleRate: number }>) => boolean;
   clearEnrolment: () => void;
@@ -71,8 +87,13 @@ export function useVoice(host: VoiceHost): UseVoiceResult {
         submit: (text) => hostRef.current.submit(text),
         lastAssistantText: () => hostRef.current.lastAssistantText(),
         isBusy: () => hostRef.current.isBusy(),
+        interrupt: () => hostRef.current.interrupt?.(),
         complete: (prompt, signal) => hostRef.current.complete?.(prompt, signal) ?? Promise.resolve(""),
         hints: () => hostRef.current.hints?.() ?? [],
+        // Every optional host method must be forwarded here, or the engine
+        // silently sees `undefined` and takes its fallback: this one was
+        // missing, so "how's it going?" got the canned line, never the run.
+        progressSummary: () => hostRef.current.progressSummary?.() ?? null,
       }),
     [],
   );
@@ -123,9 +144,13 @@ export function useVoice(host: VoiceHost): UseVoiceResult {
     discard: useCallback(() => engine.discard(), [engine]),
     recoverRejected: useCallback(() => engine.recoverRejected(), [engine]),
     silence: useCallback(() => engine.silence(), [engine]),
+    touch: useCallback(() => engine.touch(), [engine]),
     update,
     speakReply: useCallback((text: string) => engine.speakReply(text), [engine]),
+    enqueueSpeechChunk: useCallback((chunk: string, isFinal: boolean) => engine.enqueueSpeechChunk(chunk, isFinal), [engine]),
     speakAside: useCallback((text: string) => engine.speakAside(text), [engine]),
+    noteProgress: useCallback((line: string) => engine.noteProgress(line), [engine]),
+    noteDigesting: useCallback(() => engine.noteDigesting(), [engine]),
     captureEnrolmentClip: useCallback((seconds?: number) => engine.captureEnrolmentClip(seconds), [engine]),
     finishEnrolment: useCallback(
       (clips: Array<{ samples: Float32Array; sampleRate: number }>) => engine.finishEnrolment(clips) !== null,

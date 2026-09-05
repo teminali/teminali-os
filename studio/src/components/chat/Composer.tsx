@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from "react";
-import { Lock, Plus, Square } from "lucide-react";
+import { Lock, Plus, Square, Mic, X } from "lucide-react";
 import { VoiceButton } from "../voice/VoiceButton";
+import { VoiceOrb } from "../voice/VoiceOrb";
 import { VoiceReviewBar } from "../voice/VoiceReviewBar";
 import { VoiceHud } from "../voice/VoiceHud";
 import type { UseVoiceResult } from "../../hooks/useVoice";
@@ -43,6 +44,39 @@ export interface ComposerProps {
    */
   width?: "column" | "fill";
   autoFocus?: boolean;
+}
+
+/** How long a fresh "keep going" outranks the running commentary in the caption. */
+const INTENT_CAPTION_MS = 6000;
+
+const INTENT_LABEL: Record<string, string> = {
+  stop: "stopped",
+  acknowledge: "carrying on",
+  status: "answering",
+};
+
+/**
+ * One line under the orb. While the run is working it is the assistant's
+ * latest progress line; while you talk over it, it is how that was read. A
+ * dropped or reinterpreted utterance that leaves no trace is indistinguishable
+ * from a broken microphone, which is what "it's not responding" usually means.
+ */
+function voiceCaption(voice: UseVoiceResult, streaming: boolean): string | null {
+  if (voice.state === "hearing") return null;
+  const busy = streaming || voice.state === "thinking" || voice.state === "sending";
+  const intent = voice.lastIntent;
+  // A fresh "keep going" beats the narration for a few seconds: the operator
+  // must see it was heard as encouragement, not as an instruction.
+  const freshAck = intent?.intent === "acknowledge" && Date.now() - intent.at < INTENT_CAPTION_MS;
+  if (!freshAck && (voice.state === "speaking" || busy)) {
+    if (voice.narration) return voice.narration;
+  }
+  if ((busy || freshAck) && intent && intent.intent !== "instruction") {
+    const heard = intent.text.length > 42 ? `${intent.text.slice(0, 41).trim()}…` : intent.text;
+    return `Heard “${heard}” — ${INTENT_LABEL[intent.intent] ?? intent.intent}`;
+  }
+  if (busy) return voice.narration ?? "Working…";
+  return null;
 }
 
 export const Composer: React.FC<ComposerProps> = ({
@@ -168,10 +202,10 @@ export const Composer: React.FC<ComposerProps> = ({
   const reviewing = voice.state === "review" && voice.pending !== null;
 
   useEffect(() => {
-    if (reviewing && voice.pending && assistant?.claimsUtterance()) {
+    if (reviewing && voice.pending) {
       void voice.approve(voice.pending.repaired);
     }
-  }, [reviewing, voice, assistant]);
+  }, [reviewing, voice]);
 
   /* The follow-up bar is a true pill only while it is one row high. An
      attachment or a wrapped line makes it tall, and half of a tall box is the
@@ -195,37 +229,100 @@ export const Composer: React.FC<ComposerProps> = ({
         </p>
       )}
 
-      {conversation && (
-        <VoiceHud
-          state={voice.state}
-          level={voice.level}
-          transcript={voice.transcript}
-          verdict={voice.verdict}
-          lastRejected={voice.lastRejected}
-          interrupted={voice.interrupted}
-          tierLabel={
-            voice.providers?.capabilities[voice.providers.asrTier ?? "builtin"]?.label ?? "Speech unavailable"
-          }
-          onRecover={() => void voice.recoverRejected()}
-          onEnd={() => void voice.stop()}
-        />
+      {conversation && !tall && (
+        <div className="w-full flex flex-col items-center gap-1 pb-3.5 overflow-visible">
+          <div className="relative p-2 overflow-visible animate-float">
+            <VoiceOrb
+              state={voice.state}
+              level={voice.level}
+              size={56}
+              onClick={() => void voice.stop()}
+              title="Click to end voice conversation"
+            />
+          </div>
+          {/* What the assistant last said about the run, or how it read what
+              you said over it. A decision you cannot see is one you cannot
+              correct, so "keep going" shows as carrying on, not as silence. */}
+          {(() => {
+            const caption = voiceCaption(voice, streaming);
+            return caption ? (
+              <p className="max-w-[28rem] px-2 text-2xs text-ink-muted text-center truncate" aria-live="polite">
+                {caption}
+              </p>
+            ) : null;
+          })()}
+        </div>
       )}
 
-      {reviewing && voice.pending && !assistant?.claimsUtterance() && (
-        <VoiceReviewBar
-          pending={voice.pending}
-          autoSendIn={voice.autoSendIn}
-          onApprove={(text) => void voice.approve(text)}
-          onDiscard={() => voice.discard()}
-          onInteract={() => {
-            // Touching the review bar must stop the clock — an auto-send that
-            // fires while you are editing is the worst possible behaviour.
-            if (voice.autoSendIn !== null) voice.update({ autoSendAfterMs: 0 });
-          }}
-        />
-      )}
-
-      {!conversation && (
+      {conversation ? (
+        /* ChatGPT Astra Voice Input Bar — matches Screenshot 1, 2, 3 */
+        <div className="lit lit-strong lit-focus w-full bg-surface rounded-full px-3.5 py-1.5 flex items-center justify-between gap-3 border border-edge-subtle shadow-xl">
+          <button
+            type="button"
+            onClick={onAttach}
+            className="w-8 h-8 rounded-full flex items-center justify-center text-ink-muted hover:text-ink-high hover:bg-surface-hover transition-colors flex-shrink-0"
+            title="Attach file"
+            aria-label="Attach file"
+          >
+            <Plus size={16} />
+          </button>
+          <input
+            type="text"
+            value={value}
+            onChange={(e) => {
+              voice.touch();
+              onChange(e.target.value);
+            }}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && !e.shiftKey) {
+                e.preventDefault();
+                onSubmit();
+              }
+            }}
+            placeholder="Type"
+            className="flex-1 bg-transparent border-none outline-none text-sm text-ink-high placeholder:text-ink-muted px-1"
+          />
+          {value.trim() && (
+            <button
+              type="button"
+              onClick={onSubmit}
+              className="w-7 h-7 rounded-full bg-accent text-accent-ink hover:opacity-90 flex items-center justify-center transition-opacity flex-shrink-0"
+              title={streaming ? "Interrupt and send" : "Send"}
+              aria-label="Send"
+            >
+              <span className="text-xs leading-none font-bold">↑</span>
+            </button>
+          )}
+          <div className="flex items-center gap-1.5 flex-shrink-0">
+            <button
+              type="button"
+              onClick={() => {
+                if (voice.state === "listening" || voice.state === "hearing") {
+                  voice.silence();
+                }
+              }}
+              className={`w-8 h-8 rounded-full flex items-center justify-center transition-colors ${
+                voice.state === "hearing"
+                  ? "text-success bg-success/15"
+                  : "text-ink-muted hover:text-ink-high hover:bg-surface-hover"
+              }`}
+              title={voice.state === "hearing" ? "Hearing you" : "Listening"}
+              aria-label="Microphone"
+            >
+              <Mic size={15} />
+            </button>
+            <button
+              type="button"
+              onClick={() => void voice.stop()}
+              className="w-8 h-8 rounded-full bg-surface-chip flex items-center justify-center text-ink-muted hover:text-danger hover:bg-danger/20 transition-colors"
+              title="End voice conversation"
+              aria-label="End voice conversation"
+            >
+              <X size={15} />
+            </button>
+          </div>
+        </div>
+      ) : (
         <div
           {...(attachments?.dropProps ?? {})}
           onPaste={(event) => {
@@ -287,6 +384,7 @@ export const Composer: React.FC<ComposerProps> = ({
                 ref={areaRef}
                 value={value}
                 onChange={(event) => {
+                  voice.touch();
                   onChange(event.target.value);
                   syncTrigger(event.target);
                 }}
@@ -334,6 +432,7 @@ export const Composer: React.FC<ComposerProps> = ({
                 ref={areaRef}
                 value={value}
                 onChange={(event) => {
+                  voice.touch();
                   onChange(event.target.value);
                   syncTrigger(event.target);
                 }}
@@ -372,14 +471,27 @@ export const Composer: React.FC<ComposerProps> = ({
             )}
 
             {streaming ? (
-              <button
-                type="button"
-                onClick={onStop}
-                title="Stop generating"
-                className="w-6 h-6 rounded-full bg-danger/20 text-danger flex items-center justify-center flex-shrink-0 hover:bg-danger/30 transition-colors duration-ds ease-ds"
-              >
-                <Square size={11} fill="currentColor" />
-              </button>
+              value.trim() ? (
+                <button
+                  type="button"
+                  onClick={onSubmit}
+                  title="Interrupt and send"
+                  aria-label="Interrupt and send"
+                  className="w-6 h-6 rounded-full bg-accent text-accent-ink hover:opacity-90 flex items-center justify-center flex-shrink-0 transition-colors duration-ds ease-ds shadow-sm"
+                >
+                  <span className="text-sm leading-none font-bold">↑</span>
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  onClick={onStop}
+                  title="Stop generating"
+                  aria-label="Stop generating"
+                  className="w-6 h-6 rounded-full bg-danger/20 text-danger flex items-center justify-center flex-shrink-0 hover:bg-danger/30 transition-colors duration-ds ease-ds"
+                >
+                  <Square size={11} fill="currentColor" />
+                </button>
+              )
             ) : value.trim() ? (
               <button
                 type="button"
@@ -399,7 +511,7 @@ export const Composer: React.FC<ComposerProps> = ({
                 state={voice.state}
                 level={voice.level}
                 mode={assistant?.settings.mode ?? "dictate"}
-                onDictate={() => (assistant ? void assistant.beginListening() : void voice.startDictation())}
+                onDictate={() => void voice.startConversation()}
                 onConversation={() => void voice.startConversation()}
                 onStop={() => {
                   assistant?.cancel();

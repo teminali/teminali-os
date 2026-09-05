@@ -54,7 +54,7 @@ export const VoiceButton: React.FC<VoiceButtonProps> = ({
   const speaking = state === "speaking";
 
   const label = idle
-    ? `${MODE_LABEL[mode]} — hold Shift for hands-free conversation`
+    ? "Start voice conversation with Temy"
     : speaking
       ? "Speaking — talk to interrupt"
       : hearing
@@ -68,13 +68,12 @@ export const VoiceButton: React.FC<VoiceButtonProps> = ({
       aria-label={label}
       aria-pressed={!idle}
       disabled={disabled}
-      onClick={(event) => {
+      onClick={() => {
         if (!idle) {
           onStop();
           return;
         }
-        if (event.shiftKey) onConversation();
-        else onDictate();
+        onConversation();
       }}
       style={{ width: size, height: size }}
       className={`relative flex items-center justify-center rounded-full flex-shrink-0 transition-colors duration-ds ease-ds disabled:opacity-40 ${

@@ -76,7 +76,10 @@ const FOLLOW_UP_WINDOW_MS = 9000;
 export function stripWakeWord(text: string, wakeWords: string[]): { text: string; matched: boolean } {
   const trimmed = text.trim();
   for (const word of wakeWords) {
-    // "teminali, open the file" / "hey teminali open the file" / "ok teminali…"
+    // Exact wake word with optional greeting: "Hey Temy", "Temy", "Ok Temy"
+    const exactPattern = new RegExp(`^(hey\\s+|ok(ay)?\\s+|yo\\s+|habari\\s+)?${escape(word)}[\\s,.!:—?]*$`, "i");
+    if (exactPattern.test(trimmed)) return { text: "", matched: true };
+    // "teminali, open the file" / "hey temy open the file" / "ok temy…"
     const pattern = new RegExp(`^(hey\\s+|ok(ay)?\\s+|yo\\s+|habari\\s+)?${escape(word)}[\\s,.!:—-]+`, "i");
     if (pattern.test(trimmed)) return { text: trimmed.replace(pattern, "").trim(), matched: true };
     // Trailing form: "open the file, teminali"
@@ -110,6 +113,21 @@ export function scoreAddressing(
   const domainHits = DOMAIN_NOUNS.filter((noun) => lower.includes(noun)).length;
   const thirdParty = THIRD_PARTY_MARKERS.some((marker) => lower.includes(marker));
 
+  // Hard rejection for ambient noise descriptions that escaped brackets
+  const isAmbientNoise =
+    /(keyboard\s+clicking|upbeat\s+music|gentle\s+music|background\s+noise|ambient\s+audio|typing\s+sounds?|mouse\s+clicks?|cough(?:ing|s)?|throat\s+clearing|breathing)/i.test(lower);
+  if (isAmbientNoise) {
+    return {
+      verdict: {
+        directed: false,
+        confidence: 0.98,
+        reason: "Detected ambient audio or non-speech background sound.",
+        signals: { wakeWord: false, speakerMatch: context.speakerMatch, followUpWindow, classifier: null, imperative },
+      },
+      needsClassifier: false,
+    };
+  }
+
   /* ── Hard gates the operator asked for ────────────────────────────────── */
 
   if (context.requireWakeWord && !wakeWord && !followUpWindow) {
@@ -138,26 +156,57 @@ export function scoreAddressing(
 
   /* ── The blend ────────────────────────────────────────────────────────── */
 
-  // Base rate: most speech picked up by an always-open mic in a shared room is
-  // not addressed to the assistant, so we start below the line.
+  // Base rate: start at 0.34. In active conversation, clear conversational cues
+  // (greetings, second-person address, questions, directives) lift it over the line (0.62).
   let score = 0.34;
 
+  const GREETING_TOKENS = [
+    "hello", "hi", "hey", "yo", "howdy", "morning", "afternoon", "evening", "mambo", "habari",
+  ];
+  const isGreeting = words.some((w) => GREETING_TOKENS.includes(w));
+
+  const ANSWER_TOKENS = [
+    "yes", "yeah", "yep", "sure", "ok", "okay", "no", "nope", "do it", "go ahead",
+    "make it", "add", "change", "fix", "deploy", "build", "run", "push", "test",
+    "ndiyo", "hapana", "sawa", "fanya",
+  ];
+  const isDirectAnswer = words.some((w) => ANSWER_TOKENS.includes(w));
+
   if (wakeWord) score += 0.5;
-  if (followUpWindow) score += 0.28;
-  if (imperative) score += 0.16;
-  if (secondPerson) score += 0.08;
+  if (isGreeting) score += 0.35; // "hello", "hi", "hey" -> 0.34 + 0.35 = 0.69 >= 0.62 (DIRECTED)
+  if (followUpWindow) {
+    score += 0.32;
+    if (isDirectAnswer) score += 0.22;
+  }
+  if (imperative) score += 0.18;
+  if (secondPerson) score += 0.22; // "can you hear me", "who are you" -> 0.34 + 0.22 + 0.10 >= 0.62 (DIRECTED)
   score += Math.min(0.14, domainHits * 0.05);
   if (context.windowFocused) score += 0.05;
 
-  if (thirdParty) score -= 0.42;
-  // Very short fragments with no other signal are usually room noise or the
-  // tail of someone else's sentence.
-  if (words.length <= 2 && !wakeWord && !followUpWindow) score -= 0.2;
+  // The operator opened a hands-free session without asking for a wake word.
+  // That is itself the address: in a room where the assistant is listening on
+  // purpose, an ordinary sentence is for it unless something says otherwise.
+  // A lone stray word ("okay", "right") still needs the follow-up window or a
+  // greeting to count, because those are what people say to nobody.
+  if (!context.requireWakeWord && !thirdParty && words.length >= 2) {
+    score += 0.3;
+  }
 
+  // Ignore unrelated room chatter / third party speech
+  if (thirdParty) score -= 0.45;
+  // Unrelated words with no context or conversation sync (only when wake word is required in shared room)
+  if (context.requireWakeWord && !wakeWord && !followUpWindow && domainHits === 0 && !imperative && !secondPerson) {
+    score -= 0.22;
+  }
+  if (context.requireWakeWord && words.length <= 2 && !wakeWord && !followUpWindow) score -= 0.2;
+
+  // Personalised speaker matching: recognise only the enrolled operator
   if (context.speakerMatch !== null) {
-    // Centre on 0.62: above it adds confidence, below it subtracts. The weight
-    // stays modest on purpose — see speakerProfile.ts on how weak this is.
-    score += (context.speakerMatch - 0.62) * 0.5;
+    if (context.speakerMatch >= 0.65) {
+      score += (context.speakerMatch - 0.62) * 0.75 + 0.12;
+    } else {
+      score += (context.speakerMatch - 0.62) * 0.65;
+    }
   }
 
   score = Math.max(0, Math.min(1, score));
@@ -171,7 +220,7 @@ export function scoreAddressing(
         : imperative
           ? "Reads as an instruction to the workspace."
           : score >= 0.62
-            ? "Matches how you normally address the assistant."
+            ? (context.requireWakeWord ? "Matches how you normally address the assistant." : "Hands-free session is open, so this is for the assistant.")
             : "No clear sign it was meant for the assistant.";
 
   return {
@@ -181,8 +230,12 @@ export function scoreAddressing(
       reason,
       signals: { wakeWord, speakerMatch: context.speakerMatch, followUpWindow, classifier: null, imperative },
     },
-    // Only pay for the model when the cheap signals genuinely disagree.
-    needsClassifier: score > 0.42 && score < 0.78 && !wakeWord && !thirdParty,
+    // The model is only worth its latency as a rescue: an utterance the rules
+    // lean against but cannot rule out. A verdict the rules already accept is
+    // sent on the spot — in an open session that is nearly every sentence, and
+    // a local round-trip on each of them was the seconds of "deciding…" the
+    // operator felt as the assistant not answering.
+    needsClassifier: score > 0.42 && score < 0.62 && !wakeWord && !thirdParty,
   };
 }
 
