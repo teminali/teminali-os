@@ -11,6 +11,11 @@ const { resolveRealPath, processWithFfmpeg, formatAuditLine } = require("./media
 const { initScreenRecorder, shutdownScreenRecorder } = require("./screenRecorder.cjs");
 const { initVideoProjects, shutdownVideoProjects } = require("./videoProjects.cjs");
 const { initVideoExport, shutdownVideoExport } = require("./videoExport.cjs");
+const { registerWorkspaceMediaScheme, initWorkspaceMedia } = require("./workspaceMedia.cjs");
+
+// The file pane's video and audio come over `teminali-media://`, and Electron
+// only grants a scheme its privileges before `app.ready`. Handled after it.
+registerWorkspaceMediaScheme();
 
 const logFile = path.join(app.getPath("userData"), "studio-main.log");
 function log(...args) {
@@ -884,6 +889,19 @@ app.whenReady().then(async () => {
     startVoiceSidecar().catch((error) => {
       log("Voice sidecar could not be started:", error?.stack || error?.message || error);
     });
+  }
+
+  // After the gateway, so a packaged app's media protocol reads the live root
+  // off the instance this process holds; a development build is told the root
+  // by the renderer instead. See electron/workspaceMedia.cjs.
+  try {
+    initWorkspaceMedia({
+      getGatewayRoot: () => gateway?.config?.workspaceRoot ?? null,
+      isMainWindow: (sender) => Boolean(mainWindow) && !mainWindow.isDestroyed() && sender === mainWindow.webContents,
+      log,
+    });
+  } catch (error) {
+    log("Workspace media protocol could not be registered:", error?.stack || error?.message || error);
   }
 
   /*

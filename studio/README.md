@@ -104,8 +104,18 @@ the cut stated on screen — by [ExcelJS](https://www.npmjs.com/package/exceljs)
 loaded on demand so a reader who never opens a spreadsheet never downloads the
 parser. Legacy `.xls` is a different format (BIFF) and the pane says to save it
 as `.xlsx`; the one `.xls` that does open is the HTML table many web apps export
-under that name, which the gateway sniffs and treats as text. Video and audio
-are not viewable yet and say so rather than looking broken.
+under that name, which the gateway sniffs and treats as text. **Video and
+audio play** in the desktop app — `.mp4 .webm .m4v .mov .mp3 .m4a .wav .ogg
+.flac` — in Chromium's own player, with seeking, volume, fullscreen and
+picture-in-picture. The bytes do not come from the gateway: a `<video>` cannot
+carry the session's bearer token, so the app registers `teminali-media://`
+(`electron/workspaceMedia.cjs`, served by `server/workspace-media.js`) under
+the same path guard as the reader, with HTTP Range and no size cap. It is
+Chromium's player and nothing more — H.264 and VP9 video, AAC, MP3, Opus, FLAC
+and WAV audio; a `.mov` holding ProRes or an `.mp4` holding HEVC will not play,
+and the pane says which codec and the ffmpeg line that converts it. No MKV, no
+subtitle tracks, no transcoding. A browser build says playback needs the
+desktop app.
 
 It is also where you **drop** a file. Drag a row out of the Explorer, or a file
 out of Finder or Windows Explorer, and it opens in the panel. A file from
@@ -632,7 +642,7 @@ ollama serve              # local models on 127.0.0.1:11434
 
 ```bash
 npm run typecheck   # tsc --noEmit
-npm test            # 1252 tests, 0 failures
+npm test            # 1269 tests, 0 failures
 npm run build       # tsc && vite build
 npm run verify:core # all three
 ```

@@ -10,7 +10,7 @@ import {
 } from "../../gateway/frontier-runner.js";
 import { BoundedAuditLog } from "./audit-log.js";
 import { createConfig } from "./config.js";
-import { createWorkspaceDirectory, deleteWorkspaceFile, isViewableWorkspaceFile, listWorkspaceTree, readWorkspaceFile, resolveWorkspacePath, searchWorkspace, WORKSPACE_LIMITS, writeWorkspaceFile } from "./workspace.js";
+import { createWorkspaceDirectory, deleteWorkspaceFile, isStreamableWorkspaceFile, isViewableWorkspaceFile, listWorkspaceTree, readWorkspaceFile, resolveWorkspacePath, searchWorkspace, WORKSPACE_LIMITS, writeWorkspaceFile } from "./workspace.js";
 import { TERMINAL_LIMITS, runWorkspaceCommand } from "./terminal.js";
 import { forgetVoiceStatus, readBounded, speak, transcribe, voiceStatus } from "./voice.js";
 import { act, assistantCapabilities, observe, requestAccessibility } from "./assistant.js";
@@ -279,6 +279,7 @@ function workspaceError(error) {
   }
   if (code === "WORKSPACE_FILE_TOO_LARGE") return new GatewayError(413, code, "The file exceeds the safe preview limit.");
   if (code === "WORKSPACE_FILE_UNSUPPORTED") return new GatewayError(415, code, "This file type is not available for safe in-app reading.");
+  if (code === "WORKSPACE_FILE_STREAMED") return new GatewayError(415, code, "Video and audio are streamed to the desktop app's player, not read as JSON.");
   if (code === "WORKSPACE_FILE_REQUIRED") return new GatewayError(400, code, "A regular workspace file is required.");
   if (code === "WORKSPACE_CONTENT_REQUIRED") return new GatewayError(400, code, "UTF-8 text content is required for a workspace edit.");
   if (code === "WORKSPACE_FILE_CONFLICT") return new GatewayError(409, code, "The workspace file changed after Copilot started editing it.");
@@ -723,9 +724,10 @@ export async function createGateway(options = {}) {
           }
           if (!isViewableWorkspaceFile(absolutePath)) {
             throw new GatewayError(415, "WORKSPACE_FILE_UNSUPPORTED",
-              `The editor has no viewer for "${body?.path}". It opens text, images, PDFs and spreadsheets; anything else it will not pretend to show.`);
+              `The editor has no viewer for "${body?.path}". It opens text, images, PDFs, spreadsheets, video and audio; anything else it will not pretend to show.`);
           }
-          if (stats.size > WORKSPACE_LIMITS.maxFileBytes) {
+          // The cap belongs to the JSON reader; a film is streamed and has none.
+          if (!isStreamableWorkspaceFile(absolutePath) && stats.size > WORKSPACE_LIMITS.maxFileBytes) {
             throw new GatewayError(413, "WORKSPACE_FILE_TOO_LARGE",
               `"${body?.path}" is ${Math.round(stats.size / (1024 * 1024))} MB, past the ${WORKSPACE_LIMITS.maxFileBytes / (1024 * 1024)} MB the editor will open.`);
           }

@@ -66,8 +66,9 @@ test("viewable is the union of editable and previewable, and stops there", () =>
   assert.equal(isViewableWorkspaceFile("logo.png"), true);
   assert.equal(isViewableWorkspaceFile("report.pdf"), true);
   assert.equal(isViewableWorkspaceFile("book.xlsx"), true);
-  // No player and no viewer yet — see the media step in the design.
-  assert.equal(isViewableWorkspaceFile("clip.mp4"), false);
+  // Played by the desktop app's media protocol, so a tab for it is not empty.
+  assert.equal(isViewableWorkspaceFile("clip.mp4"), true);
+  assert.equal(isViewableWorkspaceFile("track.flac"), true);
   assert.equal(isViewableWorkspaceFile("bundle.zip"), false);
   assert.equal(isViewableWorkspaceFile(".env"), false);
 });
@@ -103,17 +104,30 @@ test("an .xls that is really an HTML table is still text", async () => {
 });
 
 test("a format with no viewer is still refused rather than guessed at", async () => {
+  const root = workspace({ "bundle.zip": "PK\u0003\u0004" });
+  await assert.rejects(readWorkspaceFile(root, "bundle.zip"), /WORKSPACE_FILE_UNSUPPORTED/);
+});
+
+/*
+  Media is viewable and still refused here, on purpose: it is served by the
+  desktop app's streaming protocol (server/workspace-media.js), and a JSON
+  reader that returned a film as base64 would be the 8 MB cap's whole reason
+  for existing. The reason names where the bytes went, and comes before the
+  cap, so a two-gigabyte file is not reported as "too large".
+*/
+test("video and audio are refused by the JSON reader, naming the stream instead", async () => {
   const root = workspace({ "clip.mp4": "\0\0\0 ftypmp42" });
-  await assert.rejects(readWorkspaceFile(root, "clip.mp4"), /WORKSPACE_FILE_UNSUPPORTED/);
+  await assert.rejects(readWorkspaceFile(root, "clip.mp4"), /WORKSPACE_FILE_STREAMED/);
+  await assert.rejects(readWorkspaceFile(root, "clip.mp4", { maxFileBytes: 1 }), /WORKSPACE_FILE_STREAMED/);
 });
 
 /* ── the tree ────────────────────────────────────────────────────────────── */
 
 test("the tree lists everything a pane can open, and nothing it cannot", async () => {
-  const root = workspace({ "logo.png": PNG, Dockerfile: "FROM node:22\n", "notes.md": "hi", "clip.mp4": "x" });
+  const root = workspace({ "logo.png": PNG, Dockerfile: "FROM node:22\n", "notes.md": "hi", "clip.mp4": "x", "bundle.zip": "x" });
   const tree = await listWorkspaceTree(root);
   const names = tree.files.map((entry) => entry.name).sort();
-  assert.deepEqual(names, ["Dockerfile", "logo.png", "notes.md"]);
+  assert.deepEqual(names, ["Dockerfile", "clip.mp4", "logo.png", "notes.md"]);
 });
 
 /* ── writing and deleting ────────────────────────────────────────────────── */

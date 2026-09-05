@@ -43,6 +43,18 @@ try {
   mediaPaths = null;
 }
 
+/**
+ * `{ scheme, nonce }` for the file pane's media player. The nonce is minted per
+ * launch by electron/workspaceMedia.cjs and lives only here and in main: it is
+ * what stops a page framed by the browser pane from spelling the URL itself.
+ */
+let workspaceMediaOrigin = null;
+try {
+  workspaceMediaOrigin = ipcRenderer.sendSync("workspace-media:origin-sync") ?? null;
+} catch {
+  workspaceMediaOrigin = null;
+}
+
 /** The bundle the operator has to name in System Settings. See main.cjs. */
 let host = null;
 try {
@@ -270,6 +282,18 @@ contextBridge.exposeInMainWorld("teminali", {
     /** One line per decision, in main's log. */
     audit: (entry) => ipcRenderer.send("media:audit", entry),
     ffmpeg: (options) => ipcRenderer.invoke("media:ffmpeg", options),
+  },
+  /**
+   * The file pane's video and audio, streamed by main over `teminali-media://`
+   * with HTTP Range — a `<video>` cannot carry the gateway's bearer token, so
+   * it cannot load from a gateway URL. See electron/workspaceMedia.cjs.
+   */
+  workspaceMedia: {
+    /** A playable URL for a workspace-relative path whose segments are already percent-encoded. */
+    url: (encodedPath) =>
+      workspaceMediaOrigin ? `${workspaceMediaOrigin.scheme}://${workspaceMediaOrigin.nonce}/${encodedPath}` : null,
+    /** Which project is open. A packaged app ignores this and reads its own gateway's root. */
+    announceRoot: (root) => ipcRenderer.send("workspace-media:root", root),
   },
   /**
    * The screen assistant.

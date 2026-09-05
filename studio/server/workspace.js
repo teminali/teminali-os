@@ -33,6 +33,13 @@ const IMAGE_EXTENSIONS = new Set([
   ".apng", ".avif", ".bmp", ".gif", ".ico", ".jpeg", ".jpg", ".png", ".webp",
 ]);
 const BINARY_PREVIEW_EXTENSIONS = new Set([".pdf", ".xlsx", ".xls"]);
+// Played, never read: these travel the desktop app's `teminali-media://`
+// protocol (server/workspace-media.js) with HTTP Range, not the JSON reader.
+// The list is what Chromium's own player demuxes — a container here is no
+// promise about the codec inside it; the pane names that problem on play.
+export const MEDIA_EXTENSIONS = new Set([
+  ".mp4", ".webm", ".m4v", ".mov", ".mp3", ".m4a", ".wav", ".ogg", ".flac",
+]);
 const MIME_TYPES = {
   ".apng": "image/apng",
   ".avif": "image/avif",
@@ -41,12 +48,21 @@ const MIME_TYPES = {
   ".css": "text/css",
   ".gif": "image/gif",
   ".html": "text/html",
+  ".flac": "audio/flac",
   ".ico": "image/x-icon",
   ".jpeg": "image/jpeg",
   ".jpg": "image/jpeg",
+  ".m4a": "audio/mp4",
+  ".m4v": "video/x-m4v",
+  ".mov": "video/quicktime",
+  ".mp3": "audio/mpeg",
+  ".mp4": "video/mp4",
+  ".ogg": "audio/ogg",
   ".pdf": "application/pdf",
   ".png": "image/png",
   ".svg": "image/svg+xml",
+  ".wav": "audio/wav",
+  ".webm": "video/webm",
   ".webp": "image/webp",
   ".xls": "application/vnd.ms-excel",
   ".xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
@@ -96,8 +112,24 @@ function isPreviewFile(path) {
 }
 
 /**
+ * Playable, and therefore never read: the JSON reader refuses these and the
+ * media protocol serves them. Exported so the protocol handler and the reader
+ * ask the same question — a file both answered would be read twice, a file
+ * neither answered would open to an empty pane.
+ */
+export function isStreamableWorkspaceFile(path) {
+  return MEDIA_EXTENSIONS.has(extname(basename(path)).toLowerCase());
+}
+
+/** The mime type the pane is told, or null for a format the table has no name for. */
+export function workspaceMimeType(path) {
+  return MIME_TYPES[extname(basename(path)).toLowerCase()] || null;
+}
+
+/**
  * Everything the file pane can put in front of the operator: text it can edit,
- * plus the formats it can only show. Exported because the agent's `open_file`
+ * the formats it can only show, and the media it can only play. Exported
+ * because the agent's `open_file`
  * has to refuse a format before a tab is opened for it — a tool that reports
  * success and leaves an empty pane is the silence this codebase keeps
  * legislating against.
@@ -107,7 +139,7 @@ export function isViewableWorkspaceFile(path) {
 }
 
 function isViewableFile(path) {
-  return isTextFile(path) || isPreviewFile(path);
+  return isTextFile(path) || isPreviewFile(path) || isStreamableWorkspaceFile(path);
 }
 
 // An .xls that starts with a tag is one of those HTML tables Excel opens
@@ -151,6 +183,9 @@ export async function readWorkspaceFile(root, requestedPath, options = {}) {
   const absolutePath = resolveWorkspacePath(workspaceRoot, requestedPath);
   const stats = await lstat(absolutePath);
   if (!stats.isFile() || stats.isSymbolicLink()) throw new Error("WORKSPACE_FILE_REQUIRED");
+  // Before the size cap: a two-gigabyte film is not "too large", it is served
+  // elsewhere, and the error should say which.
+  if (isStreamableWorkspaceFile(absolutePath)) throw new Error("WORKSPACE_FILE_STREAMED");
   if (stats.size > maxFileBytes) throw new Error("WORKSPACE_FILE_TOO_LARGE");
   if (!isViewableFile(absolutePath)) throw new Error("WORKSPACE_FILE_UNSUPPORTED");
   const extension = extname(basename(absolutePath)).toLowerCase();

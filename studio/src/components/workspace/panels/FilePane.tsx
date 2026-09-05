@@ -8,6 +8,14 @@ import { useStudioStore } from "../../../store/studioStore";
 import { formatBytes } from "../../../services/guardianService";
 import { describesWorkspaceDrop, resolveWorkspaceDrop, workspaceRelative } from "../../../services/workspaceDrop";
 import { SheetPreview } from "./SheetPreview";
+import {
+  NEEDS_DESKTOP_APP,
+  describeMediaError,
+  formatDuration,
+  workspaceMediaBridge,
+  workspaceMediaOf,
+  workspaceMediaUrl,
+} from "../../../services/workspaceMedia";
 
 /**
  * File viewer and editor.
@@ -38,7 +46,8 @@ import { SheetPreview } from "./SheetPreview";
 interface Preview {
   url: string;
   mimeType: string;
-  size: number;
+  /** Null for media, which is streamed and never counted by the pane. */
+  size: number | null;
 }
 
 function blobFrom(base64: string, mimeType: string): Blob {
@@ -169,6 +178,20 @@ export const FilePane: React.FC<{ panel: PanelTab }> = ({ panel }) => {
     setError(null);
     setPreview(null);
 
+    // Media never goes through the JSON reader, which refuses it: the element
+    // streams it from the desktop app's protocol, or the pane says why it
+    // cannot. See services/workspaceMedia.ts.
+    const media = workspaceMediaOf(panel.path);
+    if (media) {
+      update(panel.id, { label: panel.path.split("/").pop() ?? panel.path });
+      setContent(null);
+      const url = workspaceMediaUrl(workspaceMediaBridge(), panel.path);
+      if (url) setPreview({ url, mimeType: media.mimeType, size: null });
+      else setError(NEEDS_DESKTOP_APP);
+      setLoading(false);
+      return;
+    }
+
     WorkspaceService.readFile(panel.path, controller.signal)
       .then((file) => {
         update(panel.id, { label: file.name });
@@ -196,7 +219,8 @@ export const FilePane: React.FC<{ panel: PanelTab }> = ({ panel }) => {
   // One object URL is alive at a time; the browser holds the bytes until it is
   // revoked, so this runs on every replacement and not only on unmount.
   useEffect(() => {
-    if (!preview) return;
+    // A media URL is the protocol's, not an object URL; there is nothing to free.
+    if (!preview || !preview.url.startsWith("blob:")) return;
     return () => URL.revokeObjectURL(preview.url);
   }, [preview]);
 
@@ -265,7 +289,7 @@ export const FilePane: React.FC<{ panel: PanelTab }> = ({ panel }) => {
         <span className="truncate">{path.split("/").join(" / ")}</span>
         {dirty && <span className="w-1.5 h-1.5 rounded-full bg-accent flex-shrink-0" title="Unsaved changes" />}
         <div className="flex-1" />
-        <span className="text-ink-disabled">{preview ? formatBytes(preview.size) : `${lineCount} lines`}</span>
+        <span className="text-ink-disabled">{preview ? (preview.size === null ? "streamed" : formatBytes(preview.size)) : `${lineCount} lines`}</span>
         {dirty && (
           <>
             <IconButton onClick={() => setContent(original)} title="Revert" size={22}>
@@ -281,7 +305,7 @@ export const FilePane: React.FC<{ panel: PanelTab }> = ({ panel }) => {
       {error && <div className="px-4 py-2 text-2xs text-danger border-b border-edge-chrome">{error}</div>}
 
       {preview ? (
-        <PreviewSurface preview={preview} path={path} />
+        <PreviewSurface key={preview.url} preview={preview} path={path} />
       ) : (
       <div className="flex-1 min-h-0 relative font-mono text-xs leading-[1.75]">
         {/* Gutter */}
@@ -393,9 +417,10 @@ export const FilePane: React.FC<{ panel: PanelTab }> = ({ panel }) => {
  * flag and this component have to move together.
  *
  * A spreadsheet is drawn as a grid by `SheetPreview`, which loads its parser on
- * demand rather than in the main bundle. Anything else that arrives as bytes
- * says so plainly, and names what it would take to read it, instead of
- * pretending to be broken.
+ * demand rather than in the main bundle. Video and audio are `MediaPreview`,
+ * below: Chromium's own player, fed by the desktop app's streaming protocol
+ * rather than by bytes this pane fetched. Anything else that arrives as bytes
+ * says so plainly instead of pretending to be broken.
  */
 const PreviewSurface: React.FC<{ preview: Preview; path?: string }> = ({ preview, path }) => {
   if (preview.mimeType.startsWith("image/")) {
@@ -408,6 +433,10 @@ const PreviewSurface: React.FC<{ preview: Preview; path?: string }> = ({ preview
 
   if (preview.mimeType === "application/pdf") {
     return <iframe src={preview.url} title={path ?? "PDF preview"} className="flex-1 min-h-0 w-full border-0 bg-surface-sunken" />;
+  }
+
+  if (preview.mimeType.startsWith("video/") || preview.mimeType.startsWith("audio/")) {
+    return <MediaPreview url={preview.url} kind={preview.mimeType.startsWith("video/") ? "video" : "audio"} path={path ?? ""} />;
   }
 
   if (preview.mimeType === XLSX_MIME) {
@@ -426,7 +455,7 @@ const PreviewSurface: React.FC<{ preview: Preview; path?: string }> = ({ preview
       <EmptyState
         icon={<AlertTriangle size={26} strokeWidth={1.6} />}
         title="Legacy .xls cannot be read here"
-        detail={`${formatBytes(preview.size)}. Save it as .xlsx — the viewer reads the modern format only.`}
+        detail={`${formatBytes(preview.size ?? 0)}. Save it as .xlsx — the viewer reads the modern format only.`}
       />
     );
   }
@@ -434,8 +463,77 @@ const PreviewSurface: React.FC<{ preview: Preview; path?: string }> = ({ preview
   return (
     <EmptyState
       icon={<AlertTriangle size={26} strokeWidth={1.6} />}
-      title="No viewer for this format yet"
-      detail={`${preview.mimeType} · ${formatBytes(preview.size)}. Video and audio are the next formats to land here.`}
+      title="No viewer for this format"
+      detail={`${preview.mimeType} · ${formatBytes(preview.size ?? 0)}. The gateway sent this as bytes and the pane has no viewer for it — a gap between the two, not a broken file.`}
     />
+  );
+};
+
+/**
+ * Video and audio, played by Chromium.
+ *
+ * The element is the player: seeking, volume, fullscreen and picture-in-
+ * picture come from `controls`, and the bytes come from `teminali-media://`,
+ * which answers HTTP Range so the scrubber works. Chromium demuxes and decodes
+ * the file itself, and that is the whole promise — H.264 and VP9 video; AAC,
+ * MP3, Opus, FLAC and WAV audio. A container the gateway admits can still hold
+ * a codec the player lacks (ProRes in a .mov, HEVC in an .mp4), and when it
+ * does the element fires `error` and this names the codec and the ffmpeg line
+ * that fixes it, in place of a control bar that never moves. Real-time
+ * transcoding is a separate project and is not pretended here.
+ */
+const MediaPreview: React.FC<{ url: string; kind: "video" | "audio"; path: string }> = ({ url, kind, path }) => {
+  const [meta, setMeta] = React.useState<string | null>(null);
+  const [failure, setFailure] = React.useState<string | null>(null);
+
+  const onLoadedMetadata = (event: React.SyntheticEvent<HTMLMediaElement>) => {
+    const element = event.currentTarget;
+    const parts = [formatDuration(element.duration)];
+    if (element instanceof HTMLVideoElement && element.videoWidth) parts.push(`${element.videoWidth} × ${element.videoHeight}`);
+    setMeta(parts.filter(Boolean).join(" · "));
+  };
+  const onError = (event: React.SyntheticEvent<HTMLMediaElement>) => {
+    setFailure(describeMediaError(event.currentTarget.error?.code ?? 0, path));
+  };
+
+  if (failure) {
+    return (
+      <EmptyState
+        icon={<AlertTriangle size={26} strokeWidth={1.6} />}
+        title="Chromium cannot play this file"
+        detail={failure}
+      />
+    );
+  }
+
+  return (
+    <div className="flex-1 min-h-0 flex flex-col bg-surface-sunken">
+      <div className="flex-1 min-h-0 flex items-center justify-center p-6">
+        {kind === "video" ? (
+          <video
+            src={url}
+            controls
+            preload="metadata"
+            className="max-w-full max-h-full outline-none"
+            onLoadedMetadata={onLoadedMetadata}
+            onError={onError}
+          />
+        ) : (
+          <audio
+            src={url}
+            controls
+            preload="metadata"
+            className="w-full max-w-xl"
+            onLoadedMetadata={onLoadedMetadata}
+            onError={onError}
+          />
+        )}
+      </div>
+      <div className="h-8 flex-shrink-0 flex items-center gap-2 px-4 border-t border-edge-chrome text-2xs text-ink-muted font-mono">
+        <span>{meta ?? "Reading…"}</span>
+        <div className="flex-1" />
+        <span className="text-ink-disabled truncate">Chromium player · H.264, VP9, AAC, MP3, Opus, FLAC, WAV</span>
+      </div>
+    </div>
   );
 };

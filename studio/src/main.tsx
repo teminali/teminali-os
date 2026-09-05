@@ -7,6 +7,7 @@ import { RecorderBar } from "./components/recorder/RecorderBar";
 import { useStudioStore } from "./store/studioStore";
 import { registerVideoToolBridge } from "./services/videoToolBridge";
 import { installWindowDropGuard } from "./services/dropGuard";
+import { syncWorkspaceMediaRoot } from "./services/workspaceMedia";
 
 /**
  * Which surface this document is.
@@ -53,6 +54,13 @@ if (typeof window !== "undefined") {
   the media panel, the timeline and the file pane.
 */
 installWindowDropGuard();
+
+/*
+  Which project the media protocol should serve from, for a development build.
+  A packaged app answers that from the gateway it runs itself and ignores this;
+  main also ignores any window but the real one. See services/workspaceMedia.ts.
+*/
+syncWorkspaceMediaRoot(useStudioStore);
 
 /*
   The video panel's MCP bridge, for the agent CLIs.

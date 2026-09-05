@@ -495,6 +495,63 @@ predicate is untouched on purpose: an `.xls` that is really an HTML table is
 sniffed as text by `server/workspace.js` and opens in the editor, and narrowing
 `BINARY_PREVIEW_EXTENSIONS` would have refused it before the sniff ran.
 
+### Video and audio are streamed, not read (`server/workspace-media.js`, `electron/workspaceMedia.cjs`, `services/workspaceMedia.ts`)
+
+A film cannot travel `/api/workspace/file`: that reader returns one JSON
+document under an 8 MB cap, and a `<video>` seeks by asking for byte ranges.
+Nor can it travel any gateway URL — every workspace route sits behind the
+bearer gate, a media element cannot carry a bearer header, and the one way
+round that is the session token in a query string, which is the token in every
+log. So the desktop app registers its own scheme, **`teminali-media://`**, and
+main answers it from disk.
+
+The answer is decided in `server/workspace-media.js`, a pure function of
+(root, path, request) so it is node-tested: the **same** `resolveWorkspacePath`
+guard and the same lstat refusal of symlinks and folders as the JSON reader,
+then HTTP Range by hand — 206 with `Content-Range` for a satisfiable range,
+416 for a start past the end, 200 for no range, `Accept-Ranges: bytes` on all
+of them. Chromium opens with `bytes=0-` and learns from the 206 that it can
+seek; a 200 plays but the scrubber is dead. There is no size cap: the cap is
+the JSON reader's. An escape, a missing file, a folder and a symlink all answer
+404, because the scheme is reachable from any page the window frames and
+"that exists but you may not" is worth withholding.
+
+The scheme is privileged before `app.ready` with `stream: true` and
+**`supportFetchAPI: false`**: nothing can `fetch()` it, our own code included;
+only media elements load it, which is all the pane needs. The URL's host is a
+**nonce minted per launch** and handed only to the preload bridge, which only
+the main frame has — the window runs with `webSecurity: false` and the browser
+pane frames arbitrary sites, so a scheme any page could spell would be a scheme
+any page could read. Main also checks that a root announcement comes from the
+main window and names an existing directory.
+
+Two roots, one honest answer each. A packaged app runs the gateway in main's
+own process and reads `gateway.config.workspaceRoot` live — no IPC and no
+second copy. `npm start` runs the gateway as a sibling process main cannot see,
+so the renderer, which learns the root from `/api/workspace/projects`, repeats
+it over `workspace-media:root` (`syncWorkspaceMediaRoot`, armed in `main.tsx`);
+the gateway's root wins whenever there is one. The renderer never sees a root
+in a URL: it asks `window.teminali.workspaceMedia.url(encodedPath)` and points
+an element at the result, or — in a browser build, where the bridge is absent —
+says playback needs the desktop app, the same shape as the drop bridge.
+
+**Admitting the formats is the gate.** `MEDIA_EXTENSIONS` in
+`server/workspace.js` (`.mp4 .webm .m4v .mov .mp3 .m4a .wav .ogg .flac`) joins
+`isViewableWorkspaceFile`, so the tree lists them and the agent's `open_file`
+opens them; the JSON reader refuses them with `WORKSPACE_FILE_STREAMED`,
+before the size cap, so a two-gigabyte file is not reported as "too large".
+`tests/workspace-media.test.mjs` pins the renderer's table to that set — a
+format admitted by one side and not the other is a tab that opens onto
+nothing.
+
+It is Chromium's player and nothing more: H.264 and VP9 video; AAC, MP3, Opus,
+FLAC and WAV audio. The container list promises nothing about the codec inside,
+and when the element fires `error` the pane names the codec — ProRes or HEVC in
+a `.mov`, HEVC or AC-3 in an `.mp4` — and the ffmpeg line that converts it,
+instead of leaving a control bar that never moves. Real-time transcoding is a
+separate project; ffmpeg is already a dependency (`server/speech-local.js`) but
+the pane does not pretend to it. No MKV, no subtitle tracks.
+
 ### What the workspace will open (`server/workspace.js`, `panels/FilePane.tsx`)
 
 One predicate answers "is this text?" — `isTextFile` — and the tree, the reader,
@@ -518,12 +575,13 @@ image, an `<iframe>` for a PDF, which in the desktop app is Chromium's own
 viewer (paging, zoom, find, print, and no dependency to keep current). That
 viewer is a plugin and is **off by default**: `plugins: true` in
 `electron/main.cjs` and this pane have to move together, because without the
-flag the frame renders blank rather than failing. A format with no viewer yet —
-a spreadsheet — says so plainly instead of looking broken. The 8 MB read cap is
-unchanged, and video is not here: it cannot travel a JSON API and needs a
-streaming protocol handler.
+flag the frame renders blank rather than failing. A third predicate,
+`isStreamableWorkspaceFile`, marks video and audio: viewable, listed, opened by
+`open_file`, and refused by this reader in favour of the streaming protocol
+above. The 8 MB read cap is unchanged and applies to the reader only.
 
-Tested in `tests/workspace-files.test.mjs` (12).
+Tested in `tests/workspace-files.test.mjs` (14) and
+`tests/workspace-media.test.mjs` (16).
 
 ### The conversation surface (`components/chat/**`)
 
