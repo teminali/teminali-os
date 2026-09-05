@@ -30,7 +30,10 @@ files:
 # (The pointer helper ships as a macOS extra resource — see `mac.extraResources`
 # below. It is scoped there rather than declared globally because the directory
 # does not exist on a Windows or Linux runner, and a top-level entry makes both
-# of those builds warn about a missing source on every run.)
+# of those builds warn about a missing source on every run. A platform block's
+# `extraResources` is added to this list, not substituted for it —
+# app-builder-lib's getFileMatchers reads both, and a build with the gateway
+# entry in both places copied it twice — so nothing here needs repeating.)
 
 icon: build/icon.png
 
@@ -70,6 +73,26 @@ extraResources:
       - "**/*.json"
       - "!**/*.test.js"
       - "!fixtures/**"
+  # The local speech sidecar's source. It is a child process, not an import —
+  # onnxruntime's native binding cannot be loaded from inside an asar, so
+  # electron/main.cjs spawns cli.js from <Resources>/voice-runtime under this
+  # Electron binary with ELECTRON_RUN_AS_NODE=1, the way the MCP shim runs. It
+  # cannot go in `files` for the same reason the gateway cannot: `files` is
+  # the archive.
+  #
+  # Its node_modules are deliberately NOT carried by this entry, and cannot
+  # be: electron-builder's copier skips a directory named node_modules at the
+  # root of any `from:` (app-builder-lib/out/util/filter.js, "filter the root
+  # node_modules"), whatever the filter says — the first build with a
+  # `node_modules/**` pattern here shipped nine source files and nothing else.
+  # They ship from an entry rooted at voice-runtime/node_modules instead, one
+  # per platform block below, because each platform keeps only the
+  # onnxruntime binaries it can run and a top-level entry applies everywhere.
+  - from: voice-runtime
+    to: voice-runtime
+    filter:
+      - "*.js"
+      - "package.json"
 
 
 publish:
@@ -102,16 +125,40 @@ mac:
       to: pointer
       filter:
         - teminali-pointer
-    # Repeated from the top-level entry: a platform block replaces the array it
-    # overrides rather than extending it, so omitting this drops the gateway
-    # runner from macOS builds only.
-    - from: ../gateway
-      to: gateway
+    # The sidecar's dependencies, pruned to this platform and architecture.
+    # onnxruntime-node ships a binary for every platform in its bin/ tree, so
+    # the ones a build cannot run are dropped; ${arch} expands to arm64 or
+    # x64, which are onnxruntime-node's directory names. The models are not
+    # here either: transformers.js caches weights in a `.cache` directory
+    # inside its own package — on a developer's machine, whatever that machine
+    # has already pulled — and the packaged sidecar is handed a directory
+    # under userData instead (TEMINALI_VOICE_CACHE, set by main.cjs, read by
+    # voice-runtime/cli.js). They download on first run; /status reports each
+    # model as it becomes ready.
+    #
+    # The sidecar's own top-level onnxruntime-node is not shipped: nothing
+    # imports it. @huggingface/transformers pins a different version and
+    # carries its own copy under its node_modules, which is the one that
+    # loads. voice-runtime/node_modules exists only after
+    # `npm run voice:install`; a build made without it ships the source alone
+    # and the packaged sidecar exits at its first import — the app logs that
+    # and keeps the built-in engine, as it did before the sidecar shipped.
+    - from: voice-runtime/node_modules
+      to: voice-runtime/node_modules
       filter:
-        - "**/*.js"
-        - "**/*.json"
-        - "!**/*.test.js"
-        - "!fixtures/**"
+        - "**/*"
+        - "!.bin/**"
+        - "!**/.cache/**"
+        - "!**/*.map"
+        - "!**/*.md"
+        - "!**/*.d.ts"
+        - "!**/onnxruntime-node/bin/**/linux/**"
+        - "!**/onnxruntime-node/bin/**/win32/**"
+        - "!**/onnxruntime-node/bin/**/darwin/*/**"
+        - "**/onnxruntime-node/bin/**/darwin/${arch}/**"
+        # Last, so the re-include above cannot bring it back: a later pattern
+        # wins, and the root copy has the same bin/ layout as the nested one.
+        - "!onnxruntime-node/**"
   # macOS refuses the microphone outright, without a dialog, if the reason is
   # not declared. Screen Recording and Accessibility need no key — they are
   # granted only in System Settings, by hand, and cannot be prompted around.
@@ -154,6 +201,25 @@ win:
       arch:
         - x64
   artifactName: ${productName}-Setup-${version}-Windows-${arch}.${ext}
+  # The speech sidecar's dependencies, pruned to Windows and ${arch}. See the
+  # macOS entry for what each pattern is for.
+  extraResources:
+    - from: voice-runtime/node_modules
+      to: voice-runtime/node_modules
+      filter:
+        - "**/*"
+        - "!.bin/**"
+        - "!**/.cache/**"
+        - "!**/*.map"
+        - "!**/*.md"
+        - "!**/*.d.ts"
+        - "!**/onnxruntime-node/bin/**/darwin/**"
+        - "!**/onnxruntime-node/bin/**/linux/**"
+        - "!**/onnxruntime-node/bin/**/win32/*/**"
+        - "**/onnxruntime-node/bin/**/win32/${arch}/**"
+        # Last, so the re-include above cannot bring it back: a later pattern
+        # wins, and the root copy has the same bin/ layout as the nested one.
+        - "!onnxruntime-node/**"
 
 nsis:
   oneClick: false
@@ -171,6 +237,25 @@ linux:
         - x64
   category: Development
   artifactName: ${productName}-${version}-Linux-${arch}.${ext}
+  # The speech sidecar's dependencies, pruned to Linux and ${arch}. See the
+  # macOS entry for what each pattern is for.
+  extraResources:
+    - from: voice-runtime/node_modules
+      to: voice-runtime/node_modules
+      filter:
+        - "**/*"
+        - "!.bin/**"
+        - "!**/.cache/**"
+        - "!**/*.map"
+        - "!**/*.md"
+        - "!**/*.d.ts"
+        - "!**/onnxruntime-node/bin/**/darwin/**"
+        - "!**/onnxruntime-node/bin/**/win32/**"
+        - "!**/onnxruntime-node/bin/**/linux/*/**"
+        - "**/onnxruntime-node/bin/**/linux/${arch}/**"
+        # Last, so the re-include above cannot bring it back: a later pattern
+        # wins, and the root copy has the same bin/ layout as the nested one.
+        - "!onnxruntime-node/**"
   # Named explicitly. Left to itself electron-builder derives this from the
   # package name, which is scoped — "@teminali/code" becomes "@teminalicode",
   # and an "@" is not legal in a Linux executable path. The AppImage build fails

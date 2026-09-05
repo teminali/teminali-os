@@ -92,6 +92,13 @@ jobs:
         run: npm ci
         working-directory: studio
 
+      # The speech sidecar has its own package.json and is not covered by the
+      # npm ci above. Without this the packaged app ships voice-runtime's
+      # source with no node_modules beside it, and the sidecar cannot start.
+      - name: Install the speech sidecar's dependencies
+        run: npm run voice:install
+        working-directory: studio
+
       # The screen assistant's pointer helper is Swift and macOS-only. It is
       # compiled here rather than committed: an unsigned Mach-O in git is one
       # nobody can audit. The other two platforms ship without it, and the app

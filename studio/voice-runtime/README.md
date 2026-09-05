@@ -16,10 +16,12 @@ Both run on CPU through `onnxruntime-node`. Nothing leaves the machine.
 
 Every other `*-runtime` in `studio/` is a plain directory sharing the studio's
 `node_modules`. This one carries its own `package.json` because its
-dependencies are 857 MB on disk — `onnxruntime-node` ships native binaries for
-every platform, and `@huggingface/transformers` pulls in `sharp`. Keeping them
-here keeps them out of the application's dependency tree and out of the
-packaged app until that is a deliberate decision.
+dependencies are 943 MB on disk (`du -sh node_modules`; 251 MB of that is the
+model cache transformers.js keeps inside its own package) — `onnxruntime-node`
+ships native binaries for every platform, and `@huggingface/transformers`
+pulls in `sharp`. Keeping them here keeps them out of the application's
+dependency tree. The packaged app ships them pruned to one platform and
+architecture — see [In the packaged app](#in-the-packaged-app).
 
 It is therefore **not installed by `npm install` in `studio/`**. Install it
 explicitly:
@@ -31,6 +33,35 @@ npm run voice:serve      # starts the sidecar on 127.0.0.1:8321
 
 The gateway picks it up with no configuration: `TEMINALI_VOICE_URL` already
 defaults to `http://127.0.0.1:8321`, and it refuses any non-loopback URL.
+
+## In the packaged app
+
+Nothing to start: `electron/main.cjs` spawns `cli.js` from
+`<Resources>/voice-runtime` under the app's own Electron binary with
+`ELECTRON_RUN_AS_NODE=1`, packaged builds only. The port is taken from
+`TEMINALI_VOICE_URL`, else `TEMINALI_VOICE_PORT`, else 8321; if it is already
+held (a development sidecar, usually) the app starts no second one. Stderr is
+relayed into the app's `studio-main.log` as `Voice sidecar: …`, and quitting
+the app sends SIGTERM.
+
+The app hands it `TEMINALI_VOICE_CACHE=<userData>/voice-models`, and `cli.js`
+sets transformers.js's `env.cacheDir` from it before warm-up. Without it
+transformers.js caches inside its own package — inside the signed bundle when
+packaged. The weights are a first-run download; `/status` reports each model
+as it becomes ready and nothing else does. Measured on this machine's cache
+with `du -sh`: whisper-base 76 MB, Kokoro 88 MB, the AudioSet classifier
+87 MB — 251 MB in all.
+
+What ships is decided in `electron-builder.yml`: the source, and
+`node_modules` minus the `.cache`, source maps, `.d.ts`, `.md`, `.bin`, every
+onnxruntime binary but the one for the platform and architecture being built,
+and this package's own top-level `onnxruntime-node`, which nothing imports —
+`@huggingface/transformers` pins `1.21.0` and nests its own copy. On the macOS
+arm64 build that is 184 MB under `Contents/Resources/voice-runtime`. The
+release workflow installs these before it packages (`npm run voice:install`,
+`.github/workflows/release.yml`); without that step an artifact would carry the
+source alone, and the packaged sidecar would exit at its first import while the
+app kept the built-in engine. That step has not yet run in CI.
 
 ## Warm-up is not an error
 
@@ -113,6 +144,7 @@ goes unlogged.
 | Variable | Default | Purpose |
 | --- | --- | --- |
 | `TEMINALI_VOICE_PORT` | `8321` | Loopback port. |
+| `TEMINALI_VOICE_CACHE` | transformers.js's own `.cache` | Where model weights are cached. The packaged app sets it to `<userData>/voice-models`. |
 | `TEMINALI_ASR_MODEL` | `onnx-community/whisper-base` | Any Whisper ONNX repo. `whisper-small` is more accurate and slower. |
 | `TEMINALI_TTS_MODEL` | `onnx-community/Kokoro-82M-v1.0-ONNX` | |
 | `TEMINALI_SOUND_MODEL` | `Xenova/ast-finetuned-audioset-10-10-0.4593` | AudioSet classifier behind `sounds=1`. |
@@ -136,7 +168,8 @@ An M4 Pro, int8, warm, over loopback:
 | Naming a sound in a wordless clip | **0.22 s** |
 | Sound classifier, cold (first download) | 123 s; 0.09 s from cache thereafter |
 | Model weights, all three models | 137 MB plus the classifier |
-| `node_modules` | 857 MB |
+| `node_modules` | 943 MB, of which 251 MB is the model cache |
+| Shipped in the macOS arm64 app (`Contents/Resources/voice-runtime`) | 184 MB |
 
 Long text is split on clause boundaries before synthesis (`splitClauses`).
 Kokoro's own splitter breaks on sentences only, so a single long sentence would

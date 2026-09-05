@@ -518,7 +518,7 @@ Each is dependency-free Node with its own README and test entry point.
 | `visual-runtime/` | Deterministic PNG/RGBA comparison — exact differing-pixel counts and CIE76 deltas. Measurements, not a score. It does not capture browsers. |
 | `performance-runtime/` | Live Ollama latency harness through the gateway. Records Ollama's authoritative counts; never logs prompt content. |
 | `mcp-runtime/` | MCP client and image-proof helpers. |
-| `voice-runtime/` | Loopback speech sidecar: Whisper recognition, Kokoro synthesis and AudioSet sound labelling on CPU, nothing leaving the machine. The only runtime with its own `package.json` — its dependencies are 857 MB, so they stay out of the app's tree. Install with `npm run voice:install`, start with `npm run voice:serve`. See [`voice-runtime/README.md`](voice-runtime/README.md). |
+| `voice-runtime/` | Loopback speech sidecar: Whisper recognition, Kokoro synthesis and AudioSet sound labelling on CPU, nothing leaving the machine. The only runtime with its own `package.json`, installed with `npm run voice:install` and started in development with `npm run voice:serve`. Its dependencies are 943 MB in a development tree (including the 251 MB model cache); the packaged app ships a filtered 184 MB of them as an extra resource and downloads the models on first run. See [`voice-runtime/README.md`](voice-runtime/README.md). |
 
 ---
 
@@ -557,7 +557,7 @@ ollama serve              # local models on 127.0.0.1:11434
 
 ```bash
 npm run typecheck   # tsc --noEmit
-npm test            # 956 tests, 0 failures
+npm test            # 979 tests, 0 failures
 npm run build       # tsc && vite build
 npm run verify:core # all three
 ```
@@ -630,9 +630,12 @@ whole, minus tests.
 `server/gateway.js` imports `../../gateway/frontier-runner.js` — the one module
 under `server/` reaching outside the package — so `gateway/` is copied to
 `<Resources>/gateway` via `extraResources`. It cannot go in `files`, which only
-collects paths under the app directory. The macOS block repeats that entry
-verbatim: a platform block **replaces** the array it overrides rather than
-extending it, so omitting it drops the runner from macOS builds alone.
+collects paths under the app directory. A platform block's `extraResources`
+is **added to** the top-level list, not substituted for it —
+`app-builder-lib`'s `getFileMatchers` reads both, and until the sidecar
+shipped the macOS block repeated the gateway entry on the opposite belief, so
+every macOS build copied the runner twice. Platform blocks now carry only what
+differs by platform: the pointer helper and the sidecar's dependencies.
 
 ### The gateway in a packaged app
 
@@ -676,6 +679,70 @@ Everything under `server/` that resolves a writable path resolves it against
 therefore points the store variables below at `userData/gateway/` before config
 is read, and `FRONTIER_WORKSPACE_ROOT` at the user's home. Each is only a
 default: an operator who exports one still wins.
+
+### The speech sidecar in a packaged app
+
+`voice-runtime/` ships under `<Resources>/voice-runtime` and the app starts
+it. Its source comes from a top-level `extraResources` entry; its production
+`node_modules` come from a second entry rooted at `voice-runtime/node_modules`,
+one per platform block. The split is forced: electron-builder's copier skips a
+directory named `node_modules` at the root of any `from:`
+(`app-builder-lib/out/util/filter.js`, "filter the root node_modules") whatever
+the filter says, and the first build with `node_modules/**` in the source entry
+shipped nine `.js` files and nothing else. Per platform because
+`onnxruntime-node` carries a binary for every platform, and each build keeps
+only `bin/**/<platform>/${arch}`. The sidecar's own top-level `onnxruntime-node`
+is not shipped at all — nothing imports it; `@huggingface/transformers` pins
+`1.21.0` and nests its own copy, which is the one that loads. Source maps,
+`.d.ts`, `.md` and the transformers `.cache` directory stay out.
+
+`electron/main.cjs` spawns `<Resources>/voice-runtime/cli.js` under the app's
+own Electron binary with `ELECTRON_RUN_AS_NODE=1`, the way the MCP shim runs,
+so a packaged app needs no Node on the `PATH`; an unpackaged app never spawns
+it (`npm run voice:serve` is the development sidecar). The port is taken from
+`TEMINALI_VOICE_URL`, else `TEMINALI_VOICE_PORT`, else 8321, so the gateway and
+the sidecar cannot disagree. If that port is already held — a development
+sidecar, typically — no second one is started and the gateway talks to
+whatever answers there. The child's stderr is relayed into `studio-main.log`
+prefixed `Voice sidecar:`, its exit is logged, and `will-quit` sends it
+SIGTERM.
+
+The models are **not** in the bundle. transformers.js would cache them inside
+its own package, which is inside the signed app; the packaged sidecar is
+handed `userData/voice-models` instead (`TEMINALI_VOICE_CACHE`, which an
+operator's own value overrides), so an update does not discard the download.
+They download on first run, and `/status` — which the gateway already reads
+and caches for 15 s — reports each model as it becomes ready; a cold sidecar
+answers `{}` and the studio keeps the built-in engine until then. There is no
+other progress surface. Measured with `du -sh` on this machine's cache:
+`onnx-community/whisper-base` 76 MB, `onnx-community/Kokoro-82M-v1.0-ONNX`
+88 MB, `Xenova/ast-finetuned-audioset-10-10-0.4593` 87 MB — 251 MB in all.
+
+Measured on the `--mac --arm64 --dir` build, `du -sh`:
+`Contents/Resources/voice-runtime` is 184 MB (1407 files); the app is 576 MB
+where the previous 1.2.6 build in the same `release/mac-arm64/` was 392 MB.
+The largest pieces are `onnxruntime-web` (68 MB, a static import of
+transformers.js's Node build), `@huggingface` (63 MB, including the nested
+`onnxruntime-node` for `darwin/arm64`), `kokoro-js` (29 MB) and `sharp` (16 MB).
+
+Launched from that build with its own `--user-data-dir`, the sidecar came up
+on the port the app was given and reported all three models ready from a
+pre-seeded cache; SIGTERM to the app took it down with nothing left listening.
+
+The release workflow installs the sidecar's dependencies before it packages:
+`npm run voice:install` runs after `npm ci` in
+`.github/workflows/release.yml`. Without it an artifact would carry the
+sidecar's source with no `node_modules` beside it, the packaged sidecar would
+exit at its first import, the app would log it, and voice would stay on the
+built-in engine. That step has not yet run in CI, so no published artifact has
+been checked for it.
+
+One thing this does not yet do. `sharp` installs
+only the host's platform package (`@img/sharp-darwin-arm64` is the only one
+present here), so the macOS x64 artifact, cross-built on an arm64 runner, would
+need that install to be told the target (`--cpu x64 --os darwin`) or its
+sidecar fails the same way. The Windows and Linux entries are written but have
+not been built here.
 
 ## Configuration
 

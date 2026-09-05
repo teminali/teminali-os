@@ -160,6 +160,15 @@ npm run server                                     # gateway picks it up
 The gateway refuses any non-loopback URL: audio must not leave the machine
 because someone mistyped a hostname.
 
+A packaged app starts the sidecar itself: `electron/main.cjs` spawns
+`<Resources>/voice-runtime/cli.js` under the app's Electron binary with
+`ELECTRON_RUN_AS_NODE=1`, on the port `TEMINALI_VOICE_URL` names (8321 unless
+moved), unless that port is already held — then it starts nothing and the
+gateway talks to whatever is there. It passes `TEMINALI_VOICE_CACHE`, which the
+sidecar reads to place the model weights under the app's userData instead of
+inside its own package. See `studio/README.md`, "The speech sidecar in a
+packaged app", and `voice-runtime/README.md`.
+
 Other knobs:
 
 | Variable | Default | Meaning |
@@ -167,6 +176,7 @@ Other knobs:
 | `TEMINALI_VOICE_URL` | `http://127.0.0.1:8321` | Sidecar origin (loopback only) |
 | `TEMINALI_VOICE_TIMEOUT_MS` | `30000` | Per-request timeout |
 | `TEMINALI_VOICE_MAX_AUDIO_BYTES` | `26214400` | Upload ceiling |
+| `TEMINALI_VOICE_CACHE` | transformers.js's own `.cache` | Read by the sidecar: where model weights are cached. Set by the packaged app |
 | `TEMINALI_SOUND_MODEL` | `Xenova/ast-finetuned-audioset-10-10-0.4593` | Sound classifier |
 | `TEMINALI_SOUND_THRESHOLD` | `0.35` | Confidence a label needs to be reported |
 

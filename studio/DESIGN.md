@@ -1556,15 +1556,32 @@ every 9 s. Test and build commands also narrate their outcome ("Tests passed.").
 **Spoken digest.** The streaming reader speaks the first three sentences of a
 reply as they arrive, then holds the rest. On completion a remainder of up to
 320 characters is read verbatim; anything longer becomes a two-sentence spoken
-summary from the Flash lane (`spokenDigest.ts`, 7 s cap, first-sentence
-fallback: "… The rest is in the chat."). `summariseLongReplies` turns this off
-and reads everything. The settle effect no longer re-reads a reply the streaming
-path already spoke. While the summary is being made the orb shows *thinking*
-(`VoiceEngine.noteDigesting`), not a silent *speaking*, captioned "Summing up
-the reply."; the digest chunk puts it back to *speaking*, and an empty digest
-returns it to *listening*. The final chunk also clears `narration`, so the
-run's last step line ("Reading types dot ts") does not caption the reply being
-read — the reply is in the chat and needs no caption.
+summary from the Flash lane, spoken sentence by sentence as the model produces
+it (`spokenDigest.ts#DigestStream`; first-sentence fallback: "… The rest is
+in the chat."). The request is the digest's own lean lane
+(`FrontierEngine.streamDigest`, `frontierEngine.ts`): the digest prompt alone
+on the Flash model with the reply lane's `num_ctx`, `num_predict` 80, and no
+model unload on abort. That unload is why the old flat 7 s cap was hit on
+every long reply: `streamFromOllama` evicts the model when aborted, so each
+miss made the next digest start from a cold load (17.3 s measured), and the
+digest went through the full agent system prompt. Measured 2026-09-05 on
+`frontier-qwen2.5-coder-14b-8k` (loaded, prompt not prefix-cached): a
+3,531-character prompt took 6.9–8.7 s of prompt evaluation before the first
+token; a 1,531-character one 2.6 s, first sentence complete at 4.0 s;
+generation 24–38 tokens in 1.8–3.2 s; a `num_ctx` change 1.5–2.4 s of reload.
+So the model is shown at most 1,200 characters — the first 900 and the last
+300, code fences replaced by "(code)" — and the only timed wait is for the
+first sentence: `digestBudgetMs` = 2.5 s + 4 ms per character shown (7.3 s at
+the cap). Once a sentence is being spoken, a 4 s gap between tokens ends the
+digest with what was said; two sentences or 400 characters stop the request.
+`summariseLongReplies` turns this off and reads everything. The settle effect
+no longer re-reads a reply the streaming path already spoke. While the first
+sentence is being made the orb shows *thinking* (`VoiceEngine.noteDigesting`),
+not a silent *speaking*, captioned "Summing up the reply."; the first digest
+sentence puts it back to *speaking*, and an empty digest returns it to
+*listening*. The final chunk also clears `narration`, so the run's last step
+line ("Reading types dot ts") does not caption the reply being read — the
+reply is in the chat and needs no caption.
 
 **Pace.** `DEFAULT_VOICE_SETTINGS.ttsRate` is 1.15 (was 1.02 until
 2026-09-05; a saved 1.02 is treated as never chosen and migrated by
@@ -1656,7 +1673,9 @@ allowlist rejects (`server/validation.js#validateClientAuditEvent`), and
 `recordAudit` swallows the failure, so no local-turn audit had ever landed. It
 now posts `prompt` and `model_call` events with provider, status and duration.
 Still observed, not changed: the Flash digest hit its 7 s cap in every run, so
-the spoken summary was the rule-based fallback after a 7 s wait.
+the spoken summary was the rule-based fallback after a 7 s wait. Changed
+since: the digest now streams from its own lane (see **Spoken digest** above
+for the cause and the measurements); not yet re-observed in a hands-free run.
 
 Non-negotiables:
 
@@ -1850,3 +1869,75 @@ live in the same log, expire on the same clock, are cleared by the same
 overhears* toggle — which also stops the classifier being asked for at all.
 
 Tests: `tests/ambient.test.mjs` (16), `voice-runtime/tests/voice-runtime.test.mjs` (19).
+
+### 6.6 Turn-taking latency: prosody joins syntax (2026-09-05)
+
+The gap between the operator's last word and the assistant's first one is a
+chain, and most of it was one link. From "stops talking" to "first audio":
+
+1. **VAD.** `audioGraph.ts` reads the analyser every 20 ms (`DEFAULT_FPS`
+   50, a 1024-sample window at 48 kHz); the offset is seen within a frame.
+2. **Endpoint.** `turnTaking.ts` runs the silence clock for
+   `minSilenceMs`–`maxSilenceMs` — 540–1900 ms at the default
+   `endpointSilenceMs` of 900 (`conversation.ts#configure`: floor 0.6×,
+   ceiling `max(setting, 1900)`) — sized by how finished the turn sounds.
+3. **Recognition.** The sidecar's Whisper is one-shot: the recorder closes on
+   the endpoint and the whole utterance goes to `/transcribe` in a single
+   pass. Measured on this machine against the running sidecar
+   (`onnx-community/whisper-base`, direct to `:8321`, warm): a 1 s clip
+   answered in 0.34–0.98 s and a 5.3 s clip in 0.47–0.82 s across eight
+   calls — a fixed cost, not a per-second one.
+4. **Commit.** Echo filter, addressing gate, intent, deterministic repair:
+   synchronous, except the borderline-only classifier (§6, 1.5 s cap).
+5. **Model, then speech.** The host's time to first token, then the first
+   clause through `speechStream.ts` (`docs/VOICE_SIDECAR.md` has the sidecar's
+   own numbers).
+
+The link that was wrong was 2. The endpointer sized its window from the
+transcript's `completenessScore`, and a one-shot recogniser has no transcript
+until the recording closes — so on the sidecar tier the score was always 0 and
+**every hands-free turn waited the full 1900 ms ceiling** (1330 ms when a
+question had just been asked). The audio carries the same evidence earlier
+and for free, so the endpointer now reads two things and blends them:
+
+- **Syntax** — `syntaxFinality(text)`: the existing lexical score, but an
+  empty transcript is now *unknown* (`null`), not "clearly unfinished".
+- **Prosody** — `prosody.ts`: `audioGraph.ts` adds a per-frame pitch
+  (`estimatePitch`: decimate to ~12 kHz, normalised autocorrelation over
+  70–400 Hz, first peak within 90% of the best so a strong second harmonic is
+  not read an octave up; voiced frames only, ~30k multiply-adds). A
+  `ProsodyTracker` keeps the voiced frames of the current turn and
+  `readProsody` compares the last 300 ms against the 300 ms before it: energy
+  trailing off (≤ 0.7×) and pitch falling (a semitone or more) read as a
+  statement ending; a level plateau or a rising pitch reads as a question or
+  an open clause and holds. It returns `null` under ~400 ms of speech rather
+  than guess.
+
+`combineFinality` averages what is known — either alone when the other is
+unknown, 0.5 when both are — and `silenceWindowMs` maps 1 → floor, 0 →
+ceiling. A finished sentence on a falling voice releases at the floor; a
+dangling "and" on a falling voice still holds (0.1 syntax against 0.85
+prosody lands under the midpoint). The frame clock comes from the frame
+(`AudioFrame.at`), so tests drive the endpointer deterministically and a
+stalled timer cannot stretch a silence.
+
+**A slice boundary may not add its own latency.** On the chunked path (a
+sidecar that reports `streaming: true`) the recorder cuts 700 ms slices and
+the endpoint used to commit whatever text had arrived, leaving the tail of the
+sentence in the open slice to surface in the *next* turn. `RecognitionSession`
+gains an optional `flush()`; `vibeVoice.ts` implements it as `requestData()`
+plus a wait for the slices in flight, then one final result carrying the whole
+utterance (empty included, so a turn that transcribed to nothing releases the
+microphone). `conversation.ts#onFrame` calls it on `speech-end` and waits for
+that final under the existing `STREAMING_FINAL_TIMEOUT_MS`. The browser engine
+has no `flush` and keeps its immediate commit. The one-shot path already
+flushed by construction (`stop()` closes the whole recording) and is unchanged
+apart from the shorter window.
+
+Not yet true: the weights (0.5/0.5), the ±0.25/−0.3 prosody terms and the
+0.7× energy threshold were set on synthesised tones and the node tests, not
+on a microphone. They need an afternoon with a real voice, a real room and
+the caption under the orb.
+
+Tests: `tests/turn-taking.test.mjs` (19); the endpointer cases in
+`tests/voice.test.mjs` are unchanged and still pass.
