@@ -39,6 +39,7 @@ import {
   DEFAULT_VOICE_SETTINGS,
   VoiceError,
   type AddressingVerdict,
+  type AmbientSound,
   type RecognitionSession,
   type RepairedTranscript,
   type SynthesisHandle,
@@ -112,6 +113,13 @@ const ACK_REPLY_GAP_MS = 20_000;
 /** The local addressing tiebreak gets this long before the rule verdict stands. */
 const CLASSIFIER_TIMEOUT_MS = 1500;
 
+/**
+ * How long the same sound stays "already logged". A steady noise - a fan, a
+ * road outside - is named in every clip, and one entry per minute is all that
+ * "did you hear that?" needs from it.
+ */
+const SOUND_REPEAT_MS = 60_000;
+
 export class VoiceEngine {
   private readonly roster: ProviderRoster = createRoster();
   private readonly graph: AudioGraph;
@@ -178,6 +186,12 @@ export class VoiceEngine {
    * for the final result instead of reading a transcript that is still empty.
    */
   private streamingAsr = true;
+  /**
+   * Whether the recogniser also names non-speech sounds. Read once at listen
+   * time and kept, because the recall answers need to distinguish "there was
+   * no car" from "nothing here was ever listening for one".
+   */
+  private soundLabels = false;
   private awaitingFinal = false;
   /** Safety net for `awaitingFinal`; see `armFinalFallback`. */
   private finalFallbackTimer: number | null = null;
@@ -339,16 +353,19 @@ export class VoiceEngine {
       }
 
       this.streamingAsr = asr.capabilities.streamingAsr;
+      this.soundLabels = asr.capabilities.soundLabels;
       this.session = await asr.listen(
         {
           language: this.settings.language,
           continuous: mode === "conversation",
           interim: true,
           hints: this.host.hints?.(),
+          sounds: this.settings.ambientMemory,
           signal: this.abort.signal,
         },
         {
           onResult: (result) => this.onResult(result.transcript, result.isFinal, result.language),
+          onSound: (sounds) => this.rememberSounds(sounds),
           onError: (error) => this.fail(error),
           onClose: () => {
             if (this.state === "idle") return;
@@ -489,6 +506,38 @@ export class VoiceEngine {
     this.emit();
   }
 
+  /**
+   * A non-speech sound the sidecar named in a clip: a car, a knock, a phone.
+   *
+   * It is written straight to the ambient log and goes no further. It is not a
+   * turn, it does not touch the endpointer or the addressing gate, and it never
+   * interrupts anything: the assistant is not to announce that a car went past.
+   * The only thing that changes is that the answer exists when it is asked for.
+   */
+  private rememberSounds(sounds: AmbientSound[]): void {
+    // Checked here as well as at listen time, because the setting can be
+    // switched off in the middle of a session and must take effect at once.
+    if (!this.settings.ambientMemory) return;
+    const now = Date.now();
+    for (const sound of sounds) {
+      // A fan, an air conditioner or traffic outside is present in every clip,
+      // and logging each one would push everything else out of a 200-entry
+      // window within a minute. One entry per label per repeat window is
+      // enough to answer "did you hear that"; the rest is the same fan.
+      const repeated = this.ambient
+        .all(now)
+        .some((entry) => entry.kind === "sound" && entry.label === sound.label && now - entry.at < SOUND_REPEAT_MS);
+      if (repeated) continue;
+      this.ambient.remember({
+        kind: "sound",
+        text: sound.sound,
+        label: sound.label,
+        speaker: "unknown",
+        confidence: sound.confidence,
+      }, now);
+    }
+  }
+
   private onResult(transcript: string, isFinal: boolean, _language: string): void {
     // The recogniser hears the speakers as well as the operator. Anything that
     // is the assistant's own voice coming back is removed before it can become
@@ -565,10 +614,12 @@ export class VoiceEngine {
           continuous: true,
           interim: true,
           hints: this.host.hints?.(),
+          sounds: this.settings.ambientMemory,
           signal: this.abort?.signal,
         },
         {
           onResult: (result) => this.onResult(result.transcript, result.isFinal, result.language),
+          onSound: (sounds) => this.rememberSounds(sounds),
           onError: (error) => this.fail(error),
           onClose: () => {
             if (this.state === "idle") return;
@@ -720,7 +771,9 @@ export class VoiceEngine {
       ? classifyAmbientQuery(withoutWakeWord || heard)
       : null;
     if (ambientQuery) {
-      const recalled = this.ambient.answer(ambientQuery);
+      const recalled = this.ambient.answer(ambientQuery, Date.now(), {
+        soundLabels: this.soundLabels,
+      });
       // A null answer means nothing was overheard, and the phrasing that got
       // us here is not unambiguous: "what did he say in the docs?" reads as a
       // recall question and is not one. Falling through costs nothing, while

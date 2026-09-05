@@ -33,23 +33,26 @@ export const AMBIENT_MAX_ENTRIES = 200;
 export type AmbientSpeaker = "operator" | "other" | "unknown";
 
 /**
- * `kind` distinguishes words from noises. Only `speech` is produced today:
- * labelling a sound ("a car", "a door") needs an audio classifier that the
- * sidecar does not yet run, and this type carries the shape so that lands as
- * data rather than as a schema change.
+ * `kind` distinguishes words from noises. Speech comes from the recogniser;
+ * `sound` comes from the sidecar's AudioSet classifier, which names a car, a
+ * knock or a phone in clips that carry no words at all. A build without that
+ * classifier produces only `speech`, and the recall answers say so rather than
+ * guessing at what a noise was.
  */
 export type AmbientKind = "speech" | "sound";
 
 export interface AmbientEntry {
   at: number;
   kind: AmbientKind;
-  /** The transcript, or for a sound the label. */
+  /** The transcript, or for a sound how it is said out loud ("a car"). */
   text: string;
   speaker: AmbientSpeaker;
   /** 0 to 1, or -1 when the engine gave none. */
   confidence: number;
   /** Why the addressing gate let this pass by, when it was speech. */
   reason?: string;
+  /** The raw AudioSet class behind a sound, kept for anything that reasons. */
+  label?: string;
 }
 
 /** What a recall question is asking for. */
@@ -70,8 +73,12 @@ const PATTERNS: ReadonlyArray<readonly [RegExp, AmbientQuery]> = [
   [/\b(forget|delete|wipe|clear)\b.*\b(what you heard|that|everything|the room)\b/i, { kind: "forget" }],
   [/\b(what|who)\b.*\b(did|was)\b.*\b(they|she|he|someone|somebody|that person|the other)\b.*\bsay\b/i, { kind: "last-speech" }],
   [/\bwhat did (?:i|you) (?:just )?(?:miss|not hear)\b/i, { kind: "last-speech" }],
-  [/\bwhat was (?:that|the) (?:noise|sound|bang|beep)\b/i, { kind: "last-sound" }],
-  [/\bdid you hear (?:that|it|something|anything)\b/i, { kind: "recent", withinMs: RECENT_WINDOW_MS }],
+  [/\bwhat (?:was|made) (?:that|the) (?:noise|sound|bang|beep|thud|banging)\b/i, { kind: "last-sound" }],
+  [/\bwhat (?:noise|sound) (?:was|did you hear)\b/i, { kind: "last-sound" }],
+  // "a", "an" and "the" are here for "did you hear a car?" - the question the
+  // classifier exists to answer. Still anchored on "did you hear", so an
+  // instruction has to be phrased as one to be mistaken for a recall.
+  [/\bdid you (?:just )?hear (?:that|it|something|anything|a|an|the)\b/i, { kind: "recent", withinMs: RECENT_WINDOW_MS }],
   [/\bwhat (?:else )?(?:have you|did you) hear(?:d)?\b/i, { kind: "recent", withinMs: RECENT_WINDOW_MS }],
 ];
 
@@ -98,15 +105,30 @@ function ago(at: number, now: number): string {
   return minutes === 1 ? "a minute ago" : `${minutes} minutes ago`;
 }
 
+/** A sound is heard, words are said. Reading both the same way sounds wrong. */
+function said(entry: AmbientEntry): string {
+  return entry.kind === "sound" ? `I heard ${entry.text}` : `I heard: ${entry.text}`;
+}
+
 /**
  * Compose the spoken answer to a recall question, or null when there is
  * nothing to say. Null matters: an assistant that invents an answer about what
  * it overheard is worse than one that says it did not catch anything.
  */
+export interface AmbientRecallOptions {
+  /**
+   * Whether the engine can name sounds at all. It changes what "no" means: a
+   * build with no classifier has never listened for a car, and saying "I did
+   * not hear one" would be a claim it has no basis for.
+   */
+  soundLabels?: boolean;
+}
+
 export function answerFromAmbient(
   query: AmbientQuery,
   entries: readonly AmbientEntry[],
   now = Date.now(),
+  { soundLabels = false }: AmbientRecallOptions = {},
 ): string | null {
   if (query.kind === "forget") return "Forgotten.";
 
@@ -120,16 +142,19 @@ export function answerFromAmbient(
 
   if (query.kind === "last-sound") {
     const sound = newestFirst.find((entry) => entry.kind === "sound");
-    // Said plainly rather than guessed at. The classifier that would name a
-    // sound is not built, and "probably a door" would be an invention.
-    if (!sound) return "I can only make out speech at the moment, not other sounds.";
-    return `${ago(sound.at, now)}: ${sound.text}`;
+    if (sound) return `${ago(sound.at, now)} I heard ${sound.text}.`;
+    // Two different noes, and the difference matters. Without a classifier the
+    // engine never listened for a sound, so it says what it can do instead of
+    // claiming there was nothing; with one, "nothing" is a real observation.
+    return soundLabels
+      ? "I didn't pick out any sound just then."
+      : "I can only make out speech at the moment, not other sounds.";
   }
 
   const within = newestFirst.filter((entry) => now - entry.at <= query.withinMs);
   if (!within.length) return null;
-  if (within.length === 1) return `${ago(within[0].at, now)} I heard: ${within[0].text}`;
-  const lines = within.slice(0, 3).map((entry) => `${ago(entry.at, now)}, ${entry.text}`);
+  if (within.length === 1) return `${ago(within[0].at, now)} ${said(within[0])}`;
+  const lines = within.slice(0, 3).map((entry) => `${ago(entry.at, now)}, ${said(entry)}`);
   return `A few things: ${lines.join("; ")}.`;
 }
 
@@ -173,8 +198,8 @@ export class AmbientMemory {
       .reverse();
   }
 
-  answer(query: AmbientQuery, now = Date.now()): string | null {
-    const reply = answerFromAmbient(query, this.all(now), now);
+  answer(query: AmbientQuery, now = Date.now(), options: AmbientRecallOptions = {}): string | null {
+    const reply = answerFromAmbient(query, this.all(now), now, options);
     if (query.kind === "forget") this.forget();
     return reply;
   }

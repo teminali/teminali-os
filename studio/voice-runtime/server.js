@@ -11,11 +11,12 @@
 import { createServer } from "node:http";
 import { encodeWav } from "./audio.js";
 import { ASR_LANGUAGES, ASR_MODEL, loadAsr, transcribeClip } from "./asr.js";
+import { SOUND_MODEL, loadSounds } from "./sounds.js";
 import { DEFAULT_VOICE, TTS_MODEL, loadTts, listVoices, synthesise } from "./tts.js";
 
 const MAX_AUDIO_BYTES = Number(process.env.TEMINALI_VOICE_MAX_AUDIO_BYTES || 25 * 1024 * 1024);
 
-const warm = { asr: false, tts: false, voices: [DEFAULT_VOICE] };
+const warm = { asr: false, tts: false, sounds: false, voices: [DEFAULT_VOICE] };
 
 /** Load both models in the background; the server serves what is ready. */
 export async function warmUp({ log = console.error } = {}) {
@@ -24,6 +25,9 @@ export async function warmUp({ log = console.error } = {}) {
     loadTts()
       .then(() => listVoices())
       .then((voices) => { warm.voices = voices; warm.tts = true; log(`[voice] TTS ready: ${TTS_MODEL} (${voices.length} voices)`); }),
+    // Third and least important: recognition works without it, and a sidecar
+    // that never finishes loading it simply never advertises `sounds`.
+    loadSounds().then(() => { warm.sounds = true; log(`[voice] sound labels ready: ${SOUND_MODEL}`); }),
   ];
   const results = await Promise.allSettled(jobs);
   for (const result of results) {
@@ -62,15 +66,17 @@ function readBody(request) {
  */
 async function readAudioPart(body, contentType) {
   if (!contentType?.includes("multipart/form-data")) {
-    return { audio: body, language: "auto" };
+    return { audio: body, language: "auto", sounds: false };
   }
   const form = await new Response(body, { headers: { "content-type": contentType } }).formData();
   const file = form.get("audio");
   if (!file || typeof file === "string") throw Object.assign(new Error("No audio part."), { status: 400 });
   const language = form.get("language");
+  const sounds = form.get("sounds");
   return {
     audio: Buffer.from(await file.arrayBuffer()),
     language: typeof language === "string" && language ? language : "auto",
+    sounds: sounds === "1" || sounds === "true",
   };
 }
 
@@ -80,7 +86,9 @@ export function createVoiceServer({ log = console.error } = {}) {
     try {
       if (request.method === "GET" && url.pathname === "/status") {
         const body = {};
-        if (warm.asr) body.asr = { model: ASR_MODEL, languages: ASR_LANGUAGES, streaming: false, embedding: false };
+        if (warm.asr) {
+          body.asr = { model: ASR_MODEL, languages: ASR_LANGUAGES, streaming: false, embedding: false, sounds: warm.sounds };
+        }
         if (warm.tts) body.tts = { model: TTS_MODEL, voices: warm.voices, streaming: false };
         return json(response, 200, body);
       }
@@ -88,10 +96,17 @@ export function createVoiceServer({ log = console.error } = {}) {
       if (request.method === "POST" && url.pathname === "/transcribe") {
         if (!warm.asr) return json(response, 503, { error: "Recognition is still loading." });
         const raw = await readBody(request);
-        const { audio, language } = await readAudioPart(raw, request.headers["content-type"]);
-        const result = await transcribeClip(audio, { language });
+        const { audio, language, sounds } = await readAudioPart(raw, request.headers["content-type"]);
+        const result = await transcribeClip(audio, { language, sounds: sounds && warm.sounds });
         if (result.reason) log(`[voice] rejected a clip: ${result.reason} (voiced ${result.voiced.toFixed(2)})`);
-        return json(response, 200, { text: result.text, language: result.language, confidence: result.confidence });
+        return json(response, 200, {
+          text: result.text,
+          language: result.language,
+          confidence: result.confidence,
+          // Present whenever they were asked for, empty list included: the
+          // studio needs to tell "nothing was there" from "nobody looked".
+          ...(sounds ? { sounds: result.sounds ?? [] } : {}),
+        });
       }
 
       if (request.method === "POST" && url.pathname === "/speak") {

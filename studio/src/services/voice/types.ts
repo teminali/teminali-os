@@ -66,6 +66,18 @@ export type LanguageSetting = string | "auto";
    Recognition
    ──────────────────────────────────────────────────────────────────────────── */
 
+/**
+ * A non-speech event the sidecar's classifier named in the clip: a car, a
+ * knock, a phone. `label` is the raw AudioSet class, kept because it is the
+ * thing that can be reasoned about; `sound` is how to say it out loud.
+ */
+export interface AmbientSound {
+  label: string;
+  sound: string;
+  /** 0-1 from the classifier. */
+  confidence: number;
+}
+
 export interface RecognitionResult {
   /** Best transcript for the utterance so far. */
   transcript: string;
@@ -75,6 +87,8 @@ export interface RecognitionResult {
   confidence: number;
   /** Detected (or configured) BCP-47 tag for this utterance. */
   language: string;
+  /** Non-speech sounds in the same clip, when they were asked for. */
+  sounds?: AmbientSound[];
 }
 
 export interface RecognitionOptions {
@@ -85,11 +99,24 @@ export interface RecognitionOptions {
   interim: boolean;
   /** Domain words the recogniser should bias toward (filenames, symbols). */
   hints?: string[];
+  /**
+   * Also name the non-speech sounds in each clip. Off by default and driven by
+   * the ambient-memory setting: labelling the room is a second model per clip,
+   * and an operator who has turned the ambient log off must not pay for it.
+   */
+  sounds?: boolean;
   signal?: AbortSignal;
 }
 
 export interface RecognitionHandlers {
   onResult: (result: RecognitionResult) => void;
+  /**
+   * Non-speech sounds heard in the clip. Separate from `onResult` on purpose:
+   * a passing car produces no transcript at all, so folding it into a result
+   * would push an empty utterance through the endpointer and the addressing
+   * gate. This is an observation about the room, not a turn.
+   */
+  onSound?: (sounds: AmbientSound[]) => void;
   /** The engine believes the speaker has stopped. Advisory, not authoritative. */
   onSpeechEnd?: () => void;
   onError?: (error: VoiceError) => void;
@@ -152,6 +179,8 @@ export interface ProviderCapabilities {
   streamingTts: boolean;
   /** Returns a per-utterance speaker embedding for addressee gating. */
   speakerEmbedding: boolean;
+  /** Names non-speech sounds ("a car", "a knock") alongside the transcript. */
+  soundLabels: boolean;
   languages: string[];
   /** Why the tier is unavailable, when it is. */
   detail?: string;

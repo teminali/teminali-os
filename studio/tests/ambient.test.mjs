@@ -68,11 +68,44 @@ test("nothing overheard yields null rather than an invented answer", () => {
   assert.equal(answerFromAmbient({ kind: "recent", withinMs: 60_000 }, [], NOW), null);
 });
 
-// The classifier that would name a sound is not built. Saying so is the honest
-// answer; "probably a door" would be an invention.
-test("a question about a noise says plainly that only speech is available", () => {
-  const reply = answerFromAmbient({ kind: "last-sound" }, heard, NOW);
-  assert.match(reply, /only make out speech/i);
+// Two different noes. Without a classifier the engine never listened for a
+// sound, so it says what it can do; with one, "nothing" is an observation it
+// is entitled to make. Guessing "probably a door" is neither.
+test("a question about a noise answers from what the engine can actually do", () => {
+  assert.match(answerFromAmbient({ kind: "last-sound" }, heard, NOW), /only make out speech/i);
+  const withClassifier = answerFromAmbient({ kind: "last-sound" }, heard, NOW, { soundLabels: true });
+  assert.match(withClassifier, /didn't pick out any sound/i);
+  assert.doesNotMatch(withClassifier, /only make out speech/i);
+});
+
+test("a sound that was heard is named, with how long ago", () => {
+  const room = [
+    ...heard,
+    { kind: "sound", text: "a car going past", label: "Car passing by", speaker: "unknown", confidence: 0.62, at: NOW - 20_000 },
+  ];
+  const reply = answerFromAmbient({ kind: "last-sound" }, room, NOW, { soundLabels: true });
+  assert.match(reply, /a car going past/);
+  assert.match(reply, /20 seconds ago/);
+  // The most recent sound, not the most recent anything: "I'll grab lunch" is
+  // newer and is not a noise.
+  assert.doesNotMatch(reply, /lunch/);
+});
+
+test("did you hear that car is a question about the room", () => {
+  assert.equal(classifyAmbientQuery("did you hear that car?").kind, "recent");
+  assert.equal(classifyAmbientQuery("did you hear a car outside").kind, "recent");
+  assert.equal(classifyAmbientQuery("did you just hear the doorbell").kind, "recent");
+  assert.deepEqual(classifyAmbientQuery("what made that noise"), { kind: "last-sound" });
+  assert.deepEqual(classifyAmbientQuery("what sound was that"), { kind: "last-sound" });
+});
+
+// A sound is heard, words are said. Reading a car out as "I heard: a car"
+// is the tell that a log is being read rather than a room remembered.
+test("sounds and speech are read out differently", () => {
+  const car = [{ kind: "sound", text: "a car", label: "Car", speaker: "unknown", confidence: 0.7, at: NOW - 3_000 }];
+  assert.match(answerFromAmbient({ kind: "recent", withinMs: 60_000 }, car, NOW), /I heard a car$/);
+  const words = [{ kind: "speech", text: "over here", speaker: "other", confidence: 0.5, at: NOW - 3_000 }];
+  assert.match(answerFromAmbient({ kind: "recent", withinMs: 60_000 }, words, NOW), /I heard: over here$/);
 });
 
 test("several recent things are summarised rather than listed in full", () => {

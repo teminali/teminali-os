@@ -22,6 +22,7 @@
 import { GatewayClient } from "../../gatewayClient";
 import {
   VoiceError,
+  type AmbientSound,
   type LanguageSetting,
   type ProviderCapabilities,
   type RecognitionHandlers,
@@ -38,7 +39,7 @@ interface VoiceStatusResponse {
   /** Which engine answered: the VibeVoice sidecar, or the local binaries. */
   engine?: "vibevoice" | "local";
   detail?: string;
-  asr?: { model: string; languages: string[]; streaming: boolean; embedding: boolean };
+  asr?: { model: string; languages: string[]; streaming: boolean; embedding: boolean; sounds?: boolean };
   tts?: { model: string; voices: string[]; streaming: boolean };
 }
 
@@ -48,6 +49,8 @@ interface TranscribeResponse {
   confidence?: number;
   /** Speaker embedding, when the sidecar was built with the verifier head. */
   embedding?: number[];
+  /** Named non-speech sounds, when the request asked for them. */
+  sounds?: AmbientSound[];
 }
 
 /**
@@ -68,6 +71,7 @@ export class VibeVoiceProvider implements VoiceProvider {
     streamingAsr: true,
     streamingTts: true,
     speakerEmbedding: true,
+    soundLabels: false,
     languages: [],
     detail: "Not probed yet.",
   };
@@ -107,6 +111,7 @@ export class VibeVoiceProvider implements VoiceProvider {
         streamingAsr: status.asr?.streaming ?? false,
         streamingTts: status.tts?.streaming ?? false,
         speakerEmbedding: status.asr?.embedding ?? false,
+        soundLabels: Boolean(asrAvailable && status.asr?.sounds),
         languages: status.asr?.languages ?? [],
         detail: asrAvailable ? undefined : (status.detail ?? "The VibeVoice sidecar is not running."),
       };
@@ -144,6 +149,7 @@ export class VibeVoiceProvider implements VoiceProvider {
     const recorder = new MediaRecorder(this.stream, mimeType ? { mimeType } : undefined);
     const controller = new AbortController();
     const streaming = this.capabilities.streamingAsr;
+    const wantSounds = Boolean(options.sounds && this.capabilities.soundLabels);
     let active = true;
     let settled = "";
     let inFlight = 0;
@@ -167,9 +173,13 @@ export class VibeVoiceProvider implements VoiceProvider {
       }
       inFlight += 1;
       try {
-        const result = await this.transcribeBlob(event.data, options.language, controller.signal);
+        const result = await this.transcribeBlob(event.data, options.language, controller.signal, {
+          sounds: wantSounds,
+        });
         const chunk = result.transcript.trim();
-        if (!active || !chunk) return;
+        if (!active) return;
+        if (result.sounds?.length) handlers.onSound?.(result.sounds);
+        if (!chunk) return;
         settled = settled ? `${settled} ${chunk}` : chunk;
         handlers.onResult({
           transcript: settled,
@@ -198,7 +208,12 @@ export class VibeVoiceProvider implements VoiceProvider {
         parts.length = 0;
         if (blob.size > 1200 && active) {
           try {
-            const result = await this.transcribeBlob(blob, options.language, controller.signal);
+            const result = await this.transcribeBlob(blob, options.language, controller.signal, {
+              sounds: wantSounds,
+            });
+            // Before the transcript check, not after: a car makes no words, so
+            // the clip worth labelling is exactly the one that returns none.
+            if (result.sounds?.length) handlers.onSound?.(result.sounds);
             if (result.transcript.trim()) {
               handlers.onResult({
                 transcript: result.transcript.trim(),
@@ -260,10 +275,14 @@ export class VibeVoiceProvider implements VoiceProvider {
     blob: Blob,
     language: LanguageSetting,
     signal?: AbortSignal,
+    options: { sounds?: boolean } = {},
   ): Promise<RecognitionResult> {
     const form = new FormData();
     form.append("audio", blob, "utterance.webm");
     form.append("language", language);
+    // Only when both sides want it: the caller has the ambient log switched on
+    // and the sidecar has a classifier warm.
+    if (options.sounds && this.capabilities.soundLabels) form.append("sounds", "1");
 
     const response = await GatewayClient.request("/api/voice/transcribe", {
       method: "POST",
@@ -277,6 +296,7 @@ export class VibeVoiceProvider implements VoiceProvider {
       isFinal: true,
       confidence: data.confidence ?? -1,
       language: data.language ?? "",
+      sounds: data.sounds ?? [],
     };
   }
 

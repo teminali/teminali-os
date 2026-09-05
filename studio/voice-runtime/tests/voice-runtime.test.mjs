@@ -6,6 +6,7 @@ import {
 } from "../transcript-guard.js";
 import { encodeWav, rms, voicedFraction, SAMPLE_RATE } from "../audio.js";
 import { splitClauses } from "../tts.js";
+import { describeSound, isReportableSound, selectSounds } from "../sounds.js";
 
 /* ── Hallucination guards ─────────────────────────────────────────────────── */
 
@@ -116,4 +117,68 @@ test("a clause with nothing to break on is cut on word count", () => {
 
 test("a short line stays whole", () => {
   assert.deepEqual(splitClauses("Two edits were made."), ["Two edits were made."]);
+});
+
+/* ── Sound labels ─────────────────────────────────────────────────────────── */
+
+// The scores below are the ones this machine actually measured on 2026-09-05:
+// synthesised speech, a 1 kHz tone, brown noise and a silent buffer.
+test("speech is never reported as a sound", () => {
+  const measured = [
+    { label: "Speech", score: 0.847 },
+    { label: "Male speech, man speaking", score: 0.015 },
+  ];
+  assert.deepEqual(selectSounds(measured), []);
+  assert.equal(isReportableSound("Narration, monologue"), false);
+  assert.equal(isReportableSound("Speech synthesizer"), false);
+});
+
+test("the room's own noise floor is not an event", () => {
+  assert.deepEqual(selectSounds([{ label: "Silence", score: 0.452 }]), []);
+  assert.deepEqual(selectSounds([{ label: "Pink noise", score: 0.326 }, { label: "Static", score: 0.142 }]), []);
+  // Loud enough to clear the threshold, and still not worth saying.
+  assert.deepEqual(selectSounds([{ label: "Static", score: 0.98 }]), []);
+  assert.equal(isReportableSound("Inside, small room"), false);
+  assert.equal(isReportableSound("Mains hum"), false);
+});
+
+test("a real event is reported, in words a person would use", () => {
+  assert.deepEqual(selectSounds([{ label: "Beep, bleep", score: 0.771 }]), [
+    { label: "Beep, bleep", sound: "a beep", confidence: 0.771 },
+  ]);
+  assert.deepEqual(selectSounds([{ label: "Car passing by", score: 0.6 }])[0].sound, "a car going past");
+  assert.equal(describeSound("Vehicle horn, car horn, honking"), "a car horn");
+  assert.equal(describeSound("Knock"), "a knock at the door");
+  assert.equal(describeSound("Bark"), "a dog barking");
+});
+
+test("an unmapped label still reads as English rather than a catalogue entry", () => {
+  assert.equal(describeSound("Zither"), "a zither");
+  assert.equal(describeSound("Oboe"), "an oboe");
+  assert.equal(describeSound("Whip, thwack"), "a whip");
+});
+
+test("nothing below the threshold is claimed to have been heard", () => {
+  assert.deepEqual(selectSounds([{ label: "Car", score: 0.34 }]), []);
+  assert.equal(selectSounds([{ label: "Car", score: 0.36 }]).length, 1);
+  assert.deepEqual(selectSounds([]), []);
+  assert.deepEqual(selectSounds(undefined), []);
+});
+
+test("two labels that mean the same thing are said once", () => {
+  const heard = selectSounds([
+    { label: "Siren", score: 0.5 },
+    { label: "Civil defense siren", score: 0.4 },
+    { label: "Dog", score: 0.38 },
+  ], { limit: 3 });
+  assert.deepEqual(heard.map((entry) => entry.sound), ["a siren", "a dog"]);
+});
+
+test("only the loudest couple of sounds are kept", () => {
+  const many = [
+    { label: "Dog", score: 0.9 }, { label: "Car", score: 0.8 },
+    { label: "Bell", score: 0.7 }, { label: "Piano", score: 0.6 },
+  ];
+  assert.equal(selectSounds(many).length, 2);
+  assert.equal(selectSounds(many, { limit: 4 }).length, 4);
 });

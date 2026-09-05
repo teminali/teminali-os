@@ -1698,8 +1698,9 @@ bug that reading the diff does not catch.
 ### 6.3 The sidecar that ships (`studio/voice-runtime/`)
 
 `docs/VOICE_SIDECAR.md` describes the contract; `voice-runtime/` is a working
-implementation of it — Whisper for recognition, Kokoro-82M for synthesis, both
-on CPU through `onnxruntime-node`, both loopback-only. It is the first local
+implementation of it — Whisper for recognition, Kokoro-82M for synthesis, and
+AudioSet AST for naming non-speech sounds (§6.5), all on CPU through
+`onnxruntime-node`, all loopback-only. It is the first local
 tier that works identically on Windows, where `speech-local.js` returns
 unavailable and there has never been any local speech at all.
 
@@ -1711,7 +1712,8 @@ of the packaged app until bundling is a deliberate decision. `npm install` in
 **Capabilities are advertised only when warm.** `/status` on a cold sidecar
 returns `{}`, which the gateway reads as "no models here" and falls back to the
 local tier, so the operator keeps a voice while weights download rather than
-waiting on a probe that cannot answer inside its 2.5 s timeout. `server/voice.js`
+waiting on a probe that cannot answer inside its 2.5 s timeout. The three models
+warm independently, so recognition is available before the classifier is. `server/voice.js`
 now routes synthesis and recognition **independently**: a sidecar advertising
 only `tts` no longer receives audio it never offered to transcribe. The contract
 document has always promised that degradation; until 2026-09-05 the code did
@@ -1773,10 +1775,48 @@ Speaker attribution comes free from `AddressingVerdict.signals.speakerMatch`:
 at or above 0.6 the line is the operator's own and is never offered back as
 something overheard, below it is `other`, and `null` is `unknown`.
 
-**Sounds are not labelled yet.** `AmbientKind` carries `"sound"` so the shape is
-ready, but only `"speech"` is ever produced: naming a noise needs an audio
-classifier the sidecar does not run. Asked "what was that noise?", the
-assistant says it can only make out speech — which is true, where "probably a
-door" would be an invention.
+Tests: `tests/ambient.test.mjs` (16).
 
-Tests: `tests/ambient.test.mjs` (13).
+### 6.5 Naming a sound, not just a sentence (2026-09-05)
+
+§6.4 shipped with `AmbientKind` carrying `"sound"` and nothing ever producing
+one: asked "what was that noise?", the assistant said it could only make out
+speech. True at the time, and not what was asked for — the request was *"if
+there was a car noise i can ask did you hear that"*.
+
+The sidecar now runs a third model, AudioSet AST over 527 classes
+(`voice-runtime/sounds.js`), and the studio records what it names as
+`kind: "sound"` entries in the same bounded log. The contract addition is one
+field each way: `asr.sounds` on `/status`, a `sounds=1` form field on
+`/transcribe`, a `sounds` array back. See `docs/VOICE_SIDECAR.md`.
+
+Four decisions worth keeping:
+
+1. **A sound is not a turn.** It arrives on its own handler,
+   `RecognitionHandlers.onSound`, and goes straight to the log. Folding it into
+   `onResult` would push an empty utterance through the endpointer and the
+   addressing gate; and the assistant must never announce that a car went past.
+   It answers when asked, and not before.
+2. **Only wordless clips are classified.** Recognition takes ~250 ms and
+   classification ~220 ms, and they do not overlap — ONNX inference is
+   synchronous. Paying it on every clip would put a quarter-second in front of
+   every reply to buy almost nothing, because speech dominates the classifier
+   (0.85) and a car underneath a talking person never clears the reporting
+   threshold. The clip where a car *is* the loudest thing has no words in it.
+   The cost: a car passing mid-sentence is not logged.
+3. **The classifier is a capability, not an assumption.** `soundLabels` is read
+   from the provider at listen time and passed into recall, because the two
+   noes are different: without a classifier the engine never listened for a
+   sound and says what it can do instead; with one, "I didn't pick out any
+   sound" is an observation it is entitled to make. Neither is a guess.
+4. **A steady noise is logged once a minute.** `SOUND_REPEAT_MS` in
+   `conversation.ts` — a fan or a road outside is named in every clip, and
+   without this it would push everything else out of a 200-entry window inside
+   a minute.
+
+The privacy properties of §6.4 are unchanged and now cover more: sound entries
+live in the same log, expire on the same clock, are cleared by the same
+"forget what you heard", and are switched off by the same *Remember what it
+overhears* toggle — which also stops the classifier being asked for at all.
+
+Tests: `tests/ambient.test.mjs` (16), `voice-runtime/tests/voice-runtime.test.mjs` (19).

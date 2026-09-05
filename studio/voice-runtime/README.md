@@ -68,6 +68,46 @@ A rejected clip returns `{"text": ""}`. To the studio it is indistinguishable
 from silence, which is the point — the alternative is an assistant that argues
 with the room.
 
+## Naming the room instead of transcribing it
+
+The guards above throw away a passing car. That is right for the transcript and
+wrong for the operator, who asked to be able to say *"did you hear that?"*.
+`sounds.js` names what the words were not: AudioSet AST over 527 classes, on the
+same 16 kHz float32 the recogniser already holds.
+
+Ask for it with a `sounds=1` field on `/transcribe`; it is off by default so the
+repair and re-scoring passes do not pay for labels they discard. `/status`
+advertises `asr.sounds` once the model is warm.
+
+```
+$ curl -s -F "audio=@beep.wav" -F "sounds=1" localhost:8321/transcribe
+{"text":"","language":"en-GB","confidence":0,
+ "sounds":[{"label":"Beep, bleep","sound":"a beep","confidence":0.771}]}
+```
+
+`selectSounds` decides what is worth saying, and its three rules are the whole
+design:
+
+| Dropped | Because |
+| --- | --- |
+| `Speech`, `Conversation`, `Narration`, `Speech synthesizer` | the transcript owns words; a log carrying both answers "what did she say?" with "a person speaking" |
+| `Silence`, `Static`, `White noise`, `Inside, small room`, `Mains hum` | the noise floor and the shape of the room are not events — and they score high enough to clear any useful threshold, so they go by name, not by score |
+| anything under `TEMINALI_SOUND_THRESHOLD` | `[]` is a real answer; it is what lets the studio say no instead of inventing a door |
+
+What survives is rendered into words a person would use — `Vehicle horn, car
+horn, honking` is read back as "a car horn" — because the studio speaks the
+`sound` field verbatim. An unmapped label falls back to an article plus the text
+before the first comma, which is plain but never wrong.
+
+**Only clips with no words are classified.** Recognition of a 2.5 s utterance
+takes ~250 ms and classification takes ~220 ms, and they do not overlap: ONNX
+runs inference synchronously, so the costs add. Spending it on spoken clips
+would put a quarter-second in front of every reply and return almost nothing —
+speech dominates the classifier at 0.85, and a car underneath a talking person
+does not clear the threshold. The clip where a car *is* the loudest thing is the
+clip with no words in it. The cost of the rule: a car that passes mid-sentence
+goes unlogged.
+
 ## Configuration
 
 | Variable | Default | Purpose |
@@ -75,8 +115,10 @@ with the room.
 | `TEMINALI_VOICE_PORT` | `8321` | Loopback port. |
 | `TEMINALI_ASR_MODEL` | `onnx-community/whisper-base` | Any Whisper ONNX repo. `whisper-small` is more accurate and slower. |
 | `TEMINALI_TTS_MODEL` | `onnx-community/Kokoro-82M-v1.0-ONNX` | |
+| `TEMINALI_SOUND_MODEL` | `Xenova/ast-finetuned-audioset-10-10-0.4593` | AudioSet classifier behind `sounds=1`. |
+| `TEMINALI_SOUND_THRESHOLD` | `0.35` | Confidence a label needs before it is reported. |
 | `TEMINALI_TTS_VOICE` | `af_heart` | One of the 28 voices `/status` lists. |
-| `TEMINALI_ASR_DTYPE` / `TEMINALI_TTS_DTYPE` | `q8` | Quantisation. |
+| `TEMINALI_ASR_DTYPE` / `TEMINALI_TTS_DTYPE` / `TEMINALI_SOUND_DTYPE` | `q8` | Quantisation. |
 | `TEMINALI_FFMPEG` | first of `/opt/homebrew/bin`, `/usr/local/bin`, `/usr/bin`, then `PATH` | Decodes the recorder's webm/opus to 16 kHz mono. |
 
 `ffmpeg` is a hard requirement for recognition: Node cannot decode Opus and the
@@ -91,7 +133,9 @@ An M4 Pro, int8, warm, over loopback:
 | `Running the tests.` -> 1.55 s of audio | **0.51 s** |
 | `Two edits were made, and the tests passed.` -> 3.10 s of audio | **1.12 s** |
 | Recognition of a 2.5 s utterance | accurate, confidence 0.92 |
-| Model weights, both models | 137 MB |
+| Naming a sound in a wordless clip | **0.22 s** |
+| Sound classifier, cold (first download) | 123 s; 0.09 s from cache thereafter |
+| Model weights, all three models | 137 MB plus the classifier |
 | `node_modules` | 857 MB |
 
 Long text is split on clause boundaries before synthesis (`splitClauses`).
@@ -109,13 +153,17 @@ render as one block and give up the latency win entirely.
   "only respond to my voice" gate falls back to the studio's own MFCC matcher.
 - **`confidence` is derived from voiced fraction**, not from the model — the
   pipeline exposes no per-utterance score. Saying so beats inventing a number.
+- **A sound under speech is not named**, by the deliberate rule above: only
+  wordless clips are classified.
 
 ## Tests
 
 ```bash
-node --test tests/*.test.mjs     # 12 tests, no model required
+node --test tests/*.test.mjs     # 19 tests, no model required
 ```
 
-They cover the guards, the WAV header and clause splitting — everything that
-runs without loading a model. The end-to-end paths are exercised by hand
-against a running sidecar.
+They cover the guards, the WAV header, clause splitting and every rule about
+which sounds are worth reporting — everything that runs without loading a model.
+`selectSounds` is separated from `classifySounds` for exactly this reason: the
+judgement is testable without the classifier. The end-to-end paths are exercised
+by hand against a running sidecar.

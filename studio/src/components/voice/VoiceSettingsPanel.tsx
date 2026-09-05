@@ -249,7 +249,7 @@ export const VoiceSettingsPanel: React.FC<VoiceSettingsPanelProps> = ({
           <Toggle checked={settings.summariseLongReplies} onChange={(value) => update({ summariseLongReplies: value })} />
         </Row>
 
-        <Row label="Remember what it overhears" hint="Speech that was not addressed to the assistant is kept for ten minutes so you can ask “what did she just say?”. It is already transcribed either way; this only decides whether it is kept. Nothing is sent anywhere, and it is cleared whenever hands-free conversation stops.">
+        <Row label="Remember what it overhears" hint="Speech that was not addressed to the assistant is kept for ten minutes, so you can ask “what did she just say?” — and, where the local sidecar can name sounds, “did you hear that car?”. The words are transcribed either way; naming a sound is an extra pass this switch turns on. Nothing is sent anywhere, and it is cleared whenever hands-free conversation stops.">
           <Toggle checked={settings.ambientMemory} onChange={(value) => update({ ambientMemory: value })} />
         </Row>
 

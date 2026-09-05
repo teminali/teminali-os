@@ -128,6 +128,9 @@ export class WebSpeechProvider implements VoiceProvider {
     streamingAsr: true,
     streamingTts: false,
     speakerEmbedding: false,
+    // The Chromium recogniser reports words or nothing; there is no audio to
+    // classify on this tier.
+    soundLabels: false,
     languages: VOICE_LANGUAGES.filter((language) => language.webSpeech).map((language) => language.tag),
   };
 

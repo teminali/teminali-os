@@ -41,7 +41,7 @@ calls a loopback sidecar, and the sidecar owns the models. Three routes:
 ```json
 {
   "asr": { "model": "VibeVoice-ASR-BitNet", "languages": ["en-US", "sw-TZ", "..."],
-           "streaming": true, "embedding": false },
+           "streaming": true, "embedding": false, "sounds": false },
   "tts": { "model": "VibeVoice-Realtime-0.5B", "voices": ["default"], "streaming": true }
 }
 ```
@@ -69,6 +69,36 @@ Add `"embedding": [ ... ]` — a speaker embedding — if your build has a verif
 head. The studio uses it for the "only respond to my voice" gate and falls back
 to its own on-device matcher when absent. See *Speaker verification* below.
 
+#### Naming sounds
+
+Set `"sounds": true` on the `asr` block of `/status` if your build can name
+non-speech audio. The studio then sends a `sounds=1` form field on the clips it
+wants labelled, and you answer with a `sounds` array — **including an empty one**,
+which is a real answer and not the same as omitting the field:
+
+```json
+{ "text": "", "language": "en-US", "confidence": 0,
+  "sounds": [{ "label": "Car passing by", "sound": "a car going past", "confidence": 0.62 }] }
+```
+
+`label` is the raw class from whatever taxonomy you use; `sound` is how to say
+it out loud, because the studio reads it back verbatim. Three rules the studio
+relies on, and the reference implementation enforces in `sounds.js`:
+
+1. **Never report speech.** "Speech", "Conversation", "Narration" and the rest
+   belong to the transcript. An ambient log that carried both would answer
+   "what did she say?" with "a person speaking".
+2. **Never report the room.** "Silence", "Static", "Inside, small room" and
+   mains hum are the noise floor, not events — and they score high enough to
+   pass any useful threshold, so drop them by name rather than by score.
+3. **Never guess.** Below your threshold, return `[]`. That is what lets the
+   studio say no to "did you hear that?" instead of inventing a door.
+
+The field is opt-in per request because classification is a second model pass:
+in this repo's sidecar it costs ~220 ms and does not overlap recognition, so it
+is spent only on clips that produced no words. See `voice-runtime/asr.js` for
+why that is where the labels are worth anything anyway.
+
 ### `POST /speak`
 
 ```json
@@ -94,6 +124,8 @@ Other knobs:
 | `TEMINALI_VOICE_URL` | `http://127.0.0.1:8321` | Sidecar origin (loopback only) |
 | `TEMINALI_VOICE_TIMEOUT_MS` | `30000` | Per-request timeout |
 | `TEMINALI_VOICE_MAX_AUDIO_BYTES` | `26214400` | Upload ceiling |
+| `TEMINALI_SOUND_MODEL` | `Xenova/ast-finetuned-audioset-10-10-0.4593` | Sound classifier |
+| `TEMINALI_SOUND_THRESHOLD` | `0.35` | Confidence a label needs to be reported |
 
 The gateway caches `/status` for 15 seconds, so an always-open microphone does
 not poll a dead port.
