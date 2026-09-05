@@ -378,6 +378,18 @@ banner**; the announcement is a dot on this control and the pill in
 disagree. In a browser the rollback rows are absent rather than dead — replacing
 the bundle needs the desktop bridge (`no dead affordances`, below).
 
+### The file tree's open folders (`sidebar/FileTree.tsx`, `store/treeExpansion.ts`)
+
+Which folders are open is store state — `expandedPaths: Set<string>` in
+`studioStore`, keyed by workspace-relative path — not a `useState` on each row.
+That is what lets something other than a click open a folder: `revealPath`
+expands every ancestor of a path and stamps a `revealTarget` that the matching
+row scrolls itself to. The agent's `reveal` tool drives exactly this; §5 has the
+bridge. Booting open on top-level `src` and `studio` survives the move as
+`DEFAULT_EXPANDED_PATHS`, and because those are paths rather than names a nested
+`studio/src` stays shut. Changing the workspace root clears the set — paths from
+the old tree open nothing in the new one.
+
 ### The conversation surface (`components/chat/**`)
 
 A turn is read in a fixed order, and the components are laid out to enforce it:
@@ -1777,6 +1789,65 @@ Codex gets no briefing. `codex exec` has no equivalent flag, and prepending the
 text to the prompt would put it in the conversation as the operator's words: the
 agent would answer it, and the operator would see a reply to a message they
 never sent.
+
+### The agent gets hands on the workspace, not just on the disk (2026-09-06)
+
+*"the agent needs ability to open folders and show it's files on the tree
+without me manually having to do it."*
+
+The agent could always edit `studio/src/App.tsx`. What it could not do was
+anything to the application around that file. `WorkspaceService.openProject` had
+exactly three callers and all three were human clicks — `src/App.tsx`,
+`useProjectLibrary.ts`, `Sidebar.tsx` — so an agent asked to work on another
+project could only describe the folder and wait to be shown it. Naming a path
+was worse than useless: the operator was reading a sentence about a file while
+looking at a tree that had not moved.
+
+`server/workspace-mcp.js` and `electron/workspaceMcpStdio.cjs` are the fourth
+MCP server, after `video`, `permission` and `screen`. Three tools: `reveal`,
+`recent_projects`, `open_project`.
+
+**The tree's open folders are state, not scattered component memory.** This is
+the part that had to come first. `FileTree.tsx` held `isOpen` in a per-row
+`useState`, seeded open for top-level `src` and `studio`, so there was no
+address anything outside a row could write to. It is now `expandedPaths:
+Set<string>` in `studioStore`, moved by the pure functions in
+`src/store/treeExpansion.ts` — `expandForReveal` opens every ancestor of a path
+and returns the *original* set when nothing changed, so a repeated reveal does
+not re-render the tree. `revealPath` also stamps a `revealTarget`, and the row
+whose path matches scrolls itself into view and clears it. A change of
+workspace root resets both: paths from the old tree open nothing in the new one.
+
+**The run's own stream is the channel back to the window.** The gateway holds no
+handle on the renderer, but the renderer opened the NDJSON stream this turn is
+being read from — so `emitToRun` in `server/permission-bridge.js` puts a
+`workspace` event on it, `agentCliService.ts` dispatches it, and `AgentPane`
+calls `revealPath`. Nothing new to keep alive: the channel dies exactly when the
+turn does, and a reveal against a closed stream is reported to the agent as not
+delivered rather than pretended.
+
+**`reveal` is pre-approved; `open_project` is not.** `reveal` shows a path the
+gateway has already refused to let escape the workspace, in a tree the operator
+is already looking at. `open_project` rebinds `config.workspaceRoot`, which is
+what bounds every workspace route, the search and every terminal — the ground
+under their feet — so it falls to the same `--permission-prompt-tool` dialog
+that gates a shell command. `workspaceMcpArgs` names `mcp__workspace__reveal`
+alone in `--allowedTools`, and `tests/workspace-mcp.test.mjs` asserts the bare
+server name never appears there.
+
+**"Open the last project" is a filter, not a model call.** `server/projects.js`
+already stored every recent as `{ path, name, openedAt, kind }`, most-recent-
+first, with `kind` re-read from the marker file on disk rather than trusted from
+the store — so the data behind all three phrasings existed. `server/project-phrase.js`
+is the resolver: kind words select `video` or `code`, day words filter
+`openedAt` by calendar day, what is left is matched against the name, and the
+project already open is dropped because "the last project" never means the one
+on screen. Two limits it states rather than guesses around: `MAX_RECENT_PROJECTS`
+is **12**, so a project can genuinely have fallen off the end and a miss says
+so; and `openedAt` is when a project was *opened*, not worked on, so a session
+that starts at 23:00 and runs past midnight is stamped the previous day.
+
+Codex gets no workspace server, for the third time and the same reason.
 
 ## 6. Voice (`studio/src/services/voice/`)
 

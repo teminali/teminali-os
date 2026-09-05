@@ -92,6 +92,9 @@ is the complete list.
 | `POST` | `/api/workspace/open` | bearer | Opens a project and rebinds the workspace root. An unopenable or over-broad root is refused. |
 | `POST` | `/api/workspace/projects/remember` | bearer | Records a project in the recents **without** rebinding the workspace root. What a video project uses, so opening a timeline does not repoint the file tree, search and terminals at the folder holding it. |
 | `POST` | `/api/workspace/projects/forget` | bearer | Drops one project from the recents. |
+| `POST` | `/api/workspace/agent/reveal` | **per-run token** | Opens every folder above a workspace-relative path in the operator's file tree and scrolls to it. Read-only: it resolves the path through the same `resolveWorkspacePath` guard the read routes use, then puts a `workspace` event on the run's own NDJSON stream — the only channel back to the window during a turn. Authorised by `x-teminali-workspace-token`, the run token minted by `openRun`; checked before the bearer gate for the same reason the screen agent routes are. |
+| `POST` | `/api/workspace/agent/projects` | **per-run token** | The current project plus the recents, for the agent. The same data as `GET /api/workspace/projects`, on the run token instead of the bearer. |
+| `POST` | `/api/workspace/agent/open-project` | **per-run token** | Switches the workspace to another project, by `path` or by `phrase` — the operator's own words ("the last video project", "the one from yesterday"), resolved against the recents by `server/project-phrase.js`. Rebinds `config.workspaceRoot`, so it is deliberately **not** pre-approved in `--allowedTools`: the call only arrives after the CLI's permission prompt was answered. |
 
 ### Terminal
 

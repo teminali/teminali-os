@@ -47,6 +47,8 @@ asarUnpack:
   # file on disk. Inside app.asar nothing can spawn it; `screenShimPath()`
   # rewrites the path to the unpacked copy and this is what unpacks it.
   - electron/screenMcpStdio.cjs
+  # Same again: `workspaceShimPath()` rewrites to the unpacked copy.
+  - electron/workspaceMcpStdio.cjs
 
 # server/gateway.js imports "../../gateway/frontier-runner.js" — the one module
 # under server/ that reaches outside this package. From inside the archive that

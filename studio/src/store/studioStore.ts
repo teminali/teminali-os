@@ -3,6 +3,7 @@ import { persist, createJSONStorage } from "zustand/middleware";
 import { ModelProfileId, ModelProfile, SpecialistSkill, EditorTab, FileItem, ChatMessage, ToolCall } from "../types";
 import { purgeOllamaMemory } from "../services/aiService";
 import { findTabByFileIdentity } from "./tabIdentity";
+import { DEFAULT_EXPANDED_PATHS, expandForReveal, toggleExpansion } from "./treeExpansion";
 
 export interface ChatSession {
   id: string;
@@ -187,6 +188,22 @@ interface StudioState {
   setWorkspacePath: (path: string) => void;
   files: FileItem[];
   setFiles: (files: FileItem[]) => void;
+
+  /**
+   * Which folders the file tree has open, by workspace-relative path.
+   *
+   * Held here rather than in each row so something other than a click can open
+   * a folder — `revealPath` is what the agent's workspace `reveal` tool drives.
+   * Deliberately not persisted: the tree it describes belongs to whichever
+   * project is open, and a stale set from another root would open nothing.
+   */
+  expandedPaths: Set<string>;
+  toggleExpanded: (path: string) => void;
+  /** Open every folder on the way to `path` and scroll the tree to it. */
+  revealPath: (path: string) => void;
+  /** The row the tree should scroll to; timestamped so a repeat reveal re-fires. */
+  revealTarget: { path: string; timestamp: number } | null;
+  clearRevealTarget: () => void;
   
   tabs: EditorTab[];
   activeTabId: string | null;
@@ -295,7 +312,12 @@ export const useStudioStore = create<StudioState>()(
         }
       },
 
-      setWorkspacePath: (workspacePath) => set({ workspacePath }),
+      setWorkspacePath: (workspacePath) => set({
+        workspacePath,
+        // A new root means a new tree: paths from the old one open nothing.
+        expandedPaths: new Set<string>(DEFAULT_EXPANDED_PATHS),
+        revealTarget: null,
+      }),
 
       files: [
         {
@@ -315,6 +337,15 @@ export const useStudioStore = create<StudioState>()(
         { id: "f-7", name: "OpenCode_Groq_Codex_Handover.md", path: "OpenCode_Groq_Codex_Handover.md", type: "file" },
       ],
       setFiles: (files) => set({ files }),
+
+      expandedPaths: new Set<string>(DEFAULT_EXPANDED_PATHS),
+      toggleExpanded: (path) => set((state) => ({ expandedPaths: toggleExpansion(state.expandedPaths, path) })),
+      revealPath: (path) => set((state) => ({
+        expandedPaths: expandForReveal(state.expandedPaths, path),
+        revealTarget: { path, timestamp: Date.now() },
+      })),
+      revealTarget: null,
+      clearRevealTarget: () => set({ revealTarget: null }),
       
       /**
        * No seeded tabs.

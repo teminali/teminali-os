@@ -96,6 +96,12 @@ type AgentEvent =
      back to /api/agents/permission/resolve. */
   | { type: "permission"; id: string; toolName: string; input: Record<string, unknown>; key: string; expiresInMs: number }
   | { type: "permission-resolved"; id: string; behavior: "allow" | "deny" }
+  /* The agent driving the editor it is running inside: a folder revealed in
+     the file tree, or the whole workspace switched to another project. The
+     run's own stream is the only channel back to this window during a turn —
+     see `emitToRun` in server/permission-bridge.js. */
+  | { type: "workspace"; action: "reveal"; path: string }
+  | { type: "workspace"; action: "open-project"; path: string; name: string }
   // Recorded by the gateway into the plan store, not consumed here — the pane
   // shows a turn, and plan headroom outlives any one turn. Listed so the switch
   // below is exhaustive over what the stream can actually carry.
@@ -122,6 +128,7 @@ export interface PermissionRequest {
 export type AgentStreamCallbacks = StreamCallbacks & {
   onPermission?: (request: PermissionRequest) => void;
   onPermissionResolved?: (id: string) => void;
+  onWorkspace?: (event: Extract<AgentEvent, { type: "workspace" }>) => void;
 };
 
 export class AgentCliService {
@@ -276,6 +283,9 @@ export class AgentCliService {
           break;
         case "permission-resolved":
           callbacks.onPermissionResolved?.(event.id);
+          break;
+        case "workspace":
+          callbacks.onWorkspace?.(event);
           break;
         case "notice":
         case "limits":

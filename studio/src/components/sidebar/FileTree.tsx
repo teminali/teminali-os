@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import {
   Braces, ChevronDown, ChevronRight, Code, File, FileCode, FileCog, FileTerminal, FileText,
   Folder, FolderOpen, GitBranch, Hash, LoaderCircle, Package,
@@ -77,9 +77,10 @@ export const FileTreeItem: React.FC<{
   filter?: string;
   onError?: (message: string) => void;
 }> = ({ item, depth = 0, filter = "", onError }) => {
-  const [isOpen, setIsOpen] = useState(depth === 0 && ["src", "studio"].includes(item.name));
   const [isLoading, setIsLoading] = useState(false);
-  const { openFile, tabs, activeTabId } = useStudioStore();
+  const { openFile, tabs, activeTabId, expandedPaths, toggleExpanded, revealTarget, clearRevealTarget } = useStudioStore();
+  const isOpen = expandedPaths.has(item.path);
+  const rowRef = useRef<HTMLButtonElement>(null);
   const activeTab = tabs.find((tab) => tab.id === activeTabId);
   const isDirectory = item.type === "directory";
   const isSelected = activeTab?.path === item.path;
@@ -91,9 +92,21 @@ export const FileTreeItem: React.FC<{
     return matches || descendantMatches;
   });
 
+  /**
+   * Scroll to a row the store asked for. `revealPath` expands the ancestors
+   * before this runs, so by the time the target row exists it is mounted and
+   * can bring itself into view; it then clears the target so a later reveal of
+   * the same path — with a fresh timestamp — scrolls again.
+   */
+  useEffect(() => {
+    if (revealTarget?.path !== item.path) return;
+    rowRef.current?.scrollIntoView({ block: "center", behavior: "smooth" });
+    clearRevealTarget();
+  }, [revealTarget, item.path, clearRevealTarget]);
+
   const handleClick = async () => {
     if (isDirectory) {
-      setIsOpen((current) => !current);
+      toggleExpanded(item.path);
       return;
     }
     setIsLoading(true);
@@ -111,6 +124,7 @@ export const FileTreeItem: React.FC<{
   return (
     <div>
       <button
+        ref={rowRef}
         type="button"
         onClick={() => void handleClick()}
         className={`workspace-tree-item ${isSelected ? "selected" : ""}`}

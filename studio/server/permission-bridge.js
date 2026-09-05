@@ -179,3 +179,23 @@ export function runAuthorises(runId, token) {
   if (!run || run.closed) return false;
   return constantTimeEqual(token, run.token);
 }
+
+/**
+ * Put an event on a live run's stream, on that run's own authority.
+ *
+ * The renderer holds the file tree, and during an agent turn the only channel
+ * that reaches it is the NDJSON stream the renderer itself opened by starting
+ * the turn. The workspace bridge writes to it: an agent's `reveal` becomes a
+ * `workspace` event on the stream its own turn is already being read from.
+ *
+ * Returns false rather than throwing when the run is gone. A turn the operator
+ * stopped is a fact for the caller to report, not an exception — the gateway
+ * turns it into the same 410 the screen bridge answers with.
+ */
+export function emitToRun(runId, token, event) {
+  const run = runs.get(runId);
+  if (!run || run.closed) return false;
+  if (!constantTimeEqual(token, run.token)) return false;
+  run.emit?.(event);
+  return true;
+}

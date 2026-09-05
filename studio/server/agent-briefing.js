@@ -81,8 +81,26 @@ const CUT = [
  * Returned as a plain string so the caller decides how to deliver it; only
  * Claude Code has a flag for this, which is why `briefingArgs` is separate.
  */
-export function agentBriefing({ screen = false, video = false } = {}) {
-  return [...PLACE, "", ...COMPANY, "", ...(screen ? HANDS : NO_HANDS), ...(video ? ["", ...CUT] : [])].join("\n");
+/**
+ * The workspace UI, mentioned only when the tools are actually attached.
+ *
+ * Deliberately phrased as an expectation rather than a capability. The agent
+ * could always edit `studio/src/App.tsx`; what it did not know was that a
+ * person was looking at a file tree that would not move unless it said so.
+ */
+const WORKSPACE = [
+  "You are inside the operator's editor, and the `workspace` tools drive it. `reveal` opens every folder above a path and scrolls their file tree to it — use it whenever you name a path you want them to look at, rather than describing where to click.",
+  "`open_project` switches the whole workspace to another project. It rebinds the file tree, the search and every terminal at once, so it raises a prompt they have to answer; `recent_projects` is free and read-only, and it is usually the right first call when they say \"the last project\" or \"the one from yesterday\".",
+];
+
+export function agentBriefing({ screen = false, video = false, workspace = false } = {}) {
+  return [
+    ...PLACE, "",
+    ...COMPANY, "",
+    ...(screen ? HANDS : NO_HANDS),
+    ...(workspace ? ["", ...WORKSPACE] : []),
+    ...(video ? ["", ...CUT] : []),
+  ].join("\n");
 }
 
 /**

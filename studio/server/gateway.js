@@ -1,6 +1,6 @@
 import { createHash, randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
 import http from "node:http";
-import { dirname } from "node:path";
+import { dirname, relative, sep } from "node:path";
 import { Readable, pipeline } from "node:stream";
 import {
   MODEL_MODES,
@@ -10,12 +10,12 @@ import {
 } from "../../gateway/frontier-runner.js";
 import { BoundedAuditLog } from "./audit-log.js";
 import { createConfig } from "./config.js";
-import { createWorkspaceDirectory, deleteWorkspaceFile, listWorkspaceTree, readWorkspaceFile, searchWorkspace, writeWorkspaceFile } from "./workspace.js";
+import { createWorkspaceDirectory, deleteWorkspaceFile, listWorkspaceTree, readWorkspaceFile, resolveWorkspacePath, searchWorkspace, writeWorkspaceFile } from "./workspace.js";
 import { TERMINAL_LIMITS, runWorkspaceCommand } from "./terminal.js";
 import { forgetVoiceStatus, readBounded, speak, transcribe, voiceStatus } from "./voice.js";
 import { act, assistantCapabilities, observe, requestAccessibility } from "./assistant.js";
 import { AGENTS, AGENT_LIMITS, agentAvailability, isAgentEngine, runAgentTurn } from "./agent-cli.js";
-import { requestApproval, resolveApproval, runAuthorises, runHasEnded } from "./permission-bridge.js";
+import { emitToRun, requestApproval, resolveApproval, runAuthorises, runHasEnded } from "./permission-bridge.js";
 import { agentModels, recordResolution } from "./agent-models.js";
 import { appendUsage, summariseUsage, usageRecord } from "./usage-ledger.js";
 import { agentAccounts, readPlanLimits, recordPlanLimits } from "./plan.js";
@@ -39,6 +39,7 @@ import { currentVersion, publishRelease, validateNextVersion } from "./releases.
 import { checkForUpdate, downloadAsset, listReleases } from "./updates.js";
 import { readdir as readNodeDir, readFile as readNodeFile, stat as statNodeFile } from "node:fs/promises";
 import { join as joinPath } from "node:path";
+import { existsSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { MAX_FILE_BYTES, extractFilePart, fileCapabilities, ingestFile } from "./files.js";
 import { detectDevice } from "./device.js";
@@ -69,6 +70,7 @@ import {
   writeStore,
 } from "./providers.js";
 import { forgetProject, listRecentProjects, rememberProject, validateProjectRoot } from "./projects.js";
+import { resolveProjectPhrase } from "./project-phrase.js";
 import { GatewayError, classifyUpstreamStatus, publicError } from "./errors.js";
 import {
   parseBoundedJsonBuffer,
@@ -324,6 +326,20 @@ const bootedAt = Date.now();
 
 /** The two routes an agent CLI's screen shim may reach, and the only two. */
 const SCREEN_AGENT_ROUTES = new Set(["/api/assistant/agent/observe", "/api/assistant/agent/act"]);
+
+/**
+ * The three routes an agent CLI's workspace shim may reach, and the only three.
+ *
+ * `reveal` and `projects` only show. `open-project` rebinds the workspace root,
+ * and is reachable here because the operator has already been asked: the CLI
+ * pre-approves `reveal` alone, so this call arrived through the same permission
+ * prompt that gates a shell command.
+ */
+const WORKSPACE_AGENT_ROUTES = new Set([
+  "/api/workspace/agent/reveal",
+  "/api/workspace/agent/projects",
+  "/api/workspace/agent/open-project",
+]);
 
 export async function createGateway(options = {}) {
   const config = createConfig(options.environment, options.config);
@@ -608,6 +624,90 @@ export async function createGateway(options = {}) {
         } else {
           replyJson(response, 200, await actOnScreen(context));
         }
+        return;
+      }
+
+      /*
+        The workspace UI, reachable by an agent CLI, answered before the bearer
+        gate — same credential and same reasoning as the screen routes above.
+
+        This is what stops the agent being blind to the application around it.
+        `reveal` puts a `workspace` event on the run's own NDJSON stream, which
+        is the only channel back to the renderer during a turn: the window
+        holding the file tree is the window that opened this stream by starting
+        the turn. `open-project` is the one call that changes anything, and the
+        CLI has already asked the operator about it — `workspaceMcpArgs`
+        pre-approves `reveal` and nothing else.
+      */
+      if (request.method === "POST" && WORKSPACE_AGENT_ROUTES.has(route)) {
+        const body = await readJson(request, config.maxJsonBytes);
+        const runId = typeof body?.runId === "string" ? body.runId : "";
+        if (!runAuthorises(runId, request.headers["x-teminali-workspace-token"] || "")) {
+          if (runHasEnded(runId)) {
+            throw new GatewayError(410, "WORKSPACE_RUN_ENDED",
+              "This agent turn has ended — it was stopped or completed — so the workspace can no longer be driven from it. The next turn gets its own.");
+          }
+          throw new GatewayError(403, "WORKSPACE_BRIDGE_FORBIDDEN", "The workspace bridge rejected the caller.");
+        }
+        const token = request.headers["x-teminali-workspace-token"] || "";
+
+        if (route === "/api/workspace/agent/projects") {
+          replyJson(response, 200, {
+            current: { path: config.workspaceRoot, name: config.workspaceRoot.split("/").filter(Boolean).pop() || config.workspaceRoot },
+            recent: await listRecentProjects(config.projectsStorePath),
+          });
+          return;
+        }
+
+        if (route === "/api/workspace/agent/reveal") {
+          // Resolved through the same guard every read route uses, so there is
+          // no path here that a read could not already have named — and a typo
+          // comes back as a refusal rather than as an empty tree.
+          let absolutePath;
+          try {
+            absolutePath = resolveWorkspacePath(config.workspaceRoot, String(body?.path ?? ""));
+          } catch (error) {
+            throw workspaceError(error);
+          }
+          if (!existsSync(absolutePath)) {
+            throw new GatewayError(404, "WORKSPACE_PATH_NOT_FOUND", `There is nothing at "${body?.path}" in this workspace.`);
+          }
+          const revealed = relative(config.workspaceRoot, absolutePath).split(sep).join("/");
+          const delivered = emitToRun(runId, token, { type: "workspace", action: "reveal", path: revealed });
+          replyJson(response, 200, {
+            result: delivered
+              ? { revealed, note: "The operator's file tree is now showing it." }
+              : { revealed, note: "The path is valid, but this turn's stream is closed, so the tree was not moved." },
+          });
+          return;
+        }
+
+        // open-project. Either an explicit path, or the operator's own words
+        // resolved against the recents by `resolveProjectPhrase`.
+        const recent = await listRecentProjects(config.projectsStorePath);
+        let requestedPath = typeof body?.path === "string" && body.path.trim() ? body.path : "";
+        if (!requestedPath) {
+          const phrase = typeof body?.phrase === "string" ? body.phrase : "";
+          if (!phrase.trim()) {
+            throw new GatewayError(400, "PROJECT_CHOICE_REQUIRED",
+              `Say which project: give a path, or a phrase such as "the last video project". Recent: ${recent.map((entry) => `${entry.name} (${entry.kind})`).join(", ") || "none"}.`);
+          }
+          const { project, reason } = resolveProjectPhrase(phrase, recent, { currentPath: config.workspaceRoot });
+          if (!project) throw new GatewayError(404, "PROJECT_PHRASE_UNRESOLVED", reason);
+          requestedPath = project.path;
+        }
+
+        let project;
+        try {
+          project = await validateProjectRoot(requestedPath);
+        } catch (error) {
+          throw projectError(error);
+        }
+        config.workspaceRoot = project.path;
+        const updatedRecent = await rememberProject(config.projectsStorePath, project);
+        await audit.write({ event: "workspace-opened-by-agent", correlationId, method: request.method, route, path: project.path });
+        emitToRun(runId, token, { type: "workspace", action: "open-project", path: project.path, name: project.name });
+        replyJson(response, 200, { result: { opened: project, recent: updatedRecent } });
         return;
       }
 

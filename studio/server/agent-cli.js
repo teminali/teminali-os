@@ -33,6 +33,7 @@ import { withBinPaths } from "./bin-paths.js";
 import { videoMcpArgs } from "./video-mcp.js";
 import { permissionMcpArgs } from "./permission-mcp.js";
 import { screenMcpArgs } from "./screen-mcp.js";
+import { workspaceMcpArgs } from "./workspace-mcp.js";
 import { briefingArgs } from "./agent-briefing.js";
 import { closeRun, openRun } from "./permission-bridge.js";
 import { resolve, sep } from "node:path";
@@ -93,7 +94,7 @@ export function agentEnvironment(source = process.env) {
   return environment;
 }
 
-function argsFor(engine, { prompt, cwd, sessionId, model, permission, approval = null, screen = null }) {
+function argsFor(engine, { prompt, cwd, sessionId, model, permission, approval = null, screen = null, workspace = null }) {
   /*
     The video panel, when one is open.
 
@@ -116,7 +117,11 @@ function argsFor(engine, { prompt, cwd, sessionId, model, permission, approval =
     briefing and the tools can never disagree — an agent told it has hands
     always has them.
   */
-  const briefing = briefingArgs(engine, { screen: (screen?.args?.length ?? 0) > 0, video: mcp.length > 0 });
+  const briefing = briefingArgs(engine, {
+    screen: (screen?.args?.length ?? 0) > 0,
+    video: mcp.length > 0,
+    workspace: (workspace?.args?.length ?? 0) > 0,
+  });
 
   if (engine === "claude") {
     /*
@@ -130,6 +135,7 @@ function argsFor(engine, { prompt, cwd, sessionId, model, permission, approval =
       ...mcp,
       ...(approval?.args ?? []),
       ...(screen?.args ?? []),
+      ...(workspace?.args ?? []),
       ...briefing,
       "-p", prompt,
       "--output-format", "stream-json",
@@ -529,8 +535,18 @@ export function runAgentTurn(options) {
     ? screenMcpArgs(engine, runId, runToken, { available: screenControl })
     : null;
 
+  /*
+    The workspace UI, on the same run's token again.
+
+    No `available` flag: unlike the screen there is no operating-system grant
+    to wait on. The tree it moves is in the window that started this turn, and
+    if that stream has closed the reveal is reported as not delivered rather
+    than pretended.
+  */
+  const workspace = runToken ? workspaceMcpArgs(engine, runId, runToken) : null;
+
   const args = argsFor(engine, {
-    prompt, cwd: workingDirectory, sessionId, model, permission: mode, approval, screen,
+    prompt, cwd: workingDirectory, sessionId, model, permission: mode, approval, screen, workspace,
   });
 
   return new Promise((resolvePromise) => {

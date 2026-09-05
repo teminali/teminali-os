@@ -174,6 +174,20 @@ export const AgentPane: React.FC<{ panel: PanelTab & { kind: AgentEngine } }> = 
           // Answered elsewhere, or timed out: drop it rather than leaving a
           // dead prompt on screen with nothing behind it.
           onPermissionResolved: (id) => setApprovals((queue) => queue.filter((entry) => entry.id !== id)),
+          /*
+            The agent driving the editor around it.
+
+            `getState()` rather than a hook value on purpose: this closure is
+            captured once per turn and must act on the store as it is when the
+            event arrives, not as it was when the turn started. A project
+            switch only sets the path — the gateway has already rebound its
+            root, and `Sidebar` re-reads the tree whenever that path changes.
+          */
+          onWorkspace: (event) => {
+            const store = useStudioStore.getState();
+            if (event.action === "reveal") store.revealPath(event.path);
+            else store.setWorkspacePath(event.path);
+          },
         },
       );
       // Resuming from here is what makes the next message a reply rather than a
