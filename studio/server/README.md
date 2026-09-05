@@ -117,6 +117,8 @@ is the complete list.
 | `POST` | `/api/assistant/permissions` | bearer | Raises the system Accessibility dialog. Only on an explicit operator action — never on a poll. |
 | `POST` | `/api/assistant/observe` | bearer | Captures one observation of the screen and returns its `observationId`. |
 | `POST` | `/api/assistant/act` | bearer | Acts on a named observation. The gateway re-checks the action against that observation; an expired one is refused. A `launch` step opens an application from the fixed catalogue in `server/assistant.js` — never a path or a command — and expires the observation it ran under. |
+| `POST` | `/api/assistant/agent/observe` | **per-run token** | The same observation, for the chat pane's agent CLI instead of the renderer. Same handler, so the audit entry and the withheld frame path are identical. Authorised by `x-teminali-screen-token` — the run's own token, minted by `openRun`, good for these two routes alone and dead when the turn ends. Checked before the bearer gate, for the same reason `/api/agents/permission` is: `agentEnvironment()` strips the session bearer before an agent starts. |
+| `POST` | `/api/assistant/agent/act` | **per-run token** | The same act. Every check in `act()` applies unchanged — the 90-second observation TTL, the frontmost guard, the element lookup, and the refusal of anything that is not an element id. The operator's consent is asked earlier and elsewhere: `screenMcpArgs` pre-approves `look` and nothing else, so every tool that touches the machine goes through the CLI's existing permission prompt in the agent tab. |
 
 ### Voice
 

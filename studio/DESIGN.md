@@ -1670,6 +1670,91 @@ Accessibility → Pointer size. That is a system-wide preference affecting every
 application at all times and persisting after Teminali Code quits; this is
 app-local, themed, and gone the moment the turn ends.
 
+### The chat pane gets the same hands, through the same gate (2026-09-05)
+
+The operator asked the chat pane to open dukabotai.com and help them log in, and
+it could not. It said so plainly — it could open a URL and nothing else — and it
+was telling the truth. Their verdict: *"that's not hands free."*
+
+Two assistants lived in one application and could not reach each other. The
+screen assistant (`useAssistant.ts`) could look, click, type, press chords,
+scroll, drag, launch and focus. The chat pane runs a real Claude Code process
+and was handed exactly two MCP servers — `video-mcp.js` and
+`permission-mcp.js` — so it had a filesystem, a shell, and no way to touch the
+screen its operator was pointing at.
+
+`server/screen-mcp.js` and `electron/screenMcpStdio.cjs` are the third server.
+Nine tools: `look`, `click`, `type`, `key`, `scroll`, `drag`, `launch`, `focus`,
+`wait`.
+
+**No tool takes a coordinate, and none hands one out.** `look` returns the
+elements macOS reported, each with an id; every acting tool names one of those
+ids and the gateway resolves it to the frame the operating system gave for that
+element. This is the same rule the renderer's plans follow, enforced in the same
+place — `act()` in `server/assistant.js` — because that function is an HTTP
+boundary that re-checks everything rather than trusting its caller, and that
+property is exactly what made a second caller safe to add. Frames are stripped
+from what the model sees: it must not reason in pixels, and they were most of an
+observation's size. `tests/screen-mcp.test.mjs` walks every advertised schema and
+fails on an `x`, `y` or `point`.
+
+**The approval surface is the one that already existed.** `screenMcpArgs`
+pre-approves `mcp__screen__look` and nothing else, so every tool that touches the
+machine falls to `--permission-prompt-tool` — the same dialog in the same agent
+tab that already gates the CLI's shell commands, with the same "always allow"
+for the rest of the run. Naming the server rather than the one tool would allow
+all nine, and the operator would watch their pointer move with no prompt they
+could have refused. There is no fourth queue.
+
+**The run's token is the credential.** `agentEnvironment()` strips
+`FRONTIER_SESSION_TOKEN` before an agent starts, so a CLI that shells out cannot
+drive the gateway; handing the shim that token back would undo it. It carries
+the token `openRun` already minted for its permission prompts, widened by
+`runAuthorises` to reach `/api/assistant/agent/{observe,act}` and nothing else.
+One token, one lifetime: `closeRun` ends the turn and the hands with it. Those
+two routes are answered above the bearer gate, and a test asserts their position
+in the source — moved below it they would 401 every call with no other symptom.
+
+**No grant, no server.** The tools are attached only when `assistantCapabilities()`
+reports Accessibility actually trusted, asked per turn so a grant made while the
+app is running takes effect without a restart. Codex is given nothing at all: it
+has no `--permission-prompt-tool` equivalent, so its screen calls would be
+settled by a sandbox flag with nobody asked, and a gate that cannot ask must not
+grant.
+
+### An agent that does not know where it is gives wrong answers (2026-09-05)
+
+The same session, the operator watching the chat pane describe itself:
+
+> "it seems claude does not know that he is being operated by an assistant
+> that's a wrong design that's making him ignorant"
+
+It had answered *"I'm Claude Code in your terminal"* while sitting in a desktop
+panel beside a video editor, driven by a voice assistant it had never heard of.
+It was spawned bare: a prompt, a working directory, and no system prompt at all.
+The screen assistant has had `prompt.ts` since it was written; the chat pane had
+nothing.
+
+That is not cosmetic. An agent with a false model of its own situation gives the
+operator false answers about what is possible — it offers workarounds for
+problems it does not have, and tells them to go and use a terminal they are not
+in. The dukabotai.com refusal and this are the same failure seen from two sides.
+
+`server/agent-briefing.js` is the fix, delivered through
+`--append-system-prompt` so it lands as context about the world rather than as a
+message in the transcript the operator never sent. It carries only what the
+agent cannot find out for itself: that it is a panel in Teminali Code and not a
+terminal, that a voice assistant called Temy may be the one speaking and its
+words will carry speech-recognition errors rather than typing errors, which
+tools came from this application, and — when the screen tools were withheld —
+that they were, so it stops offering them. `screen` is passed in rather than
+re-derived, so the briefing and the tools can never disagree.
+
+Codex gets no briefing. `codex exec` has no equivalent flag, and prepending the
+text to the prompt would put it in the conversation as the operator's words: the
+agent would answer it, and the operator would see a reply to a message they
+never sent.
+
 ## 6. Voice (`studio/src/services/voice/`)
 
 Two tiers: the browser engine (always available) and **VibeVoice** run locally

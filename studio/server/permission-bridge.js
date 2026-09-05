@@ -143,3 +143,23 @@ export function resolveApproval({ runId, id, behavior, message, updatedInput, re
   run.emit?.({ type: "permission-resolved", id, behavior: behavior === "allow" ? "allow" : "deny" });
   return { ok: true };
 }
+
+/**
+ * Does this token belong to this live run?
+ *
+ * The screen bridge asks, because it needs the same answer for a different
+ * question. A run's token was minted to answer that run's approval prompts;
+ * this widens it to also drive the screen on that run's behalf, and the
+ * widening is deliberate rather than incidental: both are "this agent turn,
+ * and only while it is running". The alternative was a second token with a
+ * second lifecycle to keep in step with this one, which is a leak waiting to
+ * be written.
+ *
+ * The authority this grants is still narrow. It reaches two routes, it opens
+ * no others, and `closeRun` takes it away the moment the turn ends.
+ */
+export function runAuthorises(runId, token) {
+  const run = runs.get(runId);
+  if (!run || run.closed) return false;
+  return constantTimeEqual(token, run.token);
+}

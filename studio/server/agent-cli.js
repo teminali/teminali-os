@@ -32,6 +32,8 @@ import { spawn } from "node:child_process";
 import { withBinPaths } from "./bin-paths.js";
 import { videoMcpArgs } from "./video-mcp.js";
 import { permissionMcpArgs } from "./permission-mcp.js";
+import { screenMcpArgs } from "./screen-mcp.js";
+import { briefingArgs } from "./agent-briefing.js";
 import { closeRun, openRun } from "./permission-bridge.js";
 import { resolve, sep } from "node:path";
 
@@ -91,7 +93,7 @@ export function agentEnvironment(source = process.env) {
   return environment;
 }
 
-function argsFor(engine, { prompt, cwd, sessionId, model, permission, approval = null }) {
+function argsFor(engine, { prompt, cwd, sessionId, model, permission, approval = null, screen = null }) {
   /*
     The video panel, when one is open.
 
@@ -104,6 +106,18 @@ function argsFor(engine, { prompt, cwd, sessionId, model, permission, approval =
   */
   const mcp = videoMcpArgs(engine);
 
+  /*
+    Where the agent is, and what it can reach from there.
+
+    Without this the agent is spawned knowing nothing about the application it
+    is inside: it described itself as running in a terminal while sitting in a
+    desktop panel, and told the operator it could not drive their screen on a
+    turn where it could. `screen` is passed rather than re-derived so the
+    briefing and the tools can never disagree — an agent told it has hands
+    always has them.
+  */
+  const briefing = briefingArgs(engine, { screen: (screen?.args?.length ?? 0) > 0, video: mcp.length > 0 });
+
   if (engine === "claude") {
     /*
       Without a prompt tool, headless `claude -p` refuses anything its
@@ -115,6 +129,8 @@ function argsFor(engine, { prompt, cwd, sessionId, model, permission, approval =
     const args = [
       ...mcp,
       ...(approval?.args ?? []),
+      ...(screen?.args ?? []),
+      ...briefing,
       "-p", prompt,
       "--output-format", "stream-json",
       "--verbose",
@@ -472,6 +488,7 @@ export function runAgentTurn(options) {
     model = null,
     permission,
     runId = null,
+    screenControl = false,
     onEvent,
     signal,
     bin,
@@ -496,11 +513,24 @@ export function runAgentTurn(options) {
     prompt tool; Codex has its own sandbox flag and no equivalent, so it gets
     no bridge rather than a broken one.
   */
-  const approval =
-    engine === "claude" && runId ? permissionMcpArgs(runId, openRun(runId, onEvent)) : null;
+  const runToken = engine === "claude" && runId ? openRun(runId, onEvent) : null;
+  const approval = runToken ? permissionMcpArgs(runId, runToken) : null;
+
+  /*
+    The screen, on the same run's token.
+
+    It rides the approval bridge deliberately: the token that answers this
+    run's prompts is the token that drives the screen on its behalf, so the two
+    share one lifetime and `closeRun` takes both away at once. No approval
+    bridge therefore means no hands — which is the intended reading of "a gate
+    that cannot ask must not grant", not an accident of the wiring.
+  */
+  const screen = runToken
+    ? screenMcpArgs(engine, runId, runToken, { available: screenControl })
+    : null;
 
   const args = argsFor(engine, {
-    prompt, cwd: workingDirectory, sessionId, model, permission: mode, approval,
+    prompt, cwd: workingDirectory, sessionId, model, permission: mode, approval, screen,
   });
 
   return new Promise((resolvePromise) => {

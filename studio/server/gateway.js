@@ -15,7 +15,7 @@ import { TERMINAL_LIMITS, runWorkspaceCommand } from "./terminal.js";
 import { forgetVoiceStatus, readBounded, speak, transcribe, voiceStatus } from "./voice.js";
 import { act, assistantCapabilities, observe, requestAccessibility } from "./assistant.js";
 import { AGENTS, AGENT_LIMITS, agentAvailability, isAgentEngine, runAgentTurn } from "./agent-cli.js";
-import { requestApproval, resolveApproval } from "./permission-bridge.js";
+import { requestApproval, resolveApproval, runAuthorises } from "./permission-bridge.js";
 import { agentModels, recordResolution } from "./agent-models.js";
 import { appendUsage, summariseUsage, usageRecord } from "./usage-ledger.js";
 import { agentAccounts, readPlanLimits, recordPlanLimits } from "./plan.js";
@@ -322,6 +322,9 @@ async function streamUpstream(upstream, client, context, maxBytes) {
 /** When this process started, against which its own source files are compared. */
 const bootedAt = Date.now();
 
+/** The two routes an agent CLI's screen shim may reach, and the only two. */
+const SCREEN_AGENT_ROUTES = new Set(["/api/assistant/agent/observe", "/api/assistant/agent/act"]);
+
 export async function createGateway(options = {}) {
   const config = createConfig(options.environment, options.config);
   const fetchImpl = options.fetchImpl || globalThis.fetch;
@@ -415,6 +418,87 @@ export async function createGateway(options = {}) {
     };
   };
 
+  /* ── The screen, once, for both of its callers ───────────────────────────
+     The renderer reaches these through the bearer-guarded routes below; an
+     agent CLI reaches the same two functions through /api/assistant/agent/*
+     carrying its run's token. One implementation rather than two, because the
+     second caller was the whole point of writing the checks in `assistant.js`
+     and a forked copy here would drift out of agreement with them.
+     ──────────────────────────────────────────────────────────────────────── */
+
+  const observeScreen = async ({ body, correlationId, method, route }) => {
+    const maxElements = Number(body?.maxElements);
+    // `observe` has always taken a pid — the route dropped it, so every
+    // observation silently fell back to the frontmost application. That is
+    // usually right, and wrong exactly when the caller knows better.
+    const observePid = Number(body?.pid);
+    let observation;
+    try {
+      observation = await observe(config, {
+        pid: Number.isInteger(observePid) && observePid > 0 ? observePid : null,
+        maxElements: Number.isFinite(maxElements) ? Math.max(10, Math.min(400, maxElements)) : 120,
+        describe: body?.describe !== false,
+        fetchImpl,
+      });
+    } catch (error) {
+      throw new GatewayError(error.code === "POINTER_HELPER_MISSING" ? 503 : 502, error.code || "ASSISTANT_OBSERVE_FAILED", error.message);
+    }
+    await audit.write({
+      event: "assistant-observed",
+      correlationId,
+      method,
+      route,
+      application: observation.application?.name ?? null,
+      elements: observation.elements.length,
+      truncated: observation.truncated,
+      described: Boolean(observation.sceneDescription),
+      limits: observation.limits,
+      // Neither the frame nor its description is written to the audit log.
+    });
+    // The frame stays on disk under the gateway; the caller is told an id, not
+    // a path, so a screenshot of the operator's screen is not handed to the
+    // page — or to an agent process — for it to do anything else with.
+    return { ...observation, frame: observation.frame ? { available: true } : null };
+  };
+
+  const actOnScreen = async ({ body, correlationId, method, route }) => {
+    if (typeof body?.observationId !== "string" || !body.observationId) {
+      throw new GatewayError(400, "OBSERVATION_REQUIRED", "An action must name the look at the screen it came from.");
+    }
+    if (body?.step === null || typeof body?.step !== "object") {
+      throw new GatewayError(400, "STEP_REQUIRED", "An action must carry a step.");
+    }
+    try {
+      const result = await act(body.observationId, body.step);
+      await audit.write({
+        event: "assistant-acted",
+        correlationId,
+        method,
+        route,
+        kind: body.step.kind,
+        element: typeof body.step.element === "string" ? body.step.element : null,
+        // What was typed is never written to the audit log; how much was, is.
+        characters: typeof result.characters === "number" ? result.characters : null,
+        // A launch is worth naming: it is the one step that starts something
+        // rather than touching something already running. The address is
+        // recorded as its host, on the same rule that keeps typed text out.
+        app: typeof result.app === "string" ? result.app : null,
+        host: typeof result.url === "string" ? safeHost(result.url) : null,
+      });
+      return { ok: true, result };
+    } catch (error) {
+      await audit.write({
+        event: "assistant-refused",
+        correlationId,
+        method,
+        route,
+        kind: typeof body.step?.kind === "string" ? body.step.kind : null,
+        code: error.code || "ASSISTANT_ACT_FAILED",
+      });
+      throw new GatewayError(409, error.code || "ASSISTANT_ACT_FAILED", error.message);
+    }
+  };
+
   const server = http.createServer(async (request, response) => {
     const startedAt = performance.now();
     const correlationId = safeCorrelationId(request.headers["x-correlation-id"]);
@@ -481,6 +565,40 @@ export async function createGateway(options = {}) {
           input: body?.input && typeof body.input === "object" ? body.input : {},
         });
         replyJson(response, 200, decision);
+        return;
+      }
+
+      /*
+        The screen, reachable by an agent CLI, answered before the bearer gate.
+
+        Same reasoning as the permission route directly above, and the same
+        credential: the shim that calls this is spawned by the CLI, and
+        `agentEnvironment()` strips the session token before an agent starts so
+        a CLI that shells out cannot drive the gateway. The run's own token
+        authorises exactly these two routes and dies when the run does.
+
+        What this is NOT is a way around the checks. Both handlers are the same
+        two functions the renderer's routes call, so the observation TTL, the
+        frontmost guard, the element lookup and the refusal to accept a
+        coordinate all apply unchanged — see `act` in assistant.js. The
+        operator's consent is asked for separately and earlier, by the CLI's own
+        permission prompt: `screenMcpArgs` pre-approves `look` and nothing else,
+        so every tool that touches the machine goes through the same dialog in
+        the same agent tab as a shell command does.
+      */
+      if (request.method === "POST" && SCREEN_AGENT_ROUTES.has(route)) {
+        const body = await readJson(request, config.maxJsonBytes);
+        if (!runAuthorises(typeof body?.runId === "string" ? body.runId : "", request.headers["x-teminali-screen-token"] || "")) {
+          // Deliberately not 401: there is no credential the caller could
+          // supply to make this work other than being a live agent run.
+          throw new GatewayError(403, "SCREEN_BRIDGE_FORBIDDEN", "The screen bridge rejected the caller.");
+        }
+        const context = { body, correlationId, method: request.method, route };
+        if (route === "/api/assistant/agent/observe") {
+          replyJson(response, 200, { observation: await observeScreen(context) });
+        } else {
+          replyJson(response, 200, await actOnScreen(context));
+        }
         return;
       }
 
@@ -1518,78 +1636,14 @@ export async function createGateway(options = {}) {
       }
 
       if (request.method === "POST" && route === "/api/assistant/observe") {
-        const observeRequest = await readJson(request, config.maxJsonBytes);
-        const maxElements = Number(observeRequest?.maxElements);
-        // `observe` has always taken a pid — the route dropped it, so every
-        // observation silently fell back to the frontmost application. That is
-        // usually right, and wrong exactly when the caller knows better.
-        const observePid = Number(observeRequest?.pid);
-        try {
-          const observation = await observe(config, {
-            pid: Number.isInteger(observePid) && observePid > 0 ? observePid : null,
-            maxElements: Number.isFinite(maxElements) ? Math.max(10, Math.min(400, maxElements)) : 120,
-            describe: observeRequest?.describe !== false,
-            fetchImpl,
-          });
-          await audit.write({
-            event: "assistant-observed",
-            correlationId,
-            method: request.method,
-            route,
-            application: observation.application?.name ?? null,
-            elements: observation.elements.length,
-            truncated: observation.truncated,
-            described: Boolean(observation.sceneDescription),
-            limits: observation.limits,
-            // Neither the frame nor its description is written to the audit log.
-          });
-          // The frame stays on disk under the gateway; the renderer is told an
-          // id, not a path, so a screenshot of the operator's screen is not
-          // handed to the page for it to do anything else with.
-          replyJson(response, 200, { ...observation, frame: observation.frame ? { available: true } : null });
-        } catch (error) {
-          throw new GatewayError(error.code === "POINTER_HELPER_MISSING" ? 503 : 502, error.code || "ASSISTANT_OBSERVE_FAILED", error.message);
-        }
+        const body = await readJson(request, config.maxJsonBytes);
+        replyJson(response, 200, await observeScreen({ body, correlationId, method: request.method, route }));
         return;
       }
 
       if (request.method === "POST" && route === "/api/assistant/act") {
-        const actRequest = await readJson(request, config.maxJsonBytes);
-        if (typeof actRequest?.observationId !== "string" || !actRequest.observationId) {
-          throw new GatewayError(400, "OBSERVATION_REQUIRED", "An action must name the look at the screen it came from.");
-        }
-        if (actRequest?.step === null || typeof actRequest?.step !== "object") {
-          throw new GatewayError(400, "STEP_REQUIRED", "An action must carry a step.");
-        }
-        try {
-          const result = await act(actRequest.observationId, actRequest.step);
-          await audit.write({
-            event: "assistant-acted",
-            correlationId,
-            method: request.method,
-            route,
-            kind: actRequest.step.kind,
-            element: typeof actRequest.step.element === "string" ? actRequest.step.element : null,
-            // What was typed is never written to the audit log; how much was, is.
-            characters: typeof result.characters === "number" ? result.characters : null,
-            // A launch is worth naming: it is the one step that starts something
-            // rather than touching something already running. The address is
-            // recorded as its host, on the same rule that keeps typed text out.
-            app: typeof result.app === "string" ? result.app : null,
-            host: typeof result.url === "string" ? safeHost(result.url) : null,
-          });
-          replyJson(response, 200, { ok: true, result });
-        } catch (error) {
-          await audit.write({
-            event: "assistant-refused",
-            correlationId,
-            method: request.method,
-            route,
-            kind: typeof actRequest.step?.kind === "string" ? actRequest.step.kind : null,
-            code: error.code || "ASSISTANT_ACT_FAILED",
-          });
-          throw new GatewayError(409, error.code || "ASSISTANT_ACT_FAILED", error.message);
-        }
+        const body = await readJson(request, config.maxJsonBytes);
+        replyJson(response, 200, await actOnScreen({ body, correlationId, method: request.method, route }));
         return;
       }
 
@@ -1994,6 +2048,24 @@ export async function createGateway(options = {}) {
           if (!response.writableEnded) response.write(`${JSON.stringify(event)}\n`);
         };
 
+        /*
+          Whether this turn gets hands.
+
+          Asked here, per turn, rather than assumed at start-up: the operator
+          may grant Accessibility while the application is running, and a build
+          that decided once at boot would keep telling the agent it has no
+          screen tools until they restarted. A machine that has not granted it
+          gets no screen server and a briefing that says so, which is better
+          than tools that fail on their first call.
+        */
+        let screenControl = false;
+        try {
+          const permissions = await assistantCapabilities();
+          screenControl = Boolean(permissions.supported && permissions.helperBuilt && permissions.accessibilityTrusted);
+        } catch {
+          /* No answer is a no. */
+        }
+
         let outcome;
         try {
           outcome = await runAgentTurn({
@@ -2009,6 +2081,7 @@ export async function createGateway(options = {}) {
             // travels to the client on the response header, so it is the run
             // id the operator's answer will come back naming.
             runId: correlationId,
+            screenControl,
             onEvent: send,
           });
         } catch (error) {

@@ -55,7 +55,7 @@ route requires it. Roughly sixty routes across:
 | Workspace | `/api/workspace/{tree,file,write,delete,mkdir,search,open,projects}`, `/api/workspace/projects/{remember,forget}` |
 | Terminal | `/api/terminal/exec` |
 | Agent CLIs | `/api/agents` · `/api/agents/models` · `/api/agents/run` · `/api/agents/permission` · `/api/agents/permission/resolve` |
-| Screen assistant | `/api/assistant/{capabilities,permissions,observe,act}` |
+| Screen assistant | `/api/assistant/{capabilities,permissions,observe,act}` · `/api/assistant/agent/{observe,act}` (the chat pane's agent, on its run's token) |
 | Voice | `/api/voice/{status,transcribe,speak}` |
 | Guardian | `/api/guardian/{snapshot,unload,governor,storage}` |
 | Benchmark arena | `/api/arena/{sandbox,measure,measure/stream,history,cleanup}` |
@@ -174,6 +174,25 @@ your screen and either explains it or acts on it.
   a shell prompt plus the `type` step is arbitrary code execution wearing an
   allowlist. A launch is always the last step of a plan, because what it opens
   has no window to plan against yet.
+- **The chat pane has the same hands.** The coding agent in the chat pane is a
+  real Claude Code process, and it is given a third MCP server — `screen`,
+  beside `cut` and the permission prompt — with nine tools: `look`, `click`,
+  `type`, `key`, `scroll`, `drag`, `launch`, `focus`, `wait`. It can open a
+  site and fill in a form on your actual screen. No tool takes a coordinate:
+  `look` returns element ids from the accessibility tree and every action names
+  one, exactly as a plan step does. Only `look` is pre-approved — everything
+  that touches the machine raises the same approval prompt in the agent tab
+  that a shell command does, with the same "always allow" for the rest of the
+  run. Attached only when Accessibility is actually granted, and only to Claude
+  Code: Codex has no prompt this application can bridge, and a gate that cannot
+  ask must not grant. It will fill in a login form but never type a password —
+  that part it hands back to you.
+- **The agent is told where it is.** It is spawned with a briefing
+  (`server/agent-briefing.js`, via `--append-system-prompt`) saying it is a
+  panel in Teminali Code rather than a terminal, that the operator may be
+  speaking to it through the voice assistant rather than typing, and which of
+  its tools came from this application. Without it the agent answered questions
+  about itself wrongly and offered workarounds for problems it did not have.
 - **Dragging.** A `drag` step presses on an element, walks the path, and
   releases — a path rather than a down-and-up, because a slider or a reorderable
   list reads the events in between and a two-event drag does nothing at all. The
@@ -581,7 +600,7 @@ ollama serve              # local models on 127.0.0.1:11434
 
 ```bash
 npm run typecheck   # tsc --noEmit
-npm test            # 1119 tests, 0 failures
+npm test            # 1132 tests, 0 failures
 npm run build       # tsc && vite build
 npm run verify:core # all three
 ```
