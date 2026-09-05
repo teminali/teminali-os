@@ -430,6 +430,45 @@ route a click takes, under the same limits, so an agent-opened file and a
 clicked one are the same file. A click in the tree still keeps its own path
 through `FileTree`, which owns a spinner and an error line this cannot reach.
 
+### A dropped file is a project decision (`services/workspaceDrop.ts`)
+
+The file pane takes a drop from two sources, and it tells them apart rather than
+guessing. An Explorer row sets a private type — `application/x-teminali-path` —
+carrying a path that is *already* workspace-relative, so an internal drop needs
+neither the Electron bridge nor a comparison against the root. `text/plain` rides
+along for anything outside this app that can only take a string, and is never
+what the pane reads: a filename dragged out of a text editor would otherwise be
+mistaken for one of our own rows. Folders are not draggable in the tree at all,
+because the pane has nothing to do with one.
+
+A Finder drop carries only `Files`, and `File.path` was removed in Electron 44,
+so the absolute path comes from `webUtils.getPathForFile` through the preload
+bridge the media panel already owns. In a browser dev build there is no bridge,
+and the external half says it needs the desktop app instead of throwing.
+
+Then the boundary rule, which is the whole point of the module. **A file outside
+the current root is never read across the workspace guard.** `server/workspace.js`
+refuses `..`, absolute paths and symlinks, and nothing here goes around it: a
+drop from outside becomes an *offer* to switch the project to the folder holding
+the file — the same `openProject` road a My Projects click takes — and the file
+is opened only afterwards, from inside the new root. A dropped folder is offered
+directly, because a folder is a project and never something the pane could show.
+A drop that mixes inside and outside opens what the project already contains and
+counts the rest, since switching would close the very tree the inside file came
+from.
+
+`services/dropGuard.ts` is the other half, and it is armed in `main.tsx` before
+the first render. Chromium's default for a file dropped on a page that did not
+claim it is to **navigate to that file** — in Electron that replaces the entire
+application and reads as a crash to a blank page. The guard refuses every
+unclaimed drag on the window, visibly (`dropEffect = "none"`, so the cursor says
+so while the file is still in the air). It knows to stay out of the way by the
+platform's own signal: a real drop zone accepts a `dragover` by calling
+`preventDefault`, and the guard runs last, so `defaultPrevented` already
+distinguishes the composer, the media panel, the timeline and the file pane from
+the chrome around them. Overriding `dropEffect` on a claimed drag would stop
+Chromium delivering their `drop` event at all.
+
 ### What the workspace will open (`server/workspace.js`, `panels/FilePane.tsx`)
 
 One predicate answers "is this text?" — `isTextFile` — and the tree, the reader,

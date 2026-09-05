@@ -7,6 +7,7 @@ import type { FileItem } from "../../types";
 import { useStudioStore } from "../../store/studioStore";
 import { WorkspaceService } from "../../services/workspaceService";
 import { languageForPath as languageFor } from "../../services/language";
+import { WORKSPACE_PATH_MIME } from "../../services/workspaceDrop";
 
 /**
  * A file's glyph, tinted in its language colour.
@@ -94,6 +95,24 @@ export const FileTreeItem: React.FC<{
     clearRevealTarget();
   }, [revealTarget, item.path, clearRevealTarget]);
 
+  /**
+   * Hand this row to the file pane.
+   *
+   * The private type is what makes an Explorer row distinguishable at the far
+   * end rather than guessable: it carries a path that is already
+   * workspace-relative, so the drop needs neither the Electron bridge nor a
+   * comparison against the root. `text/plain` rides along for anything outside
+   * this app — a terminal, a composer — that can only take a string.
+   *
+   * Folders are not draggable at all: the file pane has nothing to do with one,
+   * and an affordance that leads nowhere is not offered (DESIGN.md).
+   */
+  const handleDragStart = (event: React.DragEvent<HTMLButtonElement>) => {
+    event.dataTransfer.setData(WORKSPACE_PATH_MIME, item.path);
+    event.dataTransfer.setData("text/plain", item.path);
+    event.dataTransfer.effectAllowed = "copy";
+  };
+
   const handleClick = async () => {
     if (isDirectory) {
       toggleExpanded(item.path);
@@ -117,6 +136,8 @@ export const FileTreeItem: React.FC<{
         ref={rowRef}
         type="button"
         onClick={() => void handleClick()}
+        draggable={!isDirectory}
+        onDragStart={handleDragStart}
         className={`workspace-tree-item ${isSelected ? "selected" : ""}`}
         style={{ paddingLeft: `${8 + depth * 13}px` }}
         title={item.path}

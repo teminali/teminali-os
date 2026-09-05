@@ -6,6 +6,7 @@ import { AssistantOverlaySurface } from "./components/assistant/AssistantOverlay
 import { RecorderBar } from "./components/recorder/RecorderBar";
 import { useStudioStore } from "./store/studioStore";
 import { registerVideoToolBridge } from "./services/videoToolBridge";
+import { installWindowDropGuard } from "./services/dropGuard";
 
 /**
  * Which surface this document is.
@@ -38,6 +39,20 @@ if (/Electron/i.test(navigator.userAgent)) {
 if (typeof window !== "undefined") {
   (window as unknown as { __studioStore: typeof useStudioStore }).__studioStore = useStudioStore;
 }
+
+/*
+  A file dropped anywhere but a real drop zone must not navigate the window.
+
+  Armed here rather than in a component, and before the first render, because
+  the thing it protects is the document itself: Chromium's default for an
+  unclaimed drop is to load the file, which in Electron replaces the whole
+  application with a text file and looks exactly like a crash to a blank page.
+  It applies to all three surfaces this bundle serves — the overlay and the
+  recorder bar have no drop zones at all, so for them it is the only handler.
+  See services/dropGuard.ts for how it stays out of the way of the composer,
+  the media panel, the timeline and the file pane.
+*/
+installWindowDropGuard();
 
 /*
   The video panel's MCP bridge, for the agent CLIs.

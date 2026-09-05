@@ -1,11 +1,12 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
-import { Loader2, Save, RotateCcw, AlertTriangle } from "lucide-react";
+import { Loader2, Save, RotateCcw, AlertTriangle, FolderInput } from "lucide-react";
 import { WorkspaceService } from "../../../services/workspaceService";
 import { highlightCode } from "../../../utils/syntaxHighlight";
-import { IconButton, EmptyState } from "../../ui";
+import { IconButton, EmptyState, Button } from "../../ui";
 import { usePanelStore, type PanelTab } from "../../../store/panelStore";
 import { useStudioStore } from "../../../store/studioStore";
 import { formatBytes } from "../../../services/guardianService";
+import { describesWorkspaceDrop, resolveWorkspaceDrop, workspaceRelative } from "../../../services/workspaceDrop";
 
 /**
  * File viewer and editor.
@@ -25,6 +26,12 @@ import { formatBytes } from "../../../services/guardianService";
  * to show a file the operator had just clicked on. The bytes are already in
  * memory as base64; the Blob exists so the DOM holds one copy rather than a
  * second one inlined into an attribute.
+ *
+ * It is also the landing for a dropped file, from the Explorer or from Finder.
+ * `services/workspaceDrop.ts` decides what a drop means; this component only
+ * acts on the answer, and the one answer it cannot act on alone — a file that
+ * lives outside the project — becomes an offer to switch projects rather than a
+ * silent failure or a read across the workspace boundary.
  */
 
 interface Preview {
@@ -64,8 +71,89 @@ export const FilePane: React.FC<{ panel: PanelTab }> = ({ panel }) => {
   const [error, setError] = useState<string | null>(null);
   const [preview, setPreview] = useState<Preview | null>(null);
 
+  const workspacePath = useStudioStore((state) => state.workspacePath);
+  const showFile = useStudioStore((state) => state.showFile);
+  const setWorkspacePath = useStudioStore((state) => state.setWorkspacePath);
+  const [dragging, setDragging] = useState(false);
+  const [dropNote, setDropNote] = useState<string | null>(null);
+  /** A drop from outside the project, waiting for the operator to say yes. */
+  const [offer, setOffer] = useState<{ folder: string; file: string | null } | null>(null);
+  const [switching, setSwitching] = useState(false);
+
   const preRef = useRef<HTMLPreElement>(null);
   const areaRef = useRef<HTMLTextAreaElement>(null);
+
+  /**
+   * What a drop onto this pane does.
+   *
+   * `DataTransfer` is emptied the moment this handler returns, so everything is
+   * read out of it synchronously and the decision made before any await.
+   * `dragover` only sees the *types*, never the payload — the platform hides
+   * the data until a drop actually happens — so the highlight is as specific as
+   * it is allowed to be and no more.
+   */
+  const handleDrop = (event: React.DragEvent) => {
+    if (!describesWorkspaceDrop(event.dataTransfer?.types)) return;
+    event.preventDefault();
+    setDragging(false);
+    setDropNote(null);
+
+    const bridge = (window.teminali as unknown as {
+      media?: { getPathForFile?: (file: File) => string | null };
+    } | undefined)?.media;
+
+    const outcome = resolveWorkspaceDrop<File>(event.dataTransfer, {
+      root: workspacePath,
+      getPathForFile: bridge?.getPathForFile,
+    });
+    if (!outcome) return;
+
+    if (outcome.kind === "unavailable") {
+      setDropNote(outcome.reason);
+      return;
+    }
+    if (outcome.kind === "switch") {
+      setOffer({ folder: outcome.folder, file: outcome.file });
+      return;
+    }
+    setOffer(null);
+    // Each path gets its own panel, exactly as a click or `open_file` would;
+    // the last one dropped ends up in front, which is what a hand expects.
+    for (const path of outcome.paths) void showFile(path);
+    if (outcome.skipped > 0) {
+      setDropNote(
+        outcome.skipped === 1
+          ? "One item was outside this project and was not opened."
+          : `${outcome.skipped} items were outside this project and were not opened.`,
+      );
+    }
+  };
+
+  /**
+   * Accepting the offer takes the same road a My Projects click takes —
+   * `openProject` rebinds every workspace and terminal route at the gateway —
+   * and only then asks for the file, now that it is inside the new root. There
+   * is no path that reads a file from outside the workspace.
+   */
+  const acceptOffer = async () => {
+    if (!offer) return;
+    setSwitching(true);
+    setDropNote(null);
+    try {
+      const response = await WorkspaceService.openProject(offer.folder);
+      const root = response.current.path;
+      setWorkspacePath(root);
+      setOffer(null);
+      if (offer.file) {
+        const relative = workspaceRelative(`${offer.folder}/${offer.file}`, root);
+        if (relative) void showFile(relative);
+      }
+    } catch (failure) {
+      setDropNote((failure as Error).message);
+    } finally {
+      setSwitching(false);
+    }
+  };
 
   useEffect(() => {
     if (!panel.path) {
@@ -140,34 +228,37 @@ export const FilePane: React.FC<{ panel: PanelTab }> = ({ panel }) => {
     pre.scrollLeft = area.scrollLeft;
   };
 
+  const lineCount = content ? content.split("\n").length : 0;
+  const path = panel.path;
+
+  /*
+    One body, four shapes — assigned rather than returned early, because all
+    four have to hang inside the same drop target below. A pane showing nothing
+    is the one most likely to be dropped on.
+  */
+  let body: React.ReactNode;
+
   if (loading) {
-    return (
+    body = (
       <div className="flex-1 flex items-center justify-center text-ink-muted">
         <Loader2 size={18} className="animate-spin" />
       </div>
     );
-  }
-
-  if (!panel.path) {
-    return <EmptyState title="No file selected" detail="Open a file from the sidebar or a chat message." />;
-  }
-
-  if (error && content === null && !preview) {
-    return (
+  } else if (!path) {
+    body = <EmptyState title="No file selected" detail="Open a file from the sidebar, drop one here, or ask in a chat message." />;
+  } else if (error && content === null && !preview) {
+    body = (
       <EmptyState
         icon={<AlertTriangle size={26} strokeWidth={1.6} />}
         title="This file could not be opened"
         detail={error}
       />
     );
-  }
-
-  const lineCount = content ? content.split("\n").length : 0;
-
-  return (
+  } else {
+    body = (
     <div className="flex-1 min-h-0 flex flex-col">
       <div className="h-9 flex-shrink-0 flex items-center gap-2 px-4 border-b border-edge-chrome text-2xs text-ink-muted font-mono">
-        <span className="truncate">{panel.path.split("/").join(" / ")}</span>
+        <span className="truncate">{path.split("/").join(" / ")}</span>
         {dirty && <span className="w-1.5 h-1.5 rounded-full bg-accent flex-shrink-0" title="Unsaved changes" />}
         <div className="flex-1" />
         <span className="text-ink-disabled">{preview ? formatBytes(preview.size) : `${lineCount} lines`}</span>
@@ -186,7 +277,7 @@ export const FilePane: React.FC<{ panel: PanelTab }> = ({ panel }) => {
       {error && <div className="px-4 py-2 text-2xs text-danger border-b border-edge-chrome">{error}</div>}
 
       {preview ? (
-        <PreviewSurface preview={preview} path={panel.path} />
+        <PreviewSurface preview={preview} path={path} />
       ) : (
       <div className="flex-1 min-h-0 relative font-mono text-xs leading-[1.75]">
         {/* Gutter */}
@@ -217,10 +308,72 @@ export const FilePane: React.FC<{ panel: PanelTab }> = ({ panel }) => {
             }
           }}
           spellCheck={false}
-          aria-label={`Contents of ${panel.path}`}
+          aria-label={`Contents of ${path}`}
           className="absolute inset-0 pl-12 pr-4 pt-4 bg-transparent text-transparent caret-ink-high resize-none outline-none whitespace-pre overflow-auto font-mono text-xs leading-[1.75] selection:bg-accent/25"
         />
       </div>
+      )}
+    </div>
+    );
+  }
+
+  /*
+    The drop target.
+
+    `dragover` must be accepted — `preventDefault` — or no `drop` event is ever
+    delivered here, and the window guard in `services/dropGuard.ts` would refuse
+    the drag on this pane's behalf. `dragleave` fires on every child boundary
+    crossed on the way in, so the highlight is only taken down when the pointer
+    has actually left this element.
+  */
+  return (
+    <div
+      className={`flex-1 min-h-0 flex flex-col relative ${dragging ? "lit lit-accent" : ""}`}
+      onDragOver={(event) => {
+        if (!describesWorkspaceDrop(event.dataTransfer?.types)) return;
+        event.preventDefault();
+        event.dataTransfer.dropEffect = "copy";
+        setDragging(true);
+      }}
+      onDragLeave={(event) => {
+        if (event.currentTarget.contains(event.relatedTarget as Node | null)) return;
+        setDragging(false);
+      }}
+      onDrop={handleDrop}
+    >
+      {body}
+
+      {dragging && (
+        <div className="absolute inset-0 z-10 flex items-center justify-center bg-surface/80 backdrop-blur-[2px] pointer-events-none">
+          <p className="text-xs text-accent">Drop to open here.</p>
+        </div>
+      )}
+
+      {offer && (
+        <div className="flex-shrink-0 border-t border-edge-chrome px-4 py-3 flex items-start gap-3">
+          <FolderInput size={16} className="text-ink-muted mt-0.5 flex-shrink-0" />
+          <div className="min-w-0 flex-1">
+            <p className="text-xs text-ink-high">
+              {offer.file ? `“${offer.file}” is outside this project.` : "That folder is not this project."}
+            </p>
+            <p className="text-2xs text-ink-muted font-mono truncate mt-0.5">{offer.folder}</p>
+          </div>
+          <Button size="xs" variant="ghost" onClick={() => setOffer(null)} disabled={switching}>
+            Cancel
+          </Button>
+          <Button size="xs" variant="primary" onClick={() => void acceptOffer()} loading={switching}>
+            Open as project
+          </Button>
+        </div>
+      )}
+
+      {dropNote && (
+        <div className="flex-shrink-0 border-t border-edge-chrome px-4 py-2 text-2xs text-ink-muted flex items-center gap-2">
+          <span className="flex-1 min-w-0 truncate">{dropNote}</span>
+          <button type="button" className="text-ink-disabled hover:text-ink-high" onClick={() => setDropNote(null)}>
+            Dismiss
+          </button>
+        </div>
       )}
     </div>
   );

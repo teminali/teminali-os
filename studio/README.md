@@ -101,6 +101,16 @@ the editor, search and the review dock for the first time; `.env` is
 deliberately still excluded. Spreadsheets and video are not viewable yet and
 say so rather than looking broken.
 
+It is also where you **drop** a file. Drag a row out of the Explorer, or a file
+out of Finder or Windows Explorer, and it opens in the panel. A file from
+outside the current project is never read across the workspace boundary: the
+panel offers to switch the project to the folder holding it and opens it from
+inside the new root, and a dropped *folder* is offered as a project directly.
+Outside the desktop app the external half says it needs the desktop app rather
+than half-working. A file dropped anywhere else in the window is refused
+visibly — without that, Chromium would navigate the whole window to it, which
+looks exactly like the app crashing to a blank page.
+
 **Screen recording is not a panel.** It is a dialog (`⇧⌘8`), and the reason is
 that a panel is somewhere you leave the app while recording is something you
 do: a panel persists into the next session, sits in the tab strip, and splits
@@ -616,7 +626,7 @@ ollama serve              # local models on 127.0.0.1:11434
 
 ```bash
 npm run typecheck   # tsc --noEmit
-npm test            # 1221 tests, 0 failures
+npm test            # 1241 tests, 0 failures
 npm run build       # tsc && vite build
 npm run verify:core # all three
 ```
