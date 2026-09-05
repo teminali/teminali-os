@@ -3,6 +3,8 @@ import { ChevronDown, Circle, Clapperboard, FolderGit2, Laptop } from "lucide-re
 import { AIService } from "../../services/aiService";
 import { useStudioStore, PROFILES_LIST } from "../../store/studioStore";
 import { usePanelStore } from "../../store/panelStore";
+import { useChangeStore } from "../../store/changeStore";
+import { languageForPath } from "../../services/language";
 import { useRecorderDialogStore } from "../../store/recorderDialogStore";
 import { useVoice, type UseVoiceResult } from "../../hooks/useVoice";
 import { useAttachments } from "../../hooks/useAttachments";
@@ -439,6 +441,47 @@ export const StudioChat: React.FC<{
               }
             : null,
           approveCommand: commandApproval.approveCommand,
+          /*
+            The agent driving the workspace from the chat, not only from a
+            panel tab.
+
+            `getState()` rather than the hook values above: this closure is
+            captured once per turn and must act on the store as the event
+            arrives. A project switch only sets the path — the gateway has
+            already rebound its root, and the sidebar re-reads the tree when
+            that path changes.
+          */
+          onWorkspace: (event) => {
+            const store = useStudioStore.getState();
+            if (event.action === "reveal") store.revealPath(event.path);
+            else store.setWorkspacePath(event.path);
+          },
+          /*
+            And a file it wrote becomes a reviewable row, the way one the chat
+            authored itself already does. Same dock, different road: the chat
+            hands `LiveEditService` both sides, whereas an agent writes to disk
+            and the gateway recovers the pair from its tool stream.
+          */
+          onEdit: (event) => {
+            useChangeStore.getState().record({
+              path: event.path,
+              before: event.before,
+              after: event.after,
+              existedBefore: event.existedBefore,
+              origin: "agent",
+              requestId: String(currentTurnId),
+            });
+            useStudioStore.getState().openFile({
+              path: event.path,
+              name: event.path.split("/").pop() || event.path,
+              content: event.after,
+              language: languageForPath(event.path),
+              encoding: "utf8",
+              mimeType: "text/plain",
+              size: event.size ?? undefined,
+              modified: event.modified ?? undefined,
+            });
+          },
         },
       );
     },

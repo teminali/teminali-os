@@ -8,7 +8,7 @@
  * in frontierEngine.ts.
  */
 import { GatewayError } from "./gatewayClient";
-import { AgentCliService, type PermissionRequest } from "./agentCliService";
+import { AgentCliService, type AgentStreamCallbacks, type PermissionRequest } from "./agentCliService";
 import { TerminalService } from "./terminalService";
 import { FrontierEngine, type EngineCapabilities, type StreamCallbacks, type VideoToolSummary } from "./frontierEngine";
 import { executeTool, getToolManifest } from "../video/mcp/toolRegistry";
@@ -65,6 +65,24 @@ export interface StreamRequestOptions {
    * can hand it back on the next one and keep the thread continuous.
    */
   onAgentSession?: (sessionId: string | null) => void;
+  /**
+   * Claude Code / Codex only: the agent moving the workspace around the chat.
+   *
+   * Without these two the CLI's workspace tools are wired on the gateway side
+   * and dead on this one. `reveal` and `open_project` reach the renderer as
+   * events, and an event nobody subscribes to is a tool that silently does
+   * nothing — which is worse than an absent tool, because the model is told it
+   * worked. It then goes looking for another way to do what it was asked, and
+   * the only other way it has is driving the app's own UI by pointer: eleven
+   * steps and two click approvals to open a project, ending in "I can't tell
+   * whether that switched the workspace".
+   *
+   * `AgentPane` subscribed from the start. The chat did not, and the tools are
+   * the same tools.
+   */
+  onWorkspace?: AgentStreamCallbacks["onWorkspace"];
+  /** Claude Code / Codex only: a file the agent wrote, for the review dock. */
+  onEdit?: AgentStreamCallbacks["onEdit"];
 }
 
 /**
@@ -209,6 +227,8 @@ export class AIService {
                 });
               })();
             },
+            onWorkspace: options.onWorkspace,
+            onEdit: options.onEdit,
           },
         );
         options.onAgentSession?.(turn.sessionId);

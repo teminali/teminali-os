@@ -79,6 +79,25 @@ test("the host adapter supplies capabilities and owns host integrations", async 
     "model streaming must stay in the engine");
 });
 
+test("an agent CLI turn from the chat can move the workspace it is talking about", async () => {
+  // The gateway wires `reveal` and `open_project` for every agent turn, but a
+  // tool whose event nobody subscribes to is worse than an absent one: the
+  // model is told it worked. The chat had `onPermission` and neither of these,
+  // so opening a project from chat became eleven steps of driving the app's
+  // own UI by pointer, ending in "I can't tell whether that switched the
+  // workspace". Asserted on the adapter forwarding them and on the chat
+  // supplying them, because either half alone is still silence.
+  const adapter = await read("aiService.ts");
+  assert.match(adapter, /onWorkspace: options\.onWorkspace/);
+  assert.match(adapter, /onEdit: options\.onEdit/);
+
+  const chat = await readFile(new URL("../src/components/chat/StudioChat.tsx", import.meta.url), "utf8");
+  assert.match(chat, /onWorkspace: \(event\) =>/, "the chat must subscribe to workspace events");
+  assert.match(chat, /store\.revealPath\(event\.path\)/);
+  assert.match(chat, /store\.setWorkspacePath\(event\.path\)/);
+  assert.match(chat, /onEdit: \(event\) =>/, "an agent edit from the chat must reach the review dock");
+});
+
 test("routing stays independent of both", async () => {
   const runner = await readFile(new URL("../../gateway/frontier-runner.js", import.meta.url), "utf8");
   const imported = importsOf(runner);

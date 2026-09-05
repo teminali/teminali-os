@@ -390,6 +390,30 @@ bridge. Booting open on top-level `src` and `studio` survives the move as
 `studio/src` stays shut. Changing the workspace root clears the set — paths from
 the old tree open nothing in the new one.
 
+### Every surface that streams an agent must subscribe to it
+
+The gateway wires `reveal`, `open_project` and the edit watcher for **every**
+agent CLI turn, whichever surface started it. What differs is who is listening,
+and a tool whose event nobody subscribes to is worse than an absent tool: the
+model is told it worked, sees nothing change, and goes looking for another way.
+
+The chat had `onPermission` and neither of the other two. Asked to open a
+project it fell back to the only route left to it — driving the app's own UI by
+pointer, through the screen assistant — and spent eleven steps and two click
+approvals to arrive at "the sidebar is still showing the repository list rather
+than a file tree, so I can't tell whether that switched the workspace". It was
+clicking at its own window because the tool built for the job was silent.
+
+`StudioChat.tsx` now subscribes to both, with the same handlers `AgentPane` has
+had all along. `tests/engine-boundary.test.mjs` pins both halves — the adapter
+forwarding the callbacks and the chat supplying them — because either alone is
+still silence. `ArenaPane` remains deliberately unsubscribed: its contestants
+work in sandboxes and must not move the operator's tree.
+
+**Still missing:** there is no tool that opens a file in an editor tab.
+`reveal` shows a path in the tree and says so explicitly ("opens no editor tab"),
+so "show me that file in the Files panel" has no tool behind it yet.
+
 ### What the workspace will open (`server/workspace.js`, `panels/FilePane.tsx`)
 
 One predicate answers "is this text?" — `isTextFile` — and the tree, the reader,
@@ -545,9 +569,9 @@ is on disk, it is listed above the composer, and one click puts the file back.
   a watcher beside the CLI's stdout reads the file in the same tick the tool
   line is parsed, reads it again when the tool settles, and puts an
   `{ type: "edit", path, before, after, existedBefore, size, modified }` event
-  on the run's own NDJSON stream. `panels/AgentPane.tsx` records it with
-  `origin: "agent"` and opens the file, so the edit appears in the editor as it
-  does for the chat pane. Reading on the server is the earliest snapshot anyone
+  on the run's own NDJSON stream. `panels/AgentPane.tsx` and `chat/StudioChat.tsx`
+  both record it with `origin: "agent"` and open the file, so the edit appears
+  in the editor as it does for a change the chat authored itself. Reading on the server is the earliest snapshot anyone
   can take, and it is still a race — so it is checked rather than trusted:
     * `Edit` and `MultiEdit` are literal substitutions and therefore
       *invertible*. If the snapshot no longer contains `old_string` the write
