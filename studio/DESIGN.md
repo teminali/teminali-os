@@ -1694,3 +1694,41 @@ engine transcribes the whole clip in one pass and the alternative to waiting is
 a lost turn. Three structural tests in `tests/voice-astra.test.mjs` enforce the
 rule, in the same spirit as the `VoiceHost` forwarding test: this is a class of
 bug that reading the diff does not catch.
+
+### 6.3 The sidecar that ships (`studio/voice-runtime/`)
+
+`docs/VOICE_SIDECAR.md` describes the contract; `voice-runtime/` is a working
+implementation of it — Whisper for recognition, Kokoro-82M for synthesis, both
+on CPU through `onnxruntime-node`, both loopback-only. It is the first local
+tier that works identically on Windows, where `speech-local.js` returns
+unavailable and there has never been any local speech at all.
+
+It is the only `*-runtime` with its own `package.json`. Its dependencies are
+857 MB on disk, and keeping them out of the application's tree keeps them out
+of the packaged app until bundling is a deliberate decision. `npm install` in
+`studio/` does not install it; `npm run voice:install` does.
+
+**Capabilities are advertised only when warm.** `/status` on a cold sidecar
+returns `{}`, which the gateway reads as "no models here" and falls back to the
+local tier, so the operator keeps a voice while weights download rather than
+waiting on a probe that cannot answer inside its 2.5 s timeout. `server/voice.js`
+now routes synthesis and recognition **independently**: a sidecar advertising
+only `tts` no longer receives audio it never offered to transcribe. The contract
+document has always promised that degradation; until 2026-09-05 the code did
+not implement it.
+
+**Recognition does not answer the room.** Whisper is generative: handed silence,
+hiss or a passing car it returns its best guess at what a human would have said,
+and with no language pinned it guesses in whatever language the noise resembles.
+That is what produced Devanagari, then `Hanna, hanna, hanna, hanna, hanna,
+hanna`, then a line of Arabic, in the same live session as the latch above.
+`transcript-guard.js` rejects, in order: clips under 250 ms or under 8% voiced
+frames; looping n-grams; Whisper's subtitle fillers (`thank you`,
+`please subscribe`, `amara.org`); and a transcript whose script does not match a
+language the caller pinned. `voicedFraction` measures against the clip's own
+noise floor rather than a fixed threshold, so a steady tone at any volume reads
+as unvoiced — what makes the model hallucinate is featureless audio, not quiet
+audio. A rejected clip returns empty text and is indistinguishable from silence
+to the studio, which is the point.
+
+Neither route streams, and `/status` says so rather than claiming otherwise.

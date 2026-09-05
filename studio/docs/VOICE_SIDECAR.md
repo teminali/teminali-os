@@ -23,6 +23,14 @@ Models used:
   laptop that is already hosting the code model.
 - **VibeVoice-Realtime-0.5B** — synthesis from streaming text.
 
+## The implementation in this repo
+
+`studio/voice-runtime/` implements this contract with Whisper for recognition
+and Kokoro-82M for synthesis, on CPU, loopback-only. `npm run voice:install`
+then `npm run voice:serve`. See [`../voice-runtime/README.md`](../voice-runtime/README.md).
+The VibeVoice models below remain the specified premium tier; nothing about the
+contract changes for a different backend, which is the point of having one.
+
 ## What the studio expects
 
 The studio never loads model weights itself. It calls the gateway, the gateway
@@ -39,7 +47,14 @@ calls a loopback sidecar, and the sidecar owns the models. Three routes:
 ```
 
 Omit `asr` or `tts` for a capability you do not serve. The studio degrades to the
-built-in tier for whatever is missing rather than losing voice altogether.
+built-in tier for whatever is missing rather than losing voice altogether, and
+`server/voice.js` routes the two independently — until 2026-09-05 it did not,
+and a sidecar advertising only `tts` was still sent audio to transcribe.
+
+Advertising a capability only once its model is warm is the recommended way to
+start: a cold `{}` is read as "no models here" and costs the operator nothing,
+whereas a `/status` that blocks on a model load will exceed the gateway's 2.5 s
+probe timeout.
 
 ### `POST /transcribe`
 

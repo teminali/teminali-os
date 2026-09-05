@@ -183,8 +183,12 @@ your screen and either explains it or acts on it.
 ### Voice
 
 Local by default: **whisper.cpp** for recognition, macOS `say` for synthesis. An
-optional **VibeVoice** sidecar on `127.0.0.1:8321` upgrades both; the browser
-speech engine is the always-available fallback. Push-to-talk dictation and
+optional sidecar on `127.0.0.1:8321` upgrades either or both, and
+[`voice-runtime/`](voice-runtime/README.md) is the one shipped in this repo:
+Whisper and Kokoro-82M on CPU, started with `npm run voice:serve`. The browser
+speech engine is the always-available fallback. Each capability is routed
+independently, so a sidecar serving only synthesis still leaves recognition on
+the local tier. Push-to-talk dictation and
 hands-free conversation with barge-in. Nothing reaches the chat unreviewed — every
 utterance passes a repair pass the operator sees before it sends.
 
@@ -509,6 +513,7 @@ Each is dependency-free Node with its own README and test entry point.
 | `visual-runtime/` | Deterministic PNG/RGBA comparison — exact differing-pixel counts and CIE76 deltas. Measurements, not a score. It does not capture browsers. |
 | `performance-runtime/` | Live Ollama latency harness through the gateway. Records Ollama's authoritative counts; never logs prompt content. |
 | `mcp-runtime/` | MCP client and image-proof helpers. |
+| `voice-runtime/` | Loopback speech sidecar: Whisper recognition and Kokoro synthesis on CPU, nothing leaving the machine. The only runtime with its own `package.json` — its dependencies are 857 MB, so they stay out of the app's tree. Install with `npm run voice:install`, start with `npm run voice:serve`. See [`voice-runtime/README.md`](voice-runtime/README.md). |
 
 ---
 
@@ -547,7 +552,7 @@ ollama serve              # local models on 127.0.0.1:11434
 
 ```bash
 npm run typecheck   # tsc --noEmit
-npm test            # 905 tests, 0 failures
+npm test            # 920 tests, 0 failures
 npm run build       # tsc && vite build
 npm run verify:core # all three
 ```

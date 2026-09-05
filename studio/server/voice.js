@@ -156,8 +156,11 @@ export async function transcribe(config, {
   body, contentType, language = "auto", maxSegmentChars = 0, allowVibeVoice = true,
 }) {
   const status = await voiceStatus(config, { allowVibeVoice });
+  // A sidecar may serve only one of the two capabilities: VOICE_SIDECAR.md
+  // says the studio degrades per capability rather than losing voice
+  // altogether, so one that advertises no `asr` must not be sent audio.
   // The local engine takes a raw audio buffer, not a multipart envelope.
-  if (status.engine === "local") {
+  if (status.engine === "local" || !status.asr) {
     return transcribeLocal(extractAudio(body, contentType), { language, maxSegmentChars });
   }
 
@@ -186,7 +189,9 @@ export async function transcribe(config, {
 /** Render text to speech and stream the audio back. */
 export async function speak(config, payload, { allowVibeVoice = true } = {}) {
   const status = await voiceStatus(config, { allowVibeVoice });
-  if (status.engine === "local") {
+  // As in `transcribe`: a sidecar with no `tts` falls back rather than being
+  // asked for synthesis it never claimed to offer.
+  if (status.engine === "local" || !status.tts) {
     const audio = await speakLocal(payload.text, {
       language: payload.language,
       voice: payload.voice,
