@@ -49,6 +49,13 @@ interface TranscribeResponse {
   text: string;
   language: string;
   confidence?: number;
+  /**
+   * The two things confidence is made of, when the engine reported them
+   * separately. The local whisper-server path does; the CLI fallback reports
+   * only `acousticConfidence`, and a sidecar reports neither.
+   */
+  languageConfidence?: number;
+  acousticConfidence?: number;
   /** Speaker embedding, when the sidecar was built with the verifier head. */
   embedding?: number[];
   /** Named non-speech sounds, when the request asked for them. */
@@ -359,6 +366,8 @@ export class VibeVoiceProvider implements VoiceProvider {
       transcript: data.text ?? "",
       isFinal: true,
       confidence: data.confidence ?? -1,
+      languageConfidence: data.languageConfidence ?? -1,
+      acousticConfidence: data.acousticConfidence ?? -1,
       language: data.language ?? "",
       sounds: data.sounds ?? [],
     };

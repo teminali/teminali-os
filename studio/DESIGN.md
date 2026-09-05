@@ -2192,6 +2192,141 @@ added in settings reached one of the three.
 
 Tests: `tests/voice-director.test.mjs` (8), `tests/voice-ack.test.mjs` (7).
 
+### 6.12 The confidence whisper.cpp was already returning (2026-09-05)
+
+`parseWhisperJson` hard-coded `confidence: -1` behind a comment saying
+whisper.cpp "does not expose a confidence in this output mode". That was half
+right, and the wrong half cost the studio its best signal.
+
+Measured on this machine against `ggml-large-v3-turbo-q8_0`, rather than
+assumed:
+
+- `whisper-cli -oj` reports **no probability of any kind**. The comment was
+  true of the flag the code was passing.
+- `whisper-cli -ojf` adds `transcription[].tokens[].p`, a per-token
+  probability, for one larger file and no extra decoding. `speech-local.js`
+  now passes `-ojf`.
+- `whisper-server`'s `verbose_json` carries that same number as
+  `segments[].words[].probability` **and** a `detected_language_probability`.
+- Neither path emits `avg_logprob` or `no_speech_prob`. Anything built on
+  those fields would have found nothing there.
+
+`RecognitionResult.confidence` is now a real 0–1 number, with
+`languageConfidence` and `acousticConfidence` beside it, and `-1` still means
+"the engine did not say" rather than a fabricated value. The composite is the
+**weaker** of the two, not their average, because they fail separately: the
+recogniser must be sure both that this was speech in a language it knows and
+of the words it then chose.
+
+The measurements that set the thresholds, at `language=auto`:
+
+| clip | language P | mean word P | transcript |
+| --- | --- | --- | --- |
+| 6 s digital silence | 0.369 | 0.734 | `Thank you.` |
+| 6 s pink noise | 0.603 | 0.944 | `.` |
+| 8 s low hum | 0.613 | 0.954 | `.` |
+| 8 s two-tone "music" | 0.800 | 0.262 | `.` |
+| one spoken sentence | 1.000 | 0.884 | correct |
+| the `jfk.wav` brew ships | 0.960 | 0.911 | correct |
+
+The language probability separates speech from a room; the word probability
+barely does, because silence decodes to "Thank you." with two of its three
+words scored above 0.95. Short utterances are **not** penalised for brevity —
+that was assumed, then measured: "go ahead" 0.913, "no" 0.866, "yes" 0.811, a
+bare "stop" 0.741.
+
+The CLI path reports no language probability on any flag, so when the warm
+server is down the confidence is the word score alone and says nothing about
+whether the audio was speech. A caller needing that distinction must check
+`languageConfidence >= 0`. This asymmetry is real and not worked around.
+
+Tests: `tests/whisper-confidence.test.mjs` (5), against payloads captured from
+real runs rather than invented.
+
+### 6.13 A transcript is not proof anyone spoke (`plausibility.ts`, 2026-09-05)
+
+Reported failure: the transcript `"Olof, siri e prole, olof, olof, olof,
+olof."` was committed as a genuine turn, aborted a running command, and left
+the model apologising for not catching it. Nothing in the pipeline
+malfunctioned — `cleanTranscript` found no bracketed artefact to strip,
+`isNonSpeechOrBlank` found plenty of words, and `scoreAddressing` was handed a
+sentence-shaped string and scored it. It was a Whisper repetition loop on
+non-speech audio, a failure mode with a shape of its own and no filter looking
+for it.
+
+`plausibility.ts` is that filter, and it runs in `commitTurn` **before** the
+addressing gate — addressing asks who a sentence was for, this asks whether
+there was a sentence at all. The operator's requirement was that the rejection
+land before the text becomes a prompt, so everything here is synchronous,
+offline and free.
+
+It is a separate layer from §6.12 and cannot be folded into it: **loops score
+high**. The "tk tk tk" clip measured a language probability of 0.813 and a
+mean word probability of 0.893 — better than correctly transcribed speech
+beside it, and it came back with two more `TK`s than were said. A recogniser
+that is looping is not unsure; it is confidently repeating.
+
+Four rules, each with a carve-out that exists because of a counter-example:
+
+- **Repetition** — the largest share of the utterance covered by repeats of
+  one n-gram, scanned across n = 1..4 so a looped *phrase* ("thanks for
+  watching, thanks for watching…") is caught as well as a looped word. Needs
+  ≥ 6 words, ≥ 3 repeats and ≥ 60% coverage together, and never fires on
+  `MEANINGFUL_REPEATS` — an operator hammering "stop stop stop stop" at a
+  runaway command is structurally a perfect loop and is the single most
+  important utterance the system can hear.
+- **Dominance** — one word taking ≥ 50% of a ≥ 6-word utterance without being
+  contiguous enough to read as a loop. This is the reported failure's shape.
+- **Known artefact phrases** — the subtitle credits and "Thank you." Whisper
+  emits on silence. Rejected *only* when confidence is also below 0.6, because
+  "thank you" is a thing operators say; with no confidence reported the phrase
+  is allowed through rather than guessed at.
+- **Coherence** — the share of words that are pronounceable. Deliberately
+  crude and generous: no dictionary, because one would not survive Kiswahili,
+  code identifiers or the operator's own filenames.
+
+A rejected utterance is recorded in `lastRejected` with its reason and, when
+ambient memory is on, kept — an operator who was ignored is owed a reason, and
+a silent filter cannot be tuned. The bias throughout is against false
+rejection: refusing to hear the operator is worse than passing noise to the
+addressing gate, which is itself a filter.
+
+Tests: `tests/voice-plausibility.test.mjs` (15), half of them asserting that
+ordinary, terse and urgent speech still passes.
+
+### 6.14 The follow-up window was a blanket bypass (2026-09-05)
+
+`followUpWindow` alone added +0.32 to a 0.34 base, clearing the 0.62 line on
+timing and nothing else — and it was also the escape hatch in the wake-word
+hard gate. Instrumented before it was changed: for nine seconds after the
+assistant asked anything, in **wake-word-only mode**, a stray single word, a
+sentence about someone's recipe, and the recogniser's own noise loop all came
+back DIRECTED, each explained as "Answering the question just asked."
+
+The window is still worth having — a terse answer with no wake word is exactly
+what it exists to admit — so it was narrowed rather than removed:
+
+- **Contrary evidence closes it** instead of being outweighed by it: third-party
+  phrasing, or a voice that decisively is not the operator's. The mismatch bar
+  is 0.5, below the 0.62 match line, because `speakerProfile.ts` is honest that
+  it is a weak verifier — only a decisive mismatch weighs in, and a marginal
+  score is treated as no evidence either way. This is a soft input to the
+  score, **not** a promotion of speaker matching to a gate (§6.1).
+- **What remains decays** across the nine seconds, from full weight to 45%. An
+  answer half a second after a question is overwhelmingly a reply to it; the
+  same words eight seconds later are much more often the room. A recognised
+  direct answer keeps its full bonus regardless of delay, so an operator who
+  takes a moment to think is not punished.
+- **The hard gate now tests whether the window is trusted**, not merely open.
+- **The reason must agree with the verdict.** A turn that scored below the line
+  inside the window was still explained as "Answering the question just asked.",
+  which reads as an acceptance and told an ignored operator nothing.
+
+`THIRD_PARTY_MARKERS` also gained the past-tense forms it was missing — "I told
+her the recipe was wrong" matched nothing in the list.
+
+Tests: `tests/voice-addressing-window.test.mjs` (10).
+
 ## 7. The agent command loop (`services/agentCommands.ts`, `services/commandThrashing.ts`)
 
 ### 7.1 Diagnose before retrying (2026-09-05)

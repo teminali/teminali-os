@@ -362,7 +362,17 @@ export async function transcribeLocal(buffer, { language = "auto", maxSegmentCha
         "-m", status.model,
         "-f", wavPath,
         "-l", requested,
-        "-oj",                 // JSON output, so we get the detected language too
+        /*
+          `-ojf`, not `-oj`. The plain flag writes the transcript and the
+          offsets and nothing else — measured on this machine, its JSON
+          carries no probability of any kind, which is why `confidence`
+          was hard-coded to -1 here for as long as it was. The full flag
+          adds `transcription[].tokens[].p`, the per-token probability,
+          at the cost of a larger file and no extra decoding. That is the
+          only confidence the CLI can give: unlike the server it reports
+          no language probability, so it cannot tell speech from silence.
+        */
+        "-ojf",                // full JSON: detected language *and* per-token probability
         "-of", outputBase,
         "-bs", "5", "-bo", "5",
         ...(prompt ? ["--prompt", prompt] : []),
@@ -426,6 +436,16 @@ export function parseWhisperJson(parsed, requestedLanguage = "auto") {
           from: Math.round(Number(segment?.start ?? NaN) * 1000),
           to: Math.round(Number(segment?.end ?? NaN) * 1000),
         },
+        /*
+          The server spells a token `{ word, probability }` and the CLI
+          `{ text, p }`. Same numbers — a clip run through both paths
+          returned means agreeing to three decimals — so they are read as
+          one shape here rather than twice downstream.
+        */
+        tokens: (Array.isArray(segment?.words) ? segment.words : []).map((word) => ({
+          text: word?.word ?? "",
+          p: word?.probability,
+        })),
       })),
       result: {
         language:
@@ -434,6 +454,12 @@ export function parseWhisperJson(parsed, requestedLanguage = "auto") {
       },
       /* A server that returned no segments at all still returned the text. */
       _whole: typeof parsed?.text === "string" ? parsed.text : "",
+      /*
+        The strongest signal either path offers, and only this one offers it:
+        how sure the model is that the audio was the language it picked. The
+        CLI has no equivalent field on any flag.
+      */
+      _languageProbability: parsed?.detected_language_probability,
     };
   }
   const whole = typeof parsed?._whole === "string" ? parsed._whole : "";
@@ -470,15 +496,86 @@ export function parseWhisperJson(parsed, requestedLanguage = "auto") {
       ? ""
       : requestedLanguage;
 
+  const languageConfidence = probability(parsed?._languageProbability);
+  const acoustic = meanProbability(tokenProbabilities(parsed));
+
   return {
     text,
     language,
-    // whisper.cpp does not expose a confidence in this output mode; -1 is the
-    // agreed "not reported" value rather than a fabricated number.
-    confidence: -1,
+    languageConfidence,
+    acousticConfidence: acoustic,
+    confidence: speechConfidence(languageConfidence, acoustic),
     model: parsed?.model?.type ?? null,
     segments: cues,
   };
+}
+
+/** A finite 0-1 number, or -1 for "the engine did not say". */
+function probability(value) {
+  const number = Number(value);
+  return Number.isFinite(number) && number >= 0 && number <= 1 ? number : -1;
+}
+
+/**
+ * Every per-word or per-token probability in the payload, whichever shape it
+ * came in. The server names it `segments[].words[].probability`; the CLI's
+ * `-ojf` names it `transcription[].tokens[].p`. whisper.cpp's own markers —
+ * `[_BEG_]` and the `[_TT_n]` timestamps — are dropped: they are decoder
+ * bookkeeping, always confidently predicted, and averaging them in would drag
+ * every score toward the same number.
+ */
+function tokenProbabilities(parsed) {
+  const out = [];
+  for (const segment of Array.isArray(parsed?.transcription) ? parsed.transcription : []) {
+    for (const token of Array.isArray(segment?.tokens) ? segment.tokens : []) {
+      if (String(token?.text ?? "").startsWith("[_")) continue;
+      const value = probability(token?.p);
+      if (value >= 0) out.push(value);
+    }
+  }
+  return out;
+}
+
+function meanProbability(values) {
+  if (values.length === 0) return -1;
+  return values.reduce((total, value) => total + value, 0) / values.length;
+}
+
+/**
+ * One 0-1 number for "the recogniser was sure of this utterance", from the two
+ * independent things it can be unsure about.
+ *
+ * It is the weaker of the two, not their average, because they fail
+ * separately: the recogniser must be sure both that this *was* speech in a
+ * language it knows, and of the words it then chose. Averaging lets a
+ * confident transcription of noise pass.
+ *
+ * Measured here on ggml-large-v3-turbo-q8_0, language=auto:
+ *
+ *   clip                       langP   meanP   transcript
+ *   6s digital silence         0.369   0.734   "Thank you."
+ *   6s pink noise              0.603   0.944   "."
+ *   8s low hum                 0.613   0.954   "."
+ *   8s two-tone "music"        0.800   0.262   "."
+ *   `say`, one sentence        1.000   0.884   the sentence, correctly
+ *   the jfk.wav brew ships     0.960   0.911   the speech, correctly
+ *
+ * Speech sits at 0.96+ on the language probability and non-speech below 0.81,
+ * while the token probability barely separates them at all — silence decodes
+ * to "Thank you." at 0.73, which is why a token-probability-only score cannot
+ * be the gate. Note what the table does *not* show: a repetition loop scores
+ * high on both (a clip of "tk tk tk" measured 0.813/0.893 and came back with
+ * two more "TK"s than were said). Confidence cannot catch a loop. That is a
+ * job for lexical plausibility, not for this number.
+ *
+ * The CLI path reports no language probability at all, so its confidence is
+ * the token score alone and says nothing about whether this was speech. A
+ * caller that needs that distinction must check `languageConfidence >= 0`.
+ */
+export function speechConfidence(languageConfidence, acousticConfidence) {
+  const parts = [languageConfidence, acousticConfidence].filter((value) => value >= 0);
+  if (parts.length === 0) return -1;
+  return Math.min(...parts);
 }
 
 /** Synthesise speech to a WAV buffer using the system voice. */

@@ -88,6 +88,17 @@ yours does not, and repair after the fact instead (see *Domain vocabulary*).
 { "text": "open the settings panel", "language": "en-US", "confidence": 0.94 }
 ```
 
+`confidence` is not decoration: the studio now uses it to decide whether an
+utterance was speech at all before letting it become a prompt (DESIGN.md
+§6.12–§6.13). Report a real 0–1 number or **omit the field**, which reads as
+"not reported" and makes the studio fall back to text-only evidence. A
+fabricated constant is worse than nothing — a hard-coded `1.0` tells the gate
+that an empty room was certainly speech. If your build separates them, you may
+also send `"languageConfidence"` (how sure it was of the language it picked —
+the signal that actually distinguishes speech from a room) and
+`"acousticConfidence"` (mean per-word probability); the studio's own
+whisper-server path sends both, `whisper-cli` sends only the second.
+
 Add `"embedding": [ ... ]` — a speaker embedding — if your build has a verifier
 head. The studio uses it for the "only respond to my voice" gate and falls back
 to its own on-device matcher when absent. See *Speaker verification* below.

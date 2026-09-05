@@ -83,8 +83,27 @@ export interface RecognitionResult {
   transcript: string;
   /** True once the engine will not revise this span again. */
   isFinal: boolean;
-  /** 0–1 where the engine reports it; -1 when it does not. */
+  /**
+   * 0–1 where the engine reports it; -1 when it does not.
+   *
+   * The weaker of the two components below, not their average: the recogniser
+   * must be sure both that this was speech in a language it knows and of the
+   * words it then chose, and averaging lets a confident transcription of an
+   * empty room pass. See DESIGN.md §6.12 for the measurements behind it.
+   */
   confidence: number;
+  /**
+   * How sure the engine was that this was the language it picked — the signal
+   * that actually separates speech from a room (measured: 0.37–0.81 across
+   * silence, noise and music; 0.96–1.00 across speech). -1 when unreported,
+   * which is always the case on the whisper-cli fallback and the sidecar.
+   */
+  languageConfidence?: number;
+  /**
+   * Mean per-word probability. A much weaker signal than it looks: silence
+   * transcribed as "Thank you." scores 0.73 here. -1 when unreported.
+   */
+  acousticConfidence?: number;
   /** Detected (or configured) BCP-47 tag for this utterance. */
   language: string;
   /** Non-speech sounds in the same clip, when they were asked for. */

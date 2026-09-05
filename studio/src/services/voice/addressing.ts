@@ -49,6 +49,8 @@ const DOMAIN_NOUNS = [
 const THIRD_PARTY_MARKERS = [
   "he said", "she said", "they said", "tell him", "tell her", "tell them",
   "ask him", "ask her", "ask them", "my wife", "my husband", "my friend",
+  "told him", "told her", "told them", "asked him", "asked her", "asked them",
+  "he says", "she says", "they say", "he asked", "she asked", "they asked",
   "hold on", "one second", "one sec", "give me a minute", "i'll call you",
   "call you back", "see you later", "talk to you later", "bye",
   "alisema", "waambie", "mwambie", "subiri", "ngoja", "nitakupigia",
@@ -115,6 +117,39 @@ export function scoreAddressing(
   const domainHits = DOMAIN_NOUNS.filter((noun) => lower.includes(noun)).length;
   const thirdParty = THIRD_PARTY_MARKERS.some((marker) => lower.includes(marker));
 
+  /*
+    A clear mismatch against the enrolled voiceprint — not the `requireSpeakerMatch`
+    gate, which is the operator's own hard rule, but the softer question of
+    whether the follow-up window should be believed at all. The bar is 0.5
+    rather than the 0.62 match line because speakerProfile.ts is honest that it
+    is a weak verifier: only a decisive mismatch is allowed to weigh in, and a
+    marginal score is treated as no evidence either way.
+  */
+  const speakerMismatch =
+    context.hasProfile && context.speakerMatch !== null && context.speakerMatch < 0.5;
+
+  /*
+    Whether the window can be trusted, as opposed to merely being open.
+
+    It used to be neither: `followUpWindow` alone added +0.32 to a 0.34 base,
+    clearing the 0.62 line on timing and nothing else, and it also bypassed the
+    wake-word hard gate outright. Instrumented before it was changed, that meant
+    that for nine seconds after the assistant asked anything, *every* utterance
+    in the room was "Answering the question just asked." — a stray single word,
+    a sentence about someone's recipe, and the recogniser's own noise loop all
+    came back DIRECTED, in wake-word-only mode included.
+
+    Two corrections. Contrary evidence — third-party phrasing, or a voice that
+    decisively is not the operator's — closes the window rather than being
+    outweighed by it. And what remains decays across the nine seconds: an answer
+    half a second after a question is overwhelmingly a reply to it, and the same
+    words eight seconds later are much more often the room.
+  */
+  const followUpTrusted = followUpWindow && !thirdParty && !speakerMismatch;
+  const followUpWeight = followUpTrusted
+    ? 1 - 0.55 * Math.min(1, Math.max(0, context.msSinceAssistantTurn) / FOLLOW_UP_WINDOW_MS)
+    : 0;
+
   // Hard rejection for ambient noise descriptions that escaped brackets
   const isAmbientNoise =
     /(keyboard\s+clicking|upbeat\s+music|gentle\s+music|background\s+noise|ambient\s+audio|typing\s+sounds?|mouse\s+clicks?|cough(?:ing|s)?|throat\s+clearing|breathing)/i.test(lower);
@@ -147,7 +182,7 @@ export function scoreAddressing(
 
   /* ── Hard gates the operator asked for ────────────────────────────────── */
 
-  if (context.requireWakeWord && !wakeWord && !followUpWindow) {
+  if (context.requireWakeWord && !wakeWord && !followUpTrusted) {
     return {
       verdict: {
         directed: false,
@@ -191,8 +226,11 @@ export function scoreAddressing(
 
   if (wakeWord) score += 0.5;
   if (isGreeting) score += 0.35; // "hello", "hi", "hey" -> 0.34 + 0.35 = 0.69 >= 0.62 (DIRECTED)
-  if (followUpWindow) {
-    score += 0.32;
+  if (followUpWeight > 0) {
+    score += 0.32 * followUpWeight;
+    // An actual answer keeps its full weight: "yes" to a question the assistant
+    // asked is the case the window exists for, and it should not be eroded by
+    // the operator taking a moment to think.
     if (isDirectAnswer) score += 0.22;
   }
   if (imperative) score += 0.18;
@@ -216,10 +254,10 @@ export function scoreAddressing(
   // Ignore unrelated room chatter / third party speech
   if (thirdParty) score -= 0.45;
   // Unrelated words with no context or conversation sync (only when wake word is required in shared room)
-  if (context.requireWakeWord && !wakeWord && !followUpWindow && domainHits === 0 && !imperative && !secondPerson) {
+  if (context.requireWakeWord && !wakeWord && !followUpTrusted && domainHits === 0 && !imperative && !secondPerson) {
     score -= 0.22;
   }
-  if (context.requireWakeWord && words.length <= 2 && !wakeWord && !followUpWindow) score -= 0.2;
+  if (context.requireWakeWord && words.length <= 2 && !wakeWord && !followUpTrusted) score -= 0.2;
 
   // Personalised speaker matching: recognise only the enrolled operator
   if (context.speakerMatch !== null) {
@@ -231,22 +269,31 @@ export function scoreAddressing(
   }
 
   score = Math.max(0, Math.min(1, score));
+  const directed = score >= 0.62;
 
+  /*
+    The reason has to agree with the verdict. It did not: an utterance inside
+    the follow-up window that scored *below* the line still came back
+    "Answering the question just asked.", which reads as an acceptance and told
+    the operator nothing about why they had been ignored.
+  */
   const reason = wakeWord
     ? "Addressed by name."
-    : followUpWindow
+    : followUpTrusted && directed
       ? "Answering the question just asked."
       : thirdParty
         ? "Sounds like it was meant for someone else."
         : imperative
           ? "Reads as an instruction to the workspace."
-          : score >= 0.62
+          : directed
             ? (context.requireWakeWord ? "Matches how you normally address the assistant." : "Hands-free session is open, so this is for the assistant.")
-            : "No clear sign it was meant for the assistant.";
+            : followUpWindow
+              ? "Too long after the question to read as the answer to it."
+              : "No clear sign it was meant for the assistant.";
 
   return {
     verdict: {
-      directed: score >= 0.62,
+      directed,
       confidence: Math.abs(score - 0.62) * 2.6,
       reason,
       signals: { wakeWord, speakerMatch: context.speakerMatch, followUpWindow, classifier: null, imperative },

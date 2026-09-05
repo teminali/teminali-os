@@ -35,6 +35,7 @@ import { classifyTurnIntent, type TurnIntentVerdict } from "./turnIntent";
 import { EchoGuard } from "./echoGuard";
 import { AmbientMemory, classifyAmbientQuery } from "./ambientMemory";
 import { cleanTranscript, isNonSpeechOrBlank, polishIsTrustworthy, polishPrompt, repairDeterministic, withPolish } from "./transcriptRepair";
+import { scorePlausibility } from "./plausibility";
 import { createRoster, probeAll, resolve, type ProviderRoster, type ResolvedProviders } from "./providers";
 import {
   DEFAULT_VOICE_SETTINGS,
@@ -147,6 +148,13 @@ export class VoiceEngine {
   private level = 0;
   private transcript = "";
   private finalTranscript = "";
+  /**
+   * The weakest confidence any part of this turn came back with, or -1 when
+   * the engine reported none. The weakest rather than the last, because an
+   * utterance assembled from several results is only as trustworthy as its
+   * shakiest piece, and it is the shaky piece that carries the hallucination.
+   */
+  private turnConfidence = -1;
   private pending: RepairedTranscript | null = null;
   private verdict: AddressingVerdict | null = null;
   private lastRejected: VoiceSnapshot["lastRejected"] = null;
@@ -395,7 +403,7 @@ export class VoiceEngine {
           signal: this.abort.signal,
         },
         {
-          onResult: (result) => this.onResult(result.transcript, result.isFinal, result.language),
+          onResult: (result) => this.onResult(result.transcript, result.isFinal, result.language, result.confidence),
           onSound: (sounds) => this.rememberSounds(sounds),
           onError: (error) => this.fail(error),
           onClose: () => {
@@ -598,7 +606,10 @@ export class VoiceEngine {
     }
   }
 
-  private onResult(transcript: string, isFinal: boolean, _language: string): void {
+  private onResult(transcript: string, isFinal: boolean, _language: string, confidence = -1): void {
+    if (confidence >= 0) {
+      this.turnConfidence = this.turnConfidence < 0 ? confidence : Math.min(this.turnConfidence, confidence);
+    }
     // The recogniser hears the speakers as well as the operator. Anything that
     // is the assistant's own voice coming back is removed before it can become
     // part of a turn.
@@ -695,7 +706,7 @@ export class VoiceEngine {
           signal: this.abort?.signal,
         },
         {
-          onResult: (result) => this.onResult(result.transcript, result.isFinal, result.language),
+          onResult: (result) => this.onResult(result.transcript, result.isFinal, result.language, result.confidence),
           onSound: (sounds) => this.rememberSounds(sounds),
           onError: (error) => this.fail(error),
           onClose: () => {
@@ -745,8 +756,10 @@ export class VoiceEngine {
     this.clearFinalFallback();
     this.awaitingFinal = false;
     const raw = cleanTranscript(this.transcript);
+    const confidence = this.turnConfidence;
     this.transcript = "";
     this.finalTranscript = "";
+    this.turnConfidence = -1;
     this.endpointer.reset();
 
     // Each partial result was filtered as it arrived; the assembled utterance
@@ -757,6 +770,46 @@ export class VoiceEngine {
 
     if (!heard || isNonSpeechOrBlank(heard)) {
       // Non-speech, blank audio, or our own voice. Resume where we left off.
+      this.resumeSuspendedSpeech();
+      return;
+    }
+
+    /*
+      Words, but not necessarily *spoken* words.
+
+      `cleanTranscript` strips artefacts it can recognise as artefacts and
+      `isNonSpeechOrBlank` catches an empty result, but neither can tell that a
+      grammatical-looking line was a recogniser looping on room noise. That is
+      what committed "Olof, siri e prole, olof, olof, olof, olof." as a turn
+      and aborted the command that was running. The check happens here, ahead
+      of the addressing gate, because addressing asks who a sentence was for
+      and this asks whether there was a sentence at all — and because the
+      operator asked for the rejection to land before the text becomes a
+      prompt.
+    */
+    const plausibility = scorePlausibility(heard, { confidence });
+    if (!plausibility.plausible) {
+      this.lastRejected = {
+        text: heard,
+        verdict: {
+          directed: false,
+          confidence: 0.95,
+          reason: plausibility.reason,
+          signals: { wakeWord: false, speakerMatch: null, followUpWindow: false, classifier: null, imperative: false },
+        },
+      };
+      if (this.settings.ambientMemory) {
+        // Kept for the same reason a rejected turn is: "what was that noise?"
+        // is answerable, and the clip has already been paid for.
+        this.ambient.remember({
+          kind: "speech",
+          text: heard,
+          speaker: "unknown",
+          confidence: confidence >= 0 ? confidence : 0,
+          reason: plausibility.reason,
+        });
+      }
+      this.emit();
       this.resumeSuspendedSpeech();
       return;
     }
