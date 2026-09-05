@@ -134,11 +134,26 @@ export async function localTtsStatus() {
   let voices = [];
   try {
     const { stdout } = await run("say", ["-v", "?"], { timeout: 5000, encoding: "utf8", maxBuffer: 1024 * 1024 });
+    // `say` pads the name into a column, but a long name leaves a single space
+    // before the tag, and every voice Apple has shipped since the novelty era
+    // carries parentheses in its name ("Samantha (English (US))"). The previous
+    // pattern accepted at most two whitespace-free words, so it dropped 113 of
+    // this machine's 187 voices — including every usable one — and left en-US
+    // holding nothing but "Albert" and its joke siblings. Anchor on the
+    // language tag and the `#` example instead: that parses all 187.
+    const seen = new Set();
     voices = stdout
       .split("\n")
-      .map((line) => /^(\S[^\s]*(?:\s\S+)?)\s+([a-z]{2}[-_][A-Z]{2})\s/.exec(line))
+      .map((line) => /^(.+?)\s+([a-z]{2,3}[-_][A-Za-z0-9]{2,3})\s+#/.exec(line))
       .filter(Boolean)
-      .map((match) => ({ name: match[1].trim(), language: match[2].replace("_", "-") }));
+      .map((match) => ({ name: match[1].trim(), language: match[2].replace("_", "-") }))
+      // macOS lists a voice once per installed quality tier, under one name.
+      .filter((voice) => {
+        const key = `${voice.name}\u0000${voice.language}`;
+        if (seen.has(key)) return false;
+        seen.add(key);
+        return true;
+      });
   } catch {
     /* Voice list is a nicety; synthesis still works with the system default. */
   }
@@ -298,13 +313,96 @@ export async function speakLocal(text, { language = "en-US", voice = null, rate 
   }
 }
 
+/**
+ * Voices macOS ships as jokes. `say` speaks with them perfectly happily, so a
+ * picker that takes the first match for a language lands on "Albert" for
+ * en-US — a wheezing cartoon — which is what made the desktop voice sound
+ * robotic. Kept in step with NOVELTY_VOICES in
+ * src/services/voice/providers/webSpeech.ts: the two tiers should not disagree
+ * about which voices are unusable.
+ */
+const NOVELTY_VOICES = new Set([
+  "albert", "bad news", "bahh", "bells", "boing", "bubbles", "cellos",
+  "deranged", "good news", "hysterical", "jester", "organ", "pipe organ",
+  "princess", "superstar", "trinoids", "whisper", "wobble", "zarvox",
+]);
+
+/**
+ * Eloquence, and the MacinTalk voices that predate the Vocalizer downloads.
+ * Not jokes: macOS files them under a language, a screen-reader user may
+ * genuinely prefer them, and they are perfectly intelligible. They are also
+ * flat and synthetic next to anything newer, so they lose to a real voice
+ * without being banned outright.
+ *
+ * "Alex" is deliberately absent from both sets. It was on the novelty list
+ * inherited from the client, which is simply wrong — it is Apple's flagship
+ * US male voice and the largest voice asset macOS offers at 885 MB. Scoring
+ * it out meant that an operator who downloaded the best male voice on the
+ * platform would have found the assistant refusing to use it.
+ */
+const LEGACY_VOICES = new Set([
+  "eddy", "flo", "grandma", "grandpa", "reed", "rocko", "sandy", "shelley",
+  "agnes", "bruce", "fred", "junior", "kathy", "ralph", "vicki", "victoria",
+]);
+
+function matchesVoiceSet(name, set) {
+  const lower = name.toLowerCase();
+  for (const entry of set) {
+    if (lower.includes(entry)) return true;
+  }
+  return false;
+}
+
+function isNoveltyVoice(name) {
+  return matchesVoiceSet(name, NOVELTY_VOICES);
+}
+
+function isLegacyVoice(name) {
+  return matchesVoiceSet(name, LEGACY_VOICES);
+}
+
+/**
+ * How good the voice sounds, from the tier macOS puts in the name.
+ *
+ * The gap between tiers is larger than the gap between regional accents, so
+ * these are weighted to let an Enhanced or Premium voice win across a region
+ * boundary (en-GB read to an en-US operator) while a merely ordinary one
+ * cannot. An operator who has downloaded exactly one good voice should hear it.
+ */
+function voiceQualityScore(name) {
+  const lower = name.toLowerCase();
+  if (lower.includes("premium")) return 80;
+  if (lower.includes("enhanced")) return 55;
+  if (lower.includes("compact")) return -30;
+  return 0;
+}
+
 /** Best installed voice for a language tag, or null for the system default. */
 export function pickVoice(voices, languageTag) {
   if (!Array.isArray(voices) || voices.length === 0) return null;
-  const tag = String(languageTag || "").replace("_", "-");
-  const exact = voices.find((entry) => entry.language.toLowerCase() === tag.toLowerCase());
-  if (exact) return exact.name;
-  const prefix = tag.split("-")[0].toLowerCase();
-  const sameLanguage = voices.find((entry) => entry.language.toLowerCase().startsWith(prefix));
-  return sameLanguage ? sameLanguage.name : null;
+  const tag = String(languageTag || "").replace("_", "-").toLowerCase();
+  const prefix = tag.split("-")[0];
+
+  let best = null;
+  for (const entry of voices) {
+    const language = entry.language.toLowerCase();
+    let score;
+    if (language === tag) score = 100;
+    else if (prefix && language.startsWith(prefix)) score = 50;
+    else continue;
+
+    score += voiceQualityScore(entry.name);
+    // Enough to lose to any real voice, including one from another region,
+    // but not enough to fall below zero: alone in its language it is still a
+    // better answer than whatever `say` would have defaulted to.
+    if (isLegacyVoice(entry.name)) score -= 60;
+    if (isNoveltyVoice(entry.name)) score -= 1000;
+
+    if (!best || score > best.score) best = { name: entry.name, score };
+  }
+
+  // Every candidate was a joke voice. The system default is a better answer
+  // than deliberately choosing one of them.
+  if (!best || best.score < 0) return null;
+  return best.name;
 }

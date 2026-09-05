@@ -188,6 +188,23 @@ speech engine is the always-available fallback. Push-to-talk dictation and
 hands-free conversation with barge-in. Nothing reaches the chat unreviewed — every
 utterance passes a repair pass the operator sees before it sends.
 
+Hands-free conversation behaves like a colleague over a working agent, not a
+push-button: "keep going" and "how's it going?" do not cancel a run — the first
+is acknowledged, the second is answered from what the run has actually done;
+"stop" cancels it; a new instruction replaces it. The assistant narrates notable
+steps in one short line ("running the tests"), summarises long replies for
+speech instead of reading them in full, and filters its own voice out of the
+microphone. Speech is paced for listening: short lines at the chosen rate
+(default 1.15×), long passages up to 15% faster. Each of these is a setting in
+the voice panel and is documented in `DESIGN.md` §6.1. The built-in voice is the
+best macOS voice installed, chosen by quality tier rather than by list order:
+Premium over Enhanced over ordinary, never one of the voices macOS ships as
+jokes, and an Enhanced voice is preferred even across a region boundary. The
+voice row in the panel says when only the compact voices are present and where
+to download a natural one — System Settings › Accessibility › Live Speech (or
+Spoken Content) › Voice, which installs it system-wide; Live Speech itself does
+not need to be switched on.
+
 ### Guardian
 
 What the machine is holding, right now. **Every number is measured or it is
@@ -530,7 +547,7 @@ ollama serve              # local models on 127.0.0.1:11434
 
 ```bash
 npm run typecheck   # tsc --noEmit
-npm test            # 863 tests, 0 failures
+npm test            # 905 tests, 0 failures
 npm run build       # tsc && vite build
 npm run verify:core # all three
 ```

@@ -1584,6 +1584,39 @@ the `voiceURI`. When no such voice is installed the voice row in
 `VoiceSettingsPanel.tsx` says so and names the download path. A voice beyond
 what macOS ships needs the sidecar tier (`docs/VOICE_SIDECAR.md`).
 
+The desktop shell cannot use `speechSynthesis` at all, so there the same choice
+is made server-side by `speech-local.js#pickVoice`, and until 2026-09-05 it made
+it badly. `localTtsStatus` parsed `say -v '?'` with a pattern that accepted at
+most two whitespace-free words as a name, which kept 71 of this machine's 187
+voices and discarded every modern one — they are all named
+"Samantha (English (US))". What survived for en-US was the set macOS ships as
+jokes, and `pickVoice` took the first match: **Albert**. That, not the model or
+the pace, is what "the voice sounds robotic" was. Both halves are fixed. The
+parser anchors on the language tag and the `#` example, so it reads all 187
+including a three-digit region (`ar_001`) and collapses the duplicate line macOS
+prints for a two-tier install. `pickVoice` now scores rather than takes the
+first: exact region +100, same base language +50, Premium +80, Enhanced +55,
+compact −30, an Eloquence or pre-Vocalizer MacinTalk voice −60, and a voice
+from Apple's own Novelty category −1000 — so a quality tier outranks a region
+boundary (an Enhanced en-GB voice is read to an en-US operator, because the
+accent gap is smaller than the quality gap and an operator who downloaded one
+good voice wants to hear it) while an ordinary voice never crosses one. When
+every candidate is a joke voice it returns `null` and lets `say` use the system
+default. The −60 tier is deliberately survivable: an Eloquence voice loses to
+any real voice, including one from another region, but is still chosen over the
+system default when it is the only voice in its language. Both sets mirror
+`webSpeech.ts`; the two tiers should not disagree about which voices are
+unusable. The list inherited from the browser tier was itself wrong: it scored
+out **Alex**, which is not a novelty voice but Apple's flagship US male voice
+and, at 885 MB, the largest voice asset macOS offers. An operator who
+downloaded the best male voice on the platform would have found the assistant
+refusing to use it. Alex is on neither set now, and Eddy, Flo and Reed no
+longer collect a quality bonus in `scoreVoice` — macOS files them under
+Eloquence. `ttsVoice` stays `null` in
+`DEFAULT_VOICE_SETTINGS`: the default is "the best installed voice", which is
+portable, rather than a name that is right on one machine. Tests:
+`tests/system-voices.test.mjs` (11).
+
 **Explainability.** `VoiceSnapshot.narration` and `VoiceSnapshot.lastIntent`
 drive the caption under the orb: "Heard “keep going” — carrying on". A turn that
 is reinterpreted must be visible, or it is indistinguishable from a dead
