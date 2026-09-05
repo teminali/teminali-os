@@ -2327,6 +2327,15 @@ her the recipe was wrong" matched nothing in the list.
 
 Tests: `tests/voice-addressing-window.test.mjs` (10).
 
+**The defaults stay open.** `requireSpeakerMatch` and `requireWakeWord` both
+remain `false` in `DEFAULT_VOICE_SETTINGS`. This was put to the operator
+directly when the gates above landed, and the answer was to leave them off:
+§6.13 and this section stop the reported failure without asking anyone to
+enrol or to say a name before every turn, and turning speaker match on by
+default would degrade the assistant for anyone with no profile while promoting
+a matcher that §6.1 says must never pose as verification. Both remain
+available as the operator's own hard rules.
+
 ## 7. The agent command loop (`services/agentCommands.ts`, `services/commandThrashing.ts`)
 
 ### 7.1 Diagnose before retrying (2026-09-05)
