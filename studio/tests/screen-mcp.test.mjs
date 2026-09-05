@@ -20,7 +20,7 @@ import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
 import { screenMcpArgs, screenMcpServerSpec, screenShimPath, SCREEN_SERVER_NAME, SCREEN_READ_TOOL } from "../server/screen-mcp.js";
-import { openRun, closeRun, runAuthorises } from "../server/permission-bridge.js";
+import { openRun, closeRun, runAuthorises, runHasEnded } from "../server/permission-bridge.js";
 import { agentBriefing, briefingArgs } from "../server/agent-briefing.js";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -88,6 +88,12 @@ test("a run's token authorises that run and dies with it", () => {
   assert.equal(runAuthorises("run-auth", ""), false);
   closeRun("run-auth");
   assert.equal(runAuthorises("run-auth", token), false);
+  // A stopped turn is distinguishable from a run that never existed, so the
+  // gateway can say "your turn ended" instead of "rejected" (SCREEN_RUN_ENDED).
+  assert.equal(runHasEnded("run-auth"), true);
+  assert.equal(runHasEnded("never-opened"), false);
+  const gateway = fs.readFileSync(new URL("../server/gateway.js", import.meta.url), "utf8");
+  assert.match(gateway, /runHasEnded\(runId\)[\s\S]{0,200}SCREEN_RUN_ENDED/);
 });
 
 /* ── The briefing ───────────────────────────────────────────────────────── */

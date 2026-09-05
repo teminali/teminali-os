@@ -290,9 +290,13 @@ export class VoiceEngine {
   configure(patch: Partial<VoiceSettings>): void {
     const tierChanged = patch.tier !== undefined && patch.tier !== this.settings.tier;
     this.settings = { ...this.settings, ...patch };
+    // The setting is the window for a turn whose finish is uncertain; a
+    // clearly finished one releases at 0.7× and a dangling clause holds to 2×.
+    // "Balanced" (900) therefore runs 630–1800 ms. The endpointer's learned
+    // pacing floor sits on top of this and is untouched by a settings change.
     this.endpointer.configure({
-      minSilenceMs: Math.max(300, Math.round(this.settings.endpointSilenceMs * 0.6)),
-      maxSilenceMs: Math.max(this.settings.endpointSilenceMs, DEFAULT_ENDPOINTER.maxSilenceMs),
+      minSilenceMs: Math.max(400, Math.round(this.settings.endpointSilenceMs * 0.7)),
+      maxSilenceMs: Math.max(Math.round(this.settings.endpointSilenceMs * 2), DEFAULT_ENDPOINTER.maxSilenceMs),
     });
     if (tierChanged) void this.probe();
     this.emit();

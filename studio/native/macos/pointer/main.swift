@@ -247,7 +247,27 @@ func walk(root: AXUIElement, visitLimit: Int, emitLimit: Int, depthLimit: Int) -
         }
 
         guard node.depth < depthLimit else { continue }
-        guard let children = copyAttribute(element, kAXChildrenAttribute as String) as? [AXUIElement] else { continue }
+        var children = (copyAttribute(element, kAXChildrenAttribute as String) as? [AXUIElement]) ?? []
+        if node.depth == 0 {
+            // Chromium-based applications (Chrome, Edge, Brave, Arc, Electron)
+            // list only their menu bar under AXChildren and return an empty
+            // AXWindows until an assistive client has announced itself — but
+            // AXFocusedWindow and AXMainWindow still answer. Without this, a
+            // Chrome tab observed as eleven menu bar items and nothing else,
+            // and the agent reported "only the guide button and the Home
+            // link" on a full YouTube page. Measured: seeding the walk from
+            // the focused window reached 1,184 descendants, 126 of them links.
+            for key in [kAXFocusedWindowAttribute as String, kAXMainWindowAttribute as String] {
+                guard let raw = copyAttribute(element, key) else { continue }
+                // swiftlint:disable:next force_cast — AX always hands back an element here.
+                let window = raw as! AXUIElement
+                if !children.contains(where: { CFEqual($0, window) }) { children.append(window) }
+            }
+            if let windows = copyAttribute(element, kAXWindowsAttribute as String) as? [AXUIElement] {
+                for window in windows where !children.contains(where: { CFEqual($0, window) }) { children.append(window) }
+            }
+        }
+        guard !children.isEmpty else { continue }
 
         let breadcrumb = node.path + [name.map { "\(role):\($0)" } ?? role]
         // Reversed so the popLast() stack yields children in their natural
@@ -482,7 +502,11 @@ case "tree":
         root: root,
         visitLimit: args.int("visit") ?? 6000,
         emitLimit: args.int("max") ?? 400,
-        depthLimit: args.int("depth") ?? 18
+        // 32, not 18: a web page's controls sit under the browser's own
+        // chrome and then the whole DOM. On a YouTube channel page nothing
+        // clickable was inside 18 levels; 30 reached the links. visitLimit
+        // still bounds the work.
+        depthLimit: args.int("depth") ?? 32
     )
 
     // The focused window is what the operator is actually looking at; naming it

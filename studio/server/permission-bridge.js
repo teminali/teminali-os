@@ -27,6 +27,15 @@ export const APPROVAL_TIMEOUT_MS = 5 * 60_000;
 /** runId -> { token, emit, pending, remembered, closed } */
 const runs = new Map();
 
+/**
+ * Runs that have ended, most recent last. A caller still holding the token of
+ * one — the screen shim of a turn the operator stopped — is told the turn is
+ * over rather than that it was rejected, which it read as a broken connection.
+ * Bounded: the ids are opaque and the point is the message, not the history.
+ */
+const ENDED_RUNS_REMEMBERED = 64;
+const endedRuns = new Set();
+
 function constantTimeEqual(a, b) {
   const left = Buffer.from(String(a ?? ""), "utf8");
   const right = Buffer.from(String(b ?? ""), "utf8");
@@ -70,6 +79,13 @@ export function closeRun(runId) {
   }
   run.pending.clear();
   runs.delete(runId);
+  endedRuns.add(runId);
+  if (endedRuns.size > ENDED_RUNS_REMEMBERED) endedRuns.delete(endedRuns.values().next().value);
+}
+
+/** Whether `runId` was a run that has since ended, as opposed to one that never existed. */
+export function runHasEnded(runId) {
+  return endedRuns.has(runId);
 }
 
 export function runCount() {

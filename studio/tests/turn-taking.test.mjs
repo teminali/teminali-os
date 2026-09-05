@@ -14,6 +14,8 @@ import {
 import {
   Endpointer,
   DEFAULT_ENDPOINTER,
+  EAGER_FACTOR,
+  PACING_MARGIN,
   combineFinality,
   silenceWindowMs,
   syntaxFinality,
@@ -180,7 +182,7 @@ test("the window runs from the ceiling at 0 to the floor at 1, and eager shorten
   assert.equal(silenceWindowMs(DEFAULT_ENDPOINTER, 0), maxSilenceMs);
   assert.equal(silenceWindowMs(DEFAULT_ENDPOINTER, 1), minSilenceMs);
   assert.equal(silenceWindowMs(DEFAULT_ENDPOINTER, 0.5), Math.round((minSilenceMs + maxSilenceMs) / 2));
-  assert.equal(silenceWindowMs(DEFAULT_ENDPOINTER, 1, true), Math.round(minSilenceMs * 0.7));
+  assert.equal(silenceWindowMs(DEFAULT_ENDPOINTER, 1, true), Math.round(minSilenceMs * EAGER_FACTOR));
 });
 
 /* ── The endpointer with a clock ──────────────────────────────────────────── */
@@ -244,4 +246,113 @@ test("the frame clock comes from the caller, so a stalled timer cannot stretch t
   // A 5 s gap between frames is clamped to the 120 ms ceiling per frame.
   const event = endpointer.push(false, "", false, { at: 5100, prosody: 0.5 });
   assert.equal(event.type, "holding");
+});
+
+/* ── Learning the speaker's pacing ───────────────────────────────────────── */
+
+/** Drive one endpointer with a 20 ms frame clock. */
+function driver() {
+  const endpointer = new Endpointer();
+  let at = 0;
+  const speak = (ms, transcript = "") => {
+    let event = null;
+    for (const end = at + ms; at < end; at += 20) event = endpointer.push(true, transcript, false, { at }) ?? event;
+    return event;
+  };
+  const quiet = (ms, extras = {}) => {
+    let event = null;
+    for (const end = at + ms; at < end; at += 20) event = endpointer.push(false, "", false, { at, ...extras });
+    return event;
+  };
+  /** Silence with finished-sounding evidence until the turn ends; returns the speech-end event. */
+  const finish = () => {
+    for (let guard = 0; guard < 400; guard += 1) {
+      const event = endpointer.push(false, "Open the settings file for me.", false, { at, prosody: 1 });
+      at += 20;
+      if (event?.type === "speech-end") return event;
+    }
+    throw new Error("never fired");
+  };
+  return { endpointer, speak, quiet, finish, now: () => at };
+}
+
+test("a pause the speaker talks through raises the floor for the pauses after it", () => {
+  const { endpointer, speak, quiet, finish } = driver();
+  speak(800);
+  // 900 ms of neutral silence: the midpoint window is 1200 ms, so the turn holds…
+  assert.equal(quiet(900, { prosody: 0.5 }).type, "holding");
+  assert.equal(endpointer.pacingFloorMs, 0);
+  // …and the speaker carries on. That 900 ms pause was theirs, and the floor learns it.
+  speak(400);
+  const learned = Math.round(900 * PACING_MARGIN);
+  assert.equal(endpointer.pacingFloorMs, learned);
+  // A finished sentence on a falling voice used to release at the 600 ms floor.
+  // Now it waits out the pause this speaker is known to take.
+  const end = finish();
+  assert.equal(end.windowMs, learned);
+  assert.ok(end.windowMs > DEFAULT_ENDPOINTER.minSilenceMs);
+});
+
+test("speech that resumes within a second of an endpoint is a cut-off: reported, and the next window is longer", () => {
+  const { endpointer, speak, quiet, finish } = driver();
+  speak(800);
+  const first = finish();
+  assert.equal(first.windowMs, DEFAULT_ENDPOINTER.minSilenceMs);
+  // Nothing for 300 ms, then the operator finishes the sentence we cut off.
+  quiet(300);
+  const start = speak(200);
+  assert.equal(start.type, "speech-start");
+  assert.equal(start.resumedAfterEndpoint, true);
+  // The whole silence we ended the turn in the middle of: the window that fired plus the gap since.
+  assert.ok(Math.abs(start.gapMs - (first.windowMs + 300)) <= 40, `gap ${start.gapMs}`);
+  const learned = Math.round(start.gapMs * PACING_MARGIN);
+  assert.equal(endpointer.pacingFloorMs, learned);
+  speak(800);
+  const second = finish();
+  assert.equal(second.windowMs, learned);
+  assert.ok(second.windowMs > first.windowMs);
+});
+
+test("a new turn after a pause longer than the resume window is not a cut-off", () => {
+  const { speak, quiet, finish } = driver();
+  speak(800);
+  finish();
+  quiet(DEFAULT_ENDPOINTER.resumeWindowMs + 200);
+  const start = speak(200);
+  assert.equal(start.type, "speech-start");
+  assert.equal(start.resumedAfterEndpoint, undefined);
+});
+
+test("turns that end cleanly let the learned floor relax back toward the configured one", () => {
+  const { endpointer, speak, quiet, finish } = driver();
+  speak(800);
+  quiet(900, { prosody: 0.5 });
+  speak(400);
+  const floors = [endpointer.pacingFloorMs];
+  for (let turn = 0; turn < 5; turn += 1) {
+    finish();
+    floors.push(endpointer.pacingFloorMs);
+    quiet(DEFAULT_ENDPOINTER.resumeWindowMs + 200);
+    speak(800);
+  }
+  for (let i = 1; i < floors.length; i += 1) {
+    assert.ok(floors[i] < floors[i - 1], `floors ${floors.join(" → ")}`);
+    assert.ok(floors[i] > DEFAULT_ENDPOINTER.minSilenceMs);
+  }
+});
+
+test("the learned floor survives reset(), is cleared by forgetPacing(), is capped, and eager cannot undercut it", () => {
+  const { endpointer, speak, quiet } = driver();
+  speak(800);
+  quiet(3000, { prosody: 0 }); // held: finality 0 is the 1800 ceiling… but 3 s exceeds it
+  // A three-second silence fires the turn; learning comes from pauses the speaker talks through.
+  speak(800);
+  quiet(1700, { prosody: 0 });
+  speak(400);
+  assert.equal(endpointer.pacingFloorMs, DEFAULT_ENDPOINTER.pacingCeilingMs, "a very long pause is capped");
+  endpointer.reset();
+  assert.equal(endpointer.pacingFloorMs, DEFAULT_ENDPOINTER.pacingCeilingMs, "reset() clears the turn, not the pacing");
+  assert.equal(silenceWindowMs(DEFAULT_ENDPOINTER, 1, true, 1125), 1125);
+  endpointer.forgetPacing();
+  assert.equal(endpointer.pacingFloorMs, 0);
 });

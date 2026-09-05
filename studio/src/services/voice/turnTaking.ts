@@ -54,17 +54,66 @@ export interface EndpointerConfig {
   minUtteranceMs: number;
   /** Frames of speech needed before we call it a turn start. */
   onsetFrames: number;
+  /**
+   * The learned pacing floor may not exceed this, ms. A speaker who once
+   * stopped for three seconds does not make every turn after it wait three
+   * seconds.
+   */
+  pacingCeilingMs: number;
+  /**
+   * Speech that starts within this many ms of an endpoint we fired is the
+   * same sentence, cut off — not a new turn.
+   */
+  resumeWindowMs: number;
 }
 
+/**
+ * The floor and ceiling are the range a person's own pauses fall in. Under
+ * ~500 ms is a breath between words; 600–1000 ms is a pause between phrases
+ * while the next one is composed; past ~1.8 s even a trailing "and" has been
+ * abandoned. The floor was 360 ms (250 ms after a question) until the operator
+ * reported being cut off "on most occasions" — a phrase-final pause with the
+ * voice falling off read as finished at the floor, every time. See §6.15.
+ */
 export const DEFAULT_ENDPOINTER: EndpointerConfig = {
-  minSilenceMs: 360,
-  maxSilenceMs: 1300,
+  minSilenceMs: 600,
+  maxSilenceMs: 1800,
   minUtteranceMs: 220,
   onsetFrames: 3,
+  pacingCeilingMs: 2000,
+  resumeWindowMs: 1200,
 };
 
+/**
+ * How much a reply to our own question shortens the window and its floor.
+ * 0.7 was too eager: it took a 540 ms floor to 378 ms.
+ */
+export const EAGER_FACTOR = 0.8;
+
+/**
+ * A pause the speaker takes and then talks through is evidence of how long
+ * they pause. The floor learned from it sits this far above the pause, so the
+ * same pause a little longer next time still holds.
+ */
+export const PACING_MARGIN = 1.25;
+
+/** Pauses shorter than this are the gaps between words, not between phrases. */
+const PAUSE_NOTICE_MS = 120;
+
+/**
+ * Each turn that ends without the speaker resuming lets the learned floor
+ * relax this fraction of the way back to the configured one, so a fast talker
+ * who once thought for a while is not waited on forever.
+ */
+const PACING_RELAX = 0.95;
+
 export type TurnEvent =
-  | { type: "speech-start" }
+  /**
+   * `resumedAfterEndpoint` is set when this speech began within
+   * `resumeWindowMs` of a `speech-end` we fired: the operator was not finished,
+   * and `gapMs` is the whole silence the turn was ended in the middle of.
+   */
+  | { type: "speech-start"; resumedAfterEndpoint?: boolean; gapMs?: number }
   /** The speaker paused but we are still holding the turn open. */
   | { type: "holding"; remainingMs: number; windowMs: number }
   | { type: "speech-end"; durationMs: number; reason: "endpoint" | "max-length"; windowMs: number }
@@ -141,19 +190,30 @@ export function combineFinality(syntax: number | null, prosody: number | null): 
  * Interpolate between the min and max windows by how finished it sounds:
  * finality 1 → `minSilenceMs`, 0 → `maxSilenceMs`. Right after we asked
  * something the operator's reply is expected, so `eager` shortens the window
- * — and its floor — by 30% without risking a cut-off.
+ * — and its floor — by `EAGER_FACTOR`. Neither may undercut `pacingFloorMs`,
+ * the floor learned from this speaker's own pauses: a person who pauses
+ * 800 ms between phrases is cut off by any window shorter than that, however
+ * finished the last phrase sounded.
  */
-export function silenceWindowMs(config: EndpointerConfig, finality: number, eager = false): number {
+export function silenceWindowMs(config: EndpointerConfig, finality: number, eager = false, pacingFloorMs = 0): number {
   const { minSilenceMs, maxSilenceMs } = config;
   const clamped = Math.max(0, Math.min(1, finality));
   let window = maxSilenceMs - (maxSilenceMs - minSilenceMs) * clamped;
-  if (eager) window *= 0.7;
-  return Math.round(Math.max(minSilenceMs * (eager ? 0.7 : 1), window));
+  if (eager) window *= EAGER_FACTOR;
+  const floor = Math.max(minSilenceMs * (eager ? EAGER_FACTOR : 1), pacingFloorMs);
+  return Math.round(Math.max(floor, window));
 }
 
 /**
  * Frame-driven turn detector. Feed it every VAD frame; it emits at most one
  * event per frame.
+ *
+ * It also learns. Two things tell it how long this speaker pauses: a silence
+ * that ends with more speech before the window ran out (a pause we rode out),
+ * and speech that starts right after an endpoint we fired (a pause we did not
+ * — a cut-off). Both raise `pacingFloorMs`, the shortest window it will use
+ * for this speaker from then on. `reset()` clears the turn, not the pacing;
+ * `forgetPacing()` clears the pacing.
  */
 export class Endpointer {
   private speaking = false;
@@ -162,6 +222,11 @@ export class Endpointer {
   private speechStartedAt = 0;
   private lastFrameAt = 0;
   private frameMs = 20;
+
+  /** When the last `speech-end` fired, and how long a silence fired it. Survive `reset()`. */
+  private lastEndAt = 0;
+  private lastWindowMs = 0;
+  private pacing = 0;
 
   private config: EndpointerConfig;
 
@@ -180,8 +245,20 @@ export class Endpointer {
     this.speechStartedAt = 0;
   }
 
+  /** Forget what was learned about this speaker's pauses. */
+  forgetPacing(): void {
+    this.pacing = 0;
+    this.lastEndAt = 0;
+    this.lastWindowMs = 0;
+  }
+
   get isSpeaking(): boolean {
     return this.speaking;
+  }
+
+  /** The floor learned from this speaker's pauses, ms; 0 until a pause has taught it something. */
+  get pacingFloorMs(): number {
+    return this.pacing;
   }
 
   /**
@@ -196,6 +273,11 @@ export class Endpointer {
     this.lastFrameAt = now;
 
     if (voiced) {
+      if (this.speaking && this.silenceRun >= PAUSE_NOTICE_MS) {
+        // A pause we held through: the speaker was not finished, and this is
+        // how long they were quiet for.
+        this.learnPause(this.silenceRun);
+      }
       this.silenceRun = 0;
       if (!this.speaking) {
         this.onsetRun += 1;
@@ -203,6 +285,15 @@ export class Endpointer {
           this.speaking = true;
           this.speechStartedAt = now - this.onsetRun * this.frameMs;
           this.onsetRun = 0;
+          const sinceEnd = this.lastEndAt ? this.speechStartedAt - this.lastEndAt : Infinity;
+          if (sinceEnd <= this.config.resumeWindowMs) {
+            // We called the turn over and the speaker carried on. The silence
+            // we cut into was the window that fired plus the gap since.
+            const gapMs = Math.round(this.lastWindowMs + Math.max(0, sinceEnd));
+            this.learnPause(gapMs);
+            this.lastEndAt = 0;
+            return { type: "speech-start", resumedAfterEndpoint: true, gapMs };
+          }
           return { type: "speech-start" };
         }
       }
@@ -220,6 +311,9 @@ export class Endpointer {
       this.speaking = false;
       this.silenceRun = 0;
       if (durationMs < this.config.minUtteranceMs) return { type: "discarded", durationMs };
+      this.lastEndAt = now;
+      this.lastWindowMs = window;
+      this.relaxPacing();
       return { type: "speech-end", durationMs, reason: "endpoint", windowMs: window };
     }
 
@@ -227,6 +321,19 @@ export class Endpointer {
   }
 
   private silenceWindow(transcript: string, eager: boolean, prosody: number | null): number {
-    return silenceWindowMs(this.config, combineFinality(syntaxFinality(transcript), prosody), eager);
+    return silenceWindowMs(this.config, combineFinality(syntaxFinality(transcript), prosody), eager, this.pacing);
+  }
+
+  /** A pause of `ms` was this speaker's, not the end of their turn. */
+  private learnPause(ms: number): void {
+    const target = Math.min(this.config.pacingCeilingMs, Math.round(ms * PACING_MARGIN));
+    if (target > this.config.minSilenceMs && target > this.pacing) this.pacing = target;
+  }
+
+  /** A turn ended cleanly; the learned floor eases back toward the configured one. */
+  private relaxPacing(): void {
+    if (this.pacing <= 0) return;
+    const relaxed = Math.round(this.config.minSilenceMs + (this.pacing - this.config.minSilenceMs) * PACING_RELAX);
+    this.pacing = relaxed > this.config.minSilenceMs ? relaxed : 0;
   }
 }

@@ -15,7 +15,7 @@ import { TERMINAL_LIMITS, runWorkspaceCommand } from "./terminal.js";
 import { forgetVoiceStatus, readBounded, speak, transcribe, voiceStatus } from "./voice.js";
 import { act, assistantCapabilities, observe, requestAccessibility } from "./assistant.js";
 import { AGENTS, AGENT_LIMITS, agentAvailability, isAgentEngine, runAgentTurn } from "./agent-cli.js";
-import { requestApproval, resolveApproval, runAuthorises } from "./permission-bridge.js";
+import { requestApproval, resolveApproval, runAuthorises, runHasEnded } from "./permission-bridge.js";
 import { agentModels, recordResolution } from "./agent-models.js";
 import { appendUsage, summariseUsage, usageRecord } from "./usage-ledger.js";
 import { agentAccounts, readPlanLimits, recordPlanLimits } from "./plan.js";
@@ -588,7 +588,16 @@ export async function createGateway(options = {}) {
       */
       if (request.method === "POST" && SCREEN_AGENT_ROUTES.has(route)) {
         const body = await readJson(request, config.maxJsonBytes);
-        if (!runAuthorises(typeof body?.runId === "string" ? body.runId : "", request.headers["x-teminali-screen-token"] || "")) {
+        const runId = typeof body?.runId === "string" ? body.runId : "";
+        if (!runAuthorises(runId, request.headers["x-teminali-screen-token"] || "")) {
+          // A turn the operator stopped takes its token with it (`closeRun`),
+          // and the shim's next call lands here. Told only that it was
+          // rejected, the agent reported "the screen connection dropped".
+          // The bridge is fine; its turn is over, and it is told so.
+          if (runHasEnded(runId)) {
+            throw new GatewayError(410, "SCREEN_RUN_ENDED",
+              "This agent turn has ended — it was stopped or completed — so the screen can no longer be reached from it. The screen bridge itself is fine; the next turn gets its own hands.");
+          }
           // Deliberately not 401: there is no credential the caller could
           // supply to make this work other than being a live agent run.
           throw new GatewayError(403, "SCREEN_BRIDGE_FORBIDDEN", "The screen bridge rejected the caller.");

@@ -1722,6 +1722,29 @@ has no `--permission-prompt-tool` equivalent, so its screen calls would be
 settled by a sandbox flag with nobody asked, and a gate that cannot ask must not
 grant.
 
+**What the first live turn taught (2026-09-05).** The operator asked the chat
+pane to play a video on a YouTube channel page. Two defects, both fixed.
+
+1. **Chrome's window was not in the tree.** A Chromium application element
+   lists only its menu bar under `AXChildren` and returns an empty `AXWindows`
+   until an assistive client has announced itself; `AXFocusedWindow` and
+   `AXMainWindow` still answer. `walk` in `native/macos/pointer/main.swift`
+   now seeds the application's children with those windows, and the default
+   depth limit is 32 rather than 18 because a page's controls sit under the
+   browser's own chrome and then the whole DOM. Measured on this Mac against a
+   YouTube channel page: **11 elements before (all menu bar items); 55 at
+   depth 18 once the window was reached; 166 at depth 30, 10 of them links.**
+   This was not Chromium's lazy renderer accessibility — the web area was
+   populated as soon as the walk could reach it — and no `--force-renderer-
+   accessibility` launch flag was needed.
+2. **A stopped turn read as a broken connection.** `closeRun` takes the run's
+   token away, so the shim's next call was refused 403
+   `SCREEN_BRIDGE_FORBIDDEN` and the agent reported "the screen connection
+   dropped". `permission-bridge.js` now remembers the last 64 ended run ids
+   (`runHasEnded`), and `/api/assistant/agent/*` answers such a caller **410
+   `SCREEN_RUN_ENDED`** with a message that says the turn ended and the bridge
+   is fine. An unknown run or a wrong token is still 403.
+
 ### An agent that does not know where it is gives wrong answers (2026-09-05)
 
 The same session, the operator watching the chat pane describe itself:
@@ -2170,9 +2193,11 @@ chain, and most of it was one link. From "stops talking" to "first audio":
 1. **VAD.** `audioGraph.ts` reads the analyser every 20 ms (`DEFAULT_FPS`
    50, a 1024-sample window at 48 kHz); the offset is seen within a frame.
 2. **Endpoint.** `turnTaking.ts` runs the silence clock for
-   `minSilenceMs`–`maxSilenceMs` — 540–1900 ms at the default
-   `endpointSilenceMs` of 900 (`conversation.ts#configure`: floor 0.6×,
-   ceiling `max(setting, 1900)`) — sized by how finished the turn sounds.
+   `minSilenceMs`–`maxSilenceMs` — 630–1800 ms at the default
+   `endpointSilenceMs` of 900 (`conversation.ts#configure`: floor 0.7×,
+   ceiling `max(2 × setting, 1800)`) — sized by how finished the turn
+   sounds, and never shorter than the floor learned from the speaker's own
+   pauses (§6.15).
 3. **Recognition.** The sidecar's Whisper is one-shot: the recorder closes on
    the endpoint and the whole utterance goes to `/transcribe` in a single
    pass. Measured on this machine against the running sidecar
@@ -2590,6 +2615,40 @@ enrol or to say a name before every turn, and turning speaker match on by
 default would degrade the assistant for anyone with no profile while promoting
 a matcher that §6.1 says must never pose as verification. Both remain
 available as the operator's own hard rules.
+
+### 6.15 The endpointer learns the speaker's pacing (2026-09-05)
+
+> "it's cutting me out i can not finish my sentenses on most occasionns"
+
+The silence window at the "Balanced" setting ran 540–1300 ms — §6.6 quoted a
+1900 ms ceiling the code did not have — and 378 ms right after Temy asked a
+question. A phrase-final pause on a falling voice reads as finished (§6.6), so
+every pause the operator took between phrases that lasted longer than about
+half a second ended their turn. The constants were set on synthesised tones;
+this is the microphone measurement §6.6 said they needed.
+
+Two changes in `turnTaking.ts`, both tested in `tests/turn-taking.test.mjs`:
+
+- **Human-scale bounds.** `DEFAULT_ENDPOINTER` is 600–1800 ms;
+  `conversation.ts#configure` maps the setting to floor 0.7× and ceiling
+  `max(2×, 1800)`: Snappy 420–1800, Balanced 630–1800, Patient 980–2800.
+  `EAGER_FACTOR` is 0.8, not 0.7.
+- **A learned floor.** The endpointer keeps `pacingFloorMs`, the shortest
+  window it will use for this speaker, and two things raise it: a pause of at
+  least 120 ms that the speaker talked through before the window ran out, and
+  speech that begins within `resumeWindowMs` (1200 ms) of a `speech-end` it
+  fired — a cut-off. Either teaches the pause × `PACING_MARGIN` (1.25), capped
+  at `pacingCeilingMs` (2000). Neither the finality blend nor `eager` may go
+  under it. Every turn that ends without a resume relaxes it 5 % of the way
+  back to the configured floor. `reset()` clears the turn and keeps the
+  pacing; `forgetPacing()` clears the pacing. The `speech-start` event
+  carries `resumedAfterEndpoint: true` and `gapMs` when it was a cut-off.
+
+Not yet true: `conversation.ts` does not act on `resumedAfterEndpoint` — the
+continuation is a new turn, not appended to the one in flight. The pacing is
+not persisted, so every launch starts at the configured floor. Neither the
+new bounds nor the margin has been measured against the operator's voice yet;
+the complaint arrived mid-session and this is the first response to it.
 
 ## 7. The agent command loop (`services/agentCommands.ts`, `services/commandThrashing.ts`)
 
