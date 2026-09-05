@@ -410,9 +410,25 @@ forwarding the callbacks and the chat supplying them — because either alone is
 still silence. `ArenaPane` remains deliberately unsubscribed: its contestants
 work in sandboxes and must not move the operator's tree.
 
-**Still missing:** there is no tool that opens a file in an editor tab.
-`reveal` shows a path in the tree and says so explicitly ("opens no editor tab"),
-so "show me that file in the Files panel" has no tool behind it yet.
+### Showing a file is its own action (`store/studioStore.ts` — `showFile`)
+
+`reveal` scrolls the tree and `openFile` records which file is current. Neither
+is what a person means by "show me this file", and until `open_file` existed
+nothing an agent could call put one in front of the operator — which is the rest
+of the answer to the pointer-driving above: *"it was supposed to open files
+explorer and select a file and show it on the right panel files panel."*
+
+`showFile(path)` is those three things in one place, and the order matters. It
+reveals, so the tree opens to the row; it opens the **file panel** on that path,
+because the panel is the surface that actually renders a file — it reads the
+path itself and it is the only one that can show an image or a PDF; and it then
+reads the file into a tab, which is what makes the tree row read as selected.
+The panel is opened *unconditionally* and the read is allowed to fail: when it
+does, the panel is already showing and has somewhere to put the reason, whereas
+a tab opened with no content would claim the file is empty. It takes the same
+route a click takes, under the same limits, so an agent-opened file and a
+clicked one are the same file. A click in the tree still keeps its own path
+through `FileTree`, which owns a spinner and an error line this cannot reach.
 
 ### What the workspace will open (`server/workspace.js`, `panels/FilePane.tsx`)
 
@@ -1914,8 +1930,8 @@ was worse than useless: the operator was reading a sentence about a file while
 looking at a tree that had not moved.
 
 `server/workspace-mcp.js` and `electron/workspaceMcpStdio.cjs` are the fourth
-MCP server, after `video`, `permission` and `screen`. Three tools: `reveal`,
-`recent_projects`, `open_project`.
+MCP server, after `video`, `permission` and `screen`. Four tools: `reveal`,
+`open_file`, `recent_projects`, `open_project`.
 
 **The tree's open folders are state, not scattered component memory.** This is
 the part that had to come first. `FileTree.tsx` held `isOpen` in a per-row
@@ -1931,18 +1947,34 @@ workspace root resets both: paths from the old tree open nothing in the new one.
 **The run's own stream is the channel back to the window.** The gateway holds no
 handle on the renderer, but the renderer opened the NDJSON stream this turn is
 being read from — so `emitToRun` in `server/permission-bridge.js` puts a
-`workspace` event on it, `agentCliService.ts` dispatches it, and `AgentPane`
-calls `revealPath`. Nothing new to keep alive: the channel dies exactly when the
+`workspace` event on it, `agentCliService.ts` dispatches it, and `AgentPane` and
+`StudioChat` call `revealPath` or `showFile`. Nothing new to keep alive: the channel dies exactly when the
 turn does, and a reveal against a closed stream is reported to the agent as not
 delivered rather than pretended.
 
-**`reveal` is pre-approved; `open_project` is not.** `reveal` shows a path the
-gateway has already refused to let escape the workspace, in a tree the operator
-is already looking at. `open_project` rebinds `config.workspaceRoot`, which is
-what bounds every workspace route, the search and every terminal — the ground
-under their feet — so it falls to the same `--permission-prompt-tool` dialog
-that gates a shell command. `workspaceMcpArgs` names `mcp__workspace__reveal`
-alone in `--allowedTools`, and `tests/workspace-mcp.test.mjs` asserts the bare
+**`open_file` puts the file itself in front of them.** `reveal` scrolls the
+tree and says so in its own description; `open_file` opens the file panel on the
+path and is what to call when someone asked to *see* something. It sends no
+bytes — `/api/workspace/agent/open-file` resolves the path through the same
+guard, refuses a folder, a symlink, a format with no viewer
+(`isViewableWorkspaceFile`, now exported for exactly this) or a file past the
+8 MB cap, and then emits an `open-file` event; the window reads the file back
+through `/api/workspace/file`, the same route a click uses. The refusals happen
+*before* the event so the model is told the truth rather than left believing an
+empty pane; §3 has the renderer half, `showFile`.
+
+**The showing tools are pre-approved; `open_project` is not.** The line is
+between showing and changing, not between quiet and loud. `reveal` and
+`open_file` act on a path the gateway has already refused to let escape the
+workspace, in a tree the operator is already looking at, and write nothing;
+`open_file` is louder — it changes which tab is in front of them — but a
+confirmation dialog per file would make the tool not worth calling, which is the
+behaviour it was added to replace. `open_project` rebinds
+`config.workspaceRoot`, which is what bounds every workspace route, the search
+and every terminal — the ground under their feet — so it falls to the same
+`--permission-prompt-tool` dialog that gates a shell command. `workspaceMcpArgs`
+names `mcp__workspace__reveal,mcp__workspace__open_file` in `--allowedTools`,
+and `tests/workspace-mcp.test.mjs` asserts both the exact list and that the bare
 server name never appears there.
 
 **"Open the last project" is a filter, not a model call.** `server/projects.js`

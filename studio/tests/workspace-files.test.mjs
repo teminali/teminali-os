@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
   deleteWorkspaceFile,
+  isViewableWorkspaceFile,
   isWritableWorkspaceFile,
   listWorkspaceTree,
   readWorkspaceFile,
@@ -52,6 +53,23 @@ test("bytes are never writable, whatever the pane can display", () => {
 
 test(".env stays out, because its contents are usually secrets", () => {
   assert.equal(isWritableWorkspaceFile(".env"), false);
+});
+
+/*
+  The wider predicate, which is what the agent's `open_file` refuses on. It has
+  to agree with the reader exactly: a format this admits and `readWorkspaceFile`
+  then rejects would be a tool reporting a file open over an empty pane.
+*/
+test("viewable is the union of editable and previewable, and stops there", () => {
+  assert.equal(isViewableWorkspaceFile("src/index.ts"), true);
+  assert.equal(isViewableWorkspaceFile("Dockerfile"), true);
+  assert.equal(isViewableWorkspaceFile("logo.png"), true);
+  assert.equal(isViewableWorkspaceFile("report.pdf"), true);
+  assert.equal(isViewableWorkspaceFile("book.xlsx"), true);
+  // No player and no viewer yet — see the media step in the design.
+  assert.equal(isViewableWorkspaceFile("clip.mp4"), false);
+  assert.equal(isViewableWorkspaceFile("bundle.zip"), false);
+  assert.equal(isViewableWorkspaceFile(".env"), false);
 });
 
 /* ── reading ─────────────────────────────────────────────────────────────── */

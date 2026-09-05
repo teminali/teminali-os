@@ -191,6 +191,7 @@ export const AgentPane: React.FC<{ panel: PanelTab & { kind: AgentEngine } }> = 
           onWorkspace: (event) => {
             const store = useStudioStore.getState();
             if (event.action === "reveal") store.revealPath(event.path);
+            else if (event.action === "open-file") void store.showFile(event.path);
             else store.setWorkspacePath(event.path);
           },
           /*

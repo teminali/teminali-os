@@ -95,6 +95,17 @@ function isPreviewFile(path) {
   return IMAGE_EXTENSIONS.has(extension) || BINARY_PREVIEW_EXTENSIONS.has(extension);
 }
 
+/**
+ * Everything the file pane can put in front of the operator: text it can edit,
+ * plus the formats it can only show. Exported because the agent's `open_file`
+ * has to refuse a format before a tab is opened for it — a tool that reports
+ * success and leaves an empty pane is the silence this codebase keeps
+ * legislating against.
+ */
+export function isViewableWorkspaceFile(path) {
+  return isViewableFile(path);
+}
+
 function isViewableFile(path) {
   return isTextFile(path) || isPreviewFile(path);
 }

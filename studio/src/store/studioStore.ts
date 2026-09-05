@@ -201,6 +201,17 @@ interface StudioState {
   toggleExpanded: (path: string) => void;
   /** Open every folder on the way to `path` and scroll the tree to it. */
   revealPath: (path: string) => void;
+  /**
+   * Put a file in front of the operator: revealed and highlighted in the tree,
+   * and open in the file panel, which is the surface that actually renders one
+   * — including the images and PDFs an editor tab cannot show.
+   *
+   * `revealPath` only scrolls and `openFile` only records which file is
+   * current, so neither alone is what someone means by "show me this file".
+   * Drives the agent's `open_file` tool; a click in the tree still takes its
+   * own road because it owns a spinner and an error line this cannot reach.
+   */
+  showFile: (path: string) => Promise<void>;
   /** The row the tree should scroll to; timestamped so a repeat reveal re-fires. */
   revealTarget: { path: string; timestamp: number } | null;
   clearRevealTarget: () => void;
@@ -346,6 +357,38 @@ export const useStudioStore = create<StudioState>()(
       })),
       revealTarget: null,
       clearRevealTarget: () => set({ revealTarget: null }),
+
+      showFile: async (filePath) => {
+        const { revealPath, openFile } = get();
+        revealPath(filePath);
+        const name = filePath.split("/").pop() || filePath;
+
+        /*
+          The panel first, and unconditionally. It reads the path itself, so it
+          shows the file whether or not the read below succeeds — and when the
+          read fails it is the panel, not this action, that has somewhere to
+          put the reason. Imported lazily for the reason `openBrowserPreview`
+          gives: the two stores must not depend on each other at module load.
+        */
+        void import("./panelStore").then(({ usePanelStore }) => {
+          usePanelStore.getState().focusOrOpen({ kind: "file", path: filePath, label: name });
+        });
+
+        /*
+          Then the tab, which is what makes the tree row read as selected.
+          Exactly what a click does — same route, same limits, base64 and all —
+          so an agent-opened file and a clicked one are the same file. A failed
+          read opens no tab at all: an empty one would claim the file is empty.
+        */
+        try {
+          const { WorkspaceService } = await import("../services/workspaceService");
+          const { languageForPath } = await import("../services/language");
+          const file = await WorkspaceService.readFile(filePath);
+          openFile({ ...file, language: languageForPath(file.name) });
+        } catch {
+          /* The panel is already showing, and it will show the error too. */
+        }
+      },
       
       /**
        * No seeded tabs.

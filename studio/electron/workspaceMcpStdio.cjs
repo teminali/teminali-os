@@ -2,22 +2,22 @@
    Workspace MCP shim.
 
    Lets the agent drive the application it is running inside: show a folder in
-   the file tree, and switch the whole workspace to another project. Every call
-   is forwarded to the gateway, which owns the workspace root, re-checks every
-   path and is the only thing holding a channel back to the window; this process
-   decides nothing.
+   the file tree, open a file into an editor tab, and switch the whole workspace
+   to another project. Every call is forwarded to the gateway, which owns the
+   workspace root, re-checks every path and is the only thing holding a channel
+   back to the window; this process decides nothing.
 
    Sibling of screenMcpStdio.cjs and shaped the same way. Runs under Electron's
    bundled Node via ELECTRON_RUN_AS_NODE=1, or under plain node.
 
-   ## The rule that shapes both tools
+   ## The rule that shapes the showing tools
 
    A path is workspace-relative and the gateway proves it. `server/workspace.js`
-   already refuses `..`, absolute paths and symlinks, and `reveal` is answered
-   by the same `resolveWorkspacePath` every read route uses — so there is no
-   path this shim can name that a read could not already have named. Switching
-   projects is the one call that steps outside that boundary, which is exactly
-   why it is not pre-approved.
+   already refuses `..`, absolute paths and symlinks, and `reveal` and
+   `open_file` are answered by the same `resolveWorkspacePath` every read route
+   uses — so there is no path this shim can name that a read could not already
+   have named. Switching projects is the one call that steps outside that
+   boundary, which is exactly why it is not pre-approved.
    ───────────────────────────────────────────────────────────────────────────── */
 
 const PORT = Number(process.env.FRONTIER_GATEWAY_PORT) || 4310;
@@ -62,6 +62,21 @@ const TOOLS = [
     },
   },
   {
+    name: "open_file",
+    description:
+      "Open a file in the operator's editor and make it the tab they are looking at. "
+      + "This is what to call when they asked to *see* something — `reveal` only scrolls their tree to it. "
+      + "Opens text, images, PDFs and spreadsheets; anything else comes back as a refusal rather than an empty tab. "
+      + "It reads only: nothing is written, and a tab they have unsaved changes in is left as it is.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        path: { type: "string", description: "A workspace-relative path to a file, such as \"studio/src/App.tsx\". Not an absolute path, and not a folder." },
+      },
+      required: ["path"],
+    },
+  },
+  {
     name: "open_project",
     description:
       "Switch the whole workspace to another project. This rebinds the file tree, the search and every terminal at once, "
@@ -89,6 +104,10 @@ async function runTool(name, args) {
   switch (name) {
     case "reveal": {
       const data = await call("reveal", { path: String(args.path ?? "") });
+      return data.result ?? { ok: true };
+    }
+    case "open_file": {
+      const data = await call("open-file", { path: String(args.path ?? "") });
       return data.result ?? { ok: true };
     }
     case "recent_projects": {

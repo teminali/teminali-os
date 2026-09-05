@@ -14,9 +14,21 @@
  *
  * ## Which tools are pre-approved, and why that line is where it is
  *
+ * The line is between showing and changing, not between quiet and loud.
+ *
  * `reveal` opens folders in a tree the operator is already looking at, at a
  * path the gateway has already refused to let escape the workspace. It shows;
  * it does not change anything. It is pre-approved.
+ *
+ * `open_file` was added to the same side of that line, deliberately. It opens
+ * an editor tab on a file the operator could open with one click, read back
+ * through the same route that click uses, under the same size and format
+ * limits; it writes nothing, and `openFile` leaves a tab with unsaved changes
+ * alone. It is louder than `reveal` — it changes which tab is in front of them
+ * — but loud and destructive are different things, and a confirmation dialog
+ * in front of every file the agent wants to show would make the tool not worth
+ * calling. That is what the model was working around when it drove the
+ * application's own UI with the pointer instead.
  *
  * `open_project` rebinds `config.workspaceRoot`, which is what bounds every
  * workspace route, the search and every terminal. That is a change of ground
@@ -41,8 +53,17 @@ const here = path.dirname(fileURLToPath(import.meta.url));
  */
 export const WORKSPACE_SERVER_NAME = "workspace";
 
-/** The one tool that only shows. `open_project` is deliberately absent. */
-export const WORKSPACE_READ_TOOL = `mcp__${WORKSPACE_SERVER_NAME}__reveal`;
+/** The tools that only show. `open_project` is deliberately absent. */
+export const WORKSPACE_READ_TOOLS = Object.freeze([
+  `mcp__${WORKSPACE_SERVER_NAME}__reveal`,
+  `mcp__${WORKSPACE_SERVER_NAME}__open_file`,
+]);
+
+/**
+ * The first of them, kept as a name because the tests and the design docs
+ * quote it. Prefer `WORKSPACE_READ_TOOLS` for anything that has to enumerate.
+ */
+export const WORKSPACE_READ_TOOL = WORKSPACE_READ_TOOLS[0];
 
 export function workspaceShimPath() {
   return path
@@ -82,5 +103,11 @@ export function workspaceMcpArgs(engine, runId, token, { execPath = process.exec
     mode: 0o600,
   });
 
-  return { file, args: ["--mcp-config", file, "--allowedTools", WORKSPACE_READ_TOOL] };
+  /*
+    Comma-separated in one value rather than two words after the flag. The CLI
+    accepts both, but this list sits in the middle of an argv that goes on to
+    carry the briefing and the prompt, and a variadic flag next to a positional
+    is a footgun waiting for whoever adds the next argument.
+  */
+  return { file, args: ["--mcp-config", file, "--allowedTools", WORKSPACE_READ_TOOLS.join(",")] };
 }

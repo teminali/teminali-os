@@ -10,7 +10,7 @@ import {
 } from "../../gateway/frontier-runner.js";
 import { BoundedAuditLog } from "./audit-log.js";
 import { createConfig } from "./config.js";
-import { createWorkspaceDirectory, deleteWorkspaceFile, listWorkspaceTree, readWorkspaceFile, resolveWorkspacePath, searchWorkspace, writeWorkspaceFile } from "./workspace.js";
+import { createWorkspaceDirectory, deleteWorkspaceFile, isViewableWorkspaceFile, listWorkspaceTree, readWorkspaceFile, resolveWorkspacePath, searchWorkspace, WORKSPACE_LIMITS, writeWorkspaceFile } from "./workspace.js";
 import { TERMINAL_LIMITS, runWorkspaceCommand } from "./terminal.js";
 import { forgetVoiceStatus, readBounded, speak, transcribe, voiceStatus } from "./voice.js";
 import { act, assistantCapabilities, observe, requestAccessibility } from "./assistant.js";
@@ -37,7 +37,7 @@ import { isValidLogin, readAdmins, requireAdmin, whoami, writeAdmins } from "./a
 import { appendRun, createSandbox, measureSandbox, readRuns, removeRun } from "./arena.js";
 import { currentVersion, publishRelease, validateNextVersion } from "./releases.js";
 import { checkForUpdate, downloadAsset, listReleases } from "./updates.js";
-import { readdir as readNodeDir, readFile as readNodeFile, stat as statNodeFile } from "node:fs/promises";
+import { lstat as lstatNodeFile, readdir as readNodeDir, readFile as readNodeFile, stat as statNodeFile } from "node:fs/promises";
 import { join as joinPath } from "node:path";
 import { existsSync } from "node:fs";
 import { fileURLToPath } from "node:url";
@@ -328,15 +328,18 @@ const bootedAt = Date.now();
 const SCREEN_AGENT_ROUTES = new Set(["/api/assistant/agent/observe", "/api/assistant/agent/act"]);
 
 /**
- * The three routes an agent CLI's workspace shim may reach, and the only three.
+ * The four routes an agent CLI's workspace shim may reach, and the only four.
  *
- * `reveal` and `projects` only show. `open-project` rebinds the workspace root,
- * and is reachable here because the operator has already been asked: the CLI
- * pre-approves `reveal` alone, so this call arrived through the same permission
- * prompt that gates a shell command.
+ * `reveal`, `open-file` and `projects` only show — the first two at a path the
+ * workspace guard has already proved is inside the root, and neither writes a
+ * byte. `open-project` rebinds the workspace root, and is reachable here
+ * because the operator has already been asked: the CLI pre-approves the
+ * showing tools alone, so that call arrived through the same permission prompt
+ * that gates a shell command.
  */
 const WORKSPACE_AGENT_ROUTES = new Set([
   "/api/workspace/agent/reveal",
+  "/api/workspace/agent/open-file",
   "/api/workspace/agent/projects",
   "/api/workspace/agent/open-project",
 ]);
@@ -678,6 +681,60 @@ export async function createGateway(options = {}) {
             result: delivered
               ? { revealed, note: "The operator's file tree is now showing it." }
               : { revealed, note: "The path is valid, but this turn's stream is closed, so the tree was not moved." },
+          });
+          return;
+        }
+
+        /*
+          Open a file in the operator's editor.
+
+          `reveal` scrolls their tree to a path and says so in its own
+          description; until this route existed, nothing an agent could call
+          put a file in front of them, and the model's fallback was to drive
+          the application's own UI with the pointer — eleven clicks to open one
+          file, and it still could not tell whether it had worked.
+
+          The bytes are not sent from here. This puts one event on the run's
+          stream and the window reads the file back through the same
+          `/api/workspace/file` route a click uses, so an agent-opened tab and a
+          clicked one are the same tab, read under the same limits. What this
+          route owes the model is a truthful refusal before a tab is opened for
+          a format the pane cannot show.
+        */
+        if (route === "/api/workspace/agent/open-file") {
+          let absolutePath;
+          try {
+            absolutePath = resolveWorkspacePath(config.workspaceRoot, String(body?.path ?? ""));
+          } catch (error) {
+            throw workspaceError(error);
+          }
+          // lstat, not stat, and for the same reason `readWorkspaceFile` uses
+          // it: a symlink is refused by the read this tab is about to make, so
+          // reporting the file open would be a lie one step ahead of itself.
+          let stats;
+          try {
+            stats = await lstatNodeFile(absolutePath);
+          } catch {
+            throw new GatewayError(404, "WORKSPACE_PATH_NOT_FOUND", `There is nothing at "${body?.path}" in this workspace.`);
+          }
+          if (!stats.isFile() || stats.isSymbolicLink()) {
+            throw new GatewayError(400, "WORKSPACE_FILE_REQUIRED",
+              `"${body?.path}" is not a regular file the editor will open — a folder, or a symlink. \`open_file\` opens a file into an editor tab; \`reveal\` is the one that shows a folder in the tree.`);
+          }
+          if (!isViewableWorkspaceFile(absolutePath)) {
+            throw new GatewayError(415, "WORKSPACE_FILE_UNSUPPORTED",
+              `The editor has no viewer for "${body?.path}". It opens text, images, PDFs and spreadsheets; anything else it will not pretend to show.`);
+          }
+          if (stats.size > WORKSPACE_LIMITS.maxFileBytes) {
+            throw new GatewayError(413, "WORKSPACE_FILE_TOO_LARGE",
+              `"${body?.path}" is ${Math.round(stats.size / (1024 * 1024))} MB, past the ${WORKSPACE_LIMITS.maxFileBytes / (1024 * 1024)} MB the editor will open.`);
+          }
+          const opened = relative(config.workspaceRoot, absolutePath).split(sep).join("/");
+          const delivered = emitToRun(runId, token, { type: "workspace", action: "open-file", path: opened });
+          replyJson(response, 200, {
+            result: delivered
+              ? { opened, note: "It is open in the operator's editor and is the tab they are looking at." }
+              : { opened, note: "The file is readable, but this turn's stream is closed, so no tab was opened." },
           });
           return;
         }

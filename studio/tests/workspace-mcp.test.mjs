@@ -2,11 +2,12 @@
   The workspace MCP surface — the agent's hands on the editor around it.
 
   What these guard is the line between showing and changing. `reveal` opens
-  folders in a tree the operator is already looking at and is pre-approved;
-  `open_project` rebinds the workspace root, which is what bounds every
-  workspace route, the search and every terminal, and must go through the
+  folders in a tree the operator is already looking at and `open_file` opens
+  one of those files into the file panel; both only show, and both are
+  pre-approved. `open_project` rebinds the workspace root, which is what bounds
+  every workspace route, the search and every terminal, and must go through the
   permission prompt. A refactor that pre-approved the server rather than the
-  one tool would erase that line silently, so it is asserted here.
+  showing tools would erase that line silently, so it is asserted here.
 */
 import test from "node:test";
 import assert from "node:assert/strict";
@@ -18,7 +19,7 @@ import { fileURLToPath } from "node:url";
 
 import {
   workspaceMcpArgs, workspaceMcpServerSpec, workspaceShimPath,
-  WORKSPACE_SERVER_NAME, WORKSPACE_READ_TOOL,
+  WORKSPACE_SERVER_NAME, WORKSPACE_READ_TOOL, WORKSPACE_READ_TOOLS,
 } from "../server/workspace-mcp.js";
 import { openRun, closeRun, emitToRun, runAuthorises } from "../server/permission-bridge.js";
 import { agentBriefing } from "../server/agent-briefing.js";
@@ -43,15 +44,23 @@ test("a run's token reaches the shim, and the gateway's bearer does not", () => 
   assert.equal(JSON.stringify(spec).includes("FRONTIER_SESSION_TOKEN"), false);
 });
 
-test("only `reveal` is pre-approved — naming the server would allow the project switch too", () => {
+test("only the showing tools are pre-approved — naming the server would allow the project switch too", () => {
   const tmpDir = tempDir();
   const { args } = workspaceMcpArgs("claude", "run-2", "tok-2", { tmpDir, execPath: "/bin/node" });
   const allowed = args[args.indexOf("--allowedTools") + 1];
-  assert.equal(allowed, WORKSPACE_READ_TOOL);
-  assert.equal(allowed, "mcp__workspace__reveal");
+  /*
+    Two tools now, and that widening was deliberate: `open_file` opens a file
+    the operator could open with one click, through the same route and the same
+    limits, and writes nothing. What must never join them is anything that
+    changes something — a confirmation the operator can answer is the only
+    thing standing between the agent and the ground under their feet.
+  */
+  assert.deepEqual(allowed.split(","), ["mcp__workspace__reveal", "mcp__workspace__open_file"]);
+  assert.deepEqual(allowed.split(","), [...WORKSPACE_READ_TOOLS]);
+  assert.equal(WORKSPACE_READ_TOOL, "mcp__workspace__reveal");
   assert.equal(allowed.includes("open_project"), false);
   // The bare server name allows everything on it. It must not appear alone.
-  assert.notEqual(allowed, `mcp__${WORKSPACE_SERVER_NAME}`);
+  assert.equal(allowed.split(",").includes(`mcp__${WORKSPACE_SERVER_NAME}`), false);
 });
 
 test("the config file carries the token and is not world-readable", () => {
@@ -86,11 +95,28 @@ test("a reveal reaches the run's own stream, and only on that run's token", () =
   assert.equal(runAuthorises("run-emit", token), false);
 });
 
+test("an opened file reaches the window as its own action, not as a reveal", () => {
+  const seen = [];
+  const token = openRun("run-open", (event) => seen.push(event));
+
+  assert.equal(emitToRun("run-open", token, { type: "workspace", action: "open-file", path: "src/App.tsx" }), true);
+  /*
+    A distinct action, deliberately. The renderer answers `reveal` by scrolling
+    the tree and `open-file` by opening the panel; collapsing them would mean
+    either every reveal opens a tab, or the operator asked to see a file and
+    got a highlighted row.
+  */
+  assert.deepEqual(seen, [{ type: "workspace", action: "open-file", path: "src/App.tsx" }]);
+  closeRun("run-open");
+});
+
 /* ── What the agent is told ─────────────────────────────────────────────── */
 
 test("the agent is told about the tree only when the tools are attached", () => {
   assert.match(agentBriefing({ workspace: true }), /reveal/);
+  assert.match(agentBriefing({ workspace: true }), /open_file/);
   assert.equal(agentBriefing({ workspace: false }).includes("reveal"), false);
+  assert.equal(agentBriefing({ workspace: false }).includes("open_file"), false);
 });
 
 /* ── The tool surface, driven for real over stdio ───────────────────────── */
@@ -114,7 +140,7 @@ function askShim(requests) {
   });
 }
 
-test("the shim speaks MCP and offers exactly the three tools the design names", async () => {
+test("the shim speaks MCP and offers exactly the four tools the design names", async () => {
   const replies = await askShim([
     { jsonrpc: "2.0", id: 1, method: "initialize", params: {} },
     { jsonrpc: "2.0", id: 2, method: "tools/list", params: {} },
@@ -122,7 +148,7 @@ test("the shim speaks MCP and offers exactly the three tools the design names", 
 
   assert.equal(replies.find((reply) => reply.id === 1).result.serverInfo.name, "workspace");
   const names = replies.find((reply) => reply.id === 2).result.tools.map((tool) => tool.name).sort();
-  assert.deepEqual(names, ["open_project", "recent_projects", "reveal"]);
+  assert.deepEqual(names, ["open_file", "open_project", "recent_projects", "reveal"]);
 });
 
 test("an unknown tool is a result the agent can act on, not an aborted turn", async () => {
