@@ -527,7 +527,8 @@ Each is dependency-free Node with its own README and test entry point.
 ```bash
 npm install
 
-npm run dev:full     # gateway + Vite renderer in the browser
+npm run dev:full     # gateway + Vite renderer in the browser (gateway under
+                     # node --watch, so an edit to server/ restarts it)
 npm start            # gateway + Vite + Electron (the real app)
 npm run desktop      # Electron only, against an already-running dev server
 

@@ -36,8 +36,9 @@ import { isValidLogin, readAdmins, requireAdmin, whoami, writeAdmins } from "./a
 import { appendRun, createSandbox, measureSandbox, readRuns, removeRun } from "./arena.js";
 import { currentVersion, publishRelease, validateNextVersion } from "./releases.js";
 import { checkForUpdate, downloadAsset, listReleases } from "./updates.js";
-import { readdir as readNodeDir, readFile as readNodeFile } from "node:fs/promises";
+import { readdir as readNodeDir, readFile as readNodeFile, stat as statNodeFile } from "node:fs/promises";
 import { join as joinPath } from "node:path";
+import { fileURLToPath } from "node:url";
 import { MAX_FILE_BYTES, extractFilePart, fileCapabilities, ingestFile } from "./files.js";
 import { detectDevice } from "./device.js";
 import { guardianSnapshot, unloadModel } from "./guardian.js";
@@ -317,6 +318,9 @@ async function streamUpstream(upstream, client, context, maxBytes) {
   return total;
 }
 
+/** When this process started, against which its own source files are compared. */
+const bootedAt = Date.now();
+
 export async function createGateway(options = {}) {
   const config = createConfig(options.environment, options.config);
   const fetchImpl = options.fetchImpl || globalThis.fetch;
@@ -370,6 +374,33 @@ export async function createGateway(options = {}) {
     };
   };
 
+  /**
+   * How old the running code is. A gateway left up across an edit serves the
+   * previous build and every symptom points at the wrong place: the studio
+   * looks broken while the source on disk is correct. `npm run dev:full`
+   * restarts on change (`node --watch`), but a gateway started by hand does
+   * not, so /health reports it and anything can notice.
+   */
+  const sourceAge = async () => {
+    try {
+      const directory = dirname(fileURLToPath(import.meta.url));
+      const names = (await readNodeDir(directory)).filter((name) => name.endsWith(".js"));
+      const times = await Promise.all(
+        names.map(async (name) => (await statNodeFile(`${directory}/${name}`)).mtimeMs),
+      );
+      const newest = Math.max(0, ...times);
+      return {
+        startedAt: new Date(bootedAt).toISOString(),
+        sourceChangedAt: new Date(newest).toISOString(),
+        // Sources newer than the process: this gateway is running old code.
+        stale: newest > bootedAt,
+      };
+    } catch {
+      // Never fail a health check over its own diagnostics.
+      return {};
+    }
+  };
+
   const health = async () => {
     const [ollama, cutMcp] = await Promise.all([
       probe(fetchImpl, joinUrl(config.ollamaUrl, "api/tags"), config.healthTimeoutMs, (body) => Array.isArray(body.models)),
@@ -378,7 +409,7 @@ export async function createGateway(options = {}) {
     return {
       state: ollama.state === "healthy" && cutMcp.state === "healthy" ? "healthy" : "degraded",
       timestamp: new Date().toISOString(),
-      gateway: { state: "healthy", bind: config.host },
+      gateway: { state: "healthy", bind: config.host, ...(await sourceAge()) },
       dependencies: { ollama, teminaliCutMcp: cutMcp, kerfMcp: cutMcp },
     };
   };

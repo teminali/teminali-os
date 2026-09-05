@@ -55,7 +55,7 @@ is the complete list.
 
 | | Path | Auth | |
 | --- | --- | --- | --- |
-| `GET` | `/health` · `/api/health` | public | Gateway state plus Ollama and Teminali Cut MCP probes. Reports `healthy` only when both dependencies are, `degraded` otherwise. |
+| `GET` | `/health` · `/api/health` | public | Gateway state plus Ollama and Teminali Cut MCP probes. Reports `healthy` only when both dependencies are, `degraded` otherwise. `gateway.stale` is true when a file in `server/` is newer than the running process — a gateway left up across an edit, serving the previous build. |
 | `POST` | `/session` · `/api/session` | origin | Session bootstrap. Allowed origin required, body forbidden. |
 | `POST` | `/api/audit` | bearer | Client audit ingestion, metadata only, validated against an allowlist. Answers `202`. |
 
@@ -310,6 +310,13 @@ npm run server        # the gateway alone
 npm run dev:full      # gateway + Vite renderer in the browser
 npm run test:gateway  # this server's focused suite — 20 tests
 ```
+
+Both run the gateway under `node --watch`, so editing anything in `server/`
+restarts it. Before that, a gateway started days earlier kept serving the code
+it was launched with: the studio looked broken while the source on disk was
+correct, and the symptoms pointed everywhere except at the stale process. A
+gateway started some other way still can, which is what `gateway.stale` in
+`/health` is for.
 
 A gateway is often already listening on `:4310`; use
 `FRONTIER_GATEWAY_PORT=4319` when running the tests against a busy machine. If
