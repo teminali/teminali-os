@@ -820,9 +820,68 @@ export async function purgeOllamaMemory(): Promise<void> {
   if (unloaded === 0) throw new GatewayError("No local Frontier model could be unloaded.", "OLLAMA_UNLOAD_FAILED", 503);
 }
 
+export interface DigestStreamOptions {
+  signal: AbortSignal;
+  /** `num_predict` — the digest is two short sentences; see `spokenDigest.ts`. */
+  maxTokens: number;
+  onToken: (token: string) => void;
+}
+
+/**
+ * The spoken digest's own lane. The digest prompt alone — no agent system
+ * prompt, no history, no tool loop — on the Flash model, with the context
+ * size the reply lane resolved so Ollama reuses the runner it already has (a
+ * `num_ctx` change was measured at 1.5–2.4 s of reload). Tokens reach
+ * `onToken` as they arrive. Aborting stops the generation and leaves the model
+ * resident: `streamFromOllama` unloads on abort, and a digest that gave up on
+ * time must not make the next one start from a cold load (17 s measured).
+ */
+async function streamFlashDigest(prompt: string, options: DigestStreamOptions): Promise<void> {
+  const selection = await GatewayClient.resolveModelMode("flash", "");
+  const response = await GatewayClient.request("/api/ollama/chat", {
+    method: "POST",
+    signal: options.signal,
+    body: JSON.stringify({
+      model: selection.model,
+      keep_alive: "30m",
+      stream: true,
+      options: { num_ctx: selection.contextTokens, num_batch: 128, temperature: 0.15, num_predict: options.maxTokens },
+      messages: [{ role: "user", content: prompt }],
+    }),
+  });
+  await GatewayClient.expectOk(response);
+  if (!response.body) throw new GatewayError("Ollama returned no response stream.", "EMPTY_STREAM", 502);
+
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  const consume = (line: string) => {
+    if (!line.trim()) return;
+    const chunk = JSON.parse(line) as OllamaStreamChunk;
+    if (chunk.error) throw new GatewayError(chunk.error, "OLLAMA_ERROR", 502);
+    if (chunk.message?.content) options.onToken(chunk.message.content);
+  };
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split("\n");
+      buffer = lines.pop() || "";
+      for (const line of lines) consume(line);
+    }
+    buffer += decoder.decode();
+    if (buffer.trim()) consume(buffer);
+  } finally {
+    // Releasing the reader lets Ollama stop producing tokens no one will read.
+    await reader.cancel().catch(() => {});
+  }
+}
+
 export const FrontierEngine = {
   streamLocal: streamFromOllama,
   streamAnthropic: streamFromAnthropic,
+  streamDigest: streamFlashDigest,
   describeImages,
   purgeMemory: purgeOllamaMemory,
 };

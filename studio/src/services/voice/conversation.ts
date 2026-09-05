@@ -21,6 +21,7 @@
 import { AudioGraph, encodeWav, type AudioFrame } from "./audioGraph";
 import { speakableText, paceFor } from "./speakable";
 import { Endpointer, DEFAULT_ENDPOINTER } from "./turnTaking";
+import { ProsodyTracker } from "./prosody";
 import {
   applyClassifier,
   classifierPrompt,
@@ -124,6 +125,8 @@ export class VoiceEngine {
   private readonly roster: ProviderRoster = createRoster();
   private readonly graph: AudioGraph;
   private readonly endpointer = new Endpointer();
+  /** The energy and pitch of the last few hundred ms of speech; see `prosody.ts`. */
+  private readonly prosody = new ProsodyTracker();
   private listeners = new Set<Listener>();
 
   private settings: VoiceSettings = { ...DEFAULT_VOICE_SETTINGS };
@@ -474,14 +477,30 @@ export class VoiceEngine {
     // Right after we asked a question, commit faster — a reply is expected.
     const eager =
       this.assistantAskedQuestion && Date.now() - this.assistantTurnEndedAt < 9000;
-    const event = this.endpointer.push(frame.voiced, this.transcript, eager);
+    // Voiced frames feed the prosody tail; silent ones read it. A one-shot
+    // recogniser has no transcript until the recording closes, so on that path
+    // the audio is the only evidence the endpointer has before the ceiling.
+    if (frame.voiced) this.prosody.observe({ at: frame.at, rms: frame.rms, f0: frame.pitch });
+    const event = this.endpointer.push(frame.voiced, this.transcript, eager, {
+      at: frame.at,
+      prosody: frame.voiced ? null : this.prosody.finality(),
+    });
 
     if (event?.type === "speech-start") {
       this.turnStartedAt = Date.now();
       this.setState("hearing");
     } else if (event?.type === "speech-end") {
+      this.prosody.reset();
       if (this.streamingAsr) {
-        if (this.transcript.trim()) {
+        if (this.session?.flush) {
+          // A chunked engine still holds the tail of the sentence in its open
+          // slice. Flush it now rather than commit without it: the final that
+          // comes back carries the whole utterance and triggers the commit.
+          this.awaitingFinal = true;
+          this.setState("deciding");
+          this.session.flush();
+          this.armFinalFallback(VoiceEngine.STREAMING_FINAL_TIMEOUT_MS);
+        } else if (this.transcript.trim()) {
           void this.commitTurn();
         } else {
           // Speech ended, wait for final transcript from recogniser
@@ -499,6 +518,7 @@ export class VoiceEngine {
         this.armFinalFallback(VoiceEngine.ONE_SHOT_FINAL_TIMEOUT_MS);
       }
     } else if (event?.type === "discarded") {
+      this.prosody.reset();
       this.transcript = "";
       this.setState("listening");
     }
@@ -1226,9 +1246,11 @@ export class VoiceEngine {
 
   /**
    * The host has spoken what streamed and is now making the spoken summary of
-   * the rest (`spokenDigest.ts`, up to 7 s). Until it arrives through
-   * `enqueueSpeechChunk` the orb shows "thinking", not a silent "speaking".
-   * If sentences are still being read the switch waits for the queue to drain.
+   * the rest (`spokenDigest.ts`: the model's sentences are spoken as they
+   * arrive; the wait for the first one is budgeted by `digestBudgetMs`).
+   * Until that first sentence arrives through `enqueueSpeechChunk` the orb
+   * shows "thinking", not a silent "speaking". If sentences are still being
+   * read the switch waits for the queue to drain.
    */
   noteDigesting(): void {
     if (this.mode !== "conversation" || !this.settings.speakReplies || this.isStreamDone) return;

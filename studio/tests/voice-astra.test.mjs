@@ -4,7 +4,18 @@ import test from "node:test";
 import { classifyTurnIntent } from "../src/services/voice/turnIntent.ts";
 import { EchoGuard, stripSelfEcho } from "../src/services/voice/echoGuard.ts";
 import { describeToolCall, summariseProgress, summariseOutcome, speakablePath } from "../src/services/voice/progressNarration.ts";
-import { planSpokenDigest, fallbackDigest, tidyDigest, digestPrompt } from "../src/services/voice/spokenDigest.ts";
+import {
+  planSpokenDigest,
+  fallbackDigest,
+  tidyDigest,
+  digestPrompt,
+  digestSource,
+  digestBudgetMs,
+  DigestStream,
+  DIGEST_INPUT_CHARS,
+  DIGEST_BUDGET_BASE_MS,
+  DIGEST_BUDGET_PER_CHAR_MS,
+} from "../src/services/voice/spokenDigest.ts";
 import { scoreAddressing } from "../src/services/voice/addressing.ts";
 
 /* ── Turn intent ──────────────────────────────────────────────────────────── */
@@ -180,6 +191,60 @@ test("digest prompt and tidy keep the model on a short leash", () => {
   assert.equal(tidyDigest("Summary: I **fixed** the `echo` bug and the tests pass."), "I fixed the echo bug and the tests pass.");
   assert.equal(tidyDigest("ok"), "");
   assert.equal(fallbackDigest("Short one. Then more."), "Short one. The rest is in the chat.");
+});
+
+test("the model is shown the head and tail of the remainder, code fences dropped", () => {
+  assert.equal(digestSource("  a  b \n\n c "), "a b c");
+  assert.equal(digestSource("Done.\n```ts\nconst x = 1;\n```\nNext."), "Done. (code) Next.");
+  const long = `${"Head sentence number one. ".repeat(60)}END-MARKER ${"tail words ".repeat(40)}`;
+  const shown = digestSource(long);
+  assert.ok(shown.length <= DIGEST_INPUT_CHARS + " […] ".length, `shown ${shown.length} chars`);
+  assert.ok(shown.startsWith("Head sentence number one."));
+  assert.ok(shown.includes(" […] "));
+  assert.ok(shown.endsWith("tail words"));
+  assert.ok(!shown.includes("END-MARKER"));
+  // The prompt can never carry more than the bounded source.
+  const prompt = digestPrompt("x".repeat(20_000));
+  assert.ok(prompt.length < 400 + DIGEST_INPUT_CHARS, `prompt ${prompt.length} chars`);
+});
+
+test("the first-sentence budget grows with what the model is shown, then caps", () => {
+  assert.equal(digestBudgetMs(0), DIGEST_BUDGET_BASE_MS);
+  assert.equal(digestBudgetMs(320), DIGEST_BUDGET_BASE_MS + 320 * DIGEST_BUDGET_PER_CHAR_MS);
+  assert.equal(digestBudgetMs(DIGEST_INPUT_CHARS), DIGEST_BUDGET_BASE_MS + DIGEST_INPUT_CHARS * DIGEST_BUDGET_PER_CHAR_MS);
+  assert.equal(digestBudgetMs(10_000), digestBudgetMs(DIGEST_INPUT_CHARS));
+  assert.equal(digestBudgetMs(-5), DIGEST_BUDGET_BASE_MS);
+});
+
+test("a streamed digest is spoken sentence by sentence and stops at two", () => {
+  const stream = new DigestStream();
+  assert.deepEqual(stream.push("Summary: I **fixed** the `echo` bug"), []);
+  assert.deepEqual(stream.push(" and the tests pass. Next"), ["I fixed the echo bug and the tests pass."]);
+  assert.equal(stream.done, false);
+  assert.equal(stream.spokenSentences, 1);
+  assert.deepEqual(stream.push(" I will wire the panel. And then some more."), ["Next I will wire the panel."]);
+  assert.equal(stream.done, true);
+  assert.equal(stream.spokenSentences, 2);
+  assert.deepEqual(stream.push(" Ignored."), []);
+  // A cut digest flushes nothing: the half sentence it was stopped in stays unsaid.
+  assert.deepEqual(stream.finish(), []);
+});
+
+test("a digest that ends mid-sentence is flushed; a code fence or a ramble ends it", () => {
+  const short = new DigestStream();
+  assert.deepEqual(short.push("Two files changed"), []);
+  assert.deepEqual(short.finish(), ["Two files changed"]);
+  assert.equal(short.spokenSentences, 1);
+  // Decimal points are not sentence ends.
+  const decimal = new DigestStream();
+  assert.deepEqual(decimal.push("Rate is now 1.15 not 1.02. Done"), ["Rate is now 1.15 not 1.02."]);
+  const fenced = new DigestStream();
+  assert.deepEqual(fenced.push("I added the route. Here it is:\n```ts\nx\n```"), ["I added the route.", "Here it is:"]);
+  assert.equal(fenced.done, true);
+  const ramble = new DigestStream();
+  assert.deepEqual(ramble.push(`${"word ".repeat(100)}end. More.`), []);
+  assert.equal(ramble.done, true);
+  assert.equal(ramble.spokenSentences, 0);
 });
 
 /* ── Addressing in an open hands-free session ─────────────────────────────── */

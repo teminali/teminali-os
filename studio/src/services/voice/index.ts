@@ -9,7 +9,18 @@ export { scoreAddressing, stripWakeWord } from "./addressing";
 export { classifyTurnIntent, type TurnIntent, type TurnIntentVerdict } from "./turnIntent";
 export { EchoGuard, stripSelfEcho } from "./echoGuard";
 export { describeToolCall, summariseProgress, summariseOutcome, speakablePath, type RunProgress } from "./progressNarration";
-export { planSpokenDigest, digestPrompt, tidyDigest, fallbackDigest, STREAMED_SENTENCE_LIMIT, DIGEST_TIMEOUT_MS } from "./spokenDigest";
+export {
+  planSpokenDigest,
+  digestPrompt,
+  digestSource,
+  digestBudgetMs,
+  tidyDigest,
+  fallbackDigest,
+  DigestStream,
+  STREAMED_SENTENCE_LIMIT,
+  DIGEST_MAX_TOKENS,
+  DIGEST_TAIL_IDLE_MS,
+} from "./spokenDigest";
 export { createRoster, probeAll, resolve } from "./providers";
 export { resolveProviders, type ResolvedProviders } from "./resolution";
 export { AudioGraph, encodeWav } from "./audioGraph";

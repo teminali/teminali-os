@@ -13,16 +13,20 @@ import { Composer } from "./Composer";
 import { MessageBlock } from "./MessageBlock";
 import { ChangeReviewDock } from "./ChangeReviewDock";
 import {
-  DIGEST_TIMEOUT_MS,
+  DIGEST_MAX_TOKENS,
+  DIGEST_TAIL_IDLE_MS,
+  DigestStream,
   STREAMED_SENTENCE_LIMIT,
   describeToolCall,
+  digestBudgetMs,
   digestPrompt,
+  digestSource,
   planSpokenDigest,
   speakableText,
   summariseProgress,
-  tidyDigest,
   type RunProgress,
 } from "../../services/voice";
+import { FrontierEngine } from "../../services/frontierEngine";
 import { useGitHubStatus } from "../../hooks/useGitHubStatus";
 import { useProjectLibrary } from "../../hooks/useProjectLibrary";
 import { UsageService } from "../../services/usageService";
@@ -154,9 +158,11 @@ export const StudioChat: React.FC<{
 
   /**
    * Speak the part of a reply that was not read out while it streamed. Short:
-   * verbatim. Long: a two-sentence summary from the local Flash lane, with a
-   * rule-based line if the model is slow. The full text is in the chat either
-   * way. See `spokenDigest.ts` for the policy and its limits.
+   * verbatim. Long: a two-sentence summary from the Flash lane, spoken
+   * sentence by sentence as the model produces it, with a rule-based line if
+   * the first sentence is late. The full text is in the chat either way. See
+   * `spokenDigest.ts` for the policy, its limits and the measurements behind
+   * them.
    */
   const speakRemainder = useCallback(async (currentVoice: UseVoiceResult, remaining: string, turnId: number) => {
     const plan = planSpokenDigest(speakableText(remaining), currentVoice.settings.summariseLongReplies);
@@ -169,35 +175,52 @@ export const StudioChat: React.FC<{
       return;
     }
     currentVoice.noteDigesting();
-    let summary = "";
+    // The only wait the operator hears is for the first sentence, budgeted by
+    // how much the model was shown. Once something is being spoken the clock
+    // becomes an idle guard: a stalled tail is cut, not waited for. A newer
+    // turn owns the voice, so it stops the digest outright.
+    const live = () => turnId === turnIdRef.current;
+    const stream = new DigestStream();
     const controller = new AbortController();
-    const timer = window.setTimeout(() => controller.abort(), DIGEST_TIMEOUT_MS);
+    let timer = window.setTimeout(() => controller.abort(), digestBudgetMs(digestSource(remaining).length));
+    const say = (sentences: string[]) => {
+      for (const sentence of sentences) void currentVoice.enqueueSpeechChunk(sentence, false);
+    };
+    let ended = false;
     try {
-      let output = "";
-      await AIService.streamMessage(
-        "frontier",
-        digestPrompt(remaining),
-        [],
-        {
-          onToken: (token) => {
-            output += token;
-          },
-          onComplete: (result) => {
-            output = result.fullText;
-          },
+      await FrontierEngine.streamDigest(digestPrompt(remaining), {
+        signal: controller.signal,
+        maxTokens: DIGEST_MAX_TOKENS,
+        onToken: (token) => {
+          if (!live()) {
+            controller.abort();
+            return;
+          }
+          const ready = stream.push(token);
+          if (ready.length > 0) say(ready);
+          if (stream.done) {
+            controller.abort();
+            return;
+          }
+          if (stream.spokenSentences > 0) {
+            window.clearTimeout(timer);
+            timer = window.setTimeout(() => controller.abort(), DIGEST_TAIL_IDLE_MS);
+          }
         },
-        [],
-        { mode: "flash", signal: controller.signal },
-      );
-      summary = tidyDigest(output);
+      });
+      ended = !controller.signal.aborted;
     } catch {
-      summary = "";
+      // Out of time, stopped, or the lane is down: what was said stands.
     } finally {
       window.clearTimeout(timer);
     }
-    // A newer turn started while the summary was being made; it owns the voice now.
-    if (turnId !== turnIdRef.current) return;
-    void currentVoice.enqueueSpeechChunk(summary || plan.fallback, true);
+    if (!live()) return;
+    if (ended) say(stream.finish());
+    if (stream.spokenSentences === 0) {
+      void currentVoice.enqueueSpeechChunk(plan.fallback, true);
+      return;
+    }
+    void currentVoice.enqueueSpeechChunk("", true);
   }, []);
   const turnIdRef = useRef(0);
   const isSpeakingStreaming = useRef(false);
