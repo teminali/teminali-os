@@ -1500,6 +1500,36 @@ the deadline: a gate that cannot ask must not grant.
 Designed in `src/video/P3-import-gate.md`; tested in
 `tests/media-consent-gate.test.mjs`.
 
+### The assistant can see its own window
+
+Chromium builds an accessibility tree lazily: it waits for an assistive
+technology to announce itself through `AXEnhancedUserInterface` before paying
+for one. The pointer helper reads the tree with raw `AXUIElement` calls, which
+never trips that auto-enable — so the assistant could drive every application on
+the Mac **except the one it lives in**. Measured 2026-09-05: `assistant-doctor`
+reported 10 elements for this app — eight menu-bar items, the `AXWindow`, one
+`AXGroup` — and nothing at all inside the renderer.
+
+`electron/main.cjs` now calls `app.setAccessibilitySupportEnabled(true)` on
+darwin at `whenReady`. The cost is an accessibility tree maintained for the
+renderer for the life of the process; that is the trade the feature is made of.
+
+### A CLI permission prompt is asked, not waited out
+
+`server/permission-bridge.js` emits a `permission` event and blocks the agent
+inside its tool call until an answer is posted, auto-denying after
+`APPROVAL_TIMEOUT_MS` (5 minutes). `AgentPane` subscribed; **chat did not**, so a
+Claude Code or Codex turn started from chat asked a question no surface could
+render and then stalled for the full five minutes. Measured: a `cd` outside the
+workspace held a turn for 4m41s before the timeout denied it and the model
+narrated "the listing needed approval and timed out".
+
+`aiService.ts` now routes the request through the approval gate chat already
+owns (`useCommandApproval`, rendered at `StudioChat.tsx:764`) rather than
+growing a second surface. With no gate wired the answer is deny **at once** —
+the same rule the media-consent gate above states: a gate that cannot ask must
+not grant, and refusing in a second beats refusing in five minutes.
+
 ## 6. Voice (`studio/src/services/voice/`)
 
 Two tiers: the browser engine (always available) and **VibeVoice** run locally

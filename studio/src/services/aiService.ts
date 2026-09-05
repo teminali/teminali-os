@@ -8,7 +8,7 @@
  * in frontierEngine.ts.
  */
 import { GatewayError } from "./gatewayClient";
-import { AgentCliService } from "./agentCliService";
+import { AgentCliService, type PermissionRequest } from "./agentCliService";
 import { TerminalService } from "./terminalService";
 import { FrontierEngine, type EngineCapabilities, type StreamCallbacks, type VideoToolSummary } from "./frontierEngine";
 import { executeTool, getToolManifest } from "../video/mcp/toolRegistry";
@@ -18,6 +18,22 @@ import type { ChatMessage, ModelModeId } from "../types";
 
 export type { StreamCallbacks } from "./frontierEngine";
 export { FLASH_MODEL, MAX_MODEL } from "./frontierEngine";
+
+/**
+ * A CLI permission request, as one line an operator can judge.
+ *
+ * The approval gate is keyed on the head of this string, so the tool name has
+ * to lead: "always allow" must mean the tool, not the particular path it was
+ * pointed at this time. `key` is what the gateway itself would remember —
+ * `Bash(open)` rather than all of `Bash` — so it is preferred when present.
+ */
+function describePermission(request: PermissionRequest): string {
+  const command = typeof request.input?.command === "string" ? request.input.command : null;
+  const path = typeof request.input?.path === "string" ? request.input.path : null;
+  const detail = command ?? path;
+  const head = request.key || request.toolName;
+  return detail ? `${head}: ${detail}` : head;
+}
 
 export interface StreamRequestOptions {
   mode?: ModelModeId;
@@ -143,6 +159,24 @@ export class AIService {
       // CLIs, run as processes in the workspace with their own auth and their
       // own tools. Anything else has no configured production path.
       if (engine === "claude" || engine === "codex") {
+        /*
+         * Put the CLI's permission prompts in front of the operator.
+         *
+         * The gateway emits a `permission` event and then blocks the agent
+         * inside its own tool call until an answer is posted, auto-denying
+         * after APPROVAL_TIMEOUT_MS (5 minutes). Only AgentPane ever
+         * subscribed, so a turn started from chat asked a question nobody
+         * could see and then sat there for the full five minutes — measured:
+         * a `cd` outside the workspace stalled a turn for 4m41s before the
+         * timeout denied it and the model narrated "the listing needed
+         * approval and timed out".
+         *
+         * The chat already owns an approval gate for the in-app agent, and it
+         * already renders whatever is pending, so the CLI's request is asked
+         * through that same gate rather than growing a second surface. With no
+         * gate wired the request is denied at once: refusing in a second is a
+         * far better answer than refusing in five minutes.
+         */
         const turn = await AgentCliService.streamTurn(
           {
             engine,
@@ -152,7 +186,30 @@ export class AIService {
             permission: options.agentPermission,
             signal: options.signal,
           },
-          callbacks,
+          {
+            ...callbacks,
+            onPermission: (request) => {
+              void (async () => {
+                const approve = options.approveCommand;
+                const approved = approve
+                  ? await approve({
+                      command: describePermission(request),
+                      risk: "confirm",
+                      reason: `${engine === "claude" ? "Claude Code" : "Codex"} is asking to use ${request.toolName}.`,
+                    })
+                  : false;
+                await AgentCliService.answerPermission({
+                  runId: request.runId,
+                  id: request.id,
+                  behavior: approved ? "allow" : "deny",
+                  // The gate's own "remember" already suppresses the next
+                  // identical ask on this side, so the answer posted to the
+                  // gateway stays a single decision about a single request.
+                  remember: false,
+                });
+              })();
+            },
+          },
         );
         options.onAgentSession?.(turn.sessionId);
         return;

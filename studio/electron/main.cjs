@@ -841,6 +841,30 @@ process.on("unhandledRejection", (reason) => {
 app.whenReady().then(async () => {
   log("app.whenReady resolved");
 
+  /*
+   * Let the screen assistant see this window's own controls.
+   *
+   * Chromium builds its accessibility tree lazily: it waits for an assistive
+   * technology to announce itself through `AXEnhancedUserInterface` before
+   * spending anything on one. The pointer helper reads the tree with raw
+   * `AXUIElement` calls instead, which never trips that auto-enable — so
+   * `assistant-doctor` reported ten elements for this app (eight menu-bar
+   * items, the window, one group) and nothing inside the renderer. The
+   * assistant could drive every other application on the Mac except the one it
+   * lives in.
+   *
+   * The cost is real but bounded: an accessibility tree is maintained for the
+   * renderer from here on. That is the trade the feature is made of.
+   */
+  if (process.platform === "darwin") {
+    try {
+      app.setAccessibilitySupportEnabled(true);
+      log("Accessibility support enabled for the renderer");
+    } catch (error) {
+      log("Accessibility support could not be enabled:", error?.message || error);
+    }
+  }
+
   // Before the window: preload.cjs reads the session as the page loads, so the
   // gateway has to be listening by then. A failure here is logged and survived
   // rather than thrown — a studio that opens and reports the gateway offline is
