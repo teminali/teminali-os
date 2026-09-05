@@ -249,6 +249,10 @@ export const VoiceSettingsPanel: React.FC<VoiceSettingsPanelProps> = ({
           <Toggle checked={settings.summariseLongReplies} onChange={(value) => update({ summariseLongReplies: value })} />
         </Row>
 
+        <Row label="Remember what it overhears" hint="Speech that was not addressed to the assistant is kept for ten minutes so you can ask “what did she just say?”. It is already transcribed either way; this only decides whether it is kept. Nothing is sent anywhere, and it is cleared whenever hands-free conversation stops.">
+          <Toggle checked={settings.ambientMemory} onChange={(value) => update({ ambientMemory: value })} />
+        </Row>
+
         <Row label="Let me interrupt" hint="Talking over a spoken reply stops it immediately and starts your turn. Praise, “keep going” and “how's it going?” do not cancel a run; a new instruction or “stop” does.">
           <Toggle checked={settings.allowBargeIn} onChange={(value) => update({ allowBargeIn: value })} />
         </Row>

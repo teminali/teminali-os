@@ -1732,3 +1732,51 @@ audio. A rejected clip returns empty text and is indistinguishable from silence
 to the studio, which is the point.
 
 Neither route streams, and `/status` says so rather than claiming otherwise.
+
+### 6.4 What it overheard (`ambientMemory.ts`, 2026-09-05)
+
+An always-open microphone hears the whole room: the other side of a phone call,
+someone at the door, a car outside. The addressing gate exists so none of that
+becomes a turn — and until now the text was simply discarded, except for
+`lastRejected`, a single slot kept so the operator could undo a gate mistake.
+
+`AmbientMemory` is that slot generalised into a bounded log, so "what did she
+just say?" and "did you hear that?" have an answer. **It costs no extra
+recognition.** The utterance has already been transcribed by the time the gate
+rejects it; the only thing that changes is that it is kept for a while instead
+of dropped.
+
+Three properties, because this is a recording of a room containing people who
+did not ask to be recorded:
+
+1. **Bounded.** `AMBIENT_WINDOW_MS` is ten minutes and `AMBIENT_MAX_ENTRIES` is
+   200. Entries expire on a wall clock, not on a session; there is no mode in
+   which it grows all day.
+2. **Local.** Recall answers are composed by rules in `answerFromAmbient`, not
+   by a model, so asking a question about the room never sends the room to one.
+   This is the same doctrine as the addressing and intent gates: rules on the
+   hot path.
+3. **Forgettable.** "forget what you heard" clears it, and so does stopping
+   hands-free conversation — stopping is an explicit act and must end the
+   recording as well as the session. The toggle is *Remember what it overhears*
+   in `VoiceSettingsPanel.tsx`; `ambientMemory` defaults to `true`.
+
+`classifyAmbientQuery` recognises the recall phrasings. Every pattern has to
+name the room explicitly, because a false positive swallows a real instruction
+— far worse than missing a question the operator can repeat. When a pattern
+does match but nothing was overheard, the engine **falls through to the normal
+instruction path** rather than answering: "what did he say in the docs?" reads
+as a recall question and is not one, and replying "I heard nothing" would eat
+the turn.
+
+Speaker attribution comes free from `AddressingVerdict.signals.speakerMatch`:
+at or above 0.6 the line is the operator's own and is never offered back as
+something overheard, below it is `other`, and `null` is `unknown`.
+
+**Sounds are not labelled yet.** `AmbientKind` carries `"sound"` so the shape is
+ready, but only `"speech"` is ever produced: naming a noise needs an audio
+classifier the sidecar does not run. Asked "what was that noise?", the
+assistant says it can only make out speech — which is true, where "probably a
+door" would be an invention.
+
+Tests: `tests/ambient.test.mjs` (13).

@@ -32,6 +32,7 @@ import {
 import { SpeakerProfile, type EnrolledProfile } from "./speakerProfile";
 import { classifyTurnIntent, type TurnIntentVerdict } from "./turnIntent";
 import { EchoGuard } from "./echoGuard";
+import { AmbientMemory, classifyAmbientQuery } from "./ambientMemory";
 import { cleanTranscript, isNonSpeechOrBlank, polishIsTrustworthy, polishPrompt, repairDeterministic, withPolish } from "./transcriptRepair";
 import { createRoster, probeAll, resolve, type ProviderRoster, type ResolvedProviders } from "./providers";
 import {
@@ -139,6 +140,8 @@ export class VoiceEngine {
   private suspendedSpeech: string[] | null = null;
   private currentlySpeakingText: string | null = null;
   private readonly echo = new EchoGuard();
+  /** What was heard and deliberately not answered. See `ambientMemory.ts`. */
+  private readonly ambient = new AmbientMemory();
   private narration: string | null = null;
   private lastIntent: VoiceSnapshot["lastIntent"] = null;
   /** A one-off line (status answer, "still on it") is playing ahead of the queue. */
@@ -396,6 +399,9 @@ export class VoiceEngine {
     this.narration = null;
     this.lastIntent = null;
     this.echo.clear();
+    // Stopping is an explicit act, and it must be the end of the recording as
+    // well as the end of the session.
+    this.ambient.forget();
     this.clearAutoSend();
     this.stopTicker();
     this.clearFinalFallback();
@@ -634,6 +640,18 @@ export class VoiceEngine {
     if (this.mode === "conversation" && !verdict.directed) {
       // Meant for someone else. Note it, and carry on with what we were saying.
       this.lastRejected = { text: heard, verdict };
+      if (this.settings.ambientMemory) {
+        // Already transcribed, and about to be discarded. Keeping it is what
+        // makes "what did she just say?" answerable, and costs no recognition.
+        const match = verdict.signals.speakerMatch;
+        this.ambient.remember({
+          kind: "speech",
+          text: heard,
+          speaker: match === null ? "unknown" : match >= 0.6 ? "operator" : "other",
+          confidence: verdict.confidence,
+          reason: verdict.reason,
+        });
+      }
       this.resumeSuspendedSpeech();
       return;
     }
@@ -693,6 +711,27 @@ export class VoiceEngine {
       const summary = this.host.progressSummary?.() ?? "Still working on it. I'll tell you as soon as it's done.";
       this.speakInterjection(summary);
       return;
+    }
+
+    // A question about the room rather than about the work. Answered from the
+    // ambient log by rules, so asking what was overheard never sends what was
+    // overheard to a model.
+    const ambientQuery = this.settings.ambientMemory
+      ? classifyAmbientQuery(withoutWakeWord || heard)
+      : null;
+    if (ambientQuery) {
+      const recalled = this.ambient.answer(ambientQuery);
+      // A null answer means nothing was overheard, and the phrasing that got
+      // us here is not unambiguous: "what did he say in the docs?" reads as a
+      // recall question and is not one. Falling through costs nothing, while
+      // answering "I heard nothing" would swallow a real instruction.
+      if (recalled) {
+        const resume = this.suspendedSpeech ?? [];
+        this.suspendedSpeech = null;
+        this.speechQueue = [...resume, ...this.speechQueue];
+        this.speakInterjection(recalled);
+        return;
+      }
     }
 
     // A real instruction: it replaces whatever was being said or done.

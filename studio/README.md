@@ -198,7 +198,9 @@ is acknowledged, the second is answered from what the run has actually done;
 "stop" cancels it; a new instruction replaces it. The assistant narrates notable
 steps in one short line ("running the tests"), summarises long replies for
 speech instead of reading them in full, and filters its own voice out of the
-microphone. Speech is paced for listening: short lines at the chosen rate
+microphone. Speech that was not addressed to it is kept for ten minutes rather
+than discarded, so "what did she just say?" has an answer — bounded, never sent
+anywhere, cleared when the session stops, and switched off with one toggle. Speech is paced for listening: short lines at the chosen rate
 (default 1.15×), long passages up to 15% faster. Each of these is a setting in
 the voice panel and is documented in `DESIGN.md` §6.1. The built-in voice is the
 best macOS voice installed, chosen by quality tier rather than by list order:
@@ -552,7 +554,7 @@ ollama serve              # local models on 127.0.0.1:11434
 
 ```bash
 npm run typecheck   # tsc --noEmit
-npm test            # 920 tests, 0 failures
+npm test            # 933 tests, 0 failures
 npm run build       # tsc && vite build
 npm run verify:core # all three
 ```

@@ -292,6 +292,12 @@ export interface VoiceSettings {
   /** Spoken when hands-free conversation starts, so you know it is listening. */
   greeting: string;
   speakGreeting: boolean;
+  /**
+   * Keep what the addressing gate rejected, so "what did she just say?" has an
+   * answer. Bounded to `AMBIENT_WINDOW_MS`, never sent anywhere, and cleared
+   * whenever hands-free conversation stops.
+   */
+  ambientMemory: boolean;
 }
 
 export const DEFAULT_VOICE_SETTINGS: VoiceSettings = {
@@ -313,4 +319,5 @@ export const DEFAULT_VOICE_SETTINGS: VoiceSettings = {
   ttsRate: 1.15,
   greeting: "Hey! What are we building today?",
   speakGreeting: true,
+  ambientMemory: true,
 };
