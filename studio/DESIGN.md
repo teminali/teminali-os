@@ -390,6 +390,36 @@ bridge. Booting open on top-level `src` and `studio` survives the move as
 `studio/src` stays shut. Changing the workspace root clears the set — paths from
 the old tree open nothing in the new one.
 
+### What the workspace will open (`server/workspace.js`, `panels/FilePane.tsx`)
+
+One predicate answers "is this text?" — `isTextFile` — and the tree, the reader,
+the writer, the delete path and search all ask it. They read the extension table
+separately before, which was survivable only while an extension was the whole
+answer; the moment a file could qualify by its **name** they would have
+disagreed, and a disagreement here means the dock offering a reject that cannot
+run. `TEXT_FILENAMES` is what admits `.gitignore`, `Dockerfile`, `Makefile` and
+their kind. `.env` is deliberately absent: it is text, but it is the one text
+file whose contents are usually secrets.
+
+A second predicate, `isPreviewFile`, marks what is readable **as bytes only** —
+images, `.pdf`, `.xls`/`.xlsx`. Those come back base64 under a real mime type,
+appear in the tree, and are never writable: `writeWorkspaceFile` still refuses
+them, so nothing can overwrite a picture with utf8 and no dock row is ever
+offered for one. `.svg` stays on the text side, because it is markup an operator
+is more likely to edit than to look at.
+
+`FilePane` turns base64 into one object URL and shows it — an `<img>` for an
+image, an `<iframe>` for a PDF, which in the desktop app is Chromium's own
+viewer (paging, zoom, find, print, and no dependency to keep current). That
+viewer is a plugin and is **off by default**: `plugins: true` in
+`electron/main.cjs` and this pane have to move together, because without the
+flag the frame renders blank rather than failing. A format with no viewer yet —
+a spreadsheet — says so plainly instead of looking broken. The 8 MB read cap is
+unchanged, and video is not here: it cannot travel a JSON API and needs a
+streaming protocol handler.
+
+Tested in `tests/workspace-files.test.mjs` (12).
+
 ### The conversation surface (`components/chat/**`)
 
 A turn is read in a fixed order, and the components are laid out to enforce it:
@@ -532,13 +562,13 @@ is on disk, it is listed above the composer, and one click puts the file back.
       yields `before === after`, and that is dropped rather than listed as an
       empty diff.
     * Only paths `writeWorkspaceFile` would accept are watched — a row promises
-      that reject restores the file, and an extension outside its text set is a
+      that reject restores the file, and anything outside its text set is a
       promise the dock cannot keep. Paths outside the workspace root are never
-      watched at all. **Known gap:** extension-less files (`.gitignore`,
-      `Dockerfile`) are therefore invisible to the dock until the workspace
-      allowlists widen.
+      watched at all. Files whose whole name is their extension (`.gitignore`,
+      `Dockerfile`) were a standing gap here and are now admitted by name; an
+      image or a PDF still is not, because it is readable but not writable.
     * 1 MB a side, not the workspace API's 8 MB: both sides travel the stream.
-  Tested in `tests/agent-edits.test.mjs` (29) and end to end over a real spawn
+  Tested in `tests/agent-edits.test.mjs` (30) and end to end over a real spawn
   and a real file in `tests/agent-cli.test.mjs`.
 
 ### Agent tabs (`server/agent-cli.js`, `panels/AgentPane.tsx`)

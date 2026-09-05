@@ -92,6 +92,15 @@ tabs of twelve kinds:
 Video Editor is the one kind limited to a single tab: it owns a timeline and a
 playback clock, and a second copy would be a second project competing for them.
 
+The **File** panel edits text and now also *shows* what it cannot edit: images
+render as pictures, PDFs open in Chromium's own viewer, both straight from the
+bytes the gateway already returns under its 8 MB cap. Neither is writable, so
+nothing can overwrite a picture with text. Files whose whole name is their
+extension — `.gitignore`, `Dockerfile`, `Makefile` — are visible to the tree,
+the editor, search and the review dock for the first time; `.env` is
+deliberately still excluded. Spreadsheets and video are not viewable yet and
+say so rather than looking broken.
+
 **Screen recording is not a panel.** It is a dialog (`⇧⌘8`), and the reason is
 that a panel is somewhere you leave the app while recording is something you
 do: a panel persists into the next session, sits in the tab strip, and splits
@@ -607,7 +616,7 @@ ollama serve              # local models on 127.0.0.1:11434
 
 ```bash
 npm run typecheck   # tsc --noEmit
-npm test            # 1205 tests, 0 failures
+npm test            # 1218 tests, 0 failures
 npm run build       # tsc && vite build
 npm run verify:core # all three
 ```

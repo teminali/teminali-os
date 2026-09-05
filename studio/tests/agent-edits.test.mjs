@@ -187,14 +187,27 @@ test("a path outside the workspace is never watched", () => {
 });
 
 test("a path the workspace API could not write back is never watched", () => {
-  // Reject restores by calling `writeWorkspaceFile`, which refuses an
-  // extension outside its text set — so a row for one would be a promise the
-  // dock cannot keep.
+  // Reject restores by calling `writeWorkspaceFile`, which refuses anything
+  // outside its text set — so a row for one would be a promise the dock
+  // cannot keep.
+  const { watcher, emitted, disk } = harness({ "/workspace/logo.png": "old" });
+  watcher.onTool(running("t1", "Write", { file_path: "/workspace/logo.png", content: "new" }));
+  disk["/workspace/logo.png"] = "new";
+  watcher.onTool(completed("t1"));
+  assert.deepEqual(emitted, []);
+});
+
+test("a file whose whole name is its extension is watched like any other text", () => {
+  // This was the standing gap: `extname(".gitignore")` is "", so the write
+  // path refused it and the dock could not record it. Both now admit it by
+  // name, and the two must not drift apart again.
   const { watcher, emitted, disk } = harness({ "/workspace/.gitignore": "old" });
   watcher.onTool(running("t1", "Write", { file_path: "/workspace/.gitignore", content: "new" }));
   disk["/workspace/.gitignore"] = "new";
   watcher.onTool(completed("t1"));
-  assert.deepEqual(emitted, []);
+  assert.equal(emitted.length, 1);
+  assert.equal(emitted[0].path, ".gitignore");
+  assert.equal(emitted[0].before, "old");
 });
 
 test("a tool the turn never finished leaves nothing behind", () => {

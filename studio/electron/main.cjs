@@ -297,6 +297,10 @@ function createWindow() {
       nodeIntegration: false,
       contextIsolation: true,
       webSecurity: false,
+      // Chromium's PDF viewer is a plugin, and it is off by default. FilePane
+      // shows a PDF by pointing an iframe at a blob URL; without this the
+      // frame renders blank instead of failing, so the two belong together.
+      plugins: true,
       preload: path.join(__dirname, "preload.cjs"),
     },
   });

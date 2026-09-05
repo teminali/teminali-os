@@ -5,6 +5,7 @@ import { highlightCode } from "../../../utils/syntaxHighlight";
 import { IconButton, EmptyState } from "../../ui";
 import { usePanelStore, type PanelTab } from "../../../store/panelStore";
 import { useStudioStore } from "../../../store/studioStore";
+import { formatBytes } from "../../../services/guardianService";
 
 /**
  * File viewer and editor.
@@ -17,7 +18,27 @@ import { useStudioStore } from "../../../store/studioStore";
  * Saving is guarded by the modified timestamp the read returned: if the file
  * changed on disk in the meantime the gateway rejects the write rather than
  * silently discarding someone else's edit.
+ *
+ * A file the gateway sends as base64 is not text and never goes near the
+ * textarea. It becomes an object URL — a picture for an image, Chromium's own
+ * viewer for a PDF — because the alternative this replaced was a flat refusal
+ * to show a file the operator had just clicked on. The bytes are already in
+ * memory as base64; the Blob exists so the DOM holds one copy rather than a
+ * second one inlined into an attribute.
  */
+
+interface Preview {
+  url: string;
+  mimeType: string;
+  size: number;
+}
+
+function blobFrom(base64: string, mimeType: string): Blob {
+  const binary = atob(base64);
+  const bytes = new Uint8Array(binary.length);
+  for (let index = 0; index < binary.length; index += 1) bytes[index] = binary.charCodeAt(index);
+  return new Blob([bytes], { type: mimeType });
+}
 
 const LANGUAGES: Record<string, string> = {
   ts: "typescript", tsx: "tsx", js: "javascript", jsx: "jsx", mjs: "javascript",
@@ -41,6 +62,7 @@ export const FilePane: React.FC<{ panel: PanelTab }> = ({ panel }) => {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [preview, setPreview] = useState<Preview | null>(null);
 
   const preRef = useRef<HTMLPreElement>(null);
   const areaRef = useRef<HTMLTextAreaElement>(null);
@@ -53,18 +75,19 @@ export const FilePane: React.FC<{ panel: PanelTab }> = ({ panel }) => {
     const controller = new AbortController();
     setLoading(true);
     setError(null);
+    setPreview(null);
 
     WorkspaceService.readFile(panel.path, controller.signal)
       .then((file) => {
+        update(panel.id, { label: file.name });
         if (file.encoding === "base64") {
-          setError("This file is binary and cannot be shown as text.");
           setContent(null);
+          setPreview({ url: URL.createObjectURL(blobFrom(file.content, file.mimeType)), mimeType: file.mimeType, size: file.size });
           return;
         }
         setContent(file.content);
         setOriginal(file.content);
         setModified(file.modified);
-        update(panel.id, { label: file.name });
       })
       .catch((failure) => {
         if (controller.signal.aborted) return;
@@ -77,6 +100,13 @@ export const FilePane: React.FC<{ panel: PanelTab }> = ({ panel }) => {
     return () => controller.abort();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [panel.path, panel.id]);
+
+  // One object URL is alive at a time; the browser holds the bytes until it is
+  // revoked, so this runs on every replacement and not only on unmount.
+  useEffect(() => {
+    if (!preview) return;
+    return () => URL.revokeObjectURL(preview.url);
+  }, [preview]);
 
   const dirty = content !== null && content !== original;
   const language = useMemo(() => languageOf(panel.path ?? ""), [panel.path]);
@@ -122,7 +152,7 @@ export const FilePane: React.FC<{ panel: PanelTab }> = ({ panel }) => {
     return <EmptyState title="No file selected" detail="Open a file from the sidebar or a chat message." />;
   }
 
-  if (error && content === null) {
+  if (error && content === null && !preview) {
     return (
       <EmptyState
         icon={<AlertTriangle size={26} strokeWidth={1.6} />}
@@ -140,7 +170,7 @@ export const FilePane: React.FC<{ panel: PanelTab }> = ({ panel }) => {
         <span className="truncate">{panel.path.split("/").join(" / ")}</span>
         {dirty && <span className="w-1.5 h-1.5 rounded-full bg-accent flex-shrink-0" title="Unsaved changes" />}
         <div className="flex-1" />
-        <span className="text-ink-disabled">{lineCount} lines</span>
+        <span className="text-ink-disabled">{preview ? formatBytes(preview.size) : `${lineCount} lines`}</span>
         {dirty && (
           <>
             <IconButton onClick={() => setContent(original)} title="Revert" size={22}>
@@ -155,6 +185,9 @@ export const FilePane: React.FC<{ panel: PanelTab }> = ({ panel }) => {
 
       {error && <div className="px-4 py-2 text-2xs text-danger border-b border-edge-chrome">{error}</div>}
 
+      {preview ? (
+        <PreviewSurface preview={preview} path={panel.path} />
+      ) : (
       <div className="flex-1 min-h-0 relative font-mono text-xs leading-[1.75]">
         {/* Gutter */}
         <div
@@ -188,6 +221,41 @@ export const FilePane: React.FC<{ panel: PanelTab }> = ({ panel }) => {
           className="absolute inset-0 pl-12 pr-4 pt-4 bg-transparent text-transparent caret-ink-high resize-none outline-none whitespace-pre overflow-auto font-mono text-xs leading-[1.75] selection:bg-accent/25"
         />
       </div>
+      )}
     </div>
+  );
+};
+
+/**
+ * The non-text half of the pane.
+ *
+ * PDFs go to an <iframe>, which in the desktop app is Chromium's PDF viewer —
+ * paging, zoom, find and print for free, and no dependency to keep current.
+ * That viewer needs `plugins: true` on the window (electron/main.cjs); without
+ * it the frame renders blank rather than failing loudly, which is why the
+ * flag and this component have to move together.
+ *
+ * Anything else that arrives as bytes — a spreadsheet today — says so plainly
+ * instead of pretending to be broken.
+ */
+const PreviewSurface: React.FC<{ preview: Preview; path?: string }> = ({ preview, path }) => {
+  if (preview.mimeType.startsWith("image/")) {
+    return (
+      <div className="flex-1 min-h-0 overflow-auto flex items-center justify-center p-6 bg-surface-sunken">
+        <img src={preview.url} alt={path ?? "Image preview"} className="max-w-full max-h-full object-contain" />
+      </div>
+    );
+  }
+
+  if (preview.mimeType === "application/pdf") {
+    return <iframe src={preview.url} title={path ?? "PDF preview"} className="flex-1 min-h-0 w-full border-0 bg-surface-sunken" />;
+  }
+
+  return (
+    <EmptyState
+      icon={<AlertTriangle size={26} strokeWidth={1.6} />}
+      title="No viewer for this format yet"
+      detail={`${preview.mimeType} · ${formatBytes(preview.size)}. It opens in an external application until a viewer lands here.`}
+    />
   );
 };

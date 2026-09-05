@@ -8,13 +8,46 @@ const TEXT_EXTENSIONS = new Set([
   ".json", ".md", ".mjs", ".py", ".rb", ".rs", ".sh", ".sql", ".svg", ".toml", ".ts", ".tsx",
   ".txt", ".xml", ".yaml", ".yml",
 ]);
+/**
+ * Text files whose whole name is the extension, or which have none at all.
+ *
+ * `extname(".gitignore")` and `extname("Dockerfile")` are both "", so an
+ * extension allowlist hides them completely: they were missing from the tree,
+ * unreadable, unwritable, and therefore invisible to the review dock, which
+ * will not record a change it cannot offer to reject. A name list is the only
+ * way to admit them without admitting every extension-less binary on disk.
+ *
+ * `.env` is deliberately absent. It is text, but it is the one text file whose
+ * contents are usually secrets, and nothing here should put them in front of a
+ * model by default.
+ */
+const TEXT_FILENAMES = new Set([
+  ".babelrc", ".browserslistrc", ".dockerignore", ".editorconfig", ".eslintrc",
+  ".gitattributes", ".gitignore", ".gitmodules", ".npmignore", ".npmrc", ".nvmrc",
+  ".prettierrc", ".tool-versions", "CHANGELOG", "CODEOWNERS", "Dockerfile",
+  "Gemfile", "LICENCE", "LICENSE", "Makefile", "Procfile", "README", "Rakefile",
+]);
+// Shown as pictures, never as text. `.svg` is absent on purpose: it is markup,
+// and the operator is far more likely to want to edit it than to look at it.
+const IMAGE_EXTENSIONS = new Set([
+  ".apng", ".avif", ".bmp", ".gif", ".ico", ".jpeg", ".jpg", ".png", ".webp",
+]);
 const BINARY_PREVIEW_EXTENSIONS = new Set([".pdf", ".xlsx", ".xls"]);
 const MIME_TYPES = {
+  ".apng": "image/apng",
+  ".avif": "image/avif",
+  ".bmp": "image/bmp",
   ".csv": "text/csv",
   ".css": "text/css",
+  ".gif": "image/gif",
   ".html": "text/html",
+  ".ico": "image/x-icon",
+  ".jpeg": "image/jpeg",
+  ".jpg": "image/jpeg",
   ".pdf": "application/pdf",
+  ".png": "image/png",
   ".svg": "image/svg+xml",
+  ".webp": "image/webp",
   ".xls": "application/vnd.ms-excel",
   ".xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
   ".xml": "application/xml",
@@ -41,13 +74,35 @@ export function resolveWorkspacePath(root, requestedPath = "") {
  * offers a reject, whether the restore behind that button can run at all.
  */
 export function isWritableWorkspaceFile(path) {
-  return TEXT_EXTENSIONS.has(extname(path).toLowerCase());
+  return isTextFile(path);
 }
 
-function fileKind(name) {
-  const extension = extname(name).toLowerCase();
-  if (TEXT_EXTENSIONS.has(extension) || BINARY_PREVIEW_EXTENSIONS.has(extension)) return extension;
-  return "";
+/**
+ * The single answer to "is this text?", asked by the tree, the reader, the
+ * writer, the delete path and search. They gated on the extension table
+ * separately before, which was survivable only while the table was the whole
+ * truth; the moment a file could qualify by name they would have disagreed,
+ * and a disagreement here means offering a reject that cannot run.
+ */
+function isTextFile(path) {
+  const name = basename(path);
+  return TEXT_EXTENSIONS.has(extname(name).toLowerCase()) || TEXT_FILENAMES.has(name);
+}
+
+/** Readable, but only as bytes for a viewer: pictures, PDFs, spreadsheets. */
+function isPreviewFile(path) {
+  const extension = extname(basename(path)).toLowerCase();
+  return IMAGE_EXTENSIONS.has(extension) || BINARY_PREVIEW_EXTENSIONS.has(extension);
+}
+
+function isViewableFile(path) {
+  return isTextFile(path) || isPreviewFile(path);
+}
+
+// An .xls that starts with a tag is one of those HTML tables Excel opens
+// happily. Sending it as base64 would hide readable text behind a viewer.
+function looksLikeMarkup(buffer) {
+  return buffer.subarray(0, 256).toString("utf8").trimStart().startsWith("<");
 }
 
 export async function listWorkspaceTree(root, options = {}) {
@@ -67,7 +122,7 @@ export async function listWorkspaceTree(root, options = {}) {
       if (entry.isDirectory()) {
         entriesSeen += 1;
         items.push({ id: `dir:${path}`, name: entry.name, path, type: "directory", children: await visit(absolutePath, depth + 1) });
-      } else if (entry.isFile() && fileKind(entry.name)) {
+      } else if (entry.isFile() && isViewableFile(entry.name)) {
         entriesSeen += 1;
         const stats = await lstat(absolutePath);
         items.push({ id: `file:${path}`, name: entry.name, path, type: "file", size: stats.size, modified: stats.mtime.toISOString() });
@@ -86,10 +141,10 @@ export async function readWorkspaceFile(root, requestedPath, options = {}) {
   const stats = await lstat(absolutePath);
   if (!stats.isFile() || stats.isSymbolicLink()) throw new Error("WORKSPACE_FILE_REQUIRED");
   if (stats.size > maxFileBytes) throw new Error("WORKSPACE_FILE_TOO_LARGE");
-  const extension = fileKind(absolutePath);
-  if (!extension) throw new Error("WORKSPACE_FILE_UNSUPPORTED");
+  if (!isViewableFile(absolutePath)) throw new Error("WORKSPACE_FILE_UNSUPPORTED");
+  const extension = extname(basename(absolutePath)).toLowerCase();
   const buffer = await readFile(absolutePath);
-  const isBinary = BINARY_PREVIEW_EXTENSIONS.has(extension) && !(extension === ".xls" && buffer.subarray(0, 256).toString("utf8").trimStart().startsWith("<"));
+  const isBinary = !isTextFile(absolutePath) && !(extension === ".xls" && looksLikeMarkup(buffer));
   return {
     path: publicPath(workspaceRoot, absolutePath),
     name: absolutePath.split(sep).pop(),
@@ -108,8 +163,7 @@ export async function writeWorkspaceFile(root, requestedPath, content, options =
 
   const workspaceRoot = resolve(root);
   const absolutePath = resolveWorkspacePath(workspaceRoot, requestedPath);
-  const extension = extname(absolutePath).toLowerCase();
-  if (!TEXT_EXTENSIONS.has(extension)) throw new Error("WORKSPACE_FILE_UNSUPPORTED");
+  if (!isTextFile(absolutePath)) throw new Error("WORKSPACE_FILE_UNSUPPORTED");
 
   const parentPath = dirname(absolutePath);
   await mkdir(parentPath, { recursive: true });
@@ -163,7 +217,7 @@ export async function createWorkspaceDirectory(root, requestedPath) {
  * search: it answers "no matches" for a string that is right there on disk.
  *
  * Walks the same tree the explorer does, honouring the same ignore list and the
- * same text-extension allowlist, so the two views never disagree about what the
+ * same text allowlists, so the two views never disagree about what the
  * workspace contains. Bounded on every axis — files scanned, matches returned,
  * bytes read per file — because an unbounded grep over a monorepo will hang the
  * gateway rather than fail it.
@@ -216,7 +270,7 @@ export async function searchWorkspace(root, query, options = {}) {
         await walk(absolute, depth + 1);
         continue;
       }
-      if (!entry.isFile() || !TEXT_EXTENSIONS.has(extname(entry.name).toLowerCase())) continue;
+      if (!entry.isFile() || !isTextFile(entry.name)) continue;
 
       let info;
       try {
@@ -270,14 +324,14 @@ export async function searchWorkspace(root, query, options = {}) {
  * to zero bytes instead would leave litter the operator never asked for.
  *
  * Same guards as the write path — inside the root, a real file rather than a
- * symlink or a directory, and a text extension — because a delete is the one
+ * symlink or a directory, and text by extension or by name — because a delete
+ * is the one
  * operation where a path escape cannot be undone.
  */
 export async function deleteWorkspaceFile(root, requestedPath) {
   const workspaceRoot = resolve(root);
   const absolutePath = resolveWorkspacePath(workspaceRoot, requestedPath);
-  const extension = extname(absolutePath).toLowerCase();
-  if (!TEXT_EXTENSIONS.has(extension)) throw new Error("WORKSPACE_FILE_UNSUPPORTED");
+  if (!isTextFile(absolutePath)) throw new Error("WORKSPACE_FILE_UNSUPPORTED");
 
   const realParent = await realpath(dirname(absolutePath));
   const realRoot = await realpath(workspaceRoot);
