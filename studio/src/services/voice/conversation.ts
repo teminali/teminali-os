@@ -151,6 +151,15 @@ export class VoiceEngine {
   private lastActivityAt = Date.now();
   private isGoingToSleep = false;
   public static readonly INACTIVITY_SLEEP_MS = 60000; // 1 minute sweet spot
+  /** How long to wait for a streaming recogniser to deliver its final text. */
+  public static readonly STREAMING_FINAL_TIMEOUT_MS = 1200;
+  /**
+   * The same wait for a one-shot engine, which transcribes the whole clip in a
+   * single pass once the recording closes. Generous, because the alternative
+   * to waiting is a lost turn; bounded, because the alternative to a bound is
+   * a microphone that never reopens.
+   */
+  public static readonly ONE_SHOT_FINAL_TIMEOUT_MS = 12000;
 
   private autoSendTimer: number | null = null;
   private autoSendDeadline: number | null = null;
@@ -167,6 +176,10 @@ export class VoiceEngine {
    */
   private streamingAsr = true;
   private awaitingFinal = false;
+  /** Safety net for `awaitingFinal`; see `armFinalFallback`. */
+  private finalFallbackTimer: number | null = null;
+  /** A reopen `onClose` skipped because a final transcript was still expected. */
+  private reopenDeferred = false;
   private abort: AbortController | null = null;
 
   private host: VoiceHost;
@@ -335,17 +348,23 @@ export class VoiceEngine {
           onResult: (result) => this.onResult(result.transcript, result.isFinal, result.language),
           onError: (error) => this.fail(error),
           onClose: () => {
+            if (this.state === "idle") return;
+            if (this.awaitingFinal) {
+              // onResult may still be coming. Do not reopen over the top of
+              // it, but record that the microphone is now shut so the fallback
+              // can reopen it if that text never arrives.
+              this.reopenDeferred = true;
+              return;
+            }
             // Push-to-talk closes after one utterance.
-            if (this.mode === "push-to-talk" && this.state !== "idle" && !this.awaitingFinal) {
+            if (this.mode === "push-to-talk") {
               void this.commitTurn();
               return;
             }
             // A one-shot engine closes its session after every turn. In
             // conversation mode the microphone must reopen, or the exchange
             // silently ends after the first thing you say.
-            if (this.mode === "conversation" && this.state !== "idle" && !this.awaitingFinal) {
-              void this.reopen();
-            }
+            if (this.mode === "conversation") void this.reopen();
           },
         },
       );
@@ -379,7 +398,9 @@ export class VoiceEngine {
     this.echo.clear();
     this.clearAutoSend();
     this.stopTicker();
+    this.clearFinalFallback();
     this.awaitingFinal = false;
+    this.reopenDeferred = false;
     this.session?.abort();
     this.session = null;
     this.synthesis?.cancel();
@@ -443,23 +464,16 @@ export class VoiceEngine {
           // Speech ended, wait for final transcript from recogniser
           this.awaitingFinal = true;
           this.setState("deciding");
-          window.setTimeout(() => {
-            if (this.awaitingFinal && this.state === "deciding") {
-              this.awaitingFinal = false;
-              if (this.transcript.trim()) {
-                void this.commitTurn();
-              } else {
-                this.setState(this.mode === "conversation" ? "listening" : "idle");
-              }
-            }
-          }, 1200);
+          this.armFinalFallback(VoiceEngine.STREAMING_FINAL_TIMEOUT_MS);
         }
       } else {
         // Close the recording so the engine can transcribe it; onResult will
-        // commit once the text actually exists.
+        // commit once the text actually exists — or the fallback will give the
+        // microphone back if it never does.
         this.awaitingFinal = true;
         this.setState("deciding");
         this.session?.stop();
+        this.armFinalFallback(VoiceEngine.ONE_SHOT_FINAL_TIMEOUT_MS);
       }
     } else if (event?.type === "discarded") {
       this.transcript = "";
@@ -495,7 +509,47 @@ export class VoiceEngine {
   }
 
   /** Reopen the microphone after a one-shot engine closed its session. */
+  /**
+   * Arm the safety net for `awaitingFinal`. That flag is what stops `onClose`
+   * from reopening the microphone while a final transcript is still expected,
+   * so nothing may set it without a way out: an engine that closes, errors, or
+   * returns an empty result would otherwise leave it set forever and the
+   * session would go deaf while the UI still showed it live. That is the
+   * "it stopped responding but voice mode is still on" failure.
+   *
+   * The fallback deliberately does not test `state`. An interjection or a
+   * narration can move the state out of "deciding" while a final is
+   * outstanding, and a latch that only clears in one state is barely better
+   * than no latch at all.
+   */
+  private armFinalFallback(afterMs: number): void {
+    this.clearFinalFallback();
+    this.finalFallbackTimer = window.setTimeout(() => {
+      this.finalFallbackTimer = null;
+      if (!this.awaitingFinal) return;
+      this.awaitingFinal = false;
+      if (this.transcript.trim()) {
+        void this.commitTurn();
+        return;
+      }
+      this.setState(this.mode === "conversation" ? "listening" : "idle");
+      // The engine closed while we were waiting and onClose declined to
+      // reopen because of the flag we have just cleared.
+      if (this.reopenDeferred && this.mode === "conversation" && this.state !== "idle") {
+        this.reopenDeferred = false;
+        void this.reopen();
+      }
+      this.emit();
+    }, afterMs);
+  }
+
+  private clearFinalFallback(): void {
+    if (this.finalFallbackTimer !== null) window.clearTimeout(this.finalFallbackTimer);
+    this.finalFallbackTimer = null;
+  }
+
   private async reopen(): Promise<void> {
+    this.reopenDeferred = false;
     const asr = this.providers?.asr;
     if (!asr || this.state === "idle" || this.abort?.signal.aborted) return;
     try {
@@ -511,7 +565,12 @@ export class VoiceEngine {
           onResult: (result) => this.onResult(result.transcript, result.isFinal, result.language),
           onError: (error) => this.fail(error),
           onClose: () => {
-            if (this.mode === "conversation" && this.state !== "idle" && !this.awaitingFinal) void this.reopen();
+            if (this.state === "idle") return;
+            if (this.awaitingFinal) {
+              this.reopenDeferred = true;
+              return;
+            }
+            if (this.mode === "conversation") void this.reopen();
           },
         },
       );
@@ -545,6 +604,7 @@ export class VoiceEngine {
   }
 
   private async commitTurn(): Promise<void> {
+    this.clearFinalFallback();
     this.awaitingFinal = false;
     const raw = cleanTranscript(this.transcript);
     this.transcript = "";

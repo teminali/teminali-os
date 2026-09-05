@@ -235,3 +235,49 @@ test("useVoice forwards every VoiceHost method to the engine", async () => {
     assert.match(hook, new RegExp(`hostRef\\.current\\.${name}\\b`), `useVoice does not forward VoiceHost.${name}`);
   }
 });
+
+/* ── Microphone lifecycle ─────────────────────────────────────────────────── */
+
+// `awaitingFinal` is what stops `onClose` from reopening the microphone while a
+// final transcript is still expected. Setting it without arming a way out is how
+// the session went deaf on 2026-09-05 while the UI still showed voice mode live:
+// the one-shot branch set the flag and relied entirely on a result that an empty
+// transcription never delivered.
+async function conversationSource() {
+  const { readFile } = await import("node:fs/promises");
+  return readFile(new URL("../src/services/voice/conversation.ts", import.meta.url), "utf8");
+}
+
+test("every path that waits for a final transcript arms a fallback", async () => {
+  const lines = (await conversationSource()).split("\n");
+  const setters = lines.flatMap((line, i) => (/this\.awaitingFinal = true;/.test(line) ? [i] : []));
+  assert.ok(setters.length >= 2, `expected the streaming and one-shot waits, found ${setters.length}`);
+  for (const index of setters) {
+    assert.match(
+      lines.slice(index, index + 6).join("\n"),
+      /this\.armFinalFallback\(/,
+      `awaitingFinal set at line ${index + 1} without arming a fallback`,
+    );
+  }
+});
+
+test("the fallback clears the latch whatever state it fires in", async () => {
+  const body = (await conversationSource()).match(/private armFinalFallback\([\s\S]*?\n  \}/);
+  assert.ok(body, "armFinalFallback not found");
+  assert.doesNotMatch(
+    body[0],
+    /this\.state === "deciding"/,
+    "the fallback must not depend on the state still being deciding",
+  );
+  assert.match(body[0], /this\.awaitingFinal = false;/);
+  assert.match(body[0], /this\.reopenDeferred/, "the fallback must reopen a microphone onClose declined to reopen");
+});
+
+test("onClose records a deferred reopen instead of dropping it", async () => {
+  const source = await conversationSource();
+  const handlers = [...source.matchAll(/onClose: \(\) => \{([\s\S]*?)\n {10}\},/g)].map((m) => m[1]);
+  assert.equal(handlers.length, 2, `expected both listen sites, found ${handlers.length}`);
+  for (const handler of handlers) {
+    assert.match(handler, /this\.reopenDeferred = true;/, "onClose drops the reopen when a final is outstanding");
+  }
+});

@@ -1668,3 +1668,29 @@ Non-negotiables:
    it is weak; it never poses as verification.
 4. **Audio never leaves the machine on the VibeVoice tier**, and the audit log
    records that a transcription happened — never the transcript.
+
+### 6.2 The microphone must always come back (2026-09-05)
+
+`awaitingFinal` in `conversation.ts` is the flag that stops `onClose` from
+reopening the microphone while a final transcript is still expected. On
+2026-09-05 a live session went deaf mid-conversation while the HUD went on
+showing voice mode live, and this flag is why: the one-shot branch of
+`onFrame` set it and then relied entirely on a transcript arriving. When the
+engine closed without delivering one — an empty result, a dropped session, a
+recogniser that heard only noise — nothing ever cleared it, `onClose` declined
+to reopen, and the session could not hear another word.
+
+The streaming branch above it had a 1200 ms escape hatch, but only cleared the
+flag `&& this.state === "deciding"`, so an interjection or a narration moving
+the state latched it just the same.
+
+The rule now: **nothing may set `awaitingFinal` without arming
+`armFinalFallback`.** The fallback clears the flag whatever state it fires in,
+commits the turn if text did arrive, and reopens a microphone that `onClose`
+declined to reopen — `reopenDeferred` records that case rather than dropping
+it. Waits are `VoiceEngine.STREAMING_FINAL_TIMEOUT_MS` (1200 ms) and
+`ONE_SHOT_FINAL_TIMEOUT_MS` (12 s), the latter generous because a one-shot
+engine transcribes the whole clip in one pass and the alternative to waiting is
+a lost turn. Three structural tests in `tests/voice-astra.test.mjs` enforce the
+rule, in the same spirit as the `VoiceHost` forwarding test: this is a class of
+bug that reading the diff does not catch.
