@@ -99,6 +99,62 @@ A rejected clip returns `{"text": ""}`. To the studio it is indistinguishable
 from silence, which is the point — the alternative is an assistant that argues
 with the room.
 
+## Choosing a recogniser, and putting the vocabulary back
+
+A live session asked for a folder by name and the recogniser returned a name no
+folder has; the agent then acted on it. Whisper has never read this repository,
+so the words this operator says most often are the words it is least able to
+spell.
+
+The usual fix — Whisper's `initial_prompt`, a list of proper nouns handed to the
+decoder — **is not available**. `@huggingface/transformers` 3.8.1 declares
+`prompt_ids` on `WhisperGenerationConfig` but `generate()` leaves it commented
+out (`src/models.js`), and the tokenizer has no `get_prompt_ids`. Nothing in the
+options object biases the decoder toward a vocabulary.
+
+So the bias is applied afterwards, in `lexicon.js`: a phrase is rewritten only
+when its consonant skeleton is *exactly* the skeleton of a known term. No edit
+distance — "terminal" and "Teminali" are one consonant apart, and a repair that
+overwrites a word the operator really said is worse than the misrecognition.
+Spellings that do not collide are named as aliases, each one observed rather
+than imagined. `TEMINALI_ASR_VOCABULARY` adds the names that belong to this
+machine and no other. `/status` reports the size of the list as
+`asr.vocabulary`.
+
+Measured on 32 synthesised utterances — paths, folder names, shell commands,
+technical identifiers, ordinary requests, and clips in de/fr/es/pt — scored as
+word error rate against the spoken text (harness in the scratchpad, not in the
+repo). **Synthesised speech is far cleaner than a microphone in a room, so the
+absolute rates are optimistic; only the comparison between rows means anything.**
+Latency is per utterance, warm, M4 Pro, int8, CPU.
+
+| Configuration | WER | median | p95 | download |
+| --- | --- | --- | --- | --- |
+| `whisper-base`, language auto | 31.5% | 411 ms | 483 ms | 76 MB |
+| `whisper-base`, language pinned — **previous default** | 14.2% | 385 ms | 489 ms | 76 MB |
+| `whisper-base` + `temperature: 0` | 14.2% | 377 ms | 446 ms | 76 MB |
+| `whisper-base` + `no_repeat_ngram_size: 3` | 14.2% | 386 ms | 432 ms | 76 MB |
+| `whisper-base` + `num_beams: 4` | 14.2% | 478 ms | 613 ms | 76 MB |
+| `whisper-base` + vocabulary repair — **current default** | **11.6%** | **385 ms** | **489 ms** | **76 MB** |
+| `whisper-small`, language pinned | 12.3% | 896 ms | 1133 ms | 240 MB |
+| `whisper-small` + vocabulary repair | 10.3% | 896 ms | 1133 ms | 240 MB |
+
+Three things that measurement settled:
+
+- **The decoding options are free and worthless here.** `temperature`,
+  `no_repeat_ngram_size` and beam search moved the word error rate by exactly
+  zero across all 32 clips; transformers.js already decodes greedily, and beam
+  search bought nothing for +93 ms at the median and +124 ms at p95.
+- **A bigger model is a poor trade in a live conversation.** `whisper-small`
+  removes a seventh of the errors for 2.3x the wait and another 164 MB of
+  first-run download. The repair removes more, for 0.03 ms and no download.
+- **Pinning the language is the largest single lever** — it halves the error
+  rate, entirely on the non-English clips. Recognition of English is unchanged
+  (14.9% either way); what auto-detect gets wrong is *which* language.
+
+`whisper-small` remains one `TEMINALI_ASR_MODEL` away for an operator who would
+rather wait than repeat themselves, and it stacks with the repair (10.3%).
+
 ## Naming the room instead of transcribing it
 
 The guards above throw away a passing car. That is right for the transcript and
@@ -145,7 +201,8 @@ goes unlogged.
 | --- | --- | --- |
 | `TEMINALI_VOICE_PORT` | `8321` | Loopback port. |
 | `TEMINALI_VOICE_CACHE` | transformers.js's own `.cache` | Where model weights are cached. The packaged app sets it to `<userData>/voice-models`. |
-| `TEMINALI_ASR_MODEL` | `onnx-community/whisper-base` | Any Whisper ONNX repo. `whisper-small` is more accurate and slower. |
+| `TEMINALI_ASR_MODEL` | `onnx-community/whisper-base` | Any Whisper ONNX repo. `onnx-community/whisper-small` is 2.0 points more accurate and 2.3x slower (see *Choosing a recogniser*). |
+| `TEMINALI_ASR_VOCABULARY` | *(empty)* | Extra domain terms, comma or newline separated — the project and folder names on this machine. Added to the built-in list in `lexicon.js`. |
 | `TEMINALI_TTS_MODEL` | `onnx-community/Kokoro-82M-v1.0-ONNX` | |
 | `TEMINALI_SOUND_MODEL` | `Xenova/ast-finetuned-audioset-10-10-0.4593` | AudioSet classifier behind `sounds=1`. |
 | `TEMINALI_SOUND_THRESHOLD` | `0.35` | Confidence a label needs before it is reported. |
@@ -205,11 +262,12 @@ instead of 1.2 s.
 ## Tests
 
 ```bash
-node --test tests/*.test.mjs     # 24 tests, no model required
+node --test tests/*.test.mjs     # 40 tests, no model required
 ```
 
 They cover the guards, the WAV header, clause splitting and offsets, the stream
-framing, and every rule about which sounds are worth reporting — everything that runs without loading a model.
+framing, the phonetic keys and windowing of the vocabulary repair, and every
+rule about which sounds are worth reporting — everything that runs without loading a model.
 `selectSounds` is separated from `classifySounds` for exactly this reason: the
 judgement is testable without the classifier. The end-to-end paths are exercised
 by hand against a running sidecar.

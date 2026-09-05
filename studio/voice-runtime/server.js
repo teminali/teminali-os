@@ -10,7 +10,7 @@
  */
 import { createServer } from "node:http";
 import { encodeWav, float32ToPcm16 } from "./audio.js";
-import { ASR_LANGUAGES, ASR_MODEL, loadAsr, transcribeClip } from "./asr.js";
+import { ASR_LANGUAGES, ASR_MODEL, ASR_VOCABULARY, loadAsr, transcribeClip } from "./asr.js";
 import { SOUND_MODEL, loadSounds } from "./sounds.js";
 import { SPEECH_STREAM_TYPE, encodeFrame } from "./stream.js";
 import { DEFAULT_VOICE, TTS_MODEL, loadTts, listVoices, synthesise, synthesiseClauses } from "./tts.js";
@@ -126,7 +126,8 @@ export function createVoiceServer({ log = console.error } = {}) {
       if (request.method === "GET" && url.pathname === "/status") {
         const body = {};
         if (warm.asr) {
-          body.asr = { model: ASR_MODEL, languages: ASR_LANGUAGES, streaming: false, embedding: false, sounds: warm.sounds };
+          body.asr = { model: ASR_MODEL, languages: ASR_LANGUAGES, streaming: false, embedding: false,
+            sounds: warm.sounds, vocabulary: ASR_VOCABULARY.length };
         }
         // `streaming` means `/speak` accepts `"stream": true` and answers in
         // clause frames; a whole-file request is still served without it.

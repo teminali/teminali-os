@@ -1764,6 +1764,30 @@ as unvoiced — what makes the model hallucinate is featureless audio, not quiet
 audio. A rejected clip returns empty text and is indistinguishable from silence
 to the studio, which is the point.
 
+**Recognition knows the operator's vocabulary, because nothing else will.** A
+live session asked for a folder by name and got back a name no folder has, and
+the agent acted on it. Whisper has never read this repository. Its
+`initial_prompt` — the usual way to hand a decoder a list of proper nouns — is
+unavailable: `@huggingface/transformers` 3.8.1 declares `prompt_ids` on
+`WhisperGenerationConfig` and never consumes it. So `voice-runtime/lexicon.js`
+repairs the transcript afterwards, rewriting a phrase only when its consonant
+skeleton is *exactly* that of a known term; no edit distance, because
+"terminal" and "Teminali" are one consonant apart and overwriting a word the
+operator really said is worse than the misrecognition.
+`TEMINALI_ASR_VOCABULARY` adds the names local to a machine, and `/status`
+reports the list size as `asr.vocabulary` (27 built in).
+
+Measured over 32 synthesised utterances — paths, folder names, shell commands,
+identifiers, ordinary requests, and de/fr/es/pt clips, scored as word error rate
+against the spoken text: `whisper-base` 14.2% at 385 ms median / 489 ms p95;
+with the repair **11.6% at the same 385 ms**; `whisper-small` 12.3% at 896 ms
+median / 1133 ms p95 and 164 MB more download. `temperature`,
+`no_repeat_ngram_size` and `num_beams: 4` moved the rate by exactly zero, and
+beam search cost +93 ms at the median, so none was adopted. `whisper-base` stays
+the default and `TEMINALI_ASR_MODEL` still selects any other. Synthesised speech
+is cleaner than a microphone in a room, so those rates are optimistic — the
+ordering between configurations is the finding, not the absolute numbers.
+
 **Synthesis streams; recognition does not.** `/speak` with `"stream": true`
 answers in clause frames — a length-prefixed JSON header and a body of 16-bit
 PCM per clause, written the moment Kokoro returns it (`voice-runtime/stream.js`;
@@ -1880,7 +1904,8 @@ live in the same log, expire on the same clock, are cleared by the same
 "forget what you heard", and are switched off by the same *Remember what it
 overhears* toggle — which also stops the classifier being asked for at all.
 
-Tests: `tests/ambient.test.mjs` (16), `voice-runtime/tests/voice-runtime.test.mjs` (19).
+Tests: `tests/ambient.test.mjs` (16), `voice-runtime/tests/` (40 — 24 in
+`voice-runtime.test.mjs`, 16 in `lexicon.test.mjs`).
 
 ### 6.6 Turn-taking latency: prosody joins syntax (2026-09-05)
 

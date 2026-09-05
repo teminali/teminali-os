@@ -41,10 +41,16 @@ calls a loopback sidecar, and the sidecar owns the models. Three routes:
 ```json
 {
   "asr": { "model": "VibeVoice-ASR-BitNet", "languages": ["en-US", "sw-TZ", "..."],
-           "streaming": true, "embedding": false, "sounds": false },
+           "streaming": true, "embedding": false, "sounds": false, "vocabulary": 27 },
   "tts": { "model": "VibeVoice-Realtime-0.5B", "voices": ["default"], "streaming": true }
 }
 ```
+
+`model` must name the weights actually loaded, not the weights configured — an
+operator reading `/status` is asking what is answering them right now.
+`vocabulary` is optional and advisory: the number of domain terms the sidecar
+will repair in a transcript (see *Domain vocabulary* below). Omit it if your
+build does no such repair.
 
 Omit `asr` or `tts` for a capability you do not serve. The studio degrades to the
 built-in tier for whatever is missing rather than losing voice altogether, and
@@ -72,6 +78,28 @@ field (a BCP-47 tag, or `auto`).
 Add `"embedding": [ ... ]` — a speaker embedding — if your build has a verifier
 head. The studio uses it for the "only respond to my voice" gate and falls back
 to its own on-device matcher when absent. See *Speaker verification* below.
+
+#### Domain vocabulary
+
+A recogniser has never read the operator's repository, so the words they say
+most often — project names, folder names, tool names — are the words it spells
+worst. A build that can bias its decoder toward a supplied vocabulary should;
+one that cannot may repair the transcript instead, and should say how large its
+list is in `asr.vocabulary`.
+
+The reference sidecar cannot bias its decoder: `@huggingface/transformers` 3.8.1
+declares `prompt_ids` on `WhisperGenerationConfig` but never consumes it, and
+the tokenizer exposes no `get_prompt_ids`, so Whisper's `initial_prompt` is
+unavailable through this library. It repairs afterwards, matching only on an
+exact consonant skeleton so that a word the operator really said is never
+overwritten. `TEMINALI_ASR_VOCABULARY` extends the list per machine.
+
+Measured over 32 synthesised utterances (paths, folder names, shell commands,
+identifiers, ordinary requests, and de/fr/es/pt clips), the repair took
+`whisper-base` from 14.2% to 11.6% word error at an unchanged 385 ms median —
+better than `whisper-small`'s 12.3% at 896 ms. Synthesised speech is cleaner
+than a real microphone, so those rates are optimistic; the ordering is the
+finding, not the absolute numbers.
 
 #### Naming sounds
 
@@ -177,6 +205,8 @@ Other knobs:
 | `TEMINALI_VOICE_TIMEOUT_MS` | `30000` | Per-request timeout |
 | `TEMINALI_VOICE_MAX_AUDIO_BYTES` | `26214400` | Upload ceiling |
 | `TEMINALI_VOICE_CACHE` | transformers.js's own `.cache` | Read by the sidecar: where model weights are cached. Set by the packaged app |
+| `TEMINALI_ASR_MODEL` | `onnx-community/whisper-base` | Read by the sidecar: which Whisper to load. `onnx-community/whisper-small` trades 2.3x the latency for 2.0 points of word error |
+| `TEMINALI_ASR_VOCABULARY` | *(empty)* | Read by the sidecar: extra domain terms, comma or newline separated |
 | `TEMINALI_SOUND_MODEL` | `Xenova/ast-finetuned-audioset-10-10-0.4593` | Sound classifier |
 | `TEMINALI_SOUND_THRESHOLD` | `0.35` | Confidence a label needs to be reported |
 

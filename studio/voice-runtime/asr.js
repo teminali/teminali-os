@@ -10,9 +10,30 @@ import { pipeline } from "@huggingface/transformers";
 import { decodeToPcm, voicedFraction, SAMPLE_RATE } from "./audio.js";
 import { assessAudio, assessTranscript } from "./transcript-guard.js";
 import { classifySounds } from "./sounds.js";
+import { DOMAIN_TERMS, buildLexicon, repairVocabulary, vocabularyFromEnv } from "./lexicon.js";
 
+/**
+ * Which Whisper to run. `whisper-base` stays the default on measurement, not
+ * on inertia: on the synthesised bench in this repo, base transcribed at 14.2%
+ * word error in 385 ms (median) and `whisper-small` at 12.3% in 896 ms — a
+ * fifth of the errors removed for two and a third times the wait and another
+ * 164 MB on disk. Repairing the domain vocabulary afterwards takes base to
+ * 11.6% for 0.03 ms and no download at all, which is better than small was.
+ *
+ * `TEMINALI_ASR_MODEL` selects another: `onnx-community/whisper-small` and
+ * `onnx-community/whisper-large-v3-turbo` both load, and both are the right
+ * answer for an operator who would rather wait than repeat themselves.
+ */
 export const ASR_MODEL = process.env.TEMINALI_ASR_MODEL || "onnx-community/whisper-base";
 const ASR_DTYPE = process.env.TEMINALI_ASR_DTYPE || "q8";
+
+/**
+ * The domain vocabulary, built once. `TEMINALI_ASR_VOCABULARY` adds the names
+ * that belong to this machine — the project folders a recogniser has never
+ * seen and will otherwise spell as something that does not exist.
+ */
+export const ASR_VOCABULARY = [...DOMAIN_TERMS, ...vocabularyFromEnv()];
+const lexicon = buildLexicon(ASR_VOCABULARY);
 
 /**
  * Languages this build advertises. Whisper handles far more, but a language
@@ -119,7 +140,10 @@ export async function transcribeClip(buffer, { language = "auto", sounds = false
   });
 
   return {
-    text: verdict.text,
+    // Whisper has never read this repository, and transformers.js offers no
+    // `initial_prompt` to tell it (see lexicon.js). So the words it could not
+    // have known are put back after the fact.
+    text: repairVocabulary(verdict.text, lexicon),
     language,
     // The pipeline gives no per-utterance confidence; voiced fraction is the
     // only honest signal available, and saying so beats inventing a number.
