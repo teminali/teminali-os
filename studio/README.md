@@ -165,10 +165,15 @@ your screen and either explains it or acts on it.
 - **Autonomy:** `guide` · `confirm` · `auto`. The default is **`auto`**, chosen
   by the operator on 2026-09-03; the two safer rungs are one switch away.
 - **Opening applications.** A `launch` step starts an application, and a browser
-  may be given an `http`/`https` address. `app` names an id from the catalogue
-  in `src/services/assistant/apps.ts` — never a path, never a command, and no
-  terminal is in it. A launch is always the last step of a plan, because what it
-  opens has no window to plan against yet.
+  may be given an `http`/`https` address. `app` names an id — never a path,
+  never a command — and the ids are **every application installed on this
+  machine**: the curated entries in `src/services/assistant/apps.ts` first, for
+  their spoken aliases and their `browser` flag, then every other `.app` under
+  `/Applications`, `~/Applications` and `/System/Applications`, one vendor
+  folder deep. No terminal is in it, and no Script Editor or Automator either —
+  a shell prompt plus the `type` step is arbitrary code execution wearing an
+  allowlist. A launch is always the last step of a plan, because what it opens
+  has no window to plan against yet.
 - **Dragging.** A `drag` step presses on an element, walks the path, and
   releases — a path rather than a down-and-up, because a slider or a reorderable
   list reads the events in between and a two-event drag does nothing at all. The
@@ -176,8 +181,9 @@ your screen and either explains it or acts on it.
   the first (`dx`/`dy`), never both, and both ends must land on a connected
   screen.
 - **Switching applications.** A `focus` step brings an application that is
-  *already running* to the front. It never starts anything — that is `launch`,
-  and it has a different cost — and like `launch` it ends the plan.
+  *already running* to the front, addressed by bundle id where there is one and
+  by display name where there is not. It never starts anything — that is
+  `launch`, and it has a different cost — and like `launch` it ends the plan.
 - **Coming back.** When a turn moves you into another application, the assistant
   decides whether to return here: it stays if the plan moved you there on
   purpose, comes back if something only this window can show needs reading, and
@@ -575,7 +581,7 @@ ollama serve              # local models on 127.0.0.1:11434
 
 ```bash
 npm run typecheck   # tsc --noEmit
-npm test            # 1112 tests, 0 failures
+npm test            # 1119 tests, 0 failures
 npm run build       # tsc && vite build
 npm run verify:core # all three
 ```

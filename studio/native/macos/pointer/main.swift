@@ -576,10 +576,13 @@ case "key":
     }
 
 case "activate":
-    // Addressable two ways because the callers want two different things. The
-    // gateway restores an observation's own application and knows its pid; a
-    // `focus` step names a catalogue application and only knows its bundle id,
-    // because the whole point is that it is somebody else's process.
+    // Addressable three ways because the callers know three different things.
+    // The gateway restores an observation's own application and knows its pid.
+    // A `focus` on a curated application knows its bundle id, because the whole
+    // point is that it is somebody else's process. And a `focus` on an
+    // application discovered by scanning /Applications knows only the display
+    // name on the bundle — that is all `open -a` needed to start it, so it has
+    // to be enough to bring it forward too.
     let target: NSRunningApplication?
     if let pid = args.int("pid") {
         target = NSRunningApplication(processIdentifier: pid_t(pid))
@@ -589,8 +592,14 @@ case "activate":
         target = NSRunningApplication.runningApplications(withBundleIdentifier: bundle)
             .sorted { ($0.launchDate ?? .distantPast) > ($1.launchDate ?? .distantPast) }
             .first
+    } else if let name = args.string("name") {
+        let wanted = name.lowercased()
+        target = NSWorkspace.shared.runningApplications
+            .filter { ($0.localizedName ?? "").lowercased() == wanted }
+            .sorted { ($0.launchDate ?? .distantPast) > ($1.launchDate ?? .distantPast) }
+            .first
     } else {
-        fail("PID_REQUIRED", "Either --pid or --bundle is required.")
+        fail("PID_REQUIRED", "One of --pid, --bundle or --name is required.")
     }
     if let app = target {
         let ok = app.activate(options: [.activateIgnoringOtherApps])

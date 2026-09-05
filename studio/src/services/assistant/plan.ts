@@ -21,7 +21,7 @@
  * it would" is exactly the kind of thing that must never be discovered later.
  */
 
-import { parseLaunchUrl, resolveLaunchApp } from "./apps.ts";
+import { type LaunchableEntry, launchableIds, parseLaunchUrl, resolveLaunchApp } from "./apps.ts";
 import type { AssistantMode, PlanStep, RejectedStep, ScreenElement, ValidatedPlan } from "./types.ts";
 
 export const PLAN_LIMITS = Object.freeze({
@@ -145,14 +145,15 @@ export interface ValidateOptions {
   mode: AssistantMode;
   maxSteps?: number;
   /**
-   * Catalogue ids installed on this machine, from the observation.
+   * The applications installed on this machine, from the observation.
    *
-   * Omitted means "the machine did not say", and then only catalogue
-   * membership is checked here — the gateway refuses a missing application
+   * Omitted means "the machine did not say", and then only the curated
+   * catalogue is checked here — the gateway refuses a missing application
    * either way, so this only decides whether the operator hears about it
-   * before the step runs or after.
+   * before the step runs or after. Bare ids are still understood, so an
+   * observation taken before the list carried names still validates.
    */
-  launchable?: readonly string[] | null;
+  launchable?: readonly (string | LaunchableEntry)[] | null;
 }
 
 /**
@@ -353,13 +354,13 @@ export function validatePlan(parsed: unknown, options: ValidateOptions): Validat
       }
 
       case "launch": {
-        const app = resolveLaunchApp(step.app);
+        const app = resolveLaunchApp(step.app, options.launchable);
         if (!app) {
           const named = typeof step.app === "string" && step.app.trim() ? `"${step.app.trim().slice(0, 40)}"` : "that";
           reject(index, `${named} is not an application this assistant may open`, step);
           break;
         }
-        if (options.launchable && !options.launchable.includes(app.id)) {
+        if (options.launchable && !launchableIds(options.launchable).has(app.id)) {
           reject(index, `${app.name} is not installed on this machine`, step);
           break;
         }
@@ -383,7 +384,7 @@ export function validatePlan(parsed: unknown, options: ValidateOptions): Validat
       }
 
       case "focus": {
-        const app = resolveLaunchApp(step.app);
+        const app = resolveLaunchApp(step.app, options.launchable);
         if (!app) {
           const named = typeof step.app === "string" && step.app.trim() ? `"${step.app.trim().slice(0, 40)}"` : "that";
           reject(index, `${named} is not an application this assistant knows`, step);
@@ -430,7 +431,11 @@ export function readPlan(raw: string, options: ValidateOptions): ValidatedPlan {
  * Used by the HUD and by the confirmation prompt, so what the operator approves
  * and what they later see in the log are the same sentence.
  */
-export function describeStep(step: PlanStep, elements: ScreenElement[]): string {
+export function describeStep(
+  step: PlanStep,
+  elements: ScreenElement[],
+  launchable?: readonly (string | LaunchableEntry)[] | null,
+): string {
   const byId = new Map(elements.map((element) => [element.id, element]));
   const name = (id: string) => {
     const element = byId.get(id);
@@ -455,15 +460,28 @@ export function describeStep(step: PlanStep, elements: ScreenElement[]): string 
       return `${verb} ${name(step.element)} by ${step.dx ?? 0}, ${step.dy ?? 0}`;
     }
     case "launch": {
-      const app = resolveLaunchApp(step.app);
-      const label = app ? app.name : step.app;
+      const label = appLabel(step.app, launchable);
       return step.url ? `Open ${label} at ${step.url}` : `Open ${label}`;
     }
-    case "focus": {
-      const app = resolveLaunchApp(step.app);
-      return `Switch to ${app ? app.name : step.app}`;
-    }
+    case "focus":
+      return `Switch to ${appLabel(step.app, launchable)}`;
     case "wait":
       return `Wait ${step.ms}ms`;
   }
+}
+
+/**
+ * What to call an application in a sentence an operator reads.
+ *
+ * The display name where it can be resolved. Where it cannot — the HUD renders
+ * outcomes without the observation that produced them — the id is unslugged
+ * back into words, because "Open adobe-photoshop-2024" is a worse sentence than
+ * "Open Adobe Photoshop 2024" and no less honest: the id was made from that
+ * name in the first place.
+ */
+function appLabel(id: string, launchable?: readonly (string | LaunchableEntry)[] | null): string {
+  const app = resolveLaunchApp(id, launchable);
+  if (app) return app.name;
+  if (!id) return "that application";
+  return id.replace(/-+/g, " ").replace(/\b[a-z]/g, (letter) => letter.toUpperCase());
 }

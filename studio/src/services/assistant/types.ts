@@ -15,6 +15,10 @@
  * convention into a guarantee.
  */
 
+import type { LaunchableEntry } from "./apps.ts";
+
+export type { LaunchableEntry };
+
 export interface Rect {
   x: number;
   y: number;
@@ -71,13 +75,15 @@ export interface Observation {
   /** Where the frame was written, and how big it is. */
   frame: { path: string; width: number; height: number } | null;
   /**
-   * Catalogue ids from apps.ts that are actually installed on this machine.
+   * Every application installed on this machine that a `launch` may start.
    *
    * Answered by the gateway rather than assumed, so the model is offered the
-   * browsers this operator has instead of a list it has to guess against.
+   * applications this operator actually has instead of a list it has to guess
+   * against. Entries rather than bare ids because an application discovered by
+   * scanning the disk has a name and a `browser` flag that exist nowhere else.
    * Absent on an observation from a build that predates `launch`.
    */
-  launchable?: string[];
+  launchable?: LaunchableEntry[];
 }
 
 /**

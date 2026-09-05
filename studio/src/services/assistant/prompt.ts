@@ -98,7 +98,7 @@ export function observationBlock(options: PromptOptions): string {
   // Only in agent mode: talk mode cannot run a launch, and offering a
   // capability that will be withheld produces plans that get thrown away.
   if (options.mode === "agent" && observation.launchable && observation.launchable.length > 0) {
-    lines.push("", "Applications you may open with a `launch` step, and nothing else:");
+    lines.push("", "Applications installed on this machine, which a `launch` step may open:");
     lines.push(launchableInventory(observation.launchable));
   }
 

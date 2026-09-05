@@ -71,6 +71,17 @@ export const ASSISTANT_LIMITS = Object.freeze({
   /** How long the installed-application scan is trusted. */
   installedTtlMs: 60_000,
   /**
+   * Most applications the scan will report.
+   *
+   * A bound, not a target: a machine with a thousand `.app` bundles is a
+   * machine where the scan should stop rather than build a thousand-line prompt
+   * block. The curated catalogue is filled first, so hitting this ceiling loses
+   * the tail of the discovered set and never a browser.
+   */
+  maxInstalledApps: 400,
+  /** How deep inside an application directory a `.app` is still found. */
+  installedScanDepth: 2,
+  /**
    * Longest edge of the frame handed to the vision model, in pixels.
    *
    * A full 2× capture is 3024×1964 and costs ~2000 prompt tokens. Halving it
@@ -319,8 +330,10 @@ export async function observe(config, options = {}) {
     frame,
     limits,
     // What the model may open. Answered from this machine rather than assumed,
-    // so it is offered the browsers this operator actually has.
-    launchable: [...(await installedApplications()).keys()],
+    // so it is offered the applications this operator actually has — every one
+    // of them, not a curated shortlist. Entries rather than bare ids because a
+    // discovered application's name and `browser` flag exist nowhere else.
+    launchable: await launchableCatalogue(),
   };
 
   return rememberObservation(observation);
@@ -370,7 +383,7 @@ export const LAUNCHABLE_APPS = Object.freeze([
   { id: "zoom", name: "Zoom", bundleId: "us.zoom.xos" },
 ]);
 
-/** Where a `.app` bundle is looked for, in the order macOS itself would. */
+/** Where a named `.app` bundle is looked for, in the order macOS itself would. */
 function applicationDirectories() {
   return [
     "/Applications",
@@ -383,14 +396,123 @@ function applicationDirectories() {
 }
 
 /**
- * Which catalogue applications are actually on this machine, and where.
+ * The directories whose whole contents become launchable.
+ *
+ * Every directory above is searched for a *named* catalogue application; only
+ * these are enumerated wholesale. `/System/Library/CoreServices` is deliberately
+ * missing: it is where Finder lives, and also `loginwindow`, `SystemUIServer`,
+ * `Dock` and a dozen other processes that are parts of the window server rather
+ * than applications anybody opens. Naming Finder is right. Offering the model
+ * `loginwindow` is not.
+ */
+function scannableDirectories() {
+  return [
+    "/Applications",
+    join(homedir(), "Applications"),
+    "/System/Applications",
+    "/System/Applications/Utilities",
+  ];
+}
+
+/**
+ * The one thing a widened catalogue still refuses: a shell prompt.
+ *
+ * The curated list left terminals out on purpose, and the reason survives the
+ * widening unchanged — a terminal plus the `type` step is arbitrary code
+ * execution wearing an allowlist. `launch` may now start any application on
+ * this machine, but "any application" that includes a command line would make
+ * the CLI permission gate ornamental, because everything it guards would be
+ * reachable by typing it into a window instead.
+ *
+ * Script Editor and Automator are here for the same reason and not by analogy:
+ * both run `do shell script` from a document with no further prompt.
+ */
+const SHELL_APPS = Object.freeze(new Set([
+  "terminal", "iterm", "iterm2", "warp", "alacritty", "kitty", "wezterm",
+  "hyper", "ghostty", "tabby", "script editor", "automator",
+]));
+
+/** True when starting this application would hand the assistant a command line. */
+export function isShellApplication(name) {
+  const key = String(name ?? "").trim().toLowerCase().replace(/\.app$/, "");
+  if (!key) return true;
+  return SHELL_APPS.has(key) || /\bterminal\b/.test(key);
+}
+
+/**
+ * The id a discovered application is known by.
+ *
+ * A curated entry's id was chosen; a discovered one has only the display name
+ * on the bundle, so the id is derived from it. Stable across runs because it is
+ * a pure function of the name, and readable, because the model has to write it
+ * back: "Adobe Photoshop 2024" becomes `adobe-photoshop-2024`.
+ */
+export function launchAppId(name) {
+  const slug = String(name ?? "")
+    .trim()
+    .toLowerCase()
+    .replace(/\.app$/, "")
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+  return slug || "app";
+}
+
+/**
+ * Every `.app` under one directory, one vendor folder deep.
+ *
+ * The nesting is not generality for its own sake: Adobe and JetBrains both
+ * install into `/Applications/<Product>/<Product>.app`, and an assistant that
+ * cannot open Photoshop because it is one directory down is the same "I cannot
+ * see a browser button" answer the `launch` step was built to stop giving.
+ * Depth is bounded, so a symlink loop terminates.
+ */
+async function scanForApplications(directory, depth, found) {
+  if (depth <= 0) return;
+  let entries;
+  try {
+    entries = await readdir(directory, { withFileTypes: true });
+  } catch {
+    return; /* Absent or unreadable. Neither is an error worth reporting. */
+  }
+  for (const entry of entries) {
+    if (entry.name.startsWith(".")) continue;
+    if (!entry.isDirectory() && !entry.isSymbolicLink()) continue;
+    const path = join(directory, entry.name);
+    if (entry.name.endsWith(".app")) {
+      const name = entry.name.slice(0, -4);
+      const key = name.toLowerCase();
+      if (!found.has(key)) found.set(key, { name, path });
+      continue;
+    }
+    await scanForApplications(path, depth - 1, found);
+  }
+}
+
+/**
+ * Every application on this machine that a `launch` may start, and where it is.
  *
  * A directory scan rather than a LaunchServices query, because the answer is
  * wanted on every observation and `mdfind`/`lsregister` are a spawn and a wait
- * for something a handful of `stat` calls settle instantly. The cost is that an
- * application installed somewhere unusual reads as absent; the assistant then
- * says it is not installed, which is a wrong-but-safe answer rather than a
- * wrong-and-launching one.
+ * for something `readdir` settles instantly. It also means no plist is parsed:
+ * the display name is the bundle's basename, and that is the whole of what
+ * `open -a <path>` needs. No bundle identifier is read for a discovered
+ * application because none is required to start one.
+ *
+ * Two passes, and the order is the point.
+ *
+ * The **curated** entries go in first, by exact name, in the order they are
+ * read to the model — browsers before everything else. They carry an id chosen
+ * to be spoken, the words an operator would actually say, and the `browser`
+ * flag that decides whether a URL may be handed over. None of that survives
+ * being rediscovered as a bare bundle name, so a curated entry always wins the
+ * name it claims.
+ *
+ * Then **everything else on disk**, alphabetically. This is the widening: the
+ * operator asked that the assistant be able to open anything they have, so an
+ * application is launchable because it is installed, not because somebody
+ * thought of it. What it is still never given is a path or a command — the step
+ * names an id from this map and the map is built from the filesystem, so an id
+ * the model invented resolves to nothing exactly as before.
  *
  * Cached, because the set changes when somebody installs an application and not
  * between two sentences.
@@ -402,25 +524,67 @@ export async function installedApplications({ now = Date.now, ttlMs = ASSISTANT_
 
   const directories = applicationDirectories();
   const apps = new Map();
-  await Promise.all(
+  const claimed = new Set();
+
+  const curated = await Promise.all(
     LAUNCHABLE_APPS.map(async (app) => {
       for (const directory of directories) {
         const path = join(directory, `${app.name}.app`);
         try {
           const entry = await stat(path);
-          if (entry.isDirectory()) {
-            apps.set(app.id, { ...app, path });
-            return;
-          }
+          if (entry.isDirectory()) return { ...app, path };
         } catch {
           /* Not here. Try the next directory. */
         }
       }
+      return null;
     }),
   );
+  // Inserted in catalogue order rather than in the order the stats resolved, so
+  // the block the model reads is the same block twice running.
+  for (const app of curated) {
+    if (!app) continue;
+    apps.set(app.id, app);
+    claimed.add(app.name.toLowerCase());
+  }
+
+  const found = new Map();
+  for (const directory of scannableDirectories()) {
+    await scanForApplications(directory, ASSISTANT_LIMITS.installedScanDepth, found);
+  }
+
+  const discovered = [...found.values()]
+    .filter((entry) => !claimed.has(entry.name.toLowerCase()) && !isShellApplication(entry.name))
+    .sort((a, b) => a.name.localeCompare(b.name));
+
+  for (const entry of discovered) {
+    if (apps.size >= ASSISTANT_LIMITS.maxInstalledApps) break;
+    let id = launchAppId(entry.name);
+    // A curated id wins a collision; the newcomer takes a numbered one. Sorted
+    // input makes that deterministic rather than dependent on the scan order.
+    if (apps.has(id)) {
+      let suffix = 2;
+      while (apps.has(`${id}-${suffix}`)) suffix += 1;
+      id = `${id}-${suffix}`;
+    }
+    apps.set(id, { id, name: entry.name, bundleId: "", path: entry.path, discovered: true });
+  }
 
   installedCache = { at: now(), apps };
   return apps;
+}
+
+/**
+ * The installed set as the renderer needs it: an id, a name, and whether a URL
+ * means anything to it.
+ *
+ * Deliberately not the whole entry. The path is this module's business — it is
+ * the thing that must not become something a caller can choose — and a bundle
+ * id the renderer never uses would only be weight on every observation.
+ */
+export async function launchableCatalogue() {
+  const apps = await installedApplications();
+  return [...apps.values()].map((app) => (app.browser ? { id: app.id, name: app.name, browser: true } : { id: app.id, name: app.name }));
 }
 
 /** Drops the cache. Only the tests need this. */
@@ -465,7 +629,16 @@ export async function launchApplication(appId, options = {}) {
     env = launchEnvironment(),
   } = options;
 
-  const app = LAUNCHABLE_APPS.find((entry) => entry.id === appId);
+  /*
+   * Curated entries resolve without touching the disk, so a bad URL is still
+   * refused as a bad URL on a machine that does not have the application. The
+   * scan is consulted only for an id nobody curated — which is the only way a
+   * discovered application can be named at all.
+   */
+  const id = typeof appId === "string" ? appId.trim() : "";
+  const curated = LAUNCHABLE_APPS.find((entry) => entry.id === id);
+  const installed = curated ? null : await installedApplications();
+  const app = curated ?? installed.get(id);
   if (!app) throw new PointerError("APP_NOT_ALLOWED", `"${appId}" is not an application this assistant may open.`);
 
   if (url !== null) {
@@ -482,8 +655,7 @@ export async function launchApplication(appId, options = {}) {
     if (parsed.username || parsed.password) throw new PointerError("URL_INVALID", "That address carries credentials.");
   }
 
-  const installed = await installedApplications();
-  const found = installed.get(app.id);
+  const found = app.path ? app : (await installedApplications()).get(app.id);
   if (!found) throw new PointerError("APP_NOT_INSTALLED", `${app.name} is not installed on this machine.`);
 
   const args = ["-a", found.path];
@@ -523,7 +695,7 @@ export async function launchApplication(appId, options = {}) {
     });
   });
 
-  return { app: app.id, name: app.name, bundleId: app.bundleId, path: found.path, url };
+  return { app: app.id, name: app.name, bundleId: app.bundleId ?? "", path: found.path, url };
 }
 
 /**
@@ -535,13 +707,22 @@ export async function launchApplication(appId, options = {}) {
  * report, truthfully and uselessly, that the browser is still not there. A
  * miss is not an error — the caller is told `frontmost: false` and the operator
  * hears an honest "it is still opening".
+ *
+ * Addressed by bundle id where there is one and by display name where there is
+ * not, which is the same split `pointerActivate` makes and for the same reason.
  */
-async function waitForFront(bundleId, { timeoutMs, pollMs = 250, frontmostImpl = pointerFrontmost } = {}) {
+async function waitForFront(target, { timeoutMs, pollMs = 250, frontmostImpl = pointerFrontmost } = {}) {
+  const bundleId = typeof target === "string" ? target : (target?.bundleId ?? "");
+  // An application found by scanning the disk has no bundle id — nothing read
+  // its plist, because nothing needed to. The display name is then the only
+  // address there is, and `pointerFrontmost()` reports one.
+  const name = typeof target === "string" ? "" : (target?.name ?? "");
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
     try {
       const front = await frontmostImpl();
-      if (front?.bundleId === bundleId) return true;
+      if (bundleId && front?.bundleId === bundleId) return true;
+      if (!bundleId && name && front?.name === name) return true;
     } catch {
       // No helper, no answer. The launch still happened.
       return false;
@@ -615,27 +796,30 @@ export async function act(observationId, step, options = {}) {
    * that is a different act, with a different cost, and it has its own step.
    */
   if (kind === "focus") {
-    const app = LAUNCHABLE_APPS.find((entry) => entry.id === (typeof step.app === "string" ? step.app : ""));
+    const wanted = typeof step.app === "string" ? step.app.trim() : "";
+    const app = (await installedApplications()).get(wanted);
     if (!app) throw new PointerError("APP_NOT_ALLOWED", `"${step.app}" is not an application this assistant knows.`);
     let activated;
     try {
-      activated = await pointerActivate(app.bundleId);
+      // A curated application is addressed by bundle id, which is unambiguous
+      // where a display name is not; a discovered one has only its name.
+      activated = await pointerActivate(app.bundleId || { name: app.name });
     } catch (error) {
       if (error instanceof PointerError && error.code === "APP_NOT_RUNNING") {
         throw new PointerError("APP_NOT_RUNNING", `${app.name} is not running, so it cannot be brought to the front.`);
       }
       throw error;
     }
-    const frontmost = await waitForFront(app.bundleId, { timeoutMs: ASSISTANT_LIMITS.launchSettleMs });
+    const frontmost = await waitForFront(app, { timeoutMs: ASSISTANT_LIMITS.launchSettleMs });
     forgetObservation(observation.id);
-    return { kind, app: app.id, name: activated?.name ?? app.name, bundleId: app.bundleId, frontmost };
+    return { kind, app: app.id, name: activated?.name ?? app.name, bundleId: app.bundleId ?? "", frontmost };
   }
 
   if (kind === "launch") {
     const launched = await launchApplication(typeof step.app === "string" ? step.app : "", {
       url: typeof step.url === "string" && step.url ? step.url : null,
     });
-    const frontmost = await waitForFront(launched.bundleId, { timeoutMs: ASSISTANT_LIMITS.launchSettleMs });
+    const frontmost = await waitForFront(launched, { timeoutMs: ASSISTANT_LIMITS.launchSettleMs });
     // The screen this observation described is gone now. Saying so here means
     // the caller cannot keep acting against it by accident.
     forgetObservation(observation.id);

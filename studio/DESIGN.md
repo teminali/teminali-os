@@ -1278,22 +1278,57 @@ what the operator wants is not on the screen.
 
 `{ "kind": "launch", "app": "safari", "url": "https://youtube.com" }`
 
-**`app` is an id from a catalogue, never a path and never a command.**
-`services/assistant/apps.ts` holds it: browsers first, then the everyday
-applications, each with a display name and a bundle id. An id the model invented
+**`app` is an id, never a path and never a command.** An id the model invented
 resolves to nothing and starts nothing, which is the same guarantee `PlanStep`
 makes about coordinates applied to executables — the dangerous shape is not
 representable rather than merely discouraged.
 
-Two absences are deliberate, and `tests/assistant-launch.test.mjs` asserts the
-first of them:
+**Where those ids come from widened.** They were `services/assistant/apps.ts`
+and only that: twenty-four applications, and asking for anything else got a
+refusal. That is not what an operator means by an assistant that can drive their
+computer, and when asked directly they said so — let it open anything they
+actually have. So the list is now assembled on the machine by
+`installedApplications()` in `server/assistant.js`, in two passes:
 
-- **No terminal.** Terminal, iTerm and anything else that is a shell prompt stay
-  out, because a shell prompt plus the `type` step is arbitrary code execution
-  wearing an allowlist.
-- **No free-text escape hatch and no setting that appends to the list.** An
-  allowlist an operator can be talked into extending mid-session is not an
-  allowlist. Adding an application is a code change.
+1. **The curated entries**, by exact name, in the order they are read to the
+   model. They stay because they carry what a directory scan cannot infer: a
+   stable spoken id, the words an operator would actually say (`browser` →
+   Safari, `vs code` → Visual Studio Code), and the `browser` flag that decides
+   whether a URL may be handed over. A curated entry always wins the name it
+   claims.
+2. **Every other `.app`** under `/Applications`, `~/Applications`,
+   `/System/Applications` and `/System/Applications/Utilities`, one vendor
+   folder deep so that `/Applications/<Product>/<Product>.app` — how Adobe and
+   JetBrains install — is found. The id is the display name slugged
+   (`Adobe Photoshop 2024` → `adobe-photoshop-2024`) and no plist is read,
+   because the basename is the whole of what `open -a <path>` needs. On this
+   machine that is 111 applications, 95 of them discovered.
+
+`/System/Library/CoreServices` is searched for a *named* catalogue application
+and never enumerated: Finder lives there, and so do `loginwindow`,
+`SystemUIServer` and `Dock`, which are parts of the window server rather than
+applications anybody opens.
+
+Three absences survive the widening, and `tests/assistant-launch.test.mjs`
+asserts all three:
+
+- **Still no terminal.** Terminal, iTerm, Warp, Ghostty and the rest are skipped
+  by name, along with Script Editor and Automator, which run `do shell script`
+  from a document. A shell prompt plus the `type` step is arbitrary code
+  execution wearing an allowlist, and "any application" that included a command
+  line would make the CLI permission gate ornamental — everything it guards
+  would be reachable by typing into a window instead.
+- **Still no free-text escape hatch and no setting that appends to the list.**
+  The list widened because the filesystem says so, not because anything can be
+  talked into extending it mid-session.
+- **Still never a path.** The step names an id; the path stays on the gateway,
+  which is the only place that ever spawns `open`.
+
+The prompt names at most `MAX_INVENTORY_APPS` (120) of them — the curated
+entries and the browsers are ordered first, so the ceiling falls on the tail —
+and tells the model the remainder exists and may be named exactly as it appears
+in its menu bar. Validation uses the whole list, so an application past the
+ceiling still launches when it is named.
 
 Only a browser may be given a `url`, and only an `http` or `https` one. `file:`
 reads the disk, `javascript:` runs in whatever is frontmost, and a custom scheme
@@ -1311,11 +1346,19 @@ sentence is answered against a fresh one rather than against a screen that is
 gone.
 
 Which applications are actually installed is answered by the machine, not
-assumed: `observe()` scans the five standard application directories and returns
-`launchable`, and the prompt offers the model only those — in agent mode only,
-since talk mode would have the step withheld anyway. An application installed
-somewhere unusual reads as absent and the assistant says so, which is
+assumed: `observe()` returns `launchable` — entries of `{ id, name, browser? }`
+rather than bare ids, because a discovered application's name and browser flag
+exist nowhere else — and the prompt offers the model those, in agent mode only,
+since talk mode would have the step withheld anyway. The scan is cached for
+`installedTtlMs` (60 s) and bounded at `maxInstalledApps` (400). An application
+installed somewhere unusual reads as absent and the assistant says so, which is
 wrong-but-safe rather than wrong-and-launching.
+
+A `focus` on a discovered application has no bundle id to aim at, so
+`pointerActivate` gained a third address — `{ name }`, matched against
+`localizedName` by the helper's `activate --name` — and `waitForFront` falls
+back to the same comparison. Bundle id where there is one, display name where
+there is not.
 
 The allowlist exists twice on purpose. The renderer needs it to build the prompt
 and validate a plan; `server/assistant.js` needs it because `/api/assistant/act`

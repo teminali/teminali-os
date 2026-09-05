@@ -250,13 +250,15 @@ export async function pointerTree({ pid = null, max = POINTER_LIMITS.maxElements
 }
 
 /**
- * Bring an application to the front, addressed by pid or by bundle id.
+ * Bring an application to the front, addressed by pid, bundle id or `{ name }`.
  *
- * Two addresses because there are two callers with two different pieces of
- * knowledge. `act()` restores the application an observation was taken of and
- * holds its pid. A `focus` step names an application from the catalogue and
- * holds only its bundle id, because the whole point is that the process
- * belongs to somebody else and was not started by us.
+ * Three addresses because there are three callers with three different pieces
+ * of knowledge. `act()` restores the application an observation was taken of
+ * and holds its pid. A `focus` on a curated application holds its bundle id,
+ * because the whole point is that the process belongs to somebody else and was
+ * not started by us. A `focus` on an application found by scanning
+ * `/Applications` holds only the display name on the bundle — no bundle id was
+ * ever read, because none was needed to launch it either.
  */
 export function pointerActivate(target, options = {}) {
   if (Number.isInteger(target) && target > 0) {
@@ -265,7 +267,13 @@ export function pointerActivate(target, options = {}) {
   if (typeof target === "string" && target.trim()) {
     return runPointer("activate", ["--bundle", target.trim()], options);
   }
-  throw new PointerError("PID_REQUIRED", "A positive integer pid or a bundle identifier is required.");
+  // An application discovered by scanning /Applications may have no bundle id
+  // the gateway knows — the display name on the bundle is what identified it,
+  // and the helper can match a running process on that.
+  if (target && typeof target === "object" && typeof target.name === "string" && target.name.trim()) {
+    return runPointer("activate", ["--name", target.name.trim()], options);
+  }
+  throw new PointerError("PID_REQUIRED", "A pid, a bundle identifier or a { name } is required.");
 }
 
 /* ── Acting ──────────────────────────────────────────────────────────────── */

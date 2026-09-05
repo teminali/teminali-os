@@ -17,7 +17,14 @@ import test from "node:test";
 import { LAUNCHABLE_APPS, parseLaunchUrl, resolveLaunchApp } from "../src/services/assistant/apps.ts";
 import { describeStep, validatePlan } from "../src/services/assistant/plan.ts";
 import { observationBlock } from "../src/services/assistant/prompt.ts";
-import { LAUNCHABLE_APPS as SERVER_APPS, launchApplication } from "../server/assistant.js";
+import {
+  LAUNCHABLE_APPS as SERVER_APPS,
+  installedApplications,
+  isShellApplication,
+  launchAppId,
+  launchApplication,
+  launchableCatalogue,
+} from "../server/assistant.js";
 
 /* ── Fixtures ─────────────────────────────────────────────────────────────── */
 
@@ -293,3 +300,97 @@ function fakeChild(code) {
   };
   return child;
 }
+
+/* ── The widening ─────────────────────────────────────────────────────────── */
+
+/*
+ * `launch` used to mean "one of these twenty-four". The operator asked that it
+ * mean "anything I have installed", so the list is now built from the disk.
+ * What these assert is that widening the *source* of the list did not widen its
+ * *shape*: the step still names an id that this machine produced, a shell is
+ * still not one of them, and a path is still not an id.
+ */
+
+test("an application discovered on disk gets a stable, speakable id", () => {
+  assert.equal(launchAppId("Adobe Photoshop 2024"), "adobe-photoshop-2024");
+  assert.equal(launchAppId("Cursor.app"), "cursor");
+  assert.equal(launchAppId("  Final Cut Pro  "), "final-cut-pro");
+  // Same name, same id, every run — the model has to be able to write it back.
+  assert.equal(launchAppId("VLC"), launchAppId("VLC"));
+  assert.equal(launchAppId("!!!"), "app");
+});
+
+test("the widening does not admit a shell prompt", () => {
+  for (const name of ["Terminal", "terminal.app", "iTerm", "iTerm2", "Warp", "Ghostty", "WezTerm", "Script Editor", "Automator"]) {
+    assert.equal(isShellApplication(name), true, `${name} must not become launchable`);
+  }
+  for (const name of ["Safari", "Notes", "Blender", "Figma"]) {
+    assert.equal(isShellApplication(name), false, `${name} is not a shell`);
+  }
+});
+
+test("the machine reports more than the curated catalogue, and no terminal in it", async (t) => {
+  if (process.platform !== "darwin") return t.skip("the scan reads macOS application directories");
+  const catalogue = await launchableCatalogue();
+  assert.ok(catalogue.length > 0, "a Mac has applications on it");
+  for (const entry of catalogue) {
+    assert.equal(typeof entry.id, "string");
+    assert.equal(typeof entry.name, "string");
+    assert.equal(isShellApplication(entry.name), false, `${entry.name} must not be offered`);
+    assert.equal(entry.id.includes("/"), false, "an id is never a path");
+  }
+  assert.equal(new Set(catalogue.map((entry) => entry.id)).size, catalogue.length, "ids are unique");
+
+  // The curated entries keep their chosen ids rather than being rediscovered
+  // as bare bundle names — that is what carries the aliases and `browser`.
+  const installed = await installedApplications();
+  for (const app of SERVER_APPS) {
+    const found = installed.get(app.id);
+    if (found) assert.equal(found.name, app.name, `${app.id} kept its curated entry`);
+  }
+});
+
+test("the validator accepts an application this machine has and no other", () => {
+  const launchable = [
+    { id: "safari", name: "Safari", browser: true },
+    { id: "blender", name: "Blender" },
+  ];
+  const ok = plan([{ kind: "launch", app: "blender" }], { launchable });
+  assert.deepEqual(ok.steps, [{ kind: "launch", app: "blender" }]);
+
+  // By display name too, because that is what an operator says out loud.
+  assert.deepEqual(plan([{ kind: "launch", app: "Blender" }], { launchable }).steps, [{ kind: "launch", app: "blender" }]);
+
+  const no = plan([{ kind: "launch", app: "davinci-resolve" }], { launchable });
+  assert.deepEqual(no.steps, []);
+  assert.match(no.rejected[0].reason, /not an application this assistant may open/);
+
+  // A discovered application is not a browser, so it cannot be given an address.
+  const url = plan([{ kind: "launch", app: "blender", url: "https://example.com/" }], { launchable });
+  assert.deepEqual(url.steps, []);
+  assert.match(url.rejected[0].reason, /not a browser/);
+});
+
+test("a focus can name a discovered application", () => {
+  const launchable = [{ id: "cursor", name: "Cursor" }];
+  const result = plan([{ kind: "focus", app: "Cursor" }], { launchable });
+  assert.deepEqual(result.steps, [{ kind: "focus", app: "cursor" }]);
+});
+
+test("a discovered application is described in words, not in its slug", () => {
+  assert.equal(
+    describeStep({ kind: "launch", app: "adobe-photoshop-2024" }, ELEMENTS),
+    "Open Adobe Photoshop 2024",
+  );
+  assert.equal(
+    describeStep({ kind: "focus", app: "blender" }, ELEMENTS, [{ id: "blender", name: "Blender" }]),
+    "Switch to Blender",
+  );
+});
+
+test("an observation that carries bare ids still validates", () => {
+  // The list gained names when it widened; an observation taken a moment before
+  // that must not start rejecting the applications it already offered.
+  const result = plan([{ kind: "launch", app: "safari" }], { launchable: ["safari", "notes"] });
+  assert.deepEqual(result.steps, [{ kind: "launch", app: "safari" }]);
+});
