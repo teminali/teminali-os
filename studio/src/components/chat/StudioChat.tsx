@@ -33,6 +33,8 @@ import {
   type SubmitOptions,
 } from "../../services/voice";
 import { FrontierEngine, sanitizeOngoingAssist } from "../../services/frontierEngine";
+import { interruptTurn } from "../../services/interruption";
+import { useInterruptKey } from "../../hooks/useInterruptKey";
 import { useGitHubStatus } from "../../hooks/useGitHubStatus";
 import { useProjectLibrary } from "../../hooks/useProjectLibrary";
 import { UsageService } from "../../services/usageService";
@@ -103,6 +105,7 @@ export const StudioChat: React.FC<{
   // one-shots that have each forgotten the last.
   const agentSessionRef = useRef<string | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
+  const columnRef = useRef<HTMLElement>(null);
   const commandApproval = useCommandApproval();
   const attachments = useAttachments();
 
@@ -130,6 +133,7 @@ export const StudioChat: React.FC<{
   // Held in a ref so the voice engine, which is created once, always calls the
   // current version rather than the one captured at mount.
   const sendRef = useRef<(text: string, options?: SubmitOptions) => Promise<void>>(async () => {});
+  const stopRef = useRef<() => void>(() => {});
   const voiceRef = useRef<UseVoiceResult | null>(null);
   const spokenFor = useRef<string | null>(null);
   // What the current run has done so far — the tool calls and the prose — so
@@ -205,6 +209,42 @@ export const StudioChat: React.FC<{
   const turnIdRef = useRef(0);
   const hasSpokenModelTokens = useRef(false);
 
+  // Read off once so `stop` has a stable identity: `useCommandApproval`
+  // returns a fresh object every render, but this callback is the gate's.
+  const cancelApproval = commandApproval.cancel;
+
+  /**
+   * Stop the run. The only way a turn is interrupted, from anywhere.
+   *
+   * It is declared here, above `send`, because `send` interrupts too — a new
+   * prompt pre-empts the one in flight — and because the voice host's `stop`
+   * intent lands on the same routine. Three copies of this had drifted apart;
+   * the one that mattered, `commandApproval.cancel()`, was in none of them, so
+   * stopping a run that was blocked on an approval left the prompt on screen
+   * and the gate's promise unresolved forever.
+   *
+   * The order is deliberate. Retire the turn id first, so nothing still in
+   * flight can write to the transcript after this; then abort, which is what
+   * actually stops the work — the signal reaches the gateway's fetch, the
+   * gateway aborts its upstream, and `agent-cli.js` SIGTERMs the CLI; then
+   * settle what is on screen; then silence the voice.
+   *
+   * Through `voiceRef` rather than the `voice` value: the engine is built
+   * below this point, and a captured value would be the one from mount.
+   */
+  const stop = useCallback(() => {
+    turnIdRef.current += 1;
+    runRef.current = null;
+    abortRef.current?.abort();
+    abortRef.current = null;
+    // A command waiting on a decision is part of the run. Left pending it is
+    // both a dialog nobody can answer and an agent loop nobody can finish.
+    cancelApproval();
+    setStreaming(false);
+    updateLastMessageInEngine("frontier", interruptTurn);
+    voiceRef.current?.silence();
+  }, [cancelApproval, setStreaming, updateLastMessageInEngine]);
+
   const send = useCallback(
     async (text: string, options?: SubmitOptions) => {
       const ready = attachments.attachments.filter((entry) => entry.status === "ready");
@@ -213,15 +253,9 @@ export const StudioChat: React.FC<{
       // should ask about the PDF.
       if ((!typed && ready.length === 0) || attachments.busy) return;
 
-      // Universal Interruption: cleanly abort ongoing generation and proceed immediately
-      if (isStreaming) {
-        abortRef.current?.abort();
-        voiceRef.current?.silence();
-        updateLastMessageInEngine("frontier", (msg) => ({
-          isStreaming: false,
-          content: msg.content.trim() ? msg.content : "Interrupted.",
-        }));
-      }
+      // Universal Interruption: a new prompt pre-empts the run in flight, and
+      // stops it exactly the way the stop button does.
+      if (isStreaming) stop();
 
       turnIdRef.current += 1;
       const currentTurnId = turnIdRef.current;
@@ -406,10 +440,7 @@ export const StudioChat: React.FC<{
               failure.name === "AbortError" ||
               /aborted|cancelled|stopped by the user/i.test(failure.message);
             if (isAbort) {
-              updateLastMessageInEngine("frontier", (msg) => ({
-                isStreaming: false,
-                content: msg.content.trim() ? msg.content : "Interrupted.",
-              }));
+              updateLastMessageInEngine("frontier", interruptTurn);
             } else {
               updateLastMessageInEngine("frontier", () => ({
                 content: `Error: ${failure.message || "The request failed."}`,
@@ -489,11 +520,12 @@ export const StudioChat: React.FC<{
     [
       messages, isStreaming, addMessageToEngine, updateLastMessageInEngine, setStreaming,
       currentProfile, activeSkill, screenshotToCodeStack, commandApproval.approveCommand, profile.costLabel,
-      attachments, speakRemainder,
+      attachments, speakRemainder, stop,
     ],
   );
 
   sendRef.current = send;
+  stopRef.current = stop;
 
   /* ── Voice ─────────────────────────────────────────────────────────────── */
 
@@ -527,17 +559,9 @@ export const StudioChat: React.FC<{
       // best guess, not the operator's spelling.
       sendRef.current(text, options);
     },
-    interrupt: () => {
-      turnIdRef.current += 1;
-      runRef.current = null;
-      abortRef.current?.abort();
-      setStreaming(false);
-      updateLastMessageInEngine("frontier", (msg) => ({
-        isStreaming: false,
-        content: msg.content.trim() ? msg.content : "Interrupted.",
-      }));
-      voiceRef.current?.silence();
-    },
+    // "Stop", heard. The same routine the stop button runs — see §6.1 for
+    // which utterances get here and which are only encouragement.
+    interrupt: () => stopRef.current(),
     lastAssistantText: () => lastAssistant,
     isBusy: () => isStreaming,
     // "How's it going?" mid-run is answered from what the run has actually
@@ -618,33 +642,19 @@ export const StudioChat: React.FC<{
     pinnedRef.current = node.scrollHeight - node.scrollTop - node.clientHeight < 60;
   };
 
-  const stop = React.useCallback(() => {
-    turnIdRef.current += 1;
-    runRef.current = null;
-    abortRef.current?.abort();
-    setStreaming(false);
-    updateLastMessageInEngine("frontier", (msg) => ({
-      isStreaming: false,
-      content: msg.content.trim() ? msg.content : "Interrupted.",
-    }));
-    voice.silence();
-  }, [setStreaming, updateLastMessageInEngine, voice]);
+  /*
+    Escape interrupts a run, as it does in a terminal.
 
-  // Escape interrupts a run, as it does in a terminal. Ignored while typing in
-  // a field, so it never eats an in-progress edit.
-  useEffect(() => {
-    if (!isStreaming) return;
-    const onKey = (event: KeyboardEvent) => {
-      const target = event.target as HTMLElement | null;
-      const typing = target && /^(INPUT|TEXTAREA)$/.test(target.tagName);
-      if (event.key === "Escape" && !typing) {
-        event.preventDefault();
-        stop();
-      }
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [isStreaming, stop]);
+    It used to be refused whenever a field had focus, which reads as caution
+    and was the whole defect: the composer *is* a textarea, it is autofocused,
+    and it keeps focus after a prompt is sent — so the one place the operator
+    presses Escape was the one place it was thrown away. The rule is in
+    `services/interruption.ts` and the wiring in `hooks/useInterruptKey`,
+    shared with the agent tabs and the side chats so one rule cannot become
+    three. `columnRef` is what makes this column "the chat": a keystroke
+    inside it interrupts even from a text field.
+  */
+  useInterruptKey(isStreaming, columnRef, stop);
 
   /* ── Render ────────────────────────────────────────────────────────────── */
 
@@ -658,6 +668,7 @@ export const StudioChat: React.FC<{
        take the whole column, and it hides the chat rather than crushing
        it — the conversation stays mounted, so nothing is lost. */
     <main
+      ref={columnRef}
       data-chat-column
       className={`flex-1 min-w-[var(--chat-min-w)] flex-col bg-frame-mid ${
         panelExpanded ? "hidden" : "flex"

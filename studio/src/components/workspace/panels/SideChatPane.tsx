@@ -5,6 +5,8 @@ import { usePanelStore, type PanelTab } from "../../../store/panelStore";
 import { useAttachments } from "../../../hooks/useAttachments";
 import { useVoice } from "../../../hooks/useVoice";
 import { composePrompt } from "../../../services/fileService";
+import { interruptTurn } from "../../../services/interruption";
+import { useInterruptKey } from "../../../hooks/useInterruptKey";
 import { MessageBlock } from "../../chat/MessageBlock";
 import { Composer } from "../../chat/Composer";
 import { ChangeReviewDock } from "../../chat/ChangeReviewDock";
@@ -36,6 +38,7 @@ export const SideChatPane: React.FC<{ panel: PanelTab }> = ({ panel }) => {
   const [streaming, setStreaming] = useState(false);
   const abortRef = useRef<AbortController | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
+  const surfaceRef = useRef<HTMLDivElement>(null);
   const attachments = useAttachments();
 
   const profile = PROFILES_LIST.find((entry) => entry.id === currentProfile) ?? PROFILES_LIST[1];
@@ -55,9 +58,21 @@ export const SideChatPane: React.FC<{ panel: PanelTab }> = ({ panel }) => {
 
   useEffect(() => () => abortRef.current?.abort(), []);
 
-  const patchLast = (patch: Partial<ChatMessage>) =>
+  /**
+   * Writes to whatever sits last in this tab's transcript.
+   *
+   * Takes an updater as well as a patch, because a stopped turn's patch
+   * depends on what the turn had reached — the same shape the main chat's
+   * `updateLastMessageInEngine` takes, so `interruptTurn` can be handed to
+   * either one unchanged.
+   */
+  const patchLast = (patch: Partial<ChatMessage> | ((message: ChatMessage) => Partial<ChatMessage>)) =>
     setMessages((previous) =>
-      previous.map((message, index) => (index === previous.length - 1 ? { ...message, ...patch } : message)),
+      previous.map((message, index) =>
+        index === previous.length - 1
+          ? { ...message, ...(typeof patch === "function" ? patch(message) : patch) }
+          : message,
+      ),
     );
 
   const send = async (override?: string) => {
@@ -118,14 +133,26 @@ export const SideChatPane: React.FC<{ panel: PanelTab }> = ({ panel }) => {
     );
   };
 
+  /**
+   * Stops this tab's run.
+   *
+   * `interruptTurn` rather than a bare `isStreaming: false`, so a tab is
+   * stopped the same way the main chat is: the partial reply is kept and
+   * marked, and every tool call still reporting `running` is settled. Without
+   * it a stopped tab left its strip spinning under a finished turn.
+   */
   const stop = () => {
     abortRef.current?.abort();
+    abortRef.current = null;
     setStreaming(false);
-    patchLast({ isStreaming: false });
+    patchLast(interruptTurn);
   };
 
+  /* Escape stops this tab, as it stops the main chat — same rule, same hook. */
+  useInterruptKey(streaming, surfaceRef, stop);
+
   return (
-    <div className="flex-1 min-h-0 flex flex-col">
+    <div ref={surfaceRef} className="flex-1 min-h-0 flex flex-col">
       <div ref={scrollRef} className="flex-1 min-h-0 overflow-y-auto flex flex-col px-4 py-4">
         {messages.length === 0 ? (
           <EmptyState title={panel.label} detail="A scratch conversation. Nothing here reaches the main thread." />

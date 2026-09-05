@@ -32,6 +32,7 @@ import {
 } from "./addressing";
 import { SpeakerProfile, type EnrolledProfile } from "./speakerProfile";
 import { classifyTurnIntent, type TurnIntentVerdict } from "./turnIntent";
+import { selfAudio } from "./selfAudio";
 import { EchoGuard } from "./echoGuard";
 import { AmbientMemory, classifyAmbientQuery } from "./ambientMemory";
 import { cleanTranscript, isNonSpeechOrBlank, polishIsTrustworthy, polishPrompt, repairDeterministic, withPolish } from "./transcriptRepair";
@@ -42,14 +43,17 @@ import {
   VoiceError,
   type AddressingVerdict,
   type AmbientSound,
+  type PreparedSpeech,
   type RecognitionSession,
   type RepairedTranscript,
   type SubmitOptions,
   type SynthesisHandle,
   type VoiceMode,
+  type VoiceProvider,
   type VoiceSettings,
   type VoiceState,
 } from "./types";
+import { readyToWarmNext } from "./speechStream";
 
 /** What the engine needs from the application around it. */
 export interface VoiceHost {
@@ -162,6 +166,8 @@ export class VoiceEngine {
   private interrupted = false;
   private speechQueue: string[] = [];
   private isProcessingSpeechQueue = false;
+  /** The next block's audio, started while the current one is still being heard. */
+  private preparedSpeech: PreparedSpeech | null = null;
   private isStreamDone = false;
   private suspendedSpeech: string[] | null = null;
   private currentlySpeakingText: string | null = null;
@@ -507,6 +513,17 @@ export class VoiceEngine {
     // While the assistant is actively speaking, we watch for an interruption / barge-in.
     if (this.state === "speaking") {
       if (!this.settings.allowBargeIn) return;
+      /*
+        A film is not an interruption. Our own playback arrives as a long run
+        of voiced frames, which is precisely the shape barge-in looks for, so
+        a video playing in the Files panel cut the assistant off mid-sentence
+        as reliably as the operator could. See services/voice/selfAudio.ts.
+      */
+      if (selfAudio.audible) {
+        this.bargeInRun = 0;
+        this.emit();
+        return;
+      }
       this.bargeInRun = frame.voiced ? this.bargeInRun + 1 : 0;
       if (this.bargeInRun >= BARGE_IN_FRAMES) {
         this.bargeInRun = 0;
@@ -776,6 +793,43 @@ export class VoiceEngine {
       // Non-speech, blank audio, or our own voice. Resume where we left off.
       this.resumeSuspendedSpeech();
       return;
+    }
+
+    /*
+      Our own speakers.
+
+      The echo guard above catches the assistant's voice because we know its
+      words. Nothing knows the words of a video in the Files panel or a page in
+      the Browser panel, and there is nothing wrong with the transcript of one:
+      it is real speech, correctly heard, addressed to nobody here. Every gate
+      below this one asks who a sentence was *for*, and a film answers that
+      question as convincingly as a person — which is how "OpenAI has blessed
+      us" was committed as a turn and answered.
+
+      So while the app is audible the bar is a wake word, and only that. Not a
+      closed microphone: "Temy, pause the video" is exactly the turn an
+      operator needs most while something is playing, and it still lands.
+      See services/voice/selfAudio.ts.
+    */
+    if (this.mode === "conversation" && selfAudio.audibleSince(this.turnStartedAt)) {
+      const addressed = stripWakeWord(heard, this.settings.wakeWords).matched;
+      if (!addressed) {
+        this.lastRejected = {
+          text: heard,
+          verdict: {
+            directed: false,
+            confidence: 0.9,
+            reason: "The app was playing audio; only a turn that names the assistant is taken.",
+            signals: { wakeWord: false, speakerMatch: null, followUpWindow: false, classifier: null, imperative: false },
+          },
+        };
+        // Deliberately not written to ambient memory. That log is for the
+        // room — "what did she just say?" — and a film we played ourselves is
+        // not the room; a two-hour recording would be all that was left in it.
+        this.emit();
+        this.resumeSuspendedSpeech();
+        return;
+      }
     }
 
     /*
@@ -1200,6 +1254,7 @@ export class VoiceEngine {
     if (this.speechQueue.length === 0) {
       this.isProcessingSpeechQueue = false;
       this.currentlySpeakingText = null;
+      this.discardPreparedSpeech();
       this.clearSpeechWatchdog();
       this.echo.markEnded();
       if (this.interjecting && !this.isStreamDone) {
@@ -1263,9 +1318,17 @@ export class VoiceEngine {
 
     this.armSpeechWatchdog(text);
 
+    // Audio for this block may already be rendering, warmed while the previous
+    // block was still being heard. Anything prepared for other text is stale.
+    const prepared = this.preparedSpeech?.text === text ? this.preparedSpeech : null;
+    if (this.preparedSpeech && !prepared) this.discardPreparedSpeech();
+    this.preparedSpeech = null;
+
     try {
       this.synthesis = await tts.speak({
         text,
+        ...(prepared ? { prepared } : {}),
+        onBoundary: (charIndex) => this.warmNextBlock(tts, text, charIndex),
         language: this.settings.language === "auto" ? navigator.language : this.settings.language,
         voice: this.settings.ttsVoice ?? undefined,
         rate: paceFor(this.settings.ttsRate, text),
@@ -1737,8 +1800,47 @@ export class VoiceEngine {
   }
 
   /** Host hook: stop speaking without it counting as an interruption. */
+  /**
+   * Start rendering the block after this one, while this one is still audible.
+   *
+   * The synthesiser renders a whole block before a note of it can be played,
+   * so a render begun when the previous block ends is heard as a pause between
+   * paragraphs — the longer the paragraph, the longer the wait. Begun in the
+   * last fifth of the block being spoken, the same render happens under the
+   * audio and the next block starts as the current one stops.
+   *
+   * Only ever one block ahead: two warmed blocks would be two renders queued
+   * behind the one being listened to, on a sidecar that renders one at a time.
+   */
+  private warmNextBlock(tts: VoiceProvider, text: string, charIndex: number): void {
+    if (this.preparedSpeech || !tts.prepare || this.interrupted) return;
+    if (!readyToWarmNext(charIndex, text.length)) return;
+    const next = this.speechQueue[0];
+    if (!next) return;
+    try {
+      this.preparedSpeech = tts.prepare({
+        text: next,
+        language: this.settings.language === "auto" ? navigator.language : this.settings.language,
+        voice: this.settings.ttsVoice ?? undefined,
+        rate: paceFor(this.settings.ttsRate, next),
+      });
+    } catch {
+      // A provider that cannot warm one is a provider that speaks it later.
+      this.preparedSpeech = null;
+    }
+  }
+
+  /** Abandon warmed audio nobody is going to play. */
+  private discardPreparedSpeech(): void {
+    try {
+      this.preparedSpeech?.cancel();
+    } catch {}
+    this.preparedSpeech = null;
+  }
+
   silence(): void {
     this.clearSpeechWatchdog();
+    this.discardPreparedSpeech();
     this.suspendedSpeech = null;
     this.currentlySpeakingText = null;
     this.speechQueue = [];

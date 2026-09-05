@@ -31,6 +31,7 @@ import {
   type RecognitionOptions,
   type RecognitionResult,
   type RecognitionSession,
+  type PreparedSpeech,
   type SpeakOptions,
   type SynthesisHandle,
   type VoiceProvider,
@@ -393,15 +394,9 @@ export class VibeVoiceProvider implements VoiceProvider {
     }
   }
 
-  async speak(options: SpeakOptions): Promise<SynthesisHandle> {
-    if (!this.capabilities.tts) {
-      throw new VoiceError(this.capabilities.detail ?? "VibeVoice TTS is unavailable.", "TTS_FAILED", false);
-    }
-
-    const controller = new AbortController();
-    options.signal?.addEventListener("abort", () => controller.abort());
-
-    const response = await GatewayClient.request("/api/voice/speak", {
+  /** The synthesis request itself, shared by `speak` and `prepare`. */
+  private synthesise(options: SpeakOptions, controller: AbortController): Promise<Response> {
+    return GatewayClient.request("/api/voice/speak", {
       method: "POST",
       signal: controller.signal,
       body: JSON.stringify({
@@ -415,6 +410,40 @@ export class VibeVoiceProvider implements VoiceProvider {
         stream: this.capabilities.streamingTts,
       }),
     });
+  }
+
+  /**
+   * Begin the next block's synthesis while the current one is still being
+   * heard. The sidecar renders a whole block before its audio can start, so
+   * without this the render lands in the gap between blocks and is heard as a
+   * long pause. See PreparedSpeech in ../types.
+   */
+  prepare(options: SpeakOptions): PreparedSpeech | null {
+    if (!this.capabilities.tts) return null;
+    return new PreparedRequest(options.text, (controller) => this.synthesise(options, controller));
+  }
+
+  async speak(options: SpeakOptions): Promise<SynthesisHandle> {
+    if (!this.capabilities.tts) {
+      throw new VoiceError(this.capabilities.detail ?? "VibeVoice TTS is unavailable.", "TTS_FAILED", false);
+    }
+
+    // Audio already on its way for exactly this text, started while the
+    // previous block was speaking. Anything else is a fresh request.
+    const warmed = usablePrepared(options.prepared, options.text);
+    const controller = warmed?.controller ?? new AbortController();
+    options.signal?.addEventListener("abort", () => controller.abort());
+
+    let response: Response;
+    try {
+      response = await (warmed ? warmed.response : this.synthesise(options, controller));
+    } catch (error) {
+      if (!warmed) throw error;
+      // A warmed request that failed says nothing about a fresh one — the
+      // stream may simply have been abandoned. Ask again rather than lose the
+      // block.
+      response = await this.synthesise(options, controller);
+    }
     await GatewayClient.expectOk(response);
 
     if (isSpeechStream(response.headers.get("content-type"))) {
@@ -510,4 +539,38 @@ function pickMimeType(): string | null {
     "audio/mp4",
   ];
   return candidates.find((type) => MediaRecorder.isTypeSupported(type)) ?? null;
+}
+
+/**
+ * A synthesis request in flight, held until the block it belongs to is due.
+ *
+ * The response promise is consumed at most once and its rejection is swallowed
+ * here as well as at the point of use: a prepared block that is cancelled —
+ * barge-in, a new turn — must not surface as an unhandled rejection long after
+ * anyone stopped caring about it.
+ */
+class PreparedRequest implements PreparedSpeech {
+  readonly text: string;
+  readonly controller = new AbortController();
+  readonly response: Promise<Response>;
+  private cancelled = false;
+
+  constructor(text: string, start: (controller: AbortController) => Promise<Response>) {
+    this.text = text;
+    this.response = start(this.controller);
+    this.response.catch(() => {});
+  }
+
+  cancel(): void {
+    if (this.cancelled) return;
+    this.cancelled = true;
+    try {
+      this.controller.abort();
+    } catch {}
+  }
+}
+
+/** The prepared audio for this text, if that is what it is. */
+function usablePrepared(prepared: PreparedSpeech | undefined, text: string): PreparedRequest | null {
+  return prepared instanceof PreparedRequest && prepared.text === text ? prepared : null;
 }

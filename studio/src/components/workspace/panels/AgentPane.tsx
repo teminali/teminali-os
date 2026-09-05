@@ -16,6 +16,8 @@ import { Composer } from "../../chat/Composer";
 import { ChangeReviewDock } from "../../chat/ChangeReviewDock";
 import { useChangeStore } from "../../../store/changeStore";
 import { languageForPath } from "../../../services/language";
+import { interruptTurn } from "../../../services/interruption";
+import { useInterruptKey } from "../../../hooks/useInterruptKey";
 import { BrandGlyph, EmptyState } from "../../ui";
 import type { ChatMessage } from "../../../types";
 
@@ -73,6 +75,7 @@ export const AgentPane: React.FC<{ panel: PanelTab & { kind: AgentEngine } }> = 
   const sessionRef = useRef<string | null>(null);
   const abortRef = useRef<AbortController | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
+  const surfaceRef = useRef<HTMLDivElement>(null);
   const attachments = useAttachments();
 
   const voice = useVoice({
@@ -100,9 +103,21 @@ export const AgentPane: React.FC<{ panel: PanelTab & { kind: AgentEngine } }> = 
 
   useEffect(() => () => abortRef.current?.abort(), []);
 
-  const patchLast = (patch: Partial<ChatMessage>) =>
+  /**
+   * Writes to whatever sits last in this tab's transcript.
+   *
+   * Takes an updater as well as a patch, because a stopped turn's patch
+   * depends on what the turn had reached — the same shape the main chat's
+   * `updateLastMessageInEngine` takes, so `interruptTurn` can be handed to
+   * either one unchanged.
+   */
+  const patchLast = (patch: Partial<ChatMessage> | ((message: ChatMessage) => Partial<ChatMessage>)) =>
     setMessages((previous) =>
-      previous.map((message, index) => (index === previous.length - 1 ? { ...message, ...patch } : message)),
+      previous.map((message, index) =>
+        index === previous.length - 1
+          ? { ...message, ...(typeof patch === "function" ? patch(message) : patch) }
+          : message,
+      ),
     );
 
   const send = async (override?: string) => {
@@ -259,11 +274,23 @@ export const AgentPane: React.FC<{ panel: PanelTab & { kind: AgentEngine } }> = 
     });
   };
 
+  /**
+   * Stops this tab's run.
+   *
+   * `interruptTurn` rather than a bare `isStreaming: false`, so a tab is
+   * stopped the same way the main chat is: the partial reply is kept and
+   * marked, and every tool call still reporting `running` is settled. Without
+   * it a stopped tab left its strip spinning under a finished turn.
+   */
   const stop = () => {
     abortRef.current?.abort();
+    abortRef.current = null;
     setStreaming(false);
-    patchLast({ isStreaming: false });
+    patchLast(interruptTurn);
   };
+
+  /* Escape stops this tab, as it stops the main chat — same rule, same hook. */
+  useInterruptKey(streaming, surfaceRef, stop);
 
   const label = descriptor?.label ?? (engine === "claude" ? "Claude Code" : "Codex");
   const current = permission ? PERMISSION_COPY[permission] : null;
@@ -278,7 +305,7 @@ export const AgentPane: React.FC<{ panel: PanelTab & { kind: AgentEngine } }> = 
   }
 
   return (
-    <div className="flex-1 min-h-0 flex flex-col">
+    <div ref={surfaceRef} className="flex-1 min-h-0 flex flex-col">
       {/* ── Agent chrome ────────────────────────────────────────────────
           Version and permission, because both change what this tab will do
           to the repository and neither is guessable from the transcript. */}

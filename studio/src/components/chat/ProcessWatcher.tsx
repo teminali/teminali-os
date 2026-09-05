@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
-import { AlertCircle, Check, ChevronRight, FileDiff, Globe, Loader2, Search, Terminal, Waypoints, Wrench } from "lucide-react";
+import { AlertCircle, Check, ChevronRight, FileDiff, Globe, Loader2, Search, Square, Terminal, Waypoints, Wrench } from "lucide-react";
 import { groupActivity, describeCall, type ActivityGroup, type ActivityKind } from "../../services/activityGroups";
 import type { ToolCall } from "../../types";
 
@@ -16,6 +16,13 @@ import type { ToolCall } from "../../types";
  * 3. **Everything is one weight of grey.** Status is carried by a 10px glyph
  *    and by tense; nothing in here is allowed to compete with the reply itself,
  *    which is the thing the operator is actually reading.
+ *
+ * The one thing here that is not a report is **stop**, and it lives here for a
+ * reason: this strip is the only part of a turn that is on screen for the whole
+ * of it — before the first token, while tokens arrive, and through a tool call
+ * that takes a minute. The stop button used to sit in `ThinkingIndicator`,
+ * which unmounts the moment a tool call or a token appears, so it vanished at
+ * exactly the point a run becomes worth stopping.
  */
 
 const GLYPHS: Record<ActivityKind, React.ReactNode> = {
@@ -37,6 +44,8 @@ export interface ProcessWatcherProps {
   durationSec?: number;
   onJumpToFile?: (path: string, code: string) => void;
   compact?: boolean;
+  /** Interrupt the run. Shown for as long as the turn is live. */
+  onStop?: () => void;
 }
 
 export const ProcessWatcher: React.FC<ProcessWatcherProps> = ({
@@ -44,6 +53,7 @@ export const ProcessWatcher: React.FC<ProcessWatcherProps> = ({
   isStreaming = false,
   durationSec,
   onJumpToFile,
+  onStop,
 }) => {
   // Open while the work is happening, closed once it is finished: live, it is
   // the only thing to look at; afterwards it is a footnote under the answer.
@@ -64,36 +74,53 @@ export const ProcessWatcher: React.FC<ProcessWatcherProps> = ({
 
   return (
     <div className="select-none">
-      <button
-        type="button"
-        onClick={() => setExpanded((previous) => !previous)}
-        aria-expanded={expanded}
-        className="group h-6 flex items-center gap-1.5 text-xs text-ink-soft hover:text-ink-dim transition-colors duration-ds ease-ds"
-      >
-        <ChevronRight
-          size={11}
-          className={`text-ink-disabled transition-transform duration-ds ease-ds ${expanded ? "rotate-90" : ""}`}
-        />
-        {isStreaming ? (
-          <>
-            <Loader2 size={11} className="animate-spin text-ink-faint" />
-            <span className="text-shimmer">Working</span>
-          </>
-        ) : (
-          <span>
-            {failed ? "Finished with errors" : "Thought"}
-            {durationSec ? ` for ${durationSec.toFixed(1)}s` : ""}
-          </span>
+      {/* A row, not a button: the disclosure and the stop are two actions, and
+          one cannot be nested inside the other. */}
+      <div className="h-6 flex items-center gap-1.5">
+        <button
+          type="button"
+          onClick={() => setExpanded((previous) => !previous)}
+          aria-expanded={expanded}
+          className="group flex items-center gap-1.5 text-xs text-ink-soft hover:text-ink-dim transition-colors duration-ds ease-ds"
+        >
+          <ChevronRight
+            size={11}
+            className={`text-ink-disabled transition-transform duration-ds ease-ds ${expanded ? "rotate-90" : ""}`}
+          />
+          {isStreaming ? (
+            <>
+              <Loader2 size={11} className="animate-spin text-ink-faint" />
+              <span className="text-shimmer">Working</span>
+            </>
+          ) : (
+            <span>
+              {failed ? "Finished with errors" : "Thought"}
+              {durationSec ? ` for ${durationSec.toFixed(1)}s` : ""}
+            </span>
+          )}
+          {steps > 0 && (
+            <span className="font-mono text-2xs text-ink-disabled tabular-nums">
+              · {steps} {steps === 1 ? "step" : "steps"}
+            </span>
+          )}
+          {isStreaming && elapsed >= 1 && (
+            <span className="font-mono text-2xs text-ink-disabled tabular-nums">· {formatElapsed(elapsed)}</span>
+          )}
+        </button>
+
+        {isStreaming && onStop && (
+          <button
+            type="button"
+            onClick={onStop}
+            title="Stop this turn (Esc)"
+            aria-label="Stop this turn"
+            className="inline-flex items-center gap-1 text-2xs text-ink-disabled hover:text-danger transition-colors duration-ds ease-ds"
+          >
+            <Square size={7} fill="currentColor" />
+            stop
+          </button>
         )}
-        {steps > 0 && (
-          <span className="font-mono text-2xs text-ink-disabled tabular-nums">
-            · {steps} {steps === 1 ? "step" : "steps"}
-          </span>
-        )}
-        {isStreaming && elapsed >= 1 && (
-          <span className="font-mono text-2xs text-ink-disabled tabular-nums">· {formatElapsed(elapsed)}</span>
-        )}
-      </button>
+      </div>
 
       {expanded && groups.length > 0 && (
         <ol className="ml-[5px] pl-3 border-l border-edge/70 flex flex-col animate-reveal" role="list">

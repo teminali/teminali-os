@@ -118,3 +118,22 @@ export function heardChars(frame: ClauseFrame, elapsed: number): number {
   if (elapsed >= duration) return frame.end;
   return frame.start + Math.round(((frame.end - frame.start) * elapsed) / duration);
 }
+
+/**
+ * Is it time to start rendering the next block?
+ *
+ * A reply is spoken block by block, and a block's audio cannot start until the
+ * synthesiser has rendered it. Started when the previous block ends, that
+ * render is heard as a pause; started while the previous block is still being
+ * heard, it is heard as nothing at all.
+ *
+ * Late enough that the current block's own synthesis is finished — two renders
+ * at once on one local sidecar would slow the one being listened to — and
+ * early enough to cover the round trip. The last fifth of a block is the
+ * window: a 12-second paragraph leaves ~2.4s, and a block too short for that
+ * to be worth anything is also too short to have a gap worth hearing.
+ */
+export function readyToWarmNext(spokenChars: number, totalChars: number, fraction = 0.8): boolean {
+  if (!(totalChars > 0) || !(spokenChars >= 0)) return false;
+  return spokenChars >= totalChars * fraction;
+}

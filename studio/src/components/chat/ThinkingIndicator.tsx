@@ -1,5 +1,4 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
-import { Square } from "lucide-react";
 
 /**
  * The "it is working" line, for the gap before anything else exists.
@@ -13,6 +12,11 @@ import { Square } from "lucide-react";
  * The word rotation is cosmetic and says so. What it does communicate honestly
  * is *phase*: the vocabulary shifts once tokens flow, so "still waiting" and
  * "actively writing" never look the same.
+ *
+ * It carries no stop. This line unmounts the moment a tool call or a token
+ * arrives, so a stop button living here disappeared at exactly the point a run
+ * becomes worth stopping; the control belongs to `ProcessWatcher`, which is on
+ * screen for the whole turn.
  *
  * The sweep across it is one grey moving through a lighter grey. It used to be
  * a cyan-violet-amber gradient, which was the single loudest thing in a window
@@ -45,14 +49,12 @@ export interface ThinkingIndicatorProps {
   charCount?: number;
   /** A tool is executing right now. */
   toolLabel?: string | null;
-  onStop?: () => void;
 }
 
 export const ThinkingIndicator: React.FC<ThinkingIndicatorProps> = ({
   active,
   charCount = 0,
   toolLabel = null,
-  onStop,
 }) => {
   const startedAt = useRef<number>(Date.now());
   const [elapsed, setElapsed] = useState(0);
@@ -95,18 +97,6 @@ export const ThinkingIndicator: React.FC<ThinkingIndicatorProps> = ({
       </span>
 
       {tokens > 0 && <span className="font-mono text-2xs text-ink-disabled tabular-nums">{tokens.toLocaleString()} tokens</span>}
-
-      {onStop && (
-        <button
-          type="button"
-          onClick={onStop}
-          className="inline-flex items-center gap-1 text-2xs text-ink-disabled hover:text-danger transition-colors duration-ds ease-ds"
-          title="Stop generating (Esc)"
-        >
-          <Square size={7} fill="currentColor" />
-          stop
-        </button>
-      )}
     </div>
   );
 };

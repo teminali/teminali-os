@@ -296,6 +296,34 @@ contextBridge.exposeInMainWorld("teminali", {
     announceRoot: (root) => ipcRenderer.send("workspace-media:root", root),
   },
   /**
+   * The browser panel's page, which is not in this document at all.
+   *
+   * It is a `WebContentsView` — a separate web contents with its own session,
+   * layered over the window by main — so the pane's job here is to say where
+   * it is and when it may be seen, and to ask for navigation rather than to
+   * perform it. See electron/browserView.cjs for why it is not an iframe.
+   */
+  browserView: {
+    /** Load an http(s) address into the view for this panel, creating it on first use. */
+    navigate: (id, url) => ipcRenderer.invoke("browser-view:navigate", id, url),
+    /** The view for this panel, at `url` if it has to be made — an existing one is left where it is. */
+    ensure: (id, url) => ipcRenderer.invoke("browser-view:ensure", id, url),
+    /** Where the viewport is, in CSS pixels of this document, and whether it may be drawn. */
+    setBounds: (id, bounds, visible) => ipcRenderer.send("browser-view:bounds", id, bounds, visible),
+    /** "back" | "forward" | "reload" | "stop" — the page's own history, not one we keep. */
+    command: (id, command) => ipcRenderer.send("browser-view:command", id, command),
+    /** The panel is closed for good. */
+    destroy: (id) => ipcRenderer.send("browser-view:destroy", id),
+    /** Every view, for a document that is about to be replaced. */
+    destroyAll: () => ipcRenderer.send("browser-view:destroy-all"),
+    /** Navigation state for the toolbar: url, title, loading, canGoBack/Forward, or an error. */
+    onState: (handler) => {
+      const listener = (_event, state) => handler(state);
+      ipcRenderer.on("browser-view:state", listener);
+      return () => ipcRenderer.removeListener("browser-view:state", listener);
+    },
+  },
+  /**
    * The screen assistant.
    *
    * Two directions and nothing else. Commands come *in* from the global

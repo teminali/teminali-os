@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
@@ -187,5 +188,191 @@ test("Universal Voice: addressing gate rejects coughs, clicks, and unrelated amb
       hasProfile: false,
     });
     assert.equal(scored.verdict.directed, false);
+  }
+});
+
+/* ── Stopping a turn ───────────────────────────────────────────────────────
+   The report was "I cannot interrupt the chatbot on the go … it is either
+   weak or just broken", and it was both. The stop button lived in
+   `ThinkingIndicator`, which unmounts the moment a tool call or a token
+   arrives — so it disappeared at exactly the point a run becomes worth
+   stopping — and Escape was refused whenever a text field had focus, which is
+   the composer, which is where focus is. What survives a stop is the subject
+   of `src/services/interruption.ts`; these are its rules.
+   ──────────────────────────────────────────────────────────────────────── */
+
+const interruption = await import("../src/services/interruption.ts");
+const { INTERRUPTED_NOTE, INTERRUPTED_TOOL_RESULT, interruptTurn, interruptsRun, keptPartialReply, settleRunningCalls } =
+  interruption;
+
+test("a stopped turn keeps what arrived and is marked as cut short", () => {
+  const patch = interruptTurn({ role: "assistant", content: "The gateway binds to 4310 and" });
+
+  assert.equal(patch.isStreaming, false);
+  assert.equal(patch.cancelled, true, "the turn must be marked cancelled, not left looking complete");
+  assert.equal(patch.content, "The gateway binds to 4310 and", "the partial reply is real work and is kept verbatim");
+});
+
+test("a stopped turn that produced nothing says so in its own words", () => {
+  // An empty assistant message is what the *next* turn carries into the
+  // model's history, so the note is content, not decoration.
+  assert.equal(interruptTurn({ role: "assistant", content: "" }).content, INTERRUPTED_NOTE);
+  assert.equal(interruptTurn({ role: "assistant", content: "   \n " }).content, INTERRUPTED_NOTE);
+});
+
+test("stopping settles every tool call that was still running", () => {
+  const patch = interruptTurn({
+    role: "assistant",
+    content: "",
+    toolCalls: [
+      { id: "a", name: "Read", arguments: {}, status: "completed", result: "ok" },
+      { id: "b", name: "Bash", arguments: {}, status: "running" },
+      { id: "c", name: "Grep", arguments: {}, status: "error", result: "no such file" },
+    ],
+  });
+
+  // A spinner is read straight off `status`, so a call left running is a
+  // spinner that turns forever under a turn that has finished.
+  assert.deepEqual(
+    patch.toolCalls.map((call) => call.status),
+    ["completed", "error", "error"],
+  );
+  assert.equal(patch.toolCalls[1].result, INTERRUPTED_TOOL_RESULT);
+  assert.equal(patch.toolCalls[0].result, "ok", "a settled call is not rewritten");
+  assert.equal(patch.toolCalls[2].result, "no such file");
+});
+
+test("a turn with no tool calls does not get a toolCalls key", () => {
+  // The store merges the patch by spread, so an explicit `undefined` would
+  // erase a list rather than leave it alone.
+  assert.equal("toolCalls" in interruptTurn({ role: "assistant", content: "hi" }), false);
+  const untouched = [{ id: "a", name: "Read", arguments: {}, status: "completed" }];
+  assert.equal(settleRunningCalls(untouched), untouched, "nothing running means the same array back");
+});
+
+test("stopping never rewrites the operator's own prompt", () => {
+  // `updateLastMessageInEngine` writes to whatever sits last in the list, and
+  // a stop landing a beat after a turn settled would otherwise edit the user.
+  assert.deepEqual(interruptTurn({ role: "user", content: "run the tests" }), {});
+  assert.deepEqual(interruptTurn({ role: "system", content: "context" }), {});
+});
+
+test("only a stopped turn with a partial answer earns the incomplete line", () => {
+  assert.equal(keptPartialReply({ content: "half an answer", cancelled: true }), true);
+  assert.equal(keptPartialReply({ content: INTERRUPTED_NOTE, cancelled: true }), false, "the note already says it");
+  assert.equal(keptPartialReply({ content: "", cancelled: true }), false);
+  assert.equal(keptPartialReply({ content: "a whole answer", cancelled: false }), false);
+});
+
+test("Escape stops the run from the composer, which is where focus actually is", () => {
+  const composer = { key: "Escape", inTextField: true, inChat: true };
+  assert.equal(interruptsRun(composer), true, "the composer is a textarea and it must not be exempt");
+
+  const transcript = { key: "Escape", inTextField: false, inChat: true };
+  assert.equal(interruptsRun(transcript), true);
+
+  const nowhereInParticular = { key: "Escape", inTextField: false, inChat: false };
+  assert.equal(interruptsRun(nowhereInParticular), true);
+});
+
+test("Escape belongs to a field that is not the chat", () => {
+  // The terminal's command line, a search box, a settings input: Escape there
+  // is that surface's key, not a chat interrupt.
+  assert.equal(interruptsRun({ key: "Escape", inTextField: true, inChat: false }), false);
+});
+
+test("Escape already claimed by the composer's trigger menu does not also stop the run", () => {
+  assert.equal(
+    interruptsRun({ key: "Escape", defaultPrevented: true, inTextField: true, inChat: true }),
+    false,
+  );
+});
+
+test("Escape mid-composition belongs to the IME", () => {
+  assert.equal(interruptsRun({ key: "Escape", isComposing: true, inTextField: true, inChat: true }), false);
+});
+
+test("no other key stops a run", () => {
+  for (const key of ["Enter", "Esc", "escape", "Backspace", "k"]) {
+    assert.equal(interruptsRun({ key, inTextField: false, inChat: true }), false, `${key} must not stop a run`);
+  }
+});
+
+/* ── The controls, as rendered ─────────────────────────────────────────────
+   The components are .tsx and the node runner cannot import JSX, so these
+   read the source. Weaker than mounting them, and chosen over no check at
+   all: each assertion is the exact shape of a defect that shipped. Same
+   idiom as tests/composer-input.test.mjs.
+   ──────────────────────────────────────────────────────────────────────── */
+
+const readSource = (path) => readFile(new URL(path, import.meta.url), "utf8");
+
+test("the stop control is on screen for the whole turn, including a tool call", async () => {
+  const watcher = await readSource("../src/components/chat/ProcessWatcher.tsx");
+  assert.match(watcher, /onStop\?:\s*\(\)\s*=>\s*void/, "the process strip must accept a stop");
+  assert.match(watcher, /\{isStreaming && onStop && \(/, "and draw it for as long as the turn is live");
+
+  const block = await readSource("../src/components/chat/MessageBlock.tsx");
+  assert.match(block, /<ProcessWatcher[\s\S]*?onStop=\{onStop\}[\s\S]*?\/>/, "and the turn must hand it down");
+
+  // The waiting line unmounts as soon as a tool call or a token exists, so it
+  // is not allowed to be the only place a stop lives.
+  const thinking = await readSource("../src/components/chat/ThinkingIndicator.tsx");
+  assert.doesNotMatch(thinking, /onStop/, "the waiting line no longer owns the stop");
+});
+
+test("typing a follow-up never takes the composer's stop button away", async () => {
+  const composer = await readSource("../src/components/chat/Composer.tsx");
+  assert.doesNotMatch(
+    composer,
+    /\{streaming \? \(\s*\n\s*value\.trim\(\) \?/,
+    "the streaming branch must not choose between stop and send",
+  );
+  assert.match(composer, /onClick=\{onStop\}/, "the stop is unconditional while streaming");
+});
+
+test("the Escape handler no longer exempts text fields, and stop cancels the approval gate", async () => {
+  const chat = await readSource("../src/components/chat/StudioChat.tsx");
+  assert.doesNotMatch(
+    chat,
+    /typing = target && \/\^\(INPUT\|TEXTAREA\)/,
+    "the rule that swallowed Escape in the composer is gone",
+  );
+  // A command waiting on a decision is part of the run: left pending it is a
+  // dialog nobody can answer and an agent loop nobody can finish.
+  assert.match(chat, /const stop = useCallback\(\(\) => \{[\s\S]*?cancelApproval\(\);/);
+  assert.match(chat, /const stop = useCallback\(\(\) => \{[\s\S]*?abortRef\.current\?\.abort\(\);/);
+});
+
+test("Escape is wired once, by a hook every chat surface uses", async () => {
+  const hook = await readSource("../src/hooks/useInterruptKey.ts");
+  assert.match(hook, /interruptsRun\(stroke\)/, "the rule stays in services/interruption.ts");
+  assert.match(hook, /window\.addEventListener\("keydown"/);
+  assert.match(hook, /if \(!active\) return;/, "an idle surface must not swallow Escape from a live one");
+
+  // Three surfaces, one listener implementation. Written out by hand they
+  // drifted until Escape worked in none of them.
+  for (const path of [
+    "../src/components/chat/StudioChat.tsx",
+    "../src/components/workspace/panels/AgentPane.tsx",
+    "../src/components/workspace/panels/SideChatPane.tsx",
+  ]) {
+    const source = await readSource(path);
+    assert.match(source, /useInterruptKey\(/, `${path} calls the shared hook`);
+    assert.doesNotMatch(source, /addEventListener\("keydown", onKey\)/, `${path} has no copy of its own`);
+  }
+});
+
+test("an agent tab and a side chat settle a stopped turn like the main chat", async () => {
+  for (const path of [
+    "../src/components/workspace/panels/AgentPane.tsx",
+    "../src/components/workspace/panels/SideChatPane.tsx",
+  ]) {
+    const source = await readSource(path);
+    // `isStreaming: false` alone left every running tool call spinning under a
+    // finished turn, and the partial reply unmarked.
+    assert.match(source, /const stop = \(\) => \{[\s\S]*?patchLast\(interruptTurn\);/, `${path} settles the turn`);
+    assert.doesNotMatch(source, /const stop = \(\) => \{[\s\S]*?patchLast\(\{ isStreaming: false \}\)/, path);
+    assert.match(source, /const stop = \(\) => \{[\s\S]*?abortRef\.current = null;/, `${path} releases the controller`);
   }
 });

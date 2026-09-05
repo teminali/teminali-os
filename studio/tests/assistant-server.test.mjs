@@ -10,6 +10,7 @@ import {
   forgetObservations,
   recallObservation,
   rememberObservation,
+  visionRequest,
 } from "../server/assistant.js";
 import { POINTER_LIMITS, helperAvailable, runPointer } from "../server/pointer.js";
 
@@ -210,4 +211,19 @@ test("the helper is given an argument array, so a prompt cannot become a command
 test("the element cap the helper is asked for cannot be talked past", () => {
   assert.ok(POINTER_LIMITS.maxElements <= 400);
   assert.ok(POINTER_LIMITS.maxTypeLength >= ASSISTANT_LIMITS.maxTypeLength);
+});
+
+/* ── The vision pass ──────────────────────────────────────────────────────── */
+
+test("the vision request leaves room for the model's thinking trace before its answer", () => {
+  const request = visionRequest(Buffer.from("jpeg-bytes"));
+  assert.equal(request.model, "qwen3-vl:2b");
+  assert.equal(request.stream, false);
+  assert.deepEqual(request.images, [Buffer.from("jpeg-bytes").toString("base64")]);
+  // qwen3-vl:2b thinks for 400-600 tokens before it answers and cannot be told
+  // not to; at 260 every description came back empty with done_reason "length".
+  // Measured 2026-09-06: 516 and 626 tokens end in "stop" at this budget.
+  assert.ok(request.options.num_predict >= 1_000, `num_predict ${request.options.num_predict} would be spent on the thinking trace`);
+  assert.equal(request.options.num_predict, ASSISTANT_LIMITS.visionPredictTokens);
+  assert.equal(request.options.num_ctx, ASSISTANT_LIMITS.visionContextTokens);
 });

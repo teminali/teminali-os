@@ -14,6 +14,7 @@ import {
   isSpeechStream,
   nextStartTime,
   pcm16ToFloat32,
+  readyToWarmNext,
 } from "../src/services/voice/speechStream.ts";
 
 function encodeFrame(header, body = new Uint8Array(0)) {
@@ -78,4 +79,24 @@ test("a barge-in reports how far into the clause the operator was", () => {
   assert.equal(heardChars(frame, 0), 10);
   assert.equal(heardChars(frame, 1), 19);
   assert.equal(heardChars(frame, 5), 28);
+});
+
+test("the next block starts rendering while the current one is still heard", () => {
+  // A block cannot be played until it is rendered, so a render started when
+  // the previous block ends is heard as a pause between paragraphs. Started in
+  // the last fifth of the block being spoken, it happens under the audio.
+  assert.equal(readyToWarmNext(0, 500), false);
+  assert.equal(readyToWarmNext(399, 500), false);
+  assert.equal(readyToWarmNext(400, 500), true);
+  assert.equal(readyToWarmNext(500, 500), true);
+  // Never warm on a block with no length to warm through, and never on a
+  // boundary report that has gone backwards.
+  assert.equal(readyToWarmNext(10, 0), false);
+  assert.equal(readyToWarmNext(-1, 500), false);
+  assert.equal(readyToWarmNext(0, 0), false);
+  // The window is tunable, and a fraction of 0 would warm both blocks at once
+  // — two renders queued behind the one being listened to.
+  assert.equal(readyToWarmNext(1, 500, 0), true);
+  assert.equal(readyToWarmNext(499, 500, 1), false);
+  assert.equal(readyToWarmNext(500, 500, 1), true);
 });

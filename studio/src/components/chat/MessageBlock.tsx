@@ -5,6 +5,7 @@ import { FileActionCard } from "./FileActionCard";
 import { ThinkingIndicator } from "./ThinkingIndicator";
 import { ProcessWatcher } from "./ProcessWatcher";
 import { segment } from "../../utils/segment";
+import { keptPartialReply } from "../../services/interruption";
 import type { ChatMessage } from "../../types";
 
 /**
@@ -107,13 +108,15 @@ export const MessageBlock: React.FC<{
           durationSec={message.durationSec}
           onJumpToFile={onJumpToFile}
           compact={compact}
+          onStop={onStop}
         />
       )}
 
-      {/* Only when there is no process strip to carry the liveness — two live
-          timers ticking beside each other is one too many. */}
+      {/* The waiting line, only in the gap before anything else exists. The
+          strip above it is live for the whole turn and carries the stop; this
+          is the vocabulary that fills an otherwise empty reply. */}
       {message.isStreaming && calls.length === 0 && !message.content.trim() && (
-        <ThinkingIndicator active charCount={message.content.length} toolLabel={runningCall?.name ?? null} onStop={onStop} />
+        <ThinkingIndicator active charCount={message.content.length} toolLabel={runningCall?.name ?? null} />
       )}
 
       {segments.map((piece, index) =>
@@ -136,6 +139,19 @@ export const MessageBlock: React.FC<{
 
       {message.isStreaming && message.content.trim() && (
         <span className="inline-block w-[3px] h-3.5 rounded-[1px] bg-ink-faint animate-caret" />
+      )}
+
+      {/* A stopped turn says so. What arrived is kept — it is real work, and
+          the operator asked for it — but a half-written answer that looks like
+          a whole one is the reason "it stopped" and "it finished" were
+          indistinguishable in the transcript. A turn that produced nothing at
+          all already reads "Interrupted." as its content and needs no second
+          line saying the same thing. */}
+      {settled && keptPartialReply(message) && (
+        <div className="h-5 flex items-center gap-1.5 text-2xs text-ink-disabled select-none">
+          <span className="w-1 h-1 rounded-full bg-danger/70" />
+          Stopped — this reply is incomplete.
+        </div>
       )}
 
       {/* Telemetry, on hover. Every field here is measured — none of it is

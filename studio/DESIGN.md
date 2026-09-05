@@ -552,6 +552,67 @@ instead of leaving a control bar that never moves. Real-time transcoding is a
 separate project; ffmpeg is already a dependency (`server/speech-local.js`) but
 the pane does not pretend to it. No MKV, no subtitle tracks.
 
+### The browser panel is a view, not a frame (`electron/browserView.cjs`, `services/browserView.ts`, `panels/BrowserPane.tsx`)
+
+The panel used to be an `<iframe>` in the shell's own renderer, and that
+renderer runs with `webSecurity: false` — the file pane needs it to draw local
+previews. A page the operator typed the address of was therefore a page loaded
+with the shell's protections relaxed around it, in the same process as the
+conversation. It was also a page whose history could not be read: an iframe's
+`history` is cross-origin, so **Back and Forward were a list the pane kept
+beside the frame**, not the page's own. A redirect, a link, an in-page route
+change — none of them reached the toolbar.
+
+It is now an Electron **`WebContentsView`**: its own web contents, its own
+process, and its own session (`persist:teminali-browser`). It does not inherit
+the window's `webPreferences`, so the page runs *with* web security, sandboxed,
+with no node and **no preload** — there is no bridge in it to find. It cannot
+reach `teminali-media://` either: that scheme is handled on the default
+session, and this view is not on it. That closes the exposure the media
+protocol's nonce was defending against, which was framing arbitrary sites in
+the privileged renderer; the nonce stays, because the shell's own document is
+still `webSecurity: false`.
+
+Back, Forward, Reload and Stop are now the page's own
+(`webContents.navigationHistory`), reported back to the toolbar over
+`browser-view:state` along with the title and the loading flag. The omnibox
+shows where the page **is**, not where it was sent.
+
+What a view costs is that it is an OS layer above the document. It cannot be
+positioned by CSS and nothing in the page can be drawn over it, so:
+
+* the pane's viewport is an **empty box** whose rectangle is measured and sent
+  to main (`browser-view:bounds`), clamped to the window — a view does not clip
+  to the page, so an unclamped rectangle paints over whatever is beside the
+  window;
+* bounds are CSS pixels and a view is placed in DIPs, so main scales them by
+  `webContents.getZoomFactor()`;
+* the view is **hidden** whenever the app draws over it — any `role="dialog"`
+  or `role="menu"` in the document, which is every overlay the primitives can
+  open — and whenever the pane unmounts, which is what switching tabs looks
+  like from inside it;
+* closing a tab must end a page while switching tabs must not, and the pane
+  cannot tell those apart because both unmount it. Only the store knows, so the
+  reaping is a subscription to `panelStore` armed in `main.tsx`, beside the
+  media root sync;
+* and a mount asks for a view (`browser-view:ensure`) rather than for a
+  navigation. The view outlives the pane, so loading the panel's stored address
+  again on every mount would reload the page on every tab switch — at the
+  address the tab was opened with, not the one the operator had reached, and
+  with the history reset. An existing view is left alone and re-announces its
+  state to the new toolbar.
+
+Two guards, deliberately duplicated. `normaliseAddress` refuses `file:`,
+`javascript:`, `data:` and `blob:` in the renderer; `isAllowedUrl` refuses
+everything but `http(s)` in main, on navigation *and* on `will-navigate`, so a
+page cannot walk the panel somewhere else. A window the page opens is denied
+and either loaded in the same view or handed to the real browser.
+
+A browser build has no bridge and keeps the iframe, sandbox attribute and all.
+
+Tested in `tests/browser-view.test.mjs` (6): the scheme refusals on both sides,
+the zoom scaling, the malformed-rectangle refusal, and the clamping.
+
 ### What the workspace will open (`server/workspace.js`, `panels/FilePane.tsx`)
 
 One predicate answers "is this text?" — `isTextFile` — and the tree, the reader,
@@ -590,11 +651,12 @@ A turn is read in a fixed order, and the components are laid out to enforce it:
 
 | Piece | File | What it is |
 | --- | --- | --- |
-| Process inspector | `chat/ProcessWatcher.tsx` | The live activity strip above a reply. |
+| Process inspector | `chat/ProcessWatcher.tsx` | The live activity strip above a reply, and the stop control. |
 | Activity grouping | `services/activityGroups.ts` | Pure: folds tool calls into the rows the strip shows. |
 | Turn | `chat/MessageBlock.tsx` | Prompt, reply, code cards, hover telemetry. |
 | Code card | `chat/FileActionCard.tsx` | A 28px row that opens onto the code. |
-| Waiting line | `chat/ThinkingIndicator.tsx` | The gap before the first token. |
+| Waiting line | `chat/ThinkingIndicator.tsx` | The gap before the first token. Carries no stop. |
+| Interruption | `services/interruption.ts` | Pure: what a stopped turn looks like, and when `Esc` means stop. |
 | Review dock | `chat/ChangeReviewDock.tsx` | Accept / reject what was written to disk, by the chat pane or by an agent CLI. |
 | Markdown | `chat/CursorMarkdownRenderer.tsx`, `services/markdown.ts` | Blocks and inline tokens. No `innerHTML`. |
 | Composer | `chat/Composer.tsx`, `chat/AttachmentStrip.tsx` | The prompt field and what is attached to it. |
@@ -642,6 +704,70 @@ half its height, so a follow-up bar that gained an attachment card or a wrapped
 second line turned into a lozenge. `Composer.tsx` derives `pill` from the
 measured field height and the attachment count, and falls back to `rounded-2xl`
 the moment the bar grows. The collapsed bar is unchanged.
+
+### Stopping a turn (`services/interruption.ts`, 2026-09-06)
+
+Reported as "I cannot interrupt the chatbot on the go … it is either weak or
+just broken". It was both, in four separate places, and none of them was the
+transport: the gateway has always cancelled its upstream when the client's
+fetch aborts (`abortContext`, `abortWhenClientLeaves` in `server/gateway.js`)
+and `server/agent-cli.js` has always `SIGTERM`ed the CLI on `AGENT_ABORTED`.
+What was broken was every route to that abort.
+
+**The control has to outlive the first tool call.** The stop button lived in
+`ThinkingIndicator`, which `MessageBlock` mounts only while
+`calls.length === 0 && !content.trim()` — so it vanished the instant a token or
+a tool call arrived, which is precisely when a run becomes worth stopping. A
+turn sitting at *Working · 2 steps · 25s* had no stop anywhere on screen. It
+now belongs to `ProcessWatcher`, the one strip that is rendered for the whole
+of a live turn; `ThinkingIndicator` is the waiting vocabulary and nothing else.
+
+**Stop is never traded away for send.** While streaming, the composer's disc
+became "interrupt and send" the moment anything was typed into the field — so
+starting to draft the correction removed the only other way to stop. Both are
+drawn now, stop first.
+
+**`Esc` was refused exactly where it is pressed.** The shell's handler ignored
+the key whenever the target was an `INPUT` or `TEXTAREA`. The composer *is* a
+textarea, it is autofocused, and it keeps focus after a prompt is sent. The
+guard was aimed at the fields that are *not* the chat — the terminal's command
+line, a search box — so the question is not "is this a field" but "is this the
+chat", which the surface's own root element answers. `interruptsRun` holds the
+rule: not while an IME is composing, not when something nearer already claimed
+the key (which is how the `/` and `@` menu keeps `Esc` for closing itself), and
+otherwise inside the chat surface, or anywhere that is not a text field. The
+wiring — where the keystroke landed, and the listener's life — is
+`hooks/useInterruptKey.ts`, which listens only while its surface is streaming,
+so an idle tab cannot swallow `Esc` from a live one.
+
+**One routine, not four.** `send`'s pre-empt, the voice host's `interrupt`, the
+stop button and the stream's own abort path each carried their own copy of the
+same three lines, and they had drifted. They are one `stop` in `StudioChat`
+now, in a fixed order: retire the turn id, abort, cancel the approval gate,
+clear `isStreaming`, patch the message, silence the voice. The gate call was in
+none of the copies — a run blocked on `CommandApprovalPrompt` kept the prompt
+on screen and left `createApprovalGate`'s promise unresolved for good.
+
+**A stopped turn tells the truth about itself.** `interruptTurn` keeps what
+arrived — it is real work — sets `cancelled` (a field that had been declared in
+`types/index.ts` and never once written), and settles every tool call still
+reporting `running` to `error` with "Stopped by the operator." The strip reads
+its glyphs straight off `status`, so a call left running was a spinner that
+turned forever under a finished turn. `MessageBlock` draws one quiet line —
+*Stopped — this reply is incomplete.* — under a partial answer; a turn that
+produced nothing says `Interrupted.` as its content instead, because an empty
+assistant message is what the *next* turn carries into the model's history.
+
+**Three chat surfaces, one stop.** The main conversation is not the only place
+a run streams: an agent tab (`workspace/panels/AgentPane.tsx`) and a side chat
+(`SideChatPane.tsx`) each drive their own. Both used to stop with a bare
+`patchLast({ isStreaming: false })` — no settle, so an agent tab stopped
+mid-tool-call left its strip spinning; no `Esc`, because the shell's listener
+was gated on the main chat's `isStreaming` and scoped to its column. Both now
+hand `interruptTurn` to `patchLast` (widened to take an updater, the same shape
+the store's `updateLastMessageInEngine` takes), release `abortRef`, and call
+`useInterruptKey` with their own root. `tests/interruption.test.mjs` asserts
+all three call the hook and that none keeps a `keydown` listener of its own.
 
 ### Accept and reject (`chat/ChangeReviewDock.tsx`, `store/changeStore.ts`)
 
@@ -1760,9 +1886,20 @@ Four details cost a debugging session each:
 
 - A look without the vision pass: **~280 ms**. With it: **~8 s**. Which is why
   the observation is fired when *listening starts*, not when the sentence ends.
-- The vision pass at `num_ctx: 4096` returns HTTP 200 with an **empty response**
-  and `done_reason: length`. It needs 8192. The failure is silent, so the number
-  is written down in `ASSISTANT_LIMITS.visionContextTokens`.
+- The vision pass returns HTTP 200 with an **empty response** and
+  `done_reason: length` when its output budget is too small — and it is the
+  output budget, not the context window. `qwen3-vl:2b` is a thinking model with
+  no off switch in its Ollama template (`think: false` and `/no_think` were both
+  measured to change nothing), and it spends 400–600 tokens on a `thinking`
+  trace before the first word of the answer. At `num_predict: 260` every
+  description came back empty and `describeFrame` returned null, so the
+  assistant could list the controls on screen but never say what it saw.
+  Raising `num_ctx` to 8192 was the first reading of this failure and did not
+  cure it. The number that does is `ASSISTANT_LIMITS.visionPredictTokens`
+  (1024, measured 2026-09-06 — 516 and 626 tokens used, `done_reason: stop`),
+  pinned by `tests/assistant-server.test.mjs`. A described look costs 10–16 s
+  warm and up to ~30 s when the model has to load beside a resident coder
+  model; `visionTimeoutMs` (45 s) is the ceiling.
 - The frame is downscaled to 1600px by `sips` (~130 ms) before the vision pass.
   It is context, not geometry, so nothing that matters is lost.
 
@@ -2159,6 +2296,13 @@ that is mostly those content words: 60 % overlap while speaking, 75 % in the
 person answering "run the tests" to "should I run the tests?" gets through. A
 leading echoed run of three or more words followed by new speech keeps the new
 speech. Applied per recogniser result and once more on the assembled turn.
+
+**Self-audio guard.** The other half, which nothing textual can catch: the
+Files panel plays video and audio and the Browser panel loads pages that do,
+and a film's dialogue is real speech that no gate below the recogniser can tell
+from an operator. `selfAudio.ts` tracks whether the app is making sound, and
+while it is, a turn needs a wake word to be taken and our own playback cannot
+barge in. See §6.17.
 
 **Running commentary.** `StudioChat` feeds every tool call through
 `describeToolCall` into `VoiceEngine.noteProgress`. The line always reaches the
@@ -2985,6 +3129,104 @@ continuation is a new turn, not appended to the one in flight. The pacing is
 not persisted, so every launch starts at the configured floor. Neither the
 new bounds nor the margin has been measured against the operator's voice yet;
 the complaint arrived mid-session and this is the first response to it.
+
+### 6.16 The pause between paragraphs was the render (2026-09-06)
+
+A spoken reply is not synthesised in one piece. `speak()` in `conversation.ts`
+splits it into blocks — paragraphs, or ~40-word runs of a long one — because a
+block can begin playing while the rest of the reply is still being written, and
+because handing a whole reply to a whole-file engine means silence until the
+last word of it is rendered.
+
+What the split did not do was overlap. `processSpeechQueue` asked for block
+N+1's audio in block N's `onEnd`, so the entire round trip — gateway request,
+sidecar render, first audio — happened **after** the previous block had gone
+quiet. That is the pause the operator heard between paragraphs, and it grew
+with the paragraph: the render is proportional to the text, and none of it was
+under any audio.
+
+A block's synthesis now starts while the previous block is still being heard.
+`VoiceProvider` gained an optional `prepare()` returning a `PreparedSpeech` —
+the request, in flight, tagged with the text it is for — and `SpeakOptions`
+gained `prepared`, which the provider plays instead of asking again. The
+vibevoice provider implements both around one `synthesise()`; a warmed request
+that fails is retried fresh rather than dropping the block.
+
+When to warm is `readyToWarmNext` in `speechStream.ts`, tested rather than
+guessed: the **last fifth** of the block being spoken, off the `onBoundary`
+offsets both playback paths already report. Late enough that the current
+block's own render is done — two renders at once on a sidecar that serves one
+at a time would slow the one being listened to — and early enough to cover the
+round trip. Only ever one block ahead, for the same reason.
+
+The handle is cancelled whenever nobody will play it: `silence()`, a drained
+queue, and a block whose warmed text no longer matches. A provider without
+`prepare()` loses nothing and speaks exactly as before.
+
+Tested in `tests/speech-stream.test.mjs`.
+
+### 6.17 The app was answering its own speakers (`selfAudio.ts`, 2026-09-06)
+
+Reported the moment the media player was first driven by hand: *"it was
+literally listening and responding to the video, this is wrong behaviour."* An
+`.mp4` was playing in the Files panel with a voice conversation live, and the
+film's dialogue was arriving as operator prompts. The reply on screen was
+*"OpenAI has blessed us."*
+
+Nothing upstream could have caught it. `echoGuard.ts` recognises the
+assistant's own voice coming back through the microphone, but it does that
+textually — it knows what was just spoken. Nobody knows the words of a film,
+and there is nothing wrong with the transcript of one: it is real speech,
+correctly recognised, grammatical, often imperative. Every gate below the
+recogniser asks who a sentence was *for*, and a film answers that as
+convincingly as a person does, because it is a person — just not this one.
+`plausibility.ts` passes it for the same reason. The problem is not the words,
+it is where they came from.
+
+So the rule is provenance, and the only thing that can establish it is the app
+itself: it knows exactly when it is making sound. `SelfAudioMonitor` holds
+named sources — a source is named rather than counted so one that disappears
+without saying so can be dropped by name instead of leaving a count stuck above
+zero and the microphone deaf for the rest of the session. Two things feed it,
+both armed in `main.tsx` rather than by the panes, because a source outlives
+its pane:
+
+* **media elements in this document** — `<video>` and `<audio>` in the Files
+  panel. Watched with one capture-phase listener on the document, since media
+  events do not bubble but are still dispatched down the capture path. Each
+  event triggers a re-read of every element rather than a transition count,
+  because an element can also go silent *without* an event, by being removed:
+  React unmounts a playing `<video>` on a file switch and no `pause` is fired.
+  The same re-read runs before every query, so a removed element cannot leave
+  a stuck source behind;
+* **the browser panel's pages**, which are not in this document at all. Main
+  reports `webContents.isCurrentlyAudible()` on `audio-state-changed` as part
+  of the existing state message, and sends one last `audible: false` when a
+  view is destroyed — the one moment a page cannot report its own silence.
+
+What the monitor changes is two decisions, and deliberately not the microphone
+itself. **A turn committed while the app was audible needs a wake word.** Not a
+closed microphone: *"Temy, pause the video"* is precisely the turn an operator
+needs while something is playing, and it still lands. Everything else is
+recorded in `lastRejected` — so the HUD says why rather than going mysteriously
+quiet — and is *not* written to ambient memory, because that log is for the
+room and a two-hour recording we played ourselves would be all that was left in
+it. **And our own playback cannot barge in.** Sustained voiced frames are
+exactly the shape `BARGE_IN_FRAMES` looks for, so a video playing in the Files
+panel cut the assistant off mid-sentence as reliably as the operator could.
+
+The window is wider than "playing right now". A recogniser hands back a final
+transcript some way behind the audio it was built from, so `audibleSince(turnStart)`
+is true three ways: playing now; stopped after the turn began, so part of the
+turn is made of it; or stopped within `SELF_AUDIO_TAIL_MS` (2 s), which is the
+recogniser's own lag. Push-to-talk is exempt — the operator is holding the
+button, which is a statement about provenance in itself.
+
+Tested in `tests/self-audio.test.mjs` (11): what counts as an audible element,
+the multi-source and tail arithmetic, the removed-element and closed-tab leaks,
+a navigation message that says nothing about audio not being read as silence,
+and that the engine consults the monitor at both gates.
+
 
 ## 7. The agent command loop (`services/agentCommands.ts`, `services/commandThrashing.ts`)
 

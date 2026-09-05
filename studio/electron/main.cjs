@@ -12,6 +12,7 @@ const { initScreenRecorder, shutdownScreenRecorder } = require("./screenRecorder
 const { initVideoProjects, shutdownVideoProjects } = require("./videoProjects.cjs");
 const { initVideoExport, shutdownVideoExport } = require("./videoExport.cjs");
 const { registerWorkspaceMediaScheme, initWorkspaceMedia } = require("./workspaceMedia.cjs");
+const { initBrowserViews } = require("./browserView.cjs");
 
 // The file pane's video and audio come over `teminali-media://`, and Electron
 // only grants a scheme its privileges before `app.ready`. Handled after it.
@@ -254,6 +255,8 @@ async function startVoiceSidecar() {
 let mainWindow = null;
 let videoRpc = null;
 
+let browserViews = null;
+
 const DEV_URL = "http://localhost:3000";
 
 /** An unpackaged build is a development build unless it asks for the bundle. */
@@ -340,6 +343,18 @@ function createWindow() {
     });
   }
 
+  // A reload replaces the document but not the views layered over it, and the
+  // fresh page has no idea they are there — it would draw under pages it never
+  // opened. They belong to the document that asked for them.
+  mainWindow.webContents.on("did-start-navigation", (event, url, isInPlace, isMainFrame) => {
+    if (!isMainFrame || isInPlace) return;
+    try {
+      browserViews?.destroyAllBrowserViews();
+    } catch (error) {
+      log("Browser views could not be cleared on navigation:", error?.message ?? error);
+    }
+  });
+
   mainWindow.webContents.on("did-fail-load", (event, errorCode, errorDescription) => {
     log("did-fail-load:", errorCode, errorDescription);
   });
@@ -351,6 +366,14 @@ function createWindow() {
 
   mainWindow.on("closed", () => {
     log("MainWindow closed");
+    // The panel's pages are children of this window's content view; nothing
+    // else would take them down, and a view outliving its window is a web
+    // contents no one can reach.
+    try {
+      browserViews?.destroyAllBrowserViews();
+    } catch (error) {
+      log("Browser views could not be torn down:", error?.message ?? error);
+    }
     mainWindow = null;
     // The overlay only shows while the app is unfocused, so closing the last
     // window is exactly the condition that pins it on screen — and macOS keeps
@@ -902,6 +925,14 @@ app.whenReady().then(async () => {
     });
   } catch (error) {
     log("Workspace media protocol could not be registered:", error?.stack || error?.message || error);
+  }
+
+  // The browser panel's pages, which are views layered over the window rather
+  // than frames inside it. See electron/browserView.cjs.
+  try {
+    browserViews = initBrowserViews({ getMainWindow: () => mainWindow, log });
+  } catch (error) {
+    log("Browser views could not be initialised:", error?.stack || error?.message || error);
   }
 
   /*

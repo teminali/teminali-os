@@ -178,6 +178,29 @@ export interface SpeakOptions {
   /** Real-time speech playback amplitude for mouth sync modulation (0–1). */
   onAudioLevel?: (level: number) => void;
   signal?: AbortSignal;
+  /**
+   * A synthesis already started for this exact text, from `prepare()`. The
+   * provider plays it instead of asking for the audio again — which is the
+   * difference between a paragraph break and a pause long enough to wonder
+   * whether the assistant is still there.
+   */
+  prepared?: PreparedSpeech;
+}
+
+/**
+ * Synthesis begun before it is needed.
+ *
+ * A reply is spoken in blocks, and a block cannot be played until it has been
+ * rendered: with nothing warming the next one, the whole round trip — request,
+ * synthesis, first audio — falls in the silence after the previous block ends.
+ * Preparing it while the current block is still being heard moves that cost
+ * under the audio instead of after it.
+ */
+export interface PreparedSpeech {
+  /** The text it was started for. A mismatch means it is the wrong audio and must not be used. */
+  readonly text: string;
+  /** Give up on it, and on any request still in flight. Safe to call twice. */
+  cancel(): void;
 }
 
 /**
@@ -234,6 +257,13 @@ export interface VoiceProvider {
   probe(signal?: AbortSignal): Promise<ProviderCapabilities>;
   listen(options: RecognitionOptions, handlers: RecognitionHandlers): Promise<RecognitionSession>;
   speak(options: SpeakOptions): Promise<SynthesisHandle>;
+  /**
+   * Start synthesising something that will be said next, if this provider can.
+   * Optional: a provider that renders locally and instantly has nothing to
+   * gain, and returning null is always safe — the caller falls back to asking
+   * for the audio when it needs it.
+   */
+  prepare?(options: SpeakOptions): PreparedSpeech | null;
   /** Transcribe a finished buffer. Used for the repair pass and re-scoring. */
   transcribeBlob?(blob: Blob, language: LanguageSetting, signal?: AbortSignal): Promise<RecognitionResult>;
 }

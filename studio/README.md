@@ -117,6 +117,20 @@ and the pane says which codec and the ffmpeg line that converts it. No MKV, no
 subtitle tracks, no transcoding. A browser build says playback needs the
 desktop app.
 
+The **Browser** panel is a real browser in the desktop app, not a frame in the
+page. Each tab is an Electron `WebContentsView` with its own session, process
+and history: Back, Forward, Reload and Stop drive the *page's* history, so a
+redirect or a link the page followed is reflected in the toolbar and in the
+address, which an iframe could never report because its history is cross-origin.
+It also runs with web security on, sandboxed, with no preload and no access to
+the workspace media scheme — none of which was true of a frame inside the
+shell's own renderer. The omnibox still takes a bare port (`5173`), a host, or
+a full URL, and still refuses `file:`, `javascript:`, `data:` and `blob:`, now
+in both the renderer and the main process. Because the page is a layer above
+the window rather than part of it, the panel hides it while a menu or a dialog
+is open and while another tab is in front. A browser build keeps the sandboxed
+iframe.
+
 It is also where you **drop** a file. Drag a row out of the Explorer, or a file
 out of Finder or Windows Explorer, and it opens in the panel. A file from
 outside the current project is never read across the workspace boundary: the
@@ -136,9 +150,24 @@ options rail can be a column, against the panel's 452px default. See
 [Screen recording](#screen-recording).
 
 Plus `⌘B` sidebar · `⌘L` chats · `⇧⌘E` explorer · `⇧⌘F` search · `⌘K`/`⌘P`
-command palette · `⌘,` settings. My Projects and Skills are reached from the
-rail; neither has a shortcut. The media pool lives in the video editor's own
-rail.
+command palette · `⌘,` settings · `Esc` stop the turn. My Projects and Skills
+are reached from the rail; neither has a shortcut. The media pool lives in the
+video editor's own rail.
+
+**A running turn can always be stopped.** `Esc` while the conversation has
+focus — including from inside the composer, which is where the cursor actually
+is — and a **stop** control on the activity strip that stays on screen for the
+whole turn: before the first token, while tokens stream, and through a tool
+call that takes a minute. Typing a follow-up no longer replaces the composer's
+stop button with send; both are drawn, because they are two different actions.
+Stopping aborts the request itself, so the gateway drops its upstream call and
+an agent CLI is sent `SIGTERM` rather than being left running unattended; a
+command waiting on approval is denied, any speech in progress is silenced, and
+the partial reply is kept in the transcript and marked as cut short instead of
+being passed off as a finished answer. This is the same stop on all three chat
+surfaces — the main conversation, an agent tab and a side chat — so `Esc` in a
+Claude Code tab stops that tab and settles its tool calls, not the chat beside
+it.
 
 **My Projects** is one list of both kinds — repositories and saved video
 projects, newest first, with the current root marked. The gateway classifies
@@ -262,7 +291,10 @@ your screen and either explains it or acts on it.
   are all refused.
 - Vision runs locally on `qwen3-vl:2b`. Requires Screen Recording **and**
   Accessibility, which are detected and reported separately because they lose
-  different things.
+  different things. The model thinks before it answers and cannot be told not
+  to, so a described look takes 10–16 s warm (longer while the model loads) —
+  `look` with `describe: false` is the fast path when the control names are
+  enough. There is no camera: "look" means the screen.
 
 ### Voice
 
@@ -284,7 +316,11 @@ is acknowledged, the second is answered from what the run has actually done;
 "stop" cancels it; a new instruction replaces it. The assistant narrates notable
 steps in one short line ("running the tests"), summarises long replies for
 speech instead of reading them in full, and filters its own voice out of the
-microphone. Speech that was not addressed to it is kept for ten minutes rather
+microphone. It also filters out the rest of the app: while a video or a page in
+one of the panels is playing, the microphone is hearing the speakers, so only a
+turn that names the assistant ("Temy, pause it") is taken and the playback
+cannot interrupt a spoken reply — the alternative, which the operator saw, is
+the assistant answering a film. Speech that was not addressed to it is kept for ten minutes rather
 than discarded, so "what did she just say?" has an answer; where the sidecar can
 name sounds, so does "did you hear that car?" — bounded, never sent
 anywhere, cleared when the session stops, and switched off with one toggle. Speech is paced for listening: short lines at the chosen rate
@@ -642,7 +678,7 @@ ollama serve              # local models on 127.0.0.1:11434
 
 ```bash
 npm run typecheck   # tsc --noEmit
-npm test            # 1269 tests, 0 failures
+npm test            # 1304 tests, 0 failures
 npm run build       # tsc && vite build
 npm run verify:core # all three
 ```

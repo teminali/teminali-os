@@ -147,6 +147,9 @@ export const Composer: React.FC<ComposerProps> = ({
         return;
       }
       if (event.key === "Escape") {
+        // Claimed here, so the surface's `useInterruptKey` sees a handled
+        // keystroke and does not also stop the run: closing the menu is the
+        // whole of what this Escape means.
         event.preventDefault();
         setTrigger(null);
         return;
@@ -472,27 +475,35 @@ export const Composer: React.FC<ComposerProps> = ({
             )}
 
             {streaming ? (
-              value.trim() ? (
-                <button
-                  type="button"
-                  onClick={onSubmit}
-                  title="Interrupt and send"
-                  aria-label="Interrupt and send"
-                  className="w-6 h-6 rounded-full bg-accent text-accent-ink hover:opacity-90 flex items-center justify-center flex-shrink-0 transition-colors duration-ds ease-ds shadow-sm"
-                >
-                  <span className="text-sm leading-none font-bold">↑</span>
-                </button>
-              ) : (
+              /* Stop is never traded away for send. Typing a follow-up used to
+                 replace the stop button with "interrupt and send", so the
+                 moment an operator started drafting their correction the only
+                 way to stop the run went off screen — and that is precisely
+                 when they want it. Both actions are real and they are not the
+                 same action, so both are drawn: stop first, because it is the
+                 one you reach for in a hurry. */
+              <>
                 <button
                   type="button"
                   onClick={onStop}
-                  title="Stop generating"
+                  title="Stop generating (Esc)"
                   aria-label="Stop generating"
                   className="w-6 h-6 rounded-full bg-danger/20 text-danger flex items-center justify-center flex-shrink-0 hover:bg-danger/30 transition-colors duration-ds ease-ds"
                 >
                   <Square size={11} fill="currentColor" />
                 </button>
-              )
+                {value.trim().length > 0 && (
+                  <button
+                    type="button"
+                    onClick={onSubmit}
+                    title="Interrupt and send"
+                    aria-label="Interrupt and send"
+                    className="w-6 h-6 rounded-full bg-accent text-accent-ink hover:opacity-90 flex items-center justify-center flex-shrink-0 transition-colors duration-ds ease-ds shadow-sm"
+                  >
+                    <span className="text-sm leading-none font-bold">↑</span>
+                  </button>
+                )}
+              </>
             ) : value.trim() ? (
               <button
                 type="button"

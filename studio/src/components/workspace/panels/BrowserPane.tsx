@@ -1,19 +1,36 @@
-import React, { useEffect, useMemo, useRef, useState } from "react";
-import { ArrowLeft, ArrowRight, Globe, MoreHorizontal, RotateCw, Search, Star, FileText } from "lucide-react";
+import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { ArrowLeft, ArrowRight, Globe, MoreHorizontal, RotateCw, Search, Star, X } from "lucide-react";
 import { IconButton, Menu, EmptyState } from "../../ui";
 import { usePanelStore, type PanelTab } from "../../../store/panelStore";
 import { normaliseAddress } from "../../../utils/address";
+import {
+  boundsEqual,
+  browserViewBridge,
+  isOverlayOpen,
+  measureBrowserViewBounds,
+  type BrowserViewBounds,
+  type BrowserViewState,
+} from "../../../services/browserView";
 
 /**
  * The browser panel.
  *
  * The omnibox accepts a URL, a bare host, a port, or a workspace path, because
  * in practice what gets typed here is "5173" far more often than a full URL.
- * Navigation history is kept per panel so back and forward behave.
  *
  * Only http(s) is loaded. A file:// or javascript: address typed into a panel
- * that sits inside the app shell is a real hazard, so those are refused rather
- * than passed through to the frame.
+ * that sits inside the app shell is a real hazard, so those are refused before
+ * they reach the page.
+ *
+ * In the desktop app the page is a `WebContentsView` layered over the window,
+ * not a frame in this document: its own session, its own process, web security
+ * on, and — the visible difference — its own navigation history, so Back and
+ * Forward are the page's rather than a list this pane keeps beside it. What
+ * that costs is position: the view cannot be placed by CSS and nothing can be
+ * drawn over it, so the viewport below is an empty box whose measurements are
+ * reported to main, and the view is hidden whenever a menu or a modal opens.
+ * A browser build has no such view and keeps the iframe.
+ * See services/browserView.ts and electron/browserView.cjs.
  */
 
 const SUGGESTIONS = [
@@ -24,18 +41,32 @@ const SUGGESTIONS = [
 
 export const BrowserPane: React.FC<{ panel: PanelTab }> = ({ panel }) => {
   const update = usePanelStore((state) => state.update);
+  const bridge = useMemo(() => browserViewBridge(), []);
   const [draft, setDraft] = useState(panel.url ?? "");
   const [omniOpen, setOmniOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [reloadKey, setReloadKey] = useState(0);
 
-  // Per-panel history. The iframe's own history is cross-origin and unreadable,
-  // so we keep our own rather than pretend to drive the frame's.
+  /*
+    History.
+
+    With a view, the page keeps its own and reports it: `state.canGoBack` is
+    the real answer, including the redirects and in-page steps a list kept out
+    here would miss. With an iframe there is no answer to have — its history is
+    cross-origin and unreadable — so the pane keeps a list of what it was told
+    to load. Both are needed: the fallback is the browser build.
+  */
   const [history, setHistory] = useState<string[]>(panel.url ? [panel.url] : []);
   const [cursor, setCursor] = useState(panel.url ? 0 : -1);
+  const [viewState, setViewState] = useState<BrowserViewState | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+  const viewportRef = useRef<HTMLDivElement>(null);
 
   const current = cursor >= 0 ? history[cursor] : null;
+  const canGoBack = bridge ? Boolean(viewState?.canGoBack) : cursor > 0;
+  const canGoForward = bridge ? Boolean(viewState?.canGoForward) : cursor < history.length - 1;
+  // What the page says it is, once it has said anything; otherwise what it was asked to be.
+  const shown = (bridge && viewState?.url) || current;
 
   useEffect(() => {
     // Another part of the app navigated this panel (an artifact preview, say).
@@ -47,6 +78,88 @@ export const BrowserPane: React.FC<{ panel: PanelTab }> = ({ panel }) => {
     // Intentionally keyed on the incoming url only.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [panel.url]);
+
+  // State comes back per view; this pane is one of possibly several.
+  useEffect(() => {
+    if (!bridge) return;
+    return bridge.onState((state) => {
+      if (state.id !== panel.id) return;
+      if (state.error) {
+        setError(state.error);
+        return;
+      }
+      setError(null);
+      setViewState(state);
+      if (state.url) {
+        setDraft((previous) => (previous === state.url ? previous : (state.url as string)));
+        update(panel.id, { url: state.url, label: labelFor(state.url) });
+      }
+    });
+    // `update` is a stable store action.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [bridge, panel.id]);
+
+  /*
+    Where the page is, and whether it may be seen.
+
+    The view is an OS layer above the document, so this is the only thing that
+    positions it — and the only thing that stops it painting over a menu, a
+    modal, or the tab the operator switched to. Measured in a layout effect and
+    on every resize of the container or the window, and hidden on unmount,
+    because unmount is what switching tabs looks like from in here.
+  */
+  const lastBounds = useRef<BrowserViewBounds | null>(null);
+  const report = useCallback(
+    (visible: boolean) => {
+      if (!bridge) return;
+      const bounds = measureBrowserViewBounds(viewportRef.current);
+      // Bounds are sent on every observer tick; skipping the unchanged ones
+      // keeps a resize drag from crossing the process boundary 60 times a
+      // second. Visibility is cheap and always sent — it is the safety.
+      if (!boundsEqual(lastBounds.current, bounds)) {
+        lastBounds.current = bounds;
+        bridge.setBounds(panel.id, bounds, visible);
+        return;
+      }
+      bridge.setBounds(panel.id, bounds, visible);
+    },
+    [bridge, panel.id]
+  );
+
+  // The omnibox suggestions drop over the viewport, so the page has to get out
+  // of their way as much as any modal does.
+  const visible = Boolean(shown) && !omniOpen;
+  const visibleRef = useRef(visible);
+  visibleRef.current = visible;
+  const show = useCallback(() => report(visibleRef.current && !isOverlayOpen()), [report]);
+
+  // Observers, armed once per mount. Kept apart from the visibility effect
+  // below so that toggling visibility does not tear down and rebuild them —
+  // and, worse, run the cleanup that hides the page on the way through.
+  useLayoutEffect(() => {
+    if (!bridge) return;
+    show();
+    const observer = new ResizeObserver(show);
+    if (viewportRef.current) observer.observe(viewportRef.current);
+    // The panel can move without resizing — the sidebar collapses, the splitter
+    // is dragged — and an overlay can open without either.
+    const overlays = new MutationObserver(show);
+    overlays.observe(document.body, { childList: true, subtree: true, attributeFilter: ["style", "class"] });
+    window.addEventListener("resize", show);
+    return () => {
+      observer.disconnect();
+      overlays.disconnect();
+      window.removeEventListener("resize", show);
+      // Unmount is a tab switch as often as it is a close, and in both cases
+      // the page must stop being drawn. Ending it is the store's decision, not
+      // this component's. See reapClosedBrowserViews.
+      bridge.setBounds(panel.id, { x: 0, y: 0, width: 0, height: 0 }, false);
+    };
+  }, [bridge, panel.id, show]);
+
+  useLayoutEffect(() => {
+    if (bridge) show();
+  }, [bridge, show, visible]);
 
   const go = (raw: string) => {
     const { url, error: failure } = normaliseAddress(raw);
@@ -60,9 +173,35 @@ export const BrowserPane: React.FC<{ panel: PanelTab }> = ({ panel }) => {
     setCursor((previous) => previous + 1);
     setDraft(url);
     update(panel.id, { url, label: labelFor(url) });
+    if (bridge) {
+      void bridge.navigate(panel.id, url).then((result) => {
+        if (!result?.ok) setError("Only http and https addresses can be opened in a panel.");
+      });
+    }
   };
 
+  /*
+    The page this panel was already on when the pane mounted.
+
+    `ensure`, not `navigate`: the pane unmounts on every tab switch while the
+    view goes on existing behind the tab that replaced it. Navigating here
+    would reload the page each time the operator came back, at the address the
+    tab was opened with rather than the one they had reached — losing the
+    scroll, the form, and the history. An existing view is left alone and only
+    reports itself.
+  */
+  useEffect(() => {
+    if (!bridge || !current) return;
+    void bridge.ensure(panel.id, current);
+    // Only on mount: afterwards `go` and the toolbar drive the view.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [bridge]);
+
   const step = (delta: number) => {
+    if (bridge) {
+      bridge.command(panel.id, delta < 0 ? "back" : "forward");
+      return;
+    }
     const next = cursor + delta;
     if (next < 0 || next >= history.length) return;
     setCursor(next);
@@ -70,22 +209,33 @@ export const BrowserPane: React.FC<{ panel: PanelTab }> = ({ panel }) => {
     update(panel.id, { url: history[next], label: labelFor(history[next]) });
   };
 
-  const display = useMemo(() => current ?? "Open any file, URL, …", [current]);
+  const reload = () => {
+    if (bridge) bridge.command(panel.id, "reload");
+    else setReloadKey((key) => key + 1);
+  };
+
+  const display = useMemo(() => shown ?? "Open any file, URL, …", [shown]);
 
   return (
     <div className="flex-1 min-h-0 flex flex-col">
       {/* ── Toolbar ────────────────────────────────────────────────────── */}
       <div className="h-11 flex-shrink-0 flex items-center gap-2 px-3 border-b border-edge-chrome">
-        <IconButton onClick={() => step(-1)} disabled={cursor <= 0} title="Back" size={24}>
+        <IconButton onClick={() => step(-1)} disabled={!canGoBack} title="Back" size={24}>
           <ArrowLeft size={14} />
         </IconButton>
-        <IconButton onClick={() => step(1)} disabled={cursor >= history.length - 1} title="Forward" size={24}>
+        <IconButton onClick={() => step(1)} disabled={!canGoForward} title="Forward" size={24}>
           <ArrowRight size={14} />
         </IconButton>
-        <IconButton onClick={() => setReloadKey((key) => key + 1)} disabled={!current} title="Reload" size={24}>
-          <RotateCw size={14} />
-        </IconButton>
-        <IconButton title="Bookmark" size={24} disabled={!current}>
+        {bridge && viewState?.loading ? (
+          <IconButton onClick={() => bridge.command(panel.id, "stop")} title="Stop" size={24}>
+            <X size={14} />
+          </IconButton>
+        ) : (
+          <IconButton onClick={reload} disabled={!shown} title="Reload" size={24}>
+            <RotateCw size={14} />
+          </IconButton>
+        )}
+        <IconButton title="Bookmark" size={24} disabled={!shown}>
           <Star size={14} />
         </IconButton>
 
@@ -117,7 +267,7 @@ export const BrowserPane: React.FC<{ panel: PanelTab }> = ({ panel }) => {
                 className="flex-1 bg-transparent outline-none text-xs text-ink-high font-mono min-w-0"
               />
             ) : (
-              <span className={`text-xs truncate ${current ? "text-ink-dim font-mono" : "text-ink-placeholder"}`}>
+              <span className={`text-xs truncate ${shown ? "text-ink-dim font-mono" : "text-ink-placeholder"}`}>
                 {display}
               </span>
             )}
@@ -146,18 +296,25 @@ export const BrowserPane: React.FC<{ panel: PanelTab }> = ({ panel }) => {
       {error && <div className="px-3 py-2 text-2xs text-danger border-b border-edge-chrome">{error}</div>}
 
       {/* ── Viewport ───────────────────────────────────────────────────── */}
-      <div className="flex-1 min-h-0 relative flex flex-col bg-frame-bot">
-        {current ? (
-          <iframe
-            key={`${current}-${reloadKey}`}
-            src={current}
-            title={panel.label}
-            // The panel loads local dev servers, so scripts and same-origin are
-            // needed; top-level navigation is not, and letting a previewed page
-            // navigate the shell would be a way out of the sandbox.
-            sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-modals"
-            className="w-full h-full border-0 bg-white"
-          />
+      <div ref={viewportRef} className="flex-1 min-h-0 relative flex flex-col bg-frame-bot">
+        {shown ? (
+          bridge ? (
+            // Deliberately empty: the page is a view above this box, and main
+            // is told where the box is. Anything drawn here would be hidden by
+            // it. See services/browserView.ts.
+            <div className="w-full h-full" aria-label={`Browser: ${shown}`} />
+          ) : (
+            <iframe
+              key={`${shown}-${reloadKey}`}
+              src={shown}
+              title={panel.label}
+              // The browser build's fallback. Scripts and same-origin are needed
+              // for local dev servers; top-level navigation is not, and letting a
+              // previewed page navigate the shell would be a way out of the sandbox.
+              sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-modals"
+              className="w-full h-full border-0 bg-white"
+            />
+          )
         ) : (
           <EmptyState
             icon={<Globe size={30} strokeWidth={1.6} />}

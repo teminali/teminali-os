@@ -8,6 +8,9 @@ import { useStudioStore } from "./store/studioStore";
 import { registerVideoToolBridge } from "./services/videoToolBridge";
 import { installWindowDropGuard } from "./services/dropGuard";
 import { syncWorkspaceMediaRoot } from "./services/workspaceMedia";
+import { browserViewBridge, reapClosedBrowserViews } from "./services/browserView";
+import { selfAudio, watchBrowserAudio, watchMediaElements } from "./services/voice/selfAudio";
+import { usePanelStore } from "./store/panelStore";
 
 /**
  * Which surface this document is.
@@ -61,6 +64,27 @@ installWindowDropGuard();
   main also ignores any window but the real one. See services/workspaceMedia.ts.
 */
 syncWorkspaceMediaRoot(useStudioStore);
+
+/*
+  The browser panel's pages are views layered over this window, not frames in
+  this document, so closing a tab has to end one — and the pane cannot tell
+  that from the operator merely switching tabs, since both unmount it. Only the
+  store knows, so the reaping is a subscription. See services/browserView.ts.
+*/
+reapClosedBrowserViews(usePanelStore);
+
+/*
+  The app has to know when it is the one making noise.
+
+  The Files panel plays video and audio and the Browser panel loads pages that
+  do, and all of it reaches the microphone, where it is indistinguishable from
+  an operator — it is real speech, correctly transcribed. Both watches are
+  armed here rather than by the panes because a source outlives its pane: a
+  browser tab in the background is unmounted and still audible.
+  See services/voice/selfAudio.ts.
+*/
+watchMediaElements(selfAudio);
+watchBrowserAudio(selfAudio, browserViewBridge());
 
 /*
   The video panel's MCP bridge, for the agent CLIs.

@@ -91,13 +91,28 @@ export const ASSISTANT_LIMITS = Object.freeze({
    */
   visionMaxEdge: 1_600,
   /**
-   * Context window for the vision pass.
-   *
-   * Measured, not chosen: at 4096 the image tokens plus the answer overflow and
-   * Ollama returns HTTP 200 with an empty `response` and `done_reason: length`.
-   * That failure is silent, which is exactly why the number is written down.
+   * Context window for the vision pass. Generous: the image tokens and the
+   * prompt fit in far less, and this is not the number the empty-response
+   * failure below turns on.
    */
   visionContextTokens: 8_192,
+  /**
+   * Output budget for the vision pass, and the number that failure turns on.
+   *
+   * `qwen3-vl:2b` is a thinking model (`ollama show` lists the capability) and
+   * its Ollama template has no switch — `think: false` on `/api/generate` and
+   * `/api/chat`, and the `/no_think` soft switch, were all measured to change
+   * nothing. Every call spends 400–600 tokens on a `thinking` trace before a
+   * word of the answer, so a budget of 260 came back HTTP 200, `response: ""`,
+   * `done_reason: "length"` every single time, `describeFrame` returned null,
+   * and the assistant could name every control on the screen but describe
+   * none of it. The earlier reading of this failure blamed `num_ctx`; raising
+   * it to 8192 did not cure it, because the answer was never being cut by the
+   * context — it was never being started. Measured on 2026-09-06: 1024 ends
+   * with `done_reason: "stop"` and a three-sentence answer at 516 and 626
+   * tokens used, 10–16 s warm.
+   */
+  visionPredictTokens: 1_024,
 });
 
 /** The local model that looks at the frame. Small, fast, and never leaves the machine. */
@@ -229,6 +244,25 @@ async function downscaleForVision(framePath) {
  * observation: an assistant that can name every control on screen but cannot
  * describe the wallpaper is still an assistant.
  */
+/**
+ * The Ollama request one description is made with. Exported so the budget can
+ * be pinned by a test: see `visionPredictTokens` for why the number matters.
+ */
+export function visionRequest(bytes) {
+  return {
+    model: ASSISTANT_VISION_MODEL,
+    stream: false,
+    keep_alive: "5m",
+    options: {
+      num_ctx: ASSISTANT_LIMITS.visionContextTokens,
+      num_predict: ASSISTANT_LIMITS.visionPredictTokens,
+      temperature: 0.1,
+    },
+    prompt: VISION_PROMPT,
+    images: [Buffer.from(bytes).toString("base64")],
+  };
+}
+
 async function describeFrame(config, framePath, fetchImpl) {
   const { readFile } = await import("node:fs/promises");
   try {
@@ -237,14 +271,7 @@ async function describeFrame(config, framePath, fetchImpl) {
       method: "POST",
       headers: { "content-type": "application/json" },
       signal: AbortSignal.timeout(ASSISTANT_LIMITS.visionTimeoutMs),
-      body: JSON.stringify({
-        model: ASSISTANT_VISION_MODEL,
-        stream: false,
-        keep_alive: "5m",
-        options: { num_ctx: ASSISTANT_LIMITS.visionContextTokens, num_predict: 260, temperature: 0.1 },
-        prompt: VISION_PROMPT,
-        images: [bytes.toString("base64")],
-      }),
+      body: JSON.stringify(visionRequest(bytes)),
     });
     if (!response.ok) return null;
     const payload = await response.json();
