@@ -1583,6 +1583,18 @@ sentence puts it back to *speaking*, and an empty digest returns it to
 line ("Reading types dot ts") does not caption the reply being read — the
 reply is in the chat and needs no caption.
 
+**A labelled list is spoken as its labels.** `speakable.ts` collapses a run of
+list items into their labels alone when every item has one — a bold lead-in, or
+a short prefix before a colon. "Video Editing: you can use tools like
+describe_timeline, patch_clip and set_effect_param…" five times over is a
+paragraph of identifiers nobody can follow by ear, and the full text is in the
+chat. Spoken as "Video Editing, Media Management, Captions and Subtitles,
+Workspace Commands and File Editing" it is a list the operator can hold in
+their head, and the reply drops under `VERBATIM_LIMIT_CHARS` so it is read out
+rather than sent to the digest at all. A run with even one unlabelled item is
+read in full: the labels would not then be a faithful index of it. Tests:
+`tests/voice.test.mjs`.
+
 **Pace.** `DEFAULT_VOICE_SETTINGS.ttsRate` is 1.15 (was 1.02 until
 2026-09-05; a saved 1.02 is treated as never chosen and migrated by
 `useVoice.ts#loadSettings`). Each chunk is read at

@@ -1,3 +1,69 @@
+/** Opens a bullet or numbered item. */
+const LIST_MARKER = /^\s*(?:[-*+]|\d+[.)])\s+/;
+
+/**
+ * The label a list item leads with, or null when it does not have one. A bold
+ * lead-in is the clearest form; a short plain prefix before a colon counts too,
+ * as long as it reads like a label rather than a sentence that happens to
+ * contain a colon.
+ */
+function itemTitle(line: string): string | null {
+  const body = line.replace(LIST_MARKER, "").trim();
+  const bold = body.match(/^\*\*([^*]{1,60}?)\*\*\s*[:—–-]?(?:\s|$)/);
+  if (bold) return bold[1].trim().replace(/[:\s]+$/, "");
+  const plain = body.match(/^([^:.!?*`]{1,60}):\s+\S/);
+  if (plain) return plain[1].trim();
+  return null;
+}
+
+/** "a, b and c" — the way a person reads a list out. */
+function spokenList(titles: string[]): string {
+  if (titles.length === 1) return `${titles[0]}.`;
+  const head = titles.slice(0, -1);
+  const last = titles[titles.length - 1];
+  return titles.length === 2 ? `${head[0]} and ${last}.` : `${head.join(", ")} and ${last}.`;
+}
+
+/**
+ * Replace each run of list items whose every item is labelled with the labels
+ * alone. A run with even one unlabelled item is left as it is: the labels
+ * would not then be a faithful index of it, and half a list read aloud is
+ * worse than all of it.
+ */
+function collapseTitledLists(markdown: string): string {
+  const lines = markdown.split("\n");
+  const out: string[] = [];
+  /** Items in the run being gathered, each its own lines plus its label. */
+  let items: { lines: string[]; title: string | null }[] = [];
+
+  const flush = () => {
+    if (items.length === 0) return;
+    const titles = items.map((item) => item.title);
+    if (items.length >= 2 && titles.every((title): title is string => title !== null)) {
+      out.push(spokenList(titles));
+    } else {
+      for (const item of items) out.push(...item.lines);
+    }
+    items = [];
+  };
+
+  for (const line of lines) {
+    if (LIST_MARKER.test(line)) {
+      items.push({ lines: [line], title: itemTitle(line) });
+      continue;
+    }
+    // An indented line continues the item above it rather than ending the run.
+    if (items.length > 0 && /^\s+\S/.test(line)) {
+      items[items.length - 1].lines.push(line);
+      continue;
+    }
+    flush();
+    out.push(line);
+  }
+  flush();
+  return out.join("\n");
+}
+
 /**
  * Turning a written reply into something worth hearing.
  *
@@ -5,12 +71,19 @@
  * minute of punctuation names. So code is announced rather than recited, and
  * the decoration that only exists for the eye is dropped.
  *
+ * A list whose every item is a labelled heading is read as its headings alone.
+ * "Video Editing: you can use tools like describe_timeline, patch_clip and
+ * set_effect_param…" four times over is a paragraph of identifiers nobody can
+ * follow by ear, and the eye has the full text in the chat already. Spoken as
+ * the labels it is a list you can actually hold in your head.
+ *
  * Deliberately dependency-free: it is pure text in, pure text out.
  */
 export function speakableText(markdown: string): string {
-  return markdown
-    .replace(/```(\w+)?\n[\s\S]*?```/g, (_match, lang: string | undefined) =>
-      lang ? ` — ${lang} code block — ` : " — code block — ")
+  return collapseTitledLists(
+    markdown.replace(/```(\w+)?\n[\s\S]*?```/g, (_match, lang: string | undefined) =>
+      lang ? ` — ${lang} code block — ` : " — code block — "),
+  )
     .replace(/`([^`]+)`/g, "$1")
     .replace(/!\[[^\]]*\]\([^)]*\)/g, "")
     .replace(/\[([^\]]+)\]\([^)]*\)/g, "$1")
@@ -21,6 +94,10 @@ export function speakableText(markdown: string): string {
     .replace(/^\s*\d+\.\s+/gm, "")
     .replace(/\|/g, " ")
     .replace(/\n{2,}/g, ". ")
+    // A collapsed list ends in a full stop and the paragraph break adds
+    // another; a list introduced by "including:" gets one straight after the
+    // colon. Neither is a pause anyone wants read out.
+    .replace(/([:;,.!?])\s*\.(?=\s|$)/g, "$1")
     .replace(/\s{2,}/g, " ")
     .trim();
 }

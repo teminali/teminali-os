@@ -221,6 +221,52 @@ test("markdown decoration is stripped from spoken text", () => {
   assert.match(spoken, /a link/);
 });
 
+test("a list whose every item is labelled is spoken as its labels", () => {
+  const reply = [
+    "I can assist you with a variety of tasks, including:",
+    "",
+    "1. **Video Editing**: You can use tools like `describe_timeline` and `patch_clip` to edit clips.",
+    "2. **Media Management**: Import media files using `import_media_from_path`.",
+    "3. **File Editing**: Edit workspace files by emitting complete code blocks.",
+    "",
+    "If you have a specific task in mind, let me know.",
+  ].join("\n");
+  const spoken = speakableText(reply);
+  assert.equal(
+    spoken,
+    "I can assist you with a variety of tasks, including: Video Editing, Media Management and File Editing. If you have a specific task in mind, let me know.",
+  );
+  // The bodies, and the identifiers in them, are not read out.
+  assert.ok(!spoken.includes("describe_timeline"));
+  assert.ok(!spoken.includes("import_media_from_path"));
+});
+
+test("two labelled items are joined with 'and', not a comma", () => {
+  assert.equal(speakableText("- **Alpha**: one.\n- **Beta**: two."), "Alpha and Beta.");
+});
+
+test("a plain label before a colon counts as a label", () => {
+  assert.equal(speakableText("- Video Editing: edit clips.\n- File Editing: edit files."), "Video Editing and File Editing.");
+});
+
+test("a list with any unlabelled item is still read in full", () => {
+  const spoken = speakableText("- **First**: do a thing.\n- and then something with no label here.");
+  assert.ok(spoken.includes("do a thing"));
+  assert.ok(spoken.includes("no label here"));
+});
+
+test("a plain list without labels is untouched", () => {
+  const spoken = speakableText("Shopping:\n\n- milk\n- bread");
+  assert.ok(spoken.includes("milk"));
+  assert.ok(spoken.includes("bread"));
+});
+
+test("collapsing a labelled list does not leave doubled stops", () => {
+  const spoken = speakableText("Options:\n\n- **A**: one.\n- **B**: two.\n\nDone.");
+  assert.ok(!spoken.includes(".."), spoken);
+  assert.ok(!spoken.includes(":."), spoken);
+});
+
 /* ── Address normalisation ────────────────────────────────────────────────── */
 
 test("a bare port becomes a localhost URL", () => {
