@@ -35,7 +35,68 @@
 
 import { Readable } from "node:stream";
 
-import { localAsrStatus, localTtsStatus, speakLocal, transcribeLocal } from "./speech-local.js";
+import { localAsrStatus, localTtsStatus, rankLocalModel, speakLocal, transcribeLocal } from "./speech-local.js";
+
+/**
+ * Which engine listens and which one speaks, decided separately.
+ *
+ * The sidecar's recogniser is `whisper-base`, chosen for its 385 ms on CPU.
+ * whisper.cpp on this machine runs `large-v3-turbo` on Metal, and it also
+ * takes the vocabulary prompt the sidecar's transformers.js build cannot pass
+ * at all (see voice-runtime/lexicon.js). So when both are up, recognition goes
+ * to whichever model outranks the other, while synthesis stays with the
+ * sidecar's Kokoro, which the local `say` does not match. Before this the
+ * sidecar won both jobs outright the moment it answered, which is how a warm
+ * 874 MB turbo sat unused behind a 147 MB base.
+ *
+ * `preference` is the operator's override: "local" or "sidecar" pins
+ * recognition regardless of rank.
+ *
+ * Pure, so the rule is testable without a sidecar or a microphone.
+ */
+export function chooseEngines({ sidecar = null, localAsr = null, localTts = null, preference = "auto" } = {}) {
+  const sidecarAsr = sidecar?.asr ?? null;
+  const sidecarTts = sidecar?.tts ?? null;
+  const localAsrOk = Boolean(localAsr?.available);
+  const localRank = localAsrOk ? (localAsr.rank ?? rankLocalModel(localAsr.modelName)) : -1;
+  const sidecarRank = sidecarAsr ? rankLocalModel(sidecarAsr.model) : -1;
+
+  let asr = null;
+  if (preference === "sidecar" && sidecarAsr) asr = { source: "sidecar" };
+  else if (preference === "local" && localAsrOk) asr = { source: "local" };
+  else if (localAsrOk && localRank > sidecarRank) asr = { source: "local" };
+  else if (sidecarAsr) asr = { source: "sidecar" };
+  else if (localAsrOk) asr = { source: "local" };
+
+  let tts = null;
+  if (sidecarTts) tts = { source: "sidecar" };
+  else if (localTts?.available) tts = { source: "local" };
+
+  return { asr, tts };
+}
+
+function localAsrDescriptor(asr) {
+  return {
+    model: asr.modelName,
+    engine: "whisper.cpp",
+    languages: asr.multilingual ? ["auto"] : ["en"],
+    streaming: false,
+    embedding: false,
+    multilingual: asr.multilingual,
+    rank: asr.rank,
+    detail: asr.detail,
+  };
+}
+
+function localTtsDescriptor(tts) {
+  return {
+    model: "macOS system voices",
+    engine: "say",
+    voices: (tts.voices ?? []).map((voice) => voice.name),
+    languages: [...new Set((tts.voices ?? []).map((voice) => voice.language))],
+    streaming: false,
+  };
+}
 
 /**
  * The content type of a streamed `/speak` reply: one frame per rendered
@@ -78,6 +139,7 @@ export async function voiceStatus(config, { force = false, allowVibeVoice = true
   //    and discarding: the sidecar is a loopback round trip with a timeout, and
   //    spending it to reach an answer already known is just latency.
   let sidecarDetail = null;
+  let sidecar = null;
   if (allowVibeVoice) {
     const { signal, done } = timeoutSignal(Math.min(2500, config.voiceTimeoutMs));
     try {
@@ -85,14 +147,10 @@ export async function voiceStatus(config, { force = false, allowVibeVoice = true
       if (response.ok) {
         const body = await response.json();
         if (body?.asr || body?.tts) {
-          return cache(allowVibeVoice, {
-            available: true,
-            engine: "vibevoice",
-            asr: body.asr ?? null,
-            tts: body.tts ?? null,
-          });
+          sidecar = { asr: body.asr ?? null, tts: body.tts ?? null };
+        } else {
+          sidecarDetail = "The sidecar reported no speech models.";
         }
-        sidecarDetail = "The sidecar reported no speech models.";
       } else {
         sidecarDetail = `The voice sidecar answered ${response.status}.`;
       }
@@ -115,33 +173,38 @@ export async function voiceStatus(config, { force = false, allowVibeVoice = true
   //    browser's own recogniser cannot work inside Electron, so without this
   //    there would be no voice at all.
   const [asr, tts] = await Promise.all([localAsrStatus(), localTtsStatus()]);
-  if (asr.available || tts.available) {
+  const chosen = chooseEngines({
+    sidecar,
+    localAsr: asr,
+    localTts: tts,
+    preference: config.asrEngine ?? "auto",
+  });
+
+  if (chosen.asr || chosen.tts) {
+    const asrDescriptor =
+      chosen.asr?.source === "local"
+        ? localAsrDescriptor(asr)
+        : chosen.asr?.source === "sidecar"
+          ? { engine: "sidecar", ...sidecar.asr }
+          : null;
+    const ttsDescriptor =
+      chosen.tts?.source === "sidecar"
+        ? { engine: "sidecar", ...sidecar.tts }
+        : chosen.tts?.source === "local"
+          ? localTtsDescriptor(tts)
+          : null;
     return cache(allowVibeVoice, {
       available: true,
-      engine: "local",
+      /* Kept for callers that read one engine name for the whole subsystem.
+         `asr.engine` and `tts.engine` are what actually route a request now,
+         because the two halves can legitimately come from different places. */
+      engine:
+        chosen.asr?.source === "sidecar" || chosen.tts?.source === "sidecar" ? "vibevoice" : "local",
       gated,
       sidecarDetail,
-      asr: asr.available
-        ? {
-            model: asr.modelName,
-            engine: "whisper.cpp",
-            languages: asr.multilingual ? ["auto"] : ["en"],
-            streaming: false,
-            embedding: false,
-            multilingual: asr.multilingual,
-            detail: asr.detail,
-          }
-        : null,
-      tts: tts.available
-        ? {
-            model: "macOS system voices",
-            engine: "say",
-            voices: (tts.voices ?? []).map((voice) => voice.name),
-            languages: [...new Set((tts.voices ?? []).map((voice) => voice.language))],
-            streaming: false,
-          }
-        : null,
-      detail: asr.available ? null : asr.detail,
+      asr: asrDescriptor,
+      tts: ttsDescriptor,
+      detail: asrDescriptor ? null : (asr.detail ?? sidecarDetail ?? null),
     });
   }
 
@@ -165,15 +228,17 @@ export function forgetVoiceStatus() {
 
 /** Forward a recorded utterance for transcription. */
 export async function transcribe(config, {
-  body, contentType, language = "auto", maxSegmentChars = 0, allowVibeVoice = true,
+  body, contentType, language = "auto", maxSegmentChars = 0, hints = [], allowVibeVoice = true,
 }) {
   const status = await voiceStatus(config, { allowVibeVoice });
   // A sidecar may serve only one of the two capabilities: VOICE_SIDECAR.md
   // says the studio degrades per capability rather than losing voice
   // altogether, so one that advertises no `asr` must not be sent audio.
   // The local engine takes a raw audio buffer, not a multipart envelope.
-  if (status.engine === "local" || !status.asr) {
-    return transcribeLocal(extractAudio(body, contentType), { language, maxSegmentChars });
+  // Routed on which engine serves *recognition*, not on the whole-subsystem
+  // name: a sidecar serving only Kokoro must not capture the microphone.
+  if (!status.asr || status.asr.engine === "whisper.cpp") {
+    return transcribeLocal(extractAudio(body, contentType), { language, maxSegmentChars, hints });
   }
 
   const { signal, done } = timeoutSignal(config.voiceTimeoutMs);
@@ -208,7 +273,7 @@ export async function speak(config, payload, { allowVibeVoice = true } = {}) {
   const status = await voiceStatus(config, { allowVibeVoice });
   // As in `transcribe`: a sidecar with no `tts` falls back rather than being
   // asked for synthesis it never claimed to offer.
-  if (status.engine === "local" || !status.tts) {
+  if (!status.tts || status.tts.engine === "say") {
     const audio = await speakLocal(payload.text, {
       language: payload.language,
       voice: payload.voice,

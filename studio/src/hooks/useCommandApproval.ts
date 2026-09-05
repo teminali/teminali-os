@@ -6,7 +6,8 @@ export interface CommandApproval {
   pending: AgentCommandRequest | null;
   /** Gate passed to AIService; resolves once the user decides. */
   approveCommand: (request: AgentCommandRequest) => Promise<boolean>;
-  approve: () => void;
+  /** `remember` allows every later command with the same executable. */
+  approve: (remember?: boolean) => void;
   deny: () => void;
   /** Denies anything outstanding — call when a stream is cancelled. */
   cancel: () => void;
@@ -28,7 +29,7 @@ export function useCommandApproval(): CommandApproval {
   return {
     pending,
     approveCommand: useCallback((request: AgentCommandRequest) => gate.request(request), [gate]),
-    approve: useCallback(() => gate.settle(true), [gate]),
+    approve: useCallback((remember = false) => gate.settle(true, remember), [gate]),
     deny: useCallback(() => gate.settle(false), [gate]),
     cancel: useCallback(() => gate.cancel(), [gate]),
   };

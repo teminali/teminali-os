@@ -95,6 +95,32 @@ export async function listVoices() {
 }
 
 /**
+ * Trim excessive leading and trailing dead air padding from synthesized samples.
+ * Leaves a crisp, natural micro-lead/trail so that chained clauses transition
+ * without sluggish 300-400ms gaps.
+ */
+export function trimSilence(samples, { sampleRate = 24_000, maxLeadMs = 15, maxTrailMs = 25, threshold = 0.01 } = {}) {
+  if (!samples || samples.length === 0) return samples;
+  let start = 0;
+  while (start < samples.length && Math.abs(samples[start]) < threshold) {
+    start += 1;
+  }
+  let end = samples.length - 1;
+  while (end > start && Math.abs(samples[end]) < threshold) {
+    end -= 1;
+  }
+  if (start >= end) return samples;
+
+  const maxLeadSamples = Math.round((maxLeadMs / 1000) * sampleRate);
+  const maxTrailSamples = Math.round((maxTrailMs / 1000) * sampleRate);
+
+  const actualStart = Math.max(0, start - maxLeadSamples);
+  const actualEnd = Math.min(samples.length, end + 1 + maxTrailSamples);
+
+  return samples.subarray(actualStart, actualEnd);
+}
+
+/**
  * Render clause by clause, yielding each one the moment it is ready:
  * `{ clause, start, end, samples, sampleRate }`, with `start`/`end` the
  * clause's character offsets in `text`.
@@ -115,13 +141,28 @@ export async function* synthesiseClauses(text, { voice = DEFAULT_VOICE, rate = 1
 
   for (let i = 0; i < clauses.length; i += 1) {
     if (signal?.aborted) return;
-    const audio = await tts.generate(clauses[i], { voice, speed });
+    // Strip trailing commas, colons, and semicolons from the prompt handed to Kokoro
+    // so Kokoro's neural phonemizer does not inject 300-400ms of dead air pause on clause boundaries.
+    const promptText = clauses[i].replace(/[,;:]\s*$/, "");
+    const audio = await tts.generate(promptText, { voice, speed });
+    const sampleRate = audio.sampling_rate ?? 24_000;
+    const isFirst = i === 0;
+    const isLast = i === clauses.length - 1;
+    const isSentenceEnd = /[.!?]\s*$/.test(clauses[i]);
+    const maxTrailMs = isLast ? 30 : isSentenceEnd ? 22 : 12;
+    const maxLeadMs = isFirst ? 12 : 6;
+    const samples = trimSilence(audio.audio, {
+      sampleRate,
+      maxLeadMs,
+      maxTrailMs,
+      threshold: 0.012,
+    });
     yield {
       clause: clauses[i],
       start: offsets[i].start,
       end: offsets[i].end,
-      samples: audio.audio,
-      sampleRate: audio.sampling_rate ?? 24_000,
+      samples,
+      sampleRate,
     };
   }
 }

@@ -57,6 +57,13 @@ built-in tier for whatever is missing rather than losing voice altogether, and
 `server/voice.js` routes the two independently — until 2026-09-05 it did not,
 and a sidecar advertising only `tts` was still sent audio to transcribe.
 
+`asr.model` is also **compared** against whatever whisper.cpp has locally, and
+the better model gets the audio: a sidecar on `whisper-base` will not be asked
+to transcribe on a machine holding `large-v3-turbo`, though it keeps synthesis.
+Name the model honestly — `rankLocalModel` in `server/speech-local.js` reads the
+family out of the string — and see `DESIGN.md` §6.10. The operator can pin
+either side with `TEMINALI_ASR_ENGINE`.
+
 `tts.streaming` means `/speak` accepts `"stream": true` and answers in clause
 frames (below). A backend that renders whole files says `false` and is only
 ever asked for whole files.
@@ -70,6 +77,12 @@ probe timeout.
 
 `multipart/form-data` with an `audio` part (webm/opus or wav) and a `language`
 field (a BCP-47 tag, or `auto`).
+
+An optional `hints` field carries a JSON array of strings — the open project's
+own folder and file names, at most 64 of them. A backend whose decoder takes an
+initial prompt should use them as one; the words the operator says most often
+are precisely the words a general recogniser has never seen. Ignore the field if
+yours does not, and repair after the fact instead (see *Domain vocabulary*).
 
 ```json
 { "text": "open the settings panel", "language": "en-US", "confidence": 0.94 }

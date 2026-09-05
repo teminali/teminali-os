@@ -57,14 +57,25 @@ class NoiseFloor {
   private readonly attack = 0.0006;
   private readonly release = 0.02;
 
-  update(rms: number, voiced: boolean): number {
+  update(rms: number, voiced: boolean, ducked = false): number {
     // Never learn the floor from frames we already believe are speech.
-    if (voiced) return this.value;
+    // Also NEVER raise the noise floor while audio is ducked (assistant speaking),
+    // because speaker bleed into the laptop mic would inflate the floor to ~0.03
+    // and deafen the detector for 4-5 seconds after speech stops.
+    if (voiced || ducked) return this.value;
     if (rms > this.value) this.value += (rms - this.value) * this.attack;
     else this.value += (rms - this.value) * this.release;
     // Keep a sane range: silence never reads as exactly zero on real hardware.
     this.value = Math.min(0.08, Math.max(0.0015, this.value));
     return this.value;
+  }
+
+  clamp(max = 0.006): void {
+    if (this.value > max) this.value = max;
+  }
+
+  reset(): void {
+    this.value = 0.004;
   }
 
   get current(): number {
@@ -198,6 +209,11 @@ export class AudioGraph {
    * a barge-in still registers but the tail of our own sentence does not.
    */
   setDucked(ducked: boolean): void {
+    if (this.ducked && !ducked) {
+      // Ducking ended: immediately clamp noise floor to clean room sensitivity
+      // so user does not experience a 4-5s deafness period after speech finishes.
+      this.floor.clamp(0.006);
+    }
     this.ducked = ducked;
   }
 
@@ -239,13 +255,14 @@ export class AudioGraph {
     // Speech has to clear the floor by a healthy margin and land in a
     // speech-shaped part of the spectrum. The centroid test is what keeps a
     // fan or a fridge from reading as a turn.
-    const margin = this.ducked ? 4.2 : 2.6;
+    const margin = this.ducked ? 5.5 : 2.6;
+    const minThreshold = this.ducked ? 0.035 : 0.006;
     const speechBand = centroid > 180 && centroid < 4200;
-    const voiced = rms > Math.max(floor * margin, 0.006) && speechBand;
+    const voiced = rms > Math.max(floor * margin, minThreshold) && speechBand;
     // Only voiced frames pay for the autocorrelation; silence has no pitch.
     const pitch = voiced ? estimatePitch(this.timeData, this.sampleRate).f0 : 0;
 
-    this.floor.update(rms, voiced);
+    this.floor.update(rms, voiced, this.ducked);
     this.appendHistory(this.timeData);
 
     this.options.onFrame?.({

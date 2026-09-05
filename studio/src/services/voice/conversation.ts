@@ -110,12 +110,12 @@ export interface VoiceSnapshot {
 
 type Listener = (snapshot: VoiceSnapshot) => void;
 
-/** Sustained speech needed to count as a barge-in rather than a cough. */
-const BARGE_IN_FRAMES = 10;
-/** Minimum gap between spoken progress lines, so a busy run is not a running commentary. */
-const PROGRESS_GAP_MS = 9000;
+/** Sustained speech needed to count as a barge-in rather than a cough or speaker bleed. */
+const BARGE_IN_FRAMES = 18;
+/** Minimum gap between spoken progress lines, so a busy run speaks timely step updates without droning. */
+const PROGRESS_GAP_MS = 3500;
 /** No progress line this soon after the operator spoke; the reply to them comes first. */
-const PROGRESS_AFTER_TURN_MS = 2500;
+const PROGRESS_AFTER_TURN_MS = 1200;
 /** "Still on it." is said at most this often, however much encouragement arrives. */
 const ACK_REPLY_GAP_MS = 20_000;
 /** The local addressing tiebreak gets this long before the rule verdict stands. */
@@ -169,6 +169,7 @@ export class VoiceEngine {
   private lastProgressSpokenAt = 0;
   private lastAckSpokenAt = 0;
   private lastUserTurnAt = 0;
+  private hasSpokenInSession = false;
   private lastActivityAt = Date.now();
   private isGoingToSleep = false;
   public static readonly INACTIVITY_SLEEP_MS = 60000; // 1 minute sweet spot
@@ -205,6 +206,8 @@ export class VoiceEngine {
   private awaitingFinal = false;
   /** Safety net for `awaitingFinal`; see `armFinalFallback`. */
   private finalFallbackTimer: number | null = null;
+  /** Watchdog timer so speech synthesis can never hang the engine in speaking state indefinitely. */
+  private speechWatchdogTimer: number | null = null;
   /** A reopen `onClose` skipped because a final transcript was still expected. */
   private reopenDeferred = false;
   private abort: AbortController | null = null;
@@ -254,6 +257,23 @@ export class VoiceEngine {
   private setState(state: VoiceState): void {
     if (this.state === state) return;
     this.state = state;
+
+    if (this.mode === "conversation") {
+      if (state === "listening") {
+        this.endpointer.reset();
+        if (!this.streamingAsr && (!this.session?.active || this.reopenDeferred)) {
+          this.reopenDeferred = false;
+          void this.reopen();
+        }
+      } else if ((state === "hearing" || state === "thinking") && !this.streamingAsr && (!this.session?.active || this.reopenDeferred)) {
+        this.reopenDeferred = false;
+        void this.reopen();
+      } else if (state === "speaking" && !this.streamingAsr && this.session?.active) {
+        this.reopenDeferred = true;
+        this.session.abort();
+      }
+    }
+
     this.emit();
   }
 
@@ -335,6 +355,7 @@ export class VoiceEngine {
     this.lastProgressSpokenAt = 0;
     this.lastAckSpokenAt = 0;
     this.lastUserTurnAt = 0;
+    this.hasSpokenInSession = false;
     this.echo.clear();
     this.endpointer.reset();
     this.abort = new AbortController();
@@ -369,7 +390,7 @@ export class VoiceEngine {
           language: this.settings.language,
           continuous: mode === "conversation",
           interim: true,
-          hints: this.host.hints?.(),
+          hints: this.recognitionHints(),
           sounds: this.settings.ambientMemory,
           signal: this.abort.signal,
         },
@@ -389,6 +410,10 @@ export class VoiceEngine {
             // Push-to-talk closes after one utterance.
             if (this.mode === "push-to-talk") {
               void this.commitTurn();
+              return;
+            }
+            if (!this.streamingAsr && (this.state === "speaking" || this.state === "thinking" || this.state === "sending" || this.state === "deciding")) {
+              this.reopenDeferred = true;
               return;
             }
             // A one-shot engine closes its session after every turn. In
@@ -440,6 +465,7 @@ export class VoiceEngine {
     this.synthesis = null;
     this.abort?.abort();
     this.abort = null;
+    this.clearSpeechWatchdog();
     this.graph.stop();
     this.roster.vibevoice.attachStream(null);
     this.endpointer.reset();
@@ -457,15 +483,17 @@ export class VoiceEngine {
   /* ── Audio frames ──────────────────────────────────────────────────────── */
 
   private onFrame(frame: AudioFrame): void {
-    this.level = frame.level;
+    // When the assistant is speaking, this.level is driven exclusively by TTS audio output (via onAudioLevel).
+    // Do not allow microphone background noise to flap the assistant mouth while speaking.
+    if (this.state !== "speaking") {
+      this.level = frame.level;
+    }
     if (frame.voiced || this.state === "speaking" || this.state === "thinking" || this.state === "sending") {
       this.lastActivityAt = Date.now();
     }
 
-    // While the assistant is speaking, thinking, or the chat is busy,
-    // we watch for an interruption / barge-in.
-    const isAssistantBusy = this.state === "speaking" || this.state === "thinking" || (this.host.isBusy?.() && this.state !== "hearing" && this.state !== "deciding");
-    if (isAssistantBusy) {
+    // While the assistant is actively speaking, we watch for an interruption / barge-in.
+    if (this.state === "speaking") {
       if (!this.settings.allowBargeIn) return;
       this.bargeInRun = frame.voiced ? this.bargeInRun + 1 : 0;
       if (this.bargeInRun >= BARGE_IN_FRAMES) {
@@ -476,7 +504,12 @@ export class VoiceEngine {
       return;
     }
 
-    if (this.state !== "listening" && this.state !== "hearing") {
+    // "thinking" is a tool run or a generation in flight, and it is precisely
+    // when the operator is most likely to say "stop". Dropping frames here is
+    // what made the microphone deaf for the length of a long run: the
+    // endpointer never saw speech start or end, so no turn was ever committed
+    // and the word never reached the intent gate in `commitTurn`.
+    if (this.state !== "listening" && this.state !== "hearing" && this.state !== "thinking") {
       this.emit();
       return;
     }
@@ -573,7 +606,7 @@ export class VoiceEngine {
     if (!cleanPart && !this.transcript) {
       if (isFinal && (this.awaitingFinal || this.state === "deciding")) {
         this.awaitingFinal = false;
-        this.setState(this.mode === "conversation" ? "listening" : "idle");
+        this.setState(this.restingState());
       }
       return;
     }
@@ -583,11 +616,28 @@ export class VoiceEngine {
     if (this.state === "listening" && this.transcript) this.setState("hearing");
     this.emit();
 
+    // A stop cannot wait for the endpointer to call the turn over; see `fastStop`.
+    if (this.fastStop(this.transcript, isFinal)) return;
+
     // The one-shot path or delayed ASR stream: the turn already ended, and this is the text it was waiting for.
     if ((isFinal || this.transcript.trim()) && (this.awaitingFinal || this.state === "deciding")) {
       this.awaitingFinal = false;
       void this.commitTurn();
     }
+  }
+
+  /**
+   * The words to tell the recogniser about before it hears anything.
+   *
+   * The wake words lead, because they are the most-spoken words in the app and
+   * the ones a general recogniser is least equipped for: `whisper-base` heard
+   * "Temy" as "Temi" every time, and no after-the-fact repair can fix it —
+   * `lexicon.ts` matches on a consonant skeleton and "TM" is below its minimum
+   * length, so the only place to say it is the decoder's prompt. The host's own
+   * hints — the open project's file and folder names — follow.
+   */
+  private recognitionHints(): string[] {
+    return [...this.settings.wakeWords, ...(this.host.hints?.() ?? [])];
   }
 
   /** Reopen the microphone after a one-shot engine closed its session. */
@@ -614,7 +664,7 @@ export class VoiceEngine {
         void this.commitTurn();
         return;
       }
-      this.setState(this.mode === "conversation" ? "listening" : "idle");
+      this.setState(this.restingState());
       // The engine closed while we were waiting and onClose declined to
       // reopen because of the flag we have just cleared.
       if (this.reopenDeferred && this.mode === "conversation" && this.state !== "idle") {
@@ -640,7 +690,7 @@ export class VoiceEngine {
           language: this.settings.language,
           continuous: true,
           interim: true,
-          hints: this.host.hints?.(),
+          hints: this.recognitionHints(),
           sounds: this.settings.ambientMemory,
           signal: this.abort?.signal,
         },
@@ -651,6 +701,10 @@ export class VoiceEngine {
           onClose: () => {
             if (this.state === "idle") return;
             if (this.awaitingFinal) {
+              this.reopenDeferred = true;
+              return;
+            }
+            if (!this.streamingAsr && (this.state === "speaking" || this.state === "thinking" || this.state === "sending" || this.state === "deciding")) {
               this.reopenDeferred = true;
               return;
             }
@@ -750,16 +804,7 @@ export class VoiceEngine {
     this.lastUserTurnAt = Date.now();
 
     if (intent.intent === "stop") {
-      this.dropSpeech();
-      if (hostBusy) this.callInterrupt();
-      this.assistantTurnEndedAt = Date.now();
-      if (hostBusy) {
-        this.speakInterjection("Okay, stopped.");
-      } else {
-        this.narration = null;
-        this.setState(this.mode === "conversation" ? "listening" : "idle");
-        this.emit();
-      }
+      this.applyStop(hostBusy);
       return;
     }
 
@@ -823,9 +868,11 @@ export class VoiceEngine {
 
     // Direct wake-word greeting: e.g. "Hey Temy", "Temy", "Hey Teminali"
     if (wakeWordMatched && !withoutWakeWord) {
-      const greetingReply = this.settings.greeting?.trim()
-        ? this.settings.greeting.trim()
-        : "Hey! What are we building today?";
+      const isOngoing = this.hasSpokenInSession || Boolean(this.host.lastAssistantText?.()?.trim());
+      const greetingReply = isOngoing
+        ? "How can I assist you now?"
+        : (this.settings.greeting?.trim() || "Hey! What are we building today?");
+      this.hasSpokenInSession = true;
       await this.speakReply(greetingReply);
       return;
     }
@@ -944,6 +991,7 @@ export class VoiceEngine {
   private async send(text: string): Promise<void> {
     const value = text.trim();
     this.pending = null;
+    this.hasSpokenInSession = true;
     this.clearAutoSend();
     if (!value) {
       this.setState(this.mode === "conversation" ? "listening" : "idle");
@@ -985,7 +1033,14 @@ export class VoiceEngine {
         language: this.settings.language === "auto" ? navigator.language : this.settings.language,
         voice: this.settings.ttsVoice ?? undefined,
         rate: paceFor(this.settings.ttsRate, this.settings.greeting),
+        onAudioLevel: (lvl) => {
+          if (this.state === "speaking") {
+            this.level = lvl;
+            this.emit();
+          }
+        },
         onEnd: () => {
+          this.level = 0;
           this.synthesis = null;
           this.echo.markEnded();
           this.graph.setDucked(false);
@@ -993,6 +1048,7 @@ export class VoiceEngine {
         },
       });
     } catch {
+      this.level = 0;
       this.echo.markEnded();
       this.graph.setDucked(false);
       if (this.state === "speaking") this.setState("listening");
@@ -1014,10 +1070,10 @@ export class VoiceEngine {
     // The run is over: its last "Reading types dot ts" must not caption the
     // reply being read out, which is in the chat and needs no caption.
     if (isFinal) this.narration = null;
-    if (this.mode !== "conversation" || !this.settings.speakReplies) {
+    if (!this.settings.speakReplies) {
       if (isFinal) {
         this.assistantTurnEndedAt = Date.now();
-        if (this.state !== "idle") this.setState("listening");
+        if (this.state !== "idle") this.setState(this.mode === "conversation" ? "listening" : "idle");
       }
       return;
     }
@@ -1039,9 +1095,47 @@ export class VoiceEngine {
     if (this.suspendedSpeech === null && !this.isProcessingSpeechQueue && this.speechQueue.length > 0) {
       void this.processSpeechQueue();
     } else if (isFinal && this.speechQueue.length === 0 && !this.isProcessingSpeechQueue && this.suspendedSpeech === null) {
-      this.graph.setDucked(false);
-      this.assistantTurnEndedAt = Date.now();
-      if (this.state === "speaking" || (wasDigesting && this.state === "thinking")) this.setState("listening");
+      this.finishSpeaking();
+    }
+  }
+
+  private finishSpeaking(): void {
+    this.clearSpeechWatchdog();
+    this.graph.setDucked(false);
+    this.level = 0;
+    this.assistantTurnEndedAt = Date.now();
+    if (this.state === "speaking" || this.state === "thinking") {
+      this.setState(this.mode === "conversation" ? "listening" : "idle");
+    }
+    if (!this.streamingAsr && this.mode === "conversation" && this.state === "listening" && !this.session?.active) {
+      void this.reopen();
+    }
+    this.emit();
+  }
+
+  private armSpeechWatchdog(text: string): void {
+    this.clearSpeechWatchdog();
+    const timeoutMs = Math.max(14000, text.length * 150);
+    this.speechWatchdogTimer = window.setTimeout(() => {
+      this.speechWatchdogTimer = null;
+      if (this.currentlySpeakingText === text && this.state === "speaking") {
+        console.warn("[VoiceEngine] Speech playback watchdog fired for:", text);
+        this.level = 0;
+        this.currentlySpeakingText = null;
+        try {
+          this.synthesis?.cancel();
+        } catch {}
+        this.synthesis = null;
+        this.echo.markEnded();
+        void this.processSpeechQueue();
+      }
+    }, timeoutMs);
+  }
+
+  private clearSpeechWatchdog(): void {
+    if (this.speechWatchdogTimer !== null) {
+      window.clearTimeout(this.speechWatchdogTimer);
+      this.speechWatchdogTimer = null;
     }
   }
 
@@ -1049,14 +1143,19 @@ export class VoiceEngine {
     if (this.speechQueue.length === 0) {
       this.isProcessingSpeechQueue = false;
       this.currentlySpeakingText = null;
+      this.clearSpeechWatchdog();
       this.echo.markEnded();
       if (this.interjecting && !this.isStreamDone) {
         // A one-off line has finished; the run it commented on is still going.
         this.interjecting = false;
         this.graph.setDucked(false);
+        this.level = 0;
         this.assistantTurnEndedAt = Date.now();
         if (this.state === "speaking") {
           this.setState(this.host.isBusy?.() ? "thinking" : this.mode === "conversation" ? "listening" : "idle");
+        }
+        if (!this.streamingAsr && this.mode === "conversation" && this.state === "listening" && !this.session?.active) {
+          void this.reopen();
         }
         this.emit();
         return;
@@ -1064,14 +1163,19 @@ export class VoiceEngine {
       this.interjecting = false;
       if (this.isStreamDone) {
         this.isStreamDone = false;
+        this.finishSpeaking();
+      } else if (this.digesting || this.host.isBusy?.()) {
+        // The streamed sentences are spoken and generation / tool run is still in-flight:
+        // a pause the orb must show as thinking, not as speech.
         this.graph.setDucked(false);
+        this.level = 0;
         this.assistantTurnEndedAt = Date.now();
-        if (this.state === "speaking") this.setState("listening");
-        if (!this.streamingAsr && this.mode === "conversation" && !this.session?.active) void this.reopen();
-      } else if (this.digesting && this.state === "speaking") {
-        // The streamed sentences are spoken and the summary of the rest is still
-        // being made: a pause the orb must show as thinking, not as speech.
-        this.setState("thinking");
+        if (this.state === "speaking") {
+          this.setState("thinking");
+        }
+        this.emit();
+      } else {
+        this.finishSpeaking();
       }
       return;
     }
@@ -1079,7 +1183,16 @@ export class VoiceEngine {
     this.isProcessingSpeechQueue = true;
     const text = this.speechQueue.shift()!;
     this.currentlySpeakingText = text;
-    const tts = this.providers?.tts;
+    let tts = this.providers?.tts;
+    if (!tts && !this.providers) {
+      try {
+        const probed = await this.probe();
+        tts = probed.tts;
+      } catch {}
+    }
+    if (!tts && this.roster.builtin?.capabilities.tts) {
+      tts = this.roster.builtin;
+    }
     if (!tts || !text) {
       this.currentlySpeakingText = null;
       void this.processSpeechQueue();
@@ -1091,20 +1204,63 @@ export class VoiceEngine {
     this.graph.setDucked(true);
     this.echo.remember(text);
 
+    this.armSpeechWatchdog(text);
+
     try {
       this.synthesis = await tts.speak({
         text,
         language: this.settings.language === "auto" ? navigator.language : this.settings.language,
         voice: this.settings.ttsVoice ?? undefined,
         rate: paceFor(this.settings.ttsRate, text),
+        onAudioLevel: (lvl) => {
+          if (this.state === "speaking") {
+            this.level = lvl;
+            this.emit();
+          }
+        },
         onEnd: () => {
+          this.clearSpeechWatchdog();
+          this.level = 0;
           this.currentlySpeakingText = null;
           this.synthesis = null;
           this.echo.markEnded();
           void this.processSpeechQueue();
         },
       });
-    } catch {
+    } catch (ttsErr) {
+      console.warn("[VoiceEngine] Primary TTS failed, trying built-in speech fallback:", ttsErr);
+      const fallback = this.roster.builtin?.capabilities.tts && this.roster.builtin !== tts
+        ? this.roster.builtin
+        : null;
+      if (fallback) {
+        try {
+          this.synthesis = await fallback.speak({
+            text,
+            language: this.settings.language === "auto" ? navigator.language : this.settings.language,
+            voice: undefined,
+            rate: paceFor(this.settings.ttsRate, text),
+            onAudioLevel: (lvl) => {
+              if (this.state === "speaking") {
+                this.level = lvl;
+                this.emit();
+              }
+            },
+            onEnd: () => {
+              this.clearSpeechWatchdog();
+              this.level = 0;
+              this.currentlySpeakingText = null;
+              this.synthesis = null;
+              this.echo.markEnded();
+              void this.processSpeechQueue();
+            },
+          });
+          return;
+        } catch (fbErr) {
+          console.error("[VoiceEngine] Fallback speech synthesis failed:", fbErr);
+        }
+      }
+      this.clearSpeechWatchdog();
+      this.level = 0;
       this.currentlySpeakingText = null;
       this.synthesis = null;
       this.echo.markEnded();
@@ -1115,31 +1271,62 @@ export class VoiceEngine {
   async speakReply(text: string): Promise<void> {
     const spoken = speakableText(text).trim();
     if (!spoken || isNonSpeechOrBlank(spoken)) {
-      this.assistantTurnEndedAt = Date.now();
-      if (this.state !== "idle") this.setState("listening");
+      this.finishSpeaking();
       return;
     }
 
-    if (this.mode !== "conversation" || !this.settings.speakReplies) {
-      this.assistantTurnEndedAt = Date.now();
-      if (this.state !== "idle") this.setState("listening");
+    if (!this.settings.speakReplies) {
+      this.finishSpeaking();
       return;
     }
 
-    const tts = this.providers?.tts;
+    if (!this.providers) {
+      try {
+        await this.probe();
+      } catch {}
+    }
+
+    let tts = this.providers?.tts;
+    if (!tts && this.roster.builtin?.capabilities.tts) {
+      tts = this.roster.builtin;
+    }
+
     if (!tts) {
-      this.assistantTurnEndedAt = Date.now();
-      this.setState("listening");
+      this.finishSpeaking();
       return;
     }
 
-    // Split into sentences so that if the user coughs or makes an ambient sound,
-    // speech can pause and resume cleanly right from the current sentence!
-    const sentences = spoken.match(/[^.!?\n]+(?:[.!?]+|\n+|$)/g) || [spoken];
+    this.hasSpokenInSession = true;
+    // Split by paragraphs or coherent thoughts so playback streams seamlessly
+    // without introducing 1-second network/synthesis dead-air pauses between every short sentence.
+    const rawBlocks = spoken.split(/\n\n+/);
+    const speechBlocks: string[] = [];
+    for (const block of rawBlocks) {
+      const cleanBlock = block.trim();
+      if (!cleanBlock) continue;
+      const words = cleanBlock.split(/\s+/);
+      if (words.length > 60) {
+        const sentences = cleanBlock.match(/[^.!?]+(?:[.!?]+|$)/g) || [cleanBlock];
+        let currentChunk = "";
+        for (const s of sentences) {
+          const st = s.trim();
+          if (!st) continue;
+          if (currentChunk && (currentChunk + " " + st).split(/\s+/).length > 40) {
+            speechBlocks.push(currentChunk);
+            currentChunk = st;
+          } else {
+            currentChunk = currentChunk ? `${currentChunk} ${st}` : st;
+          }
+        }
+        if (currentChunk) speechBlocks.push(currentChunk);
+      } else {
+        speechBlocks.push(cleanBlock);
+      }
+    }
     this.speechQueue = [];
     this.suspendedSpeech = null;
     this.currentlySpeakingText = null;
-    for (const s of sentences) {
+    for (const s of speechBlocks) {
       const trimmed = s.trim();
       if (trimmed && !isNonSpeechOrBlank(trimmed)) {
         this.speechQueue.push(trimmed);
@@ -1152,8 +1339,7 @@ export class VoiceEngine {
     if (this.speechQueue.length > 0) {
       void this.processSpeechQueue();
     } else {
-      this.assistantTurnEndedAt = Date.now();
-      if (this.state !== "idle") this.setState("listening");
+      this.finishSpeaking();
     }
   }
 
@@ -1206,9 +1392,19 @@ export class VoiceEngine {
         language: this.settings.language === "auto" ? navigator.language : this.settings.language,
         voice: this.settings.ttsVoice ?? undefined,
         rate: paceFor(this.settings.ttsRate, spoken),
-        onEnd: restore,
+        onAudioLevel: (lvl) => {
+          if (this.state === "speaking") {
+            this.level = lvl;
+            this.emit();
+          }
+        },
+        onEnd: () => {
+          this.level = 0;
+          restore();
+        },
       });
     } catch {
+      this.level = 0;
       restore();
     }
   }
@@ -1285,8 +1481,99 @@ export class VoiceEngine {
     this.emit();
   }
 
+  /**
+   * Where the engine comes to rest when nothing is being said. A run still in
+   * flight is "thinking", not "listening": claiming to listen while the host
+   * is working reads as an assistant that dropped the job.
+   */
+  private restingState(): VoiceState {
+    if (this.mode !== "conversation") return "idle";
+    return this.host.isBusy?.() ? "thinking" : "listening";
+  }
+
+  /**
+   * Everything "stop" means: the queued speech is dropped, the ducking it
+   * imposed on the room is lifted, the run behind it is cancelled and the
+   * operator is told so. Shared by the committed-turn intent gate and the fast
+   * path in `onResult`, so a stop cannot mean two different things depending
+   * on which of them noticed it first.
+   */
+  private applyStop(hostBusy: boolean): void {
+    this.dropSpeech();
+    this.graph.setDucked(false);
+    this.level = 0;
+    this.assistantTurnEndedAt = Date.now();
+    if (hostBusy) {
+      this.callInterrupt();
+      this.speakInterjection("Okay, stopped.");
+      return;
+    }
+    this.narration = null;
+    this.setState(this.mode === "conversation" ? "listening" : "idle");
+    this.emit();
+  }
+
+  /**
+   * "Stop" cannot wait for the endpointer.
+   *
+   * A turn is only committed once the operator has been quiet long enough for
+   * `endpointer` to call it over, and that is the wrong moment for this
+   * particular word: it arrives with the assistant mid-sentence or mid-tool-run
+   * and has to land on the spot. So every result is read as it arrives, partial
+   * included, and a stop is acted on before the silence window.
+   *
+   * A partial only silences the speaker. That half is free to get wrong — an
+   * operator who says "stop" wants the talking to end whatever the rest of the
+   * sentence turns out to be — while cancelling the run waits for the final,
+   * because "stop" and "stop the dev server" open with the same word and only
+   * one of them is a cancel.
+   *
+   * Returns true when the utterance has been fully dealt with and must not go
+   * on to `commitTurn`.
+   */
+  private fastStop(text: string, isFinal: boolean): boolean {
+    if (this.mode !== "conversation") return false;
+    const hostBusy = Boolean(this.host.isBusy?.());
+    const engaged =
+      hostBusy || this.state === "speaking" || this.state === "thinking" || this.state === "sending";
+    if (!engaged) return false;
+
+    const { text: withoutWakeWord } = stripWakeWord(text, this.settings.wakeWords);
+    const spoken = (withoutWakeWord || text).trim();
+    if (!spoken) return false;
+    if (classifyTurnIntent(spoken, { busy: true, speaking: true }).intent !== "stop") return false;
+
+    if (!isFinal) {
+      // Mid-utterance: go quiet, and nothing more. The run stays the
+      // operator's to keep if the sentence lands as "stop the dev server".
+      if (this.currentlySpeakingText || this.speechQueue.length > 0 || this.suspendedSpeech !== null) {
+        this.dropSpeech();
+        this.graph.setDucked(false);
+        this.level = 0;
+        this.assistantTurnEndedAt = Date.now();
+      }
+      if (this.state === "speaking") {
+        this.endpointer.reset();
+        this.turnStartedAt = Date.now();
+        this.setState("hearing");
+      }
+      return false;
+    }
+
+    this.clearFinalFallback();
+    this.awaitingFinal = false;
+    this.transcript = "";
+    this.finalTranscript = "";
+    this.endpointer.reset();
+    this.lastIntent = { intent: "stop", reason: "Asked to stop.", text: spoken, at: Date.now() };
+    this.lastUserTurnAt = Date.now();
+    this.applyStop(hostBusy);
+    return true;
+  }
+
   /** Stop talking and forget what was queued. The run itself is untouched. */
   private dropSpeech(): void {
+    this.clearSpeechWatchdog();
     this.suspendedSpeech = null;
     this.speechQueue = [];
     this.isProcessingSpeechQueue = false;
@@ -1350,6 +1637,7 @@ export class VoiceEngine {
       this.suspendedSpeech = [];
     }
 
+    this.clearSpeechWatchdog();
     this.isProcessingSpeechQueue = false;
     this.interjecting = false;
     this.synthesis?.cancel();
@@ -1393,6 +1681,7 @@ export class VoiceEngine {
 
   /** Host hook: stop speaking without it counting as an interruption. */
   silence(): void {
+    this.clearSpeechWatchdog();
     this.suspendedSpeech = null;
     this.currentlySpeakingText = null;
     this.speechQueue = [];
@@ -1400,12 +1689,12 @@ export class VoiceEngine {
     this.isStreamDone = false;
     this.interjecting = false;
     this.digesting = false;
-    this.synthesis?.cancel();
+    try {
+      this.synthesis?.cancel();
+    } catch {}
     this.synthesis = null;
     this.echo.markEnded();
-    this.graph.setDucked(false);
-    this.assistantTurnEndedAt = Date.now();
-    if (this.state === "speaking") this.setState("listening");
+    this.finishSpeaking();
   }
 
   /* ── Plumbing ──────────────────────────────────────────────────────────── */

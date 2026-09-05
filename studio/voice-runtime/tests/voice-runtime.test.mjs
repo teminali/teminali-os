@@ -6,7 +6,7 @@ import {
 } from "../transcript-guard.js";
 import { encodeWav, float32ToPcm16, rms, voicedFraction, SAMPLE_RATE } from "../audio.js";
 import { SPEECH_STREAM_TYPE, decodeFrames, encodeFrame } from "../stream.js";
-import { clauseOffsets, splitClauses } from "../tts.js";
+import { clauseOffsets, splitClauses, trimSilence } from "../tts.js";
 import { describeSound, isReportableSound, selectSounds } from "../sounds.js";
 
 /* ── Hallucination guards ─────────────────────────────────────────────────── */
@@ -128,6 +128,27 @@ test("a conjunction opens the next clause instead of vanishing", () => {
   // Every word of the text is still spoken, in order.
   const text = "It compiled, so I ran it, because that is what you asked, which took a while.";
   assert.equal(splitClauses(text).join(" "), text);
+});
+
+test("trimSilence removes dead air padding while preserving audio samples", () => {
+  const sampleRate = 24_000;
+  // 100ms silence + 100ms tone + 100ms silence = 300ms total
+  const samples = new Float32Array(sampleRate * 0.3);
+  const toneStart = Math.round(sampleRate * 0.1);
+  const toneEnd = Math.round(sampleRate * 0.2);
+  for (let i = toneStart; i < toneEnd; i += 1) {
+    samples[i] = 0.5;
+  }
+  const trimmed = trimSilence(samples, {
+    sampleRate,
+    maxLeadMs: 10,
+    maxTrailMs: 20,
+    threshold: 0.01,
+  });
+  const expectedLen = Math.round(sampleRate * 0.01) + (toneEnd - toneStart) + Math.round(sampleRate * 0.02);
+  assert.equal(trimmed.length, expectedLen);
+  assert.ok(trimmed.length < samples.length);
+  assert.equal(trimmed[Math.round(sampleRate * 0.01)], 0.5);
 });
 
 /* ── Clause offsets and stream framing ────────────────────────────────────── */

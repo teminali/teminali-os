@@ -58,7 +58,13 @@ export const AstraVoiceHud: React.FC<AstraVoiceHudProps> = ({
       <div className="w-full flex items-center justify-between gap-3 px-3.5 py-2.5 rounded-2xl bg-surface/90 backdrop-blur-md border border-edge-subtle shadow-xl">
         {/* Left: Animated Voice Logo + State */}
         <div className="flex items-center gap-3 min-w-0">
-          <VoiceOrb size={32} state={state} level={level} interactive={false} />
+          <VoiceOrb
+            size={32}
+            state={state}
+            level={level}
+            caption={transcript || verdict?.reason || undefined}
+            interactive={false}
+          />
           <div className="min-w-0 flex flex-col">
             <div className="flex items-center gap-2">
               <span className="inline-flex items-center gap-1 text-2xs font-medium text-ink-high">

@@ -164,7 +164,9 @@ export function classifyTurnIntent(text: string, context: TurnIntentContext): Tu
     return { intent: "status", reason: "Asked how the work is going." };
   }
 
-  if (core.length === 0 || consumedBy(core, ACK_PHRASES)) {
+  // Encouragement must be genuinely consumed by acknowledgement phrases; an
+  // empty core caused by attention words like "hey" or "temy" is not praise.
+  if ((core.length > 0 && consumedBy(core, ACK_PHRASES)) || (core.length === 0 && consumedBy(words, ACK_PHRASES))) {
     return { intent: "acknowledge", reason: "Encouragement — carrying on." };
   }
 

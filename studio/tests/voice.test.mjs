@@ -392,3 +392,29 @@ test("pace stays inside what a speech engine reads naturally", () => {
   assert.equal(paceFor(1.9, Array(80).fill("word").join(" ")), 2);
   assert.equal(paceFor(1, ""), 1);
 });
+
+test("a fence tag with a hyphen is still a code block", () => {
+  // ```frontier-run is this app's own command fence. A `\w+` tag pattern did
+  // not match it, so the block fell through and the reply read the shell
+  // command out loud.
+  const spoken = speakableText("Let me check.\n```frontier-run\ngit status\nnpm test\n```\nAll good.");
+  assert.ok(!spoken.includes("git status"), "the command must not be recited");
+  assert.ok(!spoken.includes("npm test"), "the command must not be recited");
+  assert.match(spoken, /frontier-run code block/);
+  assert.match(spoken, /Let me check/);
+  assert.match(spoken, /All good/);
+});
+
+test("a fence carrying a path attribute is still a code block", () => {
+  const spoken = speakableText('Here it is.\n```html path="outputs/canary.html"\n<h1>Hello</h1>\n```\nDone.');
+  assert.ok(!spoken.includes("<h1>"), "the file body must not be recited");
+  assert.ok(!spoken.includes("outputs/canary.html"), "the path must not be recited");
+  assert.match(spoken, /html code block/);
+  assert.match(spoken, /Done/);
+});
+
+test("an untagged fence is still announced", () => {
+  const spoken = speakableText("Look:\n```\nraw text\n```\nThat is all.");
+  assert.ok(!spoken.includes("raw text"));
+  assert.match(spoken, /code block/);
+});

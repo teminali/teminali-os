@@ -1,6 +1,11 @@
 import React, { useEffect, useRef, useState } from "react";
 import { ChevronDown, ShieldAlert } from "lucide-react";
-import { AgentCliService, type AgentDescriptor, type AgentEngine } from "../../../services/agentCliService";
+import {
+  AgentCliService,
+  type AgentDescriptor,
+  type AgentEngine,
+  type PermissionRequest,
+} from "../../../services/agentCliService";
 import { usePanelStore, type PanelTab } from "../../../store/panelStore";
 import { useStudioStore } from "../../../store/studioStore";
 import { useAttachments } from "../../../hooks/useAttachments";
@@ -57,6 +62,9 @@ export const AgentPane: React.FC<{ panel: PanelTab & { kind: AgentEngine } }> = 
   const [permission, setPermission] = useState<string | null>(null);
   const [permissionOpen, setPermissionOpen] = useState(false);
   const [denials, setDenials] = useState<number>(0);
+  /* Approvals the agent is blocked on. A queue rather than one slot: a turn
+     can put several tools in flight, and each is a separate decision. */
+  const [approvals, setApprovals] = useState<PermissionRequest[]>([]);
 
   // The CLI's own session. Held in a ref because a turn reads it at send time
   // and a stale closure would silently start a new thread every message.
@@ -113,6 +121,7 @@ export const AgentPane: React.FC<{ panel: PanelTab & { kind: AgentEngine } }> = 
     attachments.clear();
     setStreaming(true);
     setDenials(0);
+    setApprovals([]);
 
     const controller = new AbortController();
     abortRef.current = controller;
@@ -161,6 +170,10 @@ export const AgentPane: React.FC<{ panel: PanelTab & { kind: AgentEngine } }> = 
             patchLast({ content: `Error: ${failure.message}`, isStreaming: false });
             setStreaming(false);
           },
+          onPermission: (request) => setApprovals((queue) => [...queue, request]),
+          // Answered elsewhere, or timed out: drop it rather than leaving a
+          // dead prompt on screen with nothing behind it.
+          onPermissionResolved: (id) => setApprovals((queue) => queue.filter((entry) => entry.id !== id)),
         },
       );
       // Resuming from here is what makes the next message a reply rather than a
@@ -171,6 +184,22 @@ export const AgentPane: React.FC<{ panel: PanelTab & { kind: AgentEngine } }> = 
       // onError already wrote the failure into the transcript.
       setStreaming(false);
     }
+  };
+
+  /**
+   * Answer the request at the head of the queue. Removed on the spot rather
+   * than on the gateway's confirmation: the agent is stalled until this lands,
+   * and a button that stays live while the answer is in flight invites a
+   * second click that would be refused as already-answered anyway.
+   */
+  const answer = async (request: PermissionRequest, behavior: "allow" | "deny", remember: boolean) => {
+    setApprovals((queue) => queue.filter((entry) => entry.id !== request.id));
+    await AgentCliService.answerPermission({
+      runId: request.runId,
+      id: request.id,
+      behavior,
+      remember,
+    });
   };
 
   const stop = () => {
@@ -276,6 +305,54 @@ export const AgentPane: React.FC<{ panel: PanelTab & { kind: AgentEngine } }> = 
           </div>
         )}
       </div>
+
+      {/* ── Approval ────────────────────────────────────────────────────
+          The agent is blocked inside its own tool call until this is
+          answered. Shown in the pane rather than as a modal: the transcript
+          above it is the context the decision needs, and a modal would cover
+          exactly the command that explains what is being asked for. */}
+      {approvals.length > 0 && (
+        <div className="flex-shrink-0 mx-3 mb-2 rounded-xl bg-surface-chip border border-edge-popover overflow-hidden">
+          <div className="flex items-center gap-2 px-3 py-2 text-2xs text-ink-muted border-b border-edge-popover">
+            <ShieldAlert size={12} className="text-warning flex-shrink-0" />
+            <span className="text-ink-high">{label} is asking to run {approvals[0].toolName}</span>
+            <span className="flex-1" />
+            {approvals.length > 1 && <span className="text-ink-disabled">{approvals.length - 1} more waiting</span>}
+          </div>
+
+          <pre className="px-3 py-2 text-2xs text-ink-muted whitespace-pre-wrap break-all max-h-32 overflow-y-auto">
+            {typeof approvals[0].input?.command === "string"
+              ? String(approvals[0].input.command)
+              : JSON.stringify(approvals[0].input, null, 2)}
+          </pre>
+
+          <div className="flex items-center gap-1.5 px-3 py-2 border-t border-edge-popover">
+            <button
+              type="button"
+              onClick={() => void answer(approvals[0], "allow", false)}
+              className="px-2.5 h-7 rounded-md text-2xs bg-surface-hover text-ink-high hover:bg-surface-popover transition-colors duration-ds ease-ds"
+            >
+              Allow once
+            </button>
+            <button
+              type="button"
+              onClick={() => void answer(approvals[0], "allow", true)}
+              className="px-2.5 h-7 rounded-md text-2xs text-ink-muted hover:bg-surface-hover hover:text-ink-high transition-colors duration-ds ease-ds"
+              title={`Every ${approvals[0].key} for the rest of this turn`}
+            >
+              Always allow {approvals[0].key}
+            </button>
+            <span className="flex-1" />
+            <button
+              type="button"
+              onClick={() => void answer(approvals[0], "deny", false)}
+              className="px-2.5 h-7 rounded-md text-2xs text-warning hover:bg-surface-hover transition-colors duration-ds ease-ds"
+            >
+              Deny
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* A refused tool call is why a turn did less than it looked like it
           would. Saying so beats leaving the operator to infer it. */}

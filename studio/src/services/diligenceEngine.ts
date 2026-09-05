@@ -109,7 +109,7 @@ const HYPOTHETICAL =
 
 /** The model asserting it cannot reach the machine it is wired into. */
 const CAPABILITY_DENIAL =
-  /\b(?:i(?:'m| am) (?:unable|not able)|i can(?:'t|not)\s+(?:directly\s+)?(?:access|read|see|inspect|browse|run|execute)|i do(?:n't| not) have (?:direct )?access|as an ai(?:[ ,]|$))/i;
+  /\b(?:i(?:'m| am) (?:unable|not able)|i can(?:'t|not)\s+(?:directly\s+)?(?:access|read|see|inspect|browse|run|execute|fetch|get)|i do(?:n't| not) have (?:direct )?access|as an ai(?:[ ,]|$)|unable to (?:execute|run|fetch|access|get)|can(?:'t|not) fetch real-time)/i;
 
 /** Deflecting the work back to the user instead of doing it. */
 const DEFLECTION =
@@ -173,7 +173,7 @@ export class DiligenceEngine {
    * what actually holds the behaviour. This is the reminder, not the guarantee.
    */
   private static DOCTRINE = `[FRONTIER INVESTIGATION DOCTRINE — APPLIES TO EVERY TASK]:
-1. You act on this machine with a \`\`\`frontier-run fence — you are not a chat assistant handing out instructions. Read-only commands run on their own; anything that changes state runs as soon as the operator approves it. When a question is about real state, measure it; when the user asks you to do something, do it in a fence. Never answer that you lack access, and never tell the user to run a command themselves.
+1. Act with full machine access via \`\`\`frontier-run fences — you are not a chat assistant handing out instructions. All commands run seamlessly. Measure real state or live data in a fence; never claim you lack access, never give up on initial errors, and never tell the user to run commands or check websites themselves. If an API or command fails, persistently self-think and try alternative solutions.
 2. Do not stop at the headline number. Decompose a total until the answer names the specific items the user would act on.
 3. Verify before you recommend anything irreversible. Two things with similar names are not the same thing until a checksum, a diff, or a stat says so.
 4. Say what your number measures. A size from \`du\` is binary (GiB) while Finder shows decimal (GB); a count from \`find\` may include symlinks. Name the caveat so a mismatch does not read as an error.

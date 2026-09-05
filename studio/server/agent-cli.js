@@ -31,6 +31,8 @@
 import { spawn } from "node:child_process";
 import { withBinPaths } from "./bin-paths.js";
 import { videoMcpArgs } from "./video-mcp.js";
+import { permissionMcpArgs } from "./permission-mcp.js";
+import { closeRun, openRun } from "./permission-bridge.js";
 import { resolve, sep } from "node:path";
 
 export const AGENT_LIMITS = Object.freeze({
@@ -89,7 +91,7 @@ export function agentEnvironment(source = process.env) {
   return environment;
 }
 
-function argsFor(engine, { prompt, cwd, sessionId, model, permission }) {
+function argsFor(engine, { prompt, cwd, sessionId, model, permission, approval = null }) {
   /*
     The video panel, when one is open.
 
@@ -103,8 +105,16 @@ function argsFor(engine, { prompt, cwd, sessionId, model, permission }) {
   const mcp = videoMcpArgs(engine);
 
   if (engine === "claude") {
+    /*
+      Without a prompt tool, headless `claude -p` refuses anything its
+      permission mode does not settle outright — there is no terminal to ask
+      on. `approval` names an MCP tool that asks the operator in the agent tab
+      instead, which is what turns "the command needs your approval and this
+      session can't prompt for it" into a dialog with a button.
+    */
     const args = [
       ...mcp,
+      ...(approval?.args ?? []),
       "-p", prompt,
       "--output-format", "stream-json",
       "--verbose",
@@ -461,6 +471,7 @@ export function runAgentTurn(options) {
     sessionId = null,
     model = null,
     permission,
+    runId = null,
     onEvent,
     signal,
     bin,
@@ -478,7 +489,19 @@ export function runAgentTurn(options) {
 
   const mode = agent.permissions.includes(permission) ? permission : agent.defaultPermission;
   const workingDirectory = resolveAgentCwd(root, cwd);
-  const args = argsFor(engine, { prompt, cwd: workingDirectory, sessionId, model, permission: mode });
+
+  /*
+    Registered with the bridge before the CLI starts, because the first tool
+    call can arrive before the first token does. Only Claude Code takes a
+    prompt tool; Codex has its own sandbox flag and no equivalent, so it gets
+    no bridge rather than a broken one.
+  */
+  const approval =
+    engine === "claude" && runId ? permissionMcpArgs(runId, openRun(runId, onEvent)) : null;
+
+  const args = argsFor(engine, {
+    prompt, cwd: workingDirectory, sessionId, model, permission: mode, approval,
+  });
 
   return new Promise((resolvePromise) => {
     const startedAt = Date.now();
@@ -502,6 +525,9 @@ export function runAgentTurn(options) {
       if (settled) return;
       settled = true;
       clearTimeout(timer);
+      // Whatever ends the turn ends its prompts: an approval whose agent has
+      // exited can never be delivered anywhere.
+      if (runId) closeRun(runId);
       resolvePromise({
         sessionId: state.sessionId,
         durationMs: Date.now() - startedAt,

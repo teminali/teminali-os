@@ -1530,7 +1530,7 @@ and `conversation.ts#commitTurn` acts on the verdict:
 | --- | --- | --- |
 | "excellent, keep going", "sawa endelea" | `acknowledge` | Nothing is cancelled. If the assistant was mid-sentence it finishes the sentence; otherwise it says "Still on it." at most once per 20 s. |
 | "how's it going?", "is it live yet?", "did the tests pass?" | `status` | Answered from the live run via `VoiceHost.progressSummary` (`progressNarration.ts#summariseProgress`), then whatever was being said resumes. The run is untouched. |
-| "stop", "wait, hold on", "never mind" | `stop` | Speech is dropped and the run is aborted; "Okay, stopped." only if a run was actually cancelled. "Stop the server" is an instruction, not a stop. |
+| "stop", "wait, hold on", "never mind" | `stop` | Speech is dropped and the run is aborted; "Okay, stopped." only if a run was actually cancelled. "Stop the server" is an instruction, not a stop. Acted on before the endpointer commits the turn — see §6.8. |
 | anything else | `instruction` | The previous behaviour: the run is aborted and the utterance is sent. |
 
 With nothing running, `acknowledge` and `status` are instructions — "yes" is
@@ -2036,3 +2036,271 @@ it is a subsystem, not a helper, and was deliberately not built.
 Tests: `tests/voice-origin.test.mjs` (9) — the fragment present for `"voice"`,
 empty for `"text"` and for an origin-less caller, its wording, and the
 threading at each of the five hops.
+
+### 6.8 Stop cannot wait for the endpointer (2026-09-05)
+
+Saying "stop" during a tool run did nothing. The intent gate in §6.1 was
+correct and had been correct all along; it was simply never reached.
+
+Two things stood between the word and the gate:
+
+- `onFrame` returned early for every state that was not `listening`,
+  `hearing` or `speaking`. A run in flight is `thinking`, so for the whole
+  length of it the audio frames were dropped, `endpointer` never saw speech
+  start or end, and no turn was ever committed. The microphone was open and
+  deaf.
+- A one-shot recogniser's session is closed when the assistant starts
+  speaking and reopened when it returns to `listening`. A run that went
+  `speaking → thinking` and stayed there never passed through `listening`, so
+  the session was never reopened.
+
+Both are fixed in `conversation.ts`: `onFrame` now runs the endpointer through
+`thinking`, and `setState` reopens a closed one-shot session on entry to
+`thinking` as well as `hearing`.
+
+**The fast path.** Even reached, the gate is too late. A turn is only committed
+once the operator has been quiet long enough for `endpointer` to call it over,
+and "stop" is the one word that has to land while they are still saying it. So
+`conversation.ts#fastStop` reads every recogniser result, partial included:
+
+| Result | What happens |
+| --- | --- |
+| partial, wholly a stop phrase | The speaker goes quiet — `dropSpeech`, unduck, and `speaking → hearing`. The run is untouched. |
+| final, wholly a stop phrase | `applyStop`: speech dropped, `host.interrupt` called if a run was live, "Okay, stopped." |
+
+The split is deliberate. Silencing on a partial is free to be wrong — an
+operator who says "stop" wants the talking to end whatever the rest of the
+sentence turns out to be — while cancelling the run waits for the final,
+because "stop" and "stop the dev server" open with the same word and only one
+of them is a cancel. When the sentence does grow into an instruction, the fast
+path declines it and `commitTurn` handles it as one.
+
+`applyStop` is shared by `fastStop` and `commitTurn`, so a stop cannot mean two
+different things depending on which of them noticed it first. It also lifts the
+ducking that speaking imposed, which the old inline branch did not: a stopped
+reply used to leave the room ducked until the next thing was said.
+
+`addressing.ts#scoreAddressing` returns `directed: true` at 0.99 confidence for
+an unambiguous stop directive before any gate runs, so wake-word-only mode and
+speaker matching cannot swallow it.
+
+Not yet true: `VoiceEngine` has no headless test — it needs a DOM and a
+recogniser — so §6.8 is verified in the running app, not by the suite. The
+rules it rests on (`classifyTurnIntent`, `scoreAddressing`) are covered by
+`tests/voice.test.mjs`.
+
+### 6.9 The fence tag is not a word (2026-09-05)
+
+`speakableText` recognised a code fence as ```` ```(\w+)?\n ````. Neither of
+the two fences this app actually emits matches that: ```` ```frontier-run ````
+has a hyphen, and ```` ```html path="outputs/canary.html" ```` has a whole
+attribute after the tag. Both fell through unrecognised, so a reply containing
+a command or a file was read out verbatim — the shell line, the angle brackets,
+the path, character by character. The tag pattern now takes the language word
+and allows the rest of the info string.
+
+`voiceDirector.ts#curateSpeech` had been carrying its own markdown stripper to
+work around this, which suppressed code blocks into silence where
+`speakableText` announces them — the same reply spoken two different ways
+depending on which path reached the synthesiser. It now delegates to
+`speakableText` and keeps only what is genuinely streaming-specific: closing a
+fence that has not finished arriving yet, and dropping table pipes.
+
+Tests: `tests/voice.test.mjs` — the hyphenated tag, the path attribute, and the
+untagged fence.
+
+### 6.10 The better recogniser was already installed (2026-09-05)
+
+Recognition was going to the sidecar's `whisper-base` while whisper.cpp sat on
+the same machine with Metal and a far better model available, because
+`voiceStatus` returned the sidecar's whole answer the moment it replied —
+`engine: "vibevoice"` — and `transcribe`/`speak` both routed on that one field.
+One engine won both jobs or neither.
+
+They are decided separately now, by `voice.js#chooseEngines`:
+
+| | Serves | Why |
+| --- | --- | --- |
+| recognition | the higher-ranked model | `large-v3-turbo` against `whisper-base` is not a close call |
+| synthesis | the sidecar's Kokoro | the local `say` does not match it, whoever is listening |
+
+`rankLocalModel` orders the families and ranks a quantised file with its parent,
+so an `-q8_0` suffix does not hide an 874 MB turbo behind a 147 MB base — which
+is exactly what `MODEL_PREFERENCE` did before, listing only unquantised names.
+`TEMINALI_ASR_ENGINE` (`auto` | `local` | `sidecar`) pins it.
+
+**The vocabulary prompt, at last.** `voice-runtime/lexicon.js` explains why the
+sidecar cannot bias its decoder: transformers.js declares `prompt_ids` and
+leaves `generate()` not implementing it, so the domain words are repaired
+*after* recognition. whisper.cpp takes `--prompt`. `speech-local.js#buildPrompt`
+builds one from the caller's `hints` — the open project's own names, first,
+because they are the words most likely to be said next — then the shared
+`DOMAIN_TERMS`, deduplicated and capped at 600 characters. The after-the-fact
+repair still runs on top.
+
+`hints` were declared on `RecognitionOptions` from the beginning and never sent;
+`vibeVoice.ts` now puts them on the multipart body and the gateway parses them.
+
+**The model is loaded once, not once per utterance.** `whisper-cli` reads the
+weights on every call: measured here on an M4 Pro, `large-v3-turbo-q8_0` takes
+1.02 s wall for a 5.7 s utterance, nearly all of it loading 874 MB. The same
+brew formula ships `whisper-server`, which holds the model warm, so the gateway
+starts one on demand and keeps it for the life of the process. A caller that
+wants caption-sized segments (`maxSegmentChars`) still gets the CLI, which is
+the only one that takes `-ml`; so does anyone whose server will not come up.
+
+Beam search is on for both paths (`-bs 5 -bo 5`), which the CLI path was not
+using at all.
+
+Not yet true: nothing here is measured against a WER bench in this repo. The
+timings above are wall-clock on one machine and one utterance.
+
+Tests: `tests/voice-engine-choice.test.mjs` (14).
+
+### 6.11 Who decides what is spoken (2026-09-05)
+
+Two modules stand between a model's tokens and the synthesiser, and neither was
+written down.
+
+`voiceDirector.ts` is the per-turn curator: `StudioChat` builds one
+`VoiceDirector` for each turn and pushes the stream through it. `pushToken`
+emits only on a sentence boundary — `.`, `!` or `?` followed by whitespace, or
+a blank line — and never from inside an open code fence, so a half-arrived
+fence is held rather than read out. It speaks at most `maxStreamedChunks`
+sentences and then falls silent for the rest of the stream; the app passes
+`STREAMED_SENTENCE_LIMIT` (3), the default is 4. `finish` flushes whatever was
+never spoken as the final chunk. `curateSpeech` closes an unfinished fence and
+hands the rest to `speakableText` (§6.9). `isFreshConversation: false` routes
+the text through `sanitizeOngoingAssist`, so a later turn does not open by
+greeting the operator again. `abort` silences everything after it: a barge-in
+must not be followed by the sentence it interrupted.
+
+`acknowledgment.ts#getImmediateAcknowledgment` speaks *before* the model does.
+On submit, with `speakReplies` on and voice not idle, an action command ("fix
+the failing test") or a short affirmation ("yes", "go ahead" — four words or
+fewer) gets one line, "On it." / "Working on it." / "Sure thing.", so the
+operator hears the request land instead of waiting out the first token. A
+greeting, a presence check ("are you there"), and any information query
+(`what`, `why`, `how`, `explain`, `list`, …) return `null`: the reply is itself
+the answer, and prefixing it with "On it." is the robot voice this exists to
+avoid. Anything unrecognised also returns `null` — silence is the default, not
+a filler.
+
+Its wake words come from `DEFAULT_VOICE_SETTINGS.wakeWords`. This file,
+`turnIntent.ts` and the settings each carried their own copy, so a wake word
+added in settings reached one of the three.
+
+Tests: `tests/voice-director.test.mjs` (8), `tests/voice-ack.test.mjs` (7).
+
+## 7. The agent command loop (`services/agentCommands.ts`, `services/commandThrashing.ts`)
+
+### 7.1 Diagnose before retrying (2026-09-05)
+
+Asked for the weather with no API key configured, the engine called Weatherbit,
+got a 401, called Weatherstack, got a 401, and called Weatherbit again — six
+turns alternating between two vendors refusing for the same reason, stopped
+only by `MAX_INVESTIGATION_TURNS`. A 401 reads locally like "this vendor is
+down", so the loop's own conclusion was always "try the other one".
+
+`commandThrashing.ts#detectCommandThrashing(executions, nextTurnText)` is a
+pure function over the exchange's command history and the model's newest
+message, run in `frontierEngine.ts` *before* the fences in that message
+execute. It intercepts three shapes:
+
+| Shape | Trip condition |
+| --- | --- |
+| repeat | The next turn calls a host that already failed this exchange. |
+| ping-pong | Two or more hosts have already refused on auth grounds and the next turn reaches for another. |
+| placeholder credential | The next turn carries `key=dummy`, `YOUR_KEY`, `appid=xxx` and friends — caught on first use, with no history needed. |
+
+A failure is a non-zero exit or a body matching the auth-refusal shapes (401,
+403, "invalid api key", "unauthorized", …). A command that never ran is not
+evidence of anything.
+
+On a trip the commands do not run. The turn's observation is a
+`[ROOT-CAUSE DIAGNOSTIC NOTICE]` naming the cause and a keyless route for the
+subject — `wttr.in` and `open-meteo` for weather, CoinGecko/Binance/Frankfurter
+for prices, `ipapi.co` for IP and geo — or, failing a match, a local
+`python3`/`node` script. `MAX_THRASH_NOTICES` is 2, after which the loop is
+left alone rather than deadlocked. The same rules are stated to the model in
+the `[FULL COMPUTER ACCESS & AUTONOMOUS ACTION MANDATE]` system prompt, point 4.
+
+Tests: `tests/command-thrashing.test.mjs` (10).
+
+### 7.2 Approval, and the friction that got it switched off (2026-09-05)
+
+`RunAgentCommandsOptions.autoApproveAll` runs every `confirm`-risk command
+without asking, and `frontierEngine.ts` briefly passed it as a hard-coded
+`true`. That bypassed `createApprovalGate` entirely — `rm`, `git push`, a
+deploy, all of it unprompted — while the gate it bypassed was working and wired
+to a UI. `AUTO_COMMANDS` also gained `curl`, `wget`, `ping`, `dig`, `host` and
+`nslookup`, which are reads and stay.
+
+The bypass is gone; `approve` decides again. The option survives on the
+interface because it is a legitimate thing for another caller to want, but no
+caller in this app passes it.
+
+What made the bypass tempting was real, though: the gate asked again for every
+single command, so approving `open -a VLC` bought nothing when the next line was
+`open -a Safari`. So the gate now remembers, and the unit it remembers is the
+**executable** — `commandHead`, the first word:
+
+| | Asks | Remembers |
+| --- | --- | --- |
+| **Run** | once | nothing |
+| **Always `open`** | once | every later `open`, for the life of the gate |
+| **Skip** | once | nothing — a denial never creates a standing allowance |
+
+The whole command would be too narrow to be worth remembering, since the next
+one differs by an argument; the tool name would be far too broad, since one
+`Bash` would cover everything. `⌘⏎` / `⌥⏎` on the prompt is "always".
+
+Tests: `tests/agent-commands-approval.test.mjs` (5).
+
+### 7.3 Answering a headless agent's prompts (2026-09-05)
+
+`claude -p` has no terminal. Anything its `--permission-mode` does not settle
+outright is therefore refused where a prompt would have gone, which the
+operator sees as the agent explaining that *"the command needs your approval and
+this session can't prompt for it"* and then doing nothing — with no way forward
+but to widen the mode for every future call too.
+
+`--permission-prompt-tool` names an MCP tool to call instead of prompting.
+The chain, and it is a chain because the CLI spawns its own MCP servers:
+
+```
+claude -p ──stdio──▶ electron/permissionMcpStdio.cjs
+                          │  POST /api/agents/permission  (x-teminali-permission-token)
+                          ▼
+                     server/permission-bridge.js ──┐
+                          ▲                        │ NDJSON `permission` event
+                          │ POST …/resolve          ▼
+                     AgentPane approval card ◀── the operator
+```
+
+`server/permission-mcp.js` writes the config file naming the shim (0600 — it
+carries the token) and returns three flags: `--mcp-config`, the
+`--permission-prompt-tool` itself, and `--allowedTools mcp__teminali_permissions`.
+That last one is not optional: without it the first thing needing approval
+would be the approver, and the turn would deadlock on its own gate.
+
+**Why a token per run rather than the session bearer.** `agentEnvironment()`
+deletes `FRONTIER_SESSION_TOKEN` before spawning an agent, so a CLI that shells
+out cannot turn around and drive the gateway. Handing the shim that token back
+would undo it. Each run mints its own instead: it reaches exactly one route, it
+authorises nothing but answering that run's own prompts, and `closeRun` drops it
+when the turn ends.
+
+Every path that is not an answer is a **denial with a reason**, never a hang and
+never a rejection: an unknown run, a forged token, a bridge that cannot be
+reached, a turn that ended first, and a prompt nobody answered inside
+`APPROVAL_TIMEOUT_MS` (5 minutes). A rejection would surface to the agent as a
+broken tool rather than as an answer it can act on.
+
+`approvalKey` is the same idea as §7.2's `commandHead` — `Bash(open)`, not
+`Bash` — so "always allow" covers the executable and still stops at `rm`.
+
+Codex gets no bridge: it has its own `--sandbox` flag and no prompt-tool
+equivalent, so it keeps the mode selector alone rather than a broken dialog.
+
+Tests: `tests/agent-permissions.test.mjs` (14).

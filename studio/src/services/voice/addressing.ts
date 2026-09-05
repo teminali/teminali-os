@@ -21,6 +21,7 @@
  */
 
 import type { AddressingVerdict } from "./types";
+import { classifyTurnIntent } from "./turnIntent.ts";
 
 /** Verbs that usually open a command aimed at a tool, in English and Kiswahili. */
 const IMPERATIVE_OPENERS = [
@@ -29,9 +30,10 @@ const IMPERATIVE_OPENERS = [
   "refactor", "test", "commit", "push", "install", "start", "stop", "restart",
   "check", "read", "list", "generate", "convert", "rename", "move", "copy",
   "undo", "redo", "revert", "deploy", "analyse", "analyze", "summarise",
-  "summarize", "translate", "compare", "review",
+  "summarize", "translate", "compare", "review", "continue", "proceed", "go",
+  "next", "repeat", "cancel", "pause", "resume", "status", "execute",
   "fungua", "funga", "endesha", "tengeneza", "rekebisha", "ongeza", "ondoa",
-  "onyesha", "tafuta", "eleza", "andika", "badilisha", "angalia", "soma",
+  "onyesha", "tafuta", "eleza", "andika", "badilisha", "angalia", "soma", "endelea",
 ];
 
 /** Nouns that only come up when talking about the workspace. */
@@ -128,6 +130,21 @@ export function scoreAddressing(
     };
   }
 
+  // Emergency / explicit stop directive (e.g. "stop", "cancel", "wait", "abort", "shut up", "hold on")
+  // MUST always be treated as directed at the assistant, even in wake-word-only mode.
+  const isStop = classifyTurnIntent(text, { busy: true, speaking: true }).intent === "stop";
+  if (isStop) {
+    return {
+      verdict: {
+        directed: true,
+        confidence: 0.99,
+        reason: "Unambiguous stop directive.",
+        signals: { wakeWord: Boolean(wakeWord), speakerMatch: context.speakerMatch, followUpWindow, classifier: null, imperative: true },
+      },
+      needsClassifier: false,
+    };
+  }
+
   /* ── Hard gates the operator asked for ────────────────────────────────── */
 
   if (context.requireWakeWord && !wakeWord && !followUpWindow) {
@@ -188,8 +205,12 @@ export function scoreAddressing(
   // purpose, an ordinary sentence is for it unless something says otherwise.
   // A lone stray word ("okay", "right") still needs the follow-up window or a
   // greeting to count, because those are what people say to nobody.
-  if (!context.requireWakeWord && !thirdParty && words.length >= 2) {
-    score += 0.3;
+  if (!context.requireWakeWord && !thirdParty) {
+    if (words.length >= 2) {
+      score += 0.3;
+    } else if (words.length === 1 && (imperative || isGreeting || domainHits > 0)) {
+      score += 0.32;
+    }
   }
 
   // Ignore unrelated room chatter / third party speech
@@ -231,11 +252,11 @@ export function scoreAddressing(
       signals: { wakeWord, speakerMatch: context.speakerMatch, followUpWindow, classifier: null, imperative },
     },
     // The model is only worth its latency as a rescue: an utterance the rules
-    // lean against but cannot rule out. A verdict the rules already accept is
-    // sent on the spot — in an open session that is nearly every sentence, and
-    // a local round-trip on each of them was the seconds of "deciding…" the
-    // operator felt as the assistant not answering.
-    needsClassifier: score > 0.42 && score < 0.62 && !wakeWord && !thirdParty,
+    // lean against but cannot rule out. In an open session (!requireWakeWord),
+    // waiting for a local classifier causes long delays and dropped turns.
+    needsClassifier: !context.requireWakeWord
+      ? false
+      : score > 0.42 && score < 0.62 && !wakeWord && !thirdParty,
   };
 }
 

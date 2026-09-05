@@ -24,6 +24,16 @@ import {
 
 let shared: AudioContext | null = null;
 
+if (typeof window !== "undefined") {
+  const unlock = () => {
+    if (shared && shared.state === "suspended") {
+      void shared.resume().catch(() => undefined);
+    }
+  };
+  window.addEventListener("pointerdown", unlock, { passive: true });
+  window.addEventListener("keydown", unlock, { passive: true });
+}
+
 /**
  * One output context for every reply. A context per utterance pays a warm-up
  * each time and runs into Chromium's cap on live contexts; a buffer at 24 kHz
@@ -35,7 +45,11 @@ async function outputContext(): Promise<AudioContext> {
       window.AudioContext ?? (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
     shared = new Ctor();
   }
-  if (shared.state === "suspended") await shared.resume().catch(() => undefined);
+  if (shared.state === "suspended") {
+    try {
+      await shared.resume();
+    } catch {}
+  }
   return shared;
 }
 
@@ -60,6 +74,11 @@ export async function playSpeechStream(
 ): Promise<SynthesisHandle> {
   if (!response.body) throw new VoiceError("The synthesised reply had no body.", "TTS_FAILED");
   const context = await outputContext();
+  if (context.state === "suspended") {
+    try {
+      await context.resume();
+    } catch {}
+  }
   const reader = response.body.getReader();
   const frames = new FrameReader();
   const schedule: Scheduled[] = [];
@@ -70,6 +89,37 @@ export async function playSpeechStream(
   let spokenChars = 0;
   let firstError: Error | null = null;
   let settleFirst: ((error?: Error) => void) | null = null;
+  const analyser = (typeof context.createAnalyser === "function" && options.onAudioLevel)
+    ? context.createAnalyser()
+    : null;
+  if (analyser) {
+    analyser.fftSize = 256;
+    analyser.smoothingTimeConstant = 0.25;
+    analyser.connect(context.destination);
+  }
+
+  let levelInterval: number | null = null;
+  if (options.onAudioLevel && analyser) {
+    const data = new Uint8Array(analyser.frequencyBinCount);
+    levelInterval = window.setInterval(() => {
+      if (!speaking) return;
+      const now = context.currentTime;
+      const isAudible = started && schedule.some((entry) => !entry.ended && now >= entry.startAt && now < entry.endAt);
+      if (!isAudible) {
+        options.onAudioLevel?.(0);
+        return;
+      }
+      analyser.getByteTimeDomainData(data);
+      let sum = 0;
+      for (let i = 0; i < data.length; i++) {
+        const norm = (data[i] - 128) / 128;
+        sum += norm * norm;
+      }
+      const rms = Math.sqrt(sum / data.length);
+      const level = Math.min(1, Math.max(0, rms * 4.2));
+      options.onAudioLevel?.(level);
+    }, 35);
+  }
 
   /**
    * The one exit. After the first clause it reports what was heard; before it
@@ -80,6 +130,11 @@ export async function playSpeechStream(
   const finish = () => {
     if (!speaking) return;
     speaking = false;
+    if (levelInterval !== null) {
+      clearInterval(levelInterval);
+      levelInterval = null;
+    }
+    options.onAudioLevel?.(0);
     for (const entry of schedule) {
       entry.source.onended = null;
       try {
@@ -111,7 +166,11 @@ export async function playSpeechStream(
     buffer.copyToChannel(samples, 0);
     const source = context.createBufferSource();
     source.buffer = buffer;
-    source.connect(context.destination);
+    if (analyser) {
+      source.connect(analyser);
+    } else {
+      source.connect(context.destination);
+    }
 
     const previous = schedule[schedule.length - 1];
     const startAt = nextStartTime(context.currentTime, previous?.endAt ?? 0);

@@ -180,7 +180,9 @@ function isPortFree(port) {
 }
 
 async function startVoiceSidecar() {
-  const root = path.join(process.resourcesPath, "voice-runtime");
+  const devRoot = path.join(__dirname, "..", "voice-runtime");
+  const packagedRoot = path.join(process.resourcesPath, "voice-runtime");
+  const root = fs.existsSync(path.join(devRoot, "cli.js")) ? devRoot : packagedRoot;
   const entry = path.join(root, "cli.js");
   if (!fs.existsSync(entry)) {
     log("No voice sidecar in this build; voice stays on the built-in engine.");

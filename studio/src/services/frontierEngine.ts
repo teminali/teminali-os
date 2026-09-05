@@ -80,6 +80,10 @@ export interface StreamCallbacks {
   onRateLimit?: (info: { resetsIn: string; provider: string }) => void;
 }
 
+import { sanitizeOngoingAssist } from "./voice/speakable";
+import { detectCommandThrashing, MAX_THRASH_NOTICES } from "./commandThrashing";
+export { sanitizeOngoingAssist };
+
 interface OllamaStreamChunk {
   message?: { content?: string };
   response?: string;
@@ -104,6 +108,7 @@ const MAX_AGENT_COMMAND_TURNS = 3;
 // which is already four sequential rounds; budgeting them like generation
 // turns is what forced the model to guess at step three.
 const MAX_INVESTIGATION_TURNS = 8;
+
 // Editor tool turns are the cheapest of the three: no files are re-emitted and
 // the results are JSON read out of the renderer's own memory. Six because an
 // editing exchange is describe -> edit -> verify, and "make the title bigger
@@ -314,12 +319,39 @@ You operate as a synchronized multi-agent engineering team:
     Empty for a typed turn, so a keyboard prompt gets the prompt it always got.
   */
   const transcriptInstruction = transcriptNotice(origin);
+  const isFreshConversation = history.length === 0 || history.every((m) => !m.content || m.role === "system");
+  const conversationalInstruction = isFreshConversation
+    ? `\n\n[CONVERSATIONAL TONE]\nSpeak naturally, concisely, and dynamically like a real engineering colleague. Avoid robotic boilerplate. If offering assistance in a greeting for this fresh new conversation, you may ask "How can I assist you today?".`
+    : `\n\n[CONVERSATIONAL TONE]\nSpeak naturally, concisely, and dynamically like a real engineering colleague. Avoid robotic boilerplate. This is an ongoing conversation: NEVER say "How can I assist you today?"; if offering assistance or asking what to do next, say "How can I assist you now?" or answer directly without canned greetings.`;
+
+  const stepExplanationInstruction = `\n\n[STEP-BY-STEP EXPLANATION MANDATE]
+Whenever you are about to run a tool or command (\`\`\`frontier-run, \`\`\`video-tool) or write/modify a file (\`\`\`path=...), ALWAYS state what you are doing in 1 short, plain, natural sentence directly before emitting the fence (for example: "I'm checking the git status to see what files were modified.", "Now running tests to verify the changes.", "Updating the component to handle the event."). Never work silently or emit bare command blocks without explaining your step first.`;
+
+  const toolExecutionMandate = `\n\n[FULL COMPUTER ACCESS & AUTONOMOUS ACTION MANDATE]
+1. FULL SYSTEM & TERMINAL CAPABILITY: You have FULL, UNRESTRICTED ACCESS to this computer, the terminal, the filesystem, and the network. You can run ANY terminal command (\`curl\`, \`wget\`, \`python\`, \`node\`, \`git\`, \`npm\`, \`cat\`, \`grep\`, \`find\`, \`ls\`, etc.), make network requests, query live APIs, inspect processes, edit files, and build projects. All commands execute automatically and seamlessly.
+2. ZERO CAPABILITY DENIAL: NEVER say "I cannot execute commands", "I cannot run commands directly", "I don't have direct access", "I cannot fetch real-time data", "as an AI I cannot", or tell the user to "check a website yourself". You HAVE full live access: whenever you need information, real-time data (crypto prices, weather, stocks, package info), or need to inspect/modify files, emit a \`\`\`frontier-run fence immediately!
+3. PERSISTENCE & AUTONOMOUS PROBLEM SOLVING:
+   - When solving any task, be relentless and persistent.
+   - If a command, script, or API endpoint fails, returns an error, times out, or produces unexpected output (e.g. 404, rate limit, parse error, missing dependency), NEVER give up or tell the user "I recommend trying later" or "check your internet connection".
+   - Instead, ACTIVELY SELF-THINK and TRY ALTERNATIVE SOLUTIONS based on what is available:
+     * If an API endpoint fails (e.g., CoinDesk is down or deprecated), immediately try alternative public APIs in the next step (e.g., for Bitcoin: CoinGecko, Binance, Coinbase, Kraken, or Yahoo Finance).
+     * If a shell tool is missing or fails, write and execute a quick inline Python or Node script to fetch or compute what you need.
+     * If parsing fails, inspect the raw output and adapt your extraction logic.
+   - Iterate autonomously until you successfully obtain the answer or complete the task.
+4. DIAGNOSE BEFORE YOU RETRY (no thrashing):
+   - Before re-running anything that failed, say in one sentence WHY it failed. A 401, 403, "invalid API key" or "missing key" is a statement about your request, NOT an outage: retrying it, or switching to a different vendor that also needs a key, cannot change the answer.
+   - NEVER invent, guess, or placeholder a credential (\`key=dummy\`, \`YOUR_KEY\`, \`appid=xxx\`, \`token=test\`). A fake key is a guaranteed refusal.
+   - Never alternate between two key-gated commercial providers. If the first one refuses for an auth reason, every other one will too.
+   - For public data, prefer endpoints that need NO credential: weather -> \`wttr.in\`, \`api.open-meteo.com\`; crypto/FX -> \`api.coingecko.com\`, \`api.binance.com\`, \`api.frankfurter.app\`; IP/geo -> \`ipapi.co\`, \`ip-api.com\`. Failing that, compute the answer locally with \`python3\` or \`node\`.
+   - If a credential genuinely is required and not configured, say so plainly and ask the user for it instead of looping.
+5. FILE WRITING: When creating or updating files, always emit complete fenced blocks with \`\`\`<lang> path="workspace/path.ext"\`\`\`.
+6. COMMAND EXECUTION: When executing terminal actions, emit \`\`\`frontier-run\n<command>\n\`\`\`. The real output will be returned to you in the next observation.`;
 
   const messages = [
     {
       role: "system",
       content: DiligenceEngine.wrapSystemPrompt(CompletenessEngine.wrapSystemPrompt(
-        `You are Teminali ${selection.label}. Be precise, disclose uncertainty, and never claim a tool or test ran unless its result is present in the conversation. When the user asks you to edit workspace files, emit every intended final file as a complete fenced block with path="workspace/relative/path.ext" directly on the code fence tag (e.g. \`\`\`html path="outputs/live-edit-vision-canary.html" or \`\`\`ts path="src/example.ts"). Use one explicit path block per file, never an ambiguous patch fragment, so Teminali can apply, display, and verify the edits safely. To actually run a workspace command, emit it in a \`\`\`frontier-run fence (one command per line); its real output is returned to you before you answer again. A \`\`\`bash or \`\`\`sh block is documentation and is never executed. Read-only checks such as npm test, npx tsc, and git status run automatically; anything that changes state waits for the user, so never assume it ran.${skillInstruction}${editorInstruction}${multiAgentPrompt}${transcriptInstruction}`,
+        `You are Teminali ${selection.label}. Be precise, disclose uncertainty, and never claim a tool or test ran unless its result is present in the conversation. When the user asks you to edit workspace files, emit every intended final file as a complete fenced block with path="workspace/relative/path.ext" directly on the code fence tag (e.g. \`\`\`html path="outputs/live-edit-vision-canary.html" or \`\`\`ts path="src/example.ts"). Use one explicit path block per file, never an ambiguous patch fragment, so Teminali can apply, display, and verify the edits safely. To actually run a workspace command, emit it in a \`\`\`frontier-run fence (one command per line); its real output is returned to you before you answer again. A \`\`\`bash or \`\`\`sh block is documentation and is never executed. All workspace and system terminal commands run automatically and seamlessly with full computer access.${skillInstruction}${editorInstruction}${multiAgentPrompt}${transcriptInstruction}${conversationalInstruction}${stepExplanationInstruction}${toolExecutionMandate}`,
       )),
     },
     ...history.slice(-6).map((message) => ({
@@ -437,6 +469,8 @@ You operate as a synchronized multi-agent engineering team:
     let editorTurns = 0;
     let correctionTurns = 0;
     let deniedFeedback = 0;
+    /** Times this exchange has been told it is retrying its way around a wall. */
+    let thrashNotices = 0;
     // Every command run this exchange. The investigation audit needs the whole
     // history, not just the last turn's, to tell "measured then answered" from
     // "measured once, then guessed at the part that mattered".
@@ -448,7 +482,20 @@ You operate as a synchronized multi-agent engineering team:
       let observation = "";
       let investigated = false;
 
-      if (capabilities.runCommand && hasExecutableCommands(turnText) && investigationTurns < MAX_INVESTIGATION_TURNS) {
+      const thrashing =
+        capabilities.runCommand && hasExecutableCommands(turnText) && thrashNotices < MAX_THRASH_NOTICES
+          ? detectCommandThrashing(allExecutions, turnText)
+          : null;
+
+      if (thrashing) {
+        // Held back rather than run: the commands about to go out are the ones
+        // that already failed, and letting them fail again buys nothing but a
+        // turn off the budget. The model gets the diagnosis in their place.
+        thrashNotices += 1;
+        investigationTurns += 1;
+        observation = thrashing.notice;
+        investigated = true;
+      } else if (capabilities.runCommand && hasExecutableCommands(turnText) && investigationTurns < MAX_INVESTIGATION_TURNS) {
         const executions = await runAgentCommands(turnText, {
           execute: capabilities.runCommand!,
           signal: controller.signal,
@@ -676,8 +723,9 @@ You operate as a synchronized multi-agent engineering team:
     status: 200,
     durationMs: telemetry.totalDurationMs,
   });
+  const deliveredText = !isFreshConversation ? sanitizeOngoingAssist(accumulated) : accumulated;
   callbacks.onComplete({
-    fullText: accumulated,
+    fullText: deliveredText,
     costUsd: 0,
     costLabel: "$0.0000 local",
     tokensCount: telemetry.promptTokens + telemetry.outputTokens,
@@ -807,8 +855,10 @@ async function streamFromAnthropic(
     status: 200,
     durationMs: telemetry.totalDurationMs,
   });
+  const isFreshConversation = history.length === 0 || history.every((m) => !m.content || m.role === "system");
+  const deliveredText = !isFreshConversation ? sanitizeOngoingAssist(accumulated) : accumulated;
   callbacks.onComplete({
-    fullText: accumulated,
+    fullText: deliveredText,
     costUsd: 0,
     costLabel: "provider reported usage",
     tokensCount: inputTokens + outputTokens,

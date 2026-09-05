@@ -156,8 +156,24 @@ export interface SpeakOptions {
   onBoundary?: (charIndex: number) => void;
   onStart?: () => void;
   onEnd?: (spokenChars: number) => void;
+  /** Real-time speech playback amplitude for mouth sync modulation (0–1). */
+  onAudioLevel?: (level: number) => void;
   signal?: AbortSignal;
 }
+
+/**
+ * Emotional & expressive posture of the Teminali character face.
+ */
+export type VoiceEmotion =
+  | "neutral"
+  | "happy"
+  | "thinking"
+  | "focused"
+  | "surprised"
+  | "error"
+  | "speaking"
+  | "listening"
+  | "relaxed";
 
 export interface SynthesisHandle {
   /** Stop immediately. Resolves the speak() promise with what was spoken. */
@@ -346,7 +362,16 @@ export const DEFAULT_VOICE_SETTINGS: VoiceSettings = {
   autoSendAfterMs: 0,
   requireSpeakerMatch: false,
   requireWakeWord: false,
-  wakeWords: ["temy", "teminali", "frontier", "studio"],
+  /*
+    "temi" is here because that is what recognition actually returns. Measured
+    on this machine with whisper large-v3-turbo: "Temy" comes back as "Temi"
+    whether or not the decoder is given the spelling in its prompt, and the
+    lexicon cannot repair it — `phoneticKey` reduces "Temy", "Temi", "Timmy"
+    and "Tammy" all to "tm", which is below `MIN_KEY_LENGTH` precisely so a
+    repair cannot rewrite somebody's name. A wake word list is the right place
+    for "what the recogniser produces" rather than "how the word is spelt".
+  */
+  wakeWords: ["temy", "temi", "teminali", "frontier", "studio"],
   endpointSilenceMs: 900,
   allowBargeIn: true,
   narrateProgress: true,

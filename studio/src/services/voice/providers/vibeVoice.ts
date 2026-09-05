@@ -270,6 +270,13 @@ export class VibeVoiceProvider implements VoiceProvider {
                 confidence: result.confidence,
                 language: result.language,
               });
+            } else {
+              handlers.onResult({
+                transcript: "",
+                isFinal: true,
+                confidence: 0,
+                language: result.language || "",
+              });
             }
           } catch (error) {
             if ((error as Error)?.name !== "AbortError") {
@@ -280,6 +287,13 @@ export class VibeVoiceProvider implements VoiceProvider {
               );
             }
           }
+        } else if (active) {
+          handlers.onResult({
+            transcript: "",
+            isFinal: true,
+            confidence: 0,
+            language: "",
+          });
         }
         close();
         return;
@@ -405,10 +419,32 @@ export class VibeVoiceProvider implements VoiceProvider {
 
     let speaking = true;
     let spokenChars = 0;
+    let levelTicker: number | null = null;
+
+    const startLevelTicker = () => {
+      if (!options.onAudioLevel || levelTicker !== null) return;
+      let phase = 0;
+      levelTicker = window.setInterval(() => {
+        if (!speaking || audio.paused || audio.ended) return;
+        phase += 0.4;
+        const envelope = 0.45 + 0.28 * Math.sin(phase) * Math.cos(phase * 0.7);
+        const level = Math.max(0.12, Math.min(0.85, envelope));
+        options.onAudioLevel?.(level);
+      }, 45);
+    };
+
+    const stopLevelTicker = () => {
+      if (levelTicker !== null) {
+        clearInterval(levelTicker);
+        levelTicker = null;
+      }
+      options.onAudioLevel?.(0);
+    };
 
     const finish = () => {
       if (!speaking) return;
       speaking = false;
+      stopLevelTicker();
       URL.revokeObjectURL(url);
       options.onEnd?.(spokenChars);
     };
@@ -421,7 +457,11 @@ export class VibeVoiceProvider implements VoiceProvider {
       spokenChars = Math.round((audio.currentTime / audio.duration) * options.text.length);
       options.onBoundary?.(spokenChars);
     };
-    audio.onplay = () => options.onStart?.();
+    audio.onplay = () => {
+      startLevelTicker();
+      options.onStart?.();
+    };
+    audio.onpause = () => stopLevelTicker();
     audio.onended = () => {
       spokenChars = options.text.length;
       finish();
@@ -436,6 +476,7 @@ export class VibeVoiceProvider implements VoiceProvider {
     }
 
     const cancel = () => {
+      stopLevelTicker();
       audio.pause();
       finish();
     };

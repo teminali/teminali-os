@@ -15,6 +15,7 @@ import { TERMINAL_LIMITS, runWorkspaceCommand } from "./terminal.js";
 import { forgetVoiceStatus, readBounded, speak, transcribe, voiceStatus } from "./voice.js";
 import { act, assistantCapabilities, observe, requestAccessibility } from "./assistant.js";
 import { AGENTS, AGENT_LIMITS, agentAvailability, isAgentEngine, runAgentTurn } from "./agent-cli.js";
+import { requestApproval, resolveApproval } from "./permission-bridge.js";
 import { agentModels, recordResolution } from "./agent-models.js";
 import { appendUsage, summariseUsage, usageRecord } from "./usage-ledger.js";
 import { agentAccounts, readPlanLimits, recordPlanLimits } from "./plan.js";
@@ -440,7 +441,7 @@ export async function createGateway(options = {}) {
         if (!origin) throw new GatewayError(403, "ORIGIN_REQUIRED", "CORS preflight requires an allowed origin.");
         response.writeHead(204, {
           "access-control-allow-methods": "GET, POST, OPTIONS",
-          "access-control-allow-headers": "authorization, content-type, x-correlation-id",
+          "access-control-allow-headers": "authorization, content-type, x-correlation-id, x-teminali-permission-token",
           "access-control-max-age": "600",
         });
         response.end();
@@ -461,8 +462,49 @@ export async function createGateway(options = {}) {
         return;
       }
 
+      /*
+        The permission prompt tool, answered before the bearer gate.
+
+        The shim that calls this is spawned by the agent CLI, not by the app,
+        and `agentEnvironment()` deliberately strips the session token before
+        an agent starts so a CLI that shells out cannot drive the gateway.
+        Giving the shim that token back would undo it. It carries a token
+        minted for one run instead, which authorises exactly this route and
+        dies when the run does — see permission-bridge.js.
+      */
+      if (request.method === "POST" && route === "/api/agents/permission") {
+        const body = await readJson(request, config.maxJsonBytes);
+        const decision = await requestApproval({
+          runId: typeof body?.runId === "string" ? body.runId : "",
+          token: request.headers["x-teminali-permission-token"] || "",
+          toolName: typeof body?.toolName === "string" ? body.toolName : "",
+          input: body?.input && typeof body.input === "object" ? body.input : {},
+        });
+        replyJson(response, 200, decision);
+        return;
+      }
+
       if (!bearerMatches(request.headers.authorization, sessionToken)) {
         throw new GatewayError(401, "AUTH_REQUIRED", "A valid session bearer token is required.");
+      }
+
+      /* The operator's answer, on its own request: the run's stream is one-way. */
+      if (request.method === "POST" && route === "/api/agents/permission/resolve") {
+        const body = await readJson(request, config.maxJsonBytes);
+        if (typeof body?.runId !== "string" || typeof body?.id !== "string") {
+          throw new GatewayError(400, "PERMISSION_ID_REQUIRED", "A run id and a request id are required.");
+        }
+        const outcome = resolveApproval({
+          runId: body.runId,
+          id: body.id,
+          behavior: body.behavior === "allow" ? "allow" : "deny",
+          message: typeof body.message === "string" ? body.message : "",
+          updatedInput: body.updatedInput && typeof body.updatedInput === "object" ? body.updatedInput : undefined,
+          remember: body.remember === true,
+        });
+        if (!outcome.ok) throw new GatewayError(409, "PERMISSION_GONE", outcome.reason);
+        replyJson(response, 200, { accepted: true });
+        return;
       }
 
       if (request.method === "POST" && route === "/api/audit") {
@@ -1384,8 +1426,15 @@ export async function createGateway(options = {}) {
           /* Caption-shaped segments, for a caller laying subtitles down.
              Absent means whisper's own segmentation, one cue an utterance. */
           const maxSegmentChars = Math.max(0, Math.min(120, Number(field("maxSegmentChars")) || 0));
+          /* The open project's names, for a recogniser that takes a vocabulary
+             prompt. A malformed field costs the prompt, never the sentence. */
+          let hints = [];
+          try {
+            const raw = field("hints");
+            if (raw) hints = JSON.parse(raw).filter((entry) => typeof entry === "string").slice(0, 64);
+          } catch {}
           const result = await transcribe(config, {
-            body: audio, contentType, language, maxSegmentChars, allowVibeVoice,
+            body: audio, contentType, language, maxSegmentChars, hints, allowVibeVoice,
           });
           await audit.write({
             event: "voice-transcribed",
@@ -1956,6 +2005,10 @@ export async function createGateway(options = {}) {
             model: requestedModel,
             permission: agentRequest.permission,
             signal: abort.signal,
+            // The correlation id is already unique per request and already
+            // travels to the client on the response header, so it is the run
+            // id the operator's answer will come back naming.
+            runId: correlationId,
             onEvent: send,
           });
         } catch (error) {

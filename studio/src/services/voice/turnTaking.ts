@@ -57,9 +57,9 @@ export interface EndpointerConfig {
 }
 
 export const DEFAULT_ENDPOINTER: EndpointerConfig = {
-  minSilenceMs: 520,
-  maxSilenceMs: 1900,
-  minUtteranceMs: 260,
+  minSilenceMs: 360,
+  maxSilenceMs: 1300,
+  minUtteranceMs: 220,
   onsetFrames: 3,
 };
 

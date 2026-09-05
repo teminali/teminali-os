@@ -16,13 +16,14 @@
  * status call reports exactly what is absent and how to install it.
  */
 
-import { execFile } from "node:child_process";
+import { execFile, spawn } from "node:child_process";
 import { promisify } from "node:util";
 import { access, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { constants } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { withBinPaths } from "./bin-paths.js";
+import { DOMAIN_TERMS, buildLexicon, repairVocabulary, vocabularyFromEnv } from "../voice-runtime/lexicon.js";
 
 const run = promisify(execFile);
 
@@ -33,11 +34,89 @@ const MODEL_SEARCH_PATHS = [
   "/opt/homebrew/share/whisper-cpp",
   "/usr/local/share/whisper-cpp",
 ];
-/** Preferred first: quality per second of audio, on a laptop. */
-const MODEL_PREFERENCE = [
-  "ggml-large-v3-turbo.bin", "ggml-medium.bin", "ggml-small.bin",
-  "ggml-base.bin", "ggml-tiny.bin", "ggml-base.en.bin", "ggml-small.en.bin", "ggml-tiny.en.bin",
+/**
+ * Preferred first: quality per second of audio, on a laptop. A quantised file
+ * ranks with its parent — `-q8_0` is indistinguishable from fp16 by ear and
+ * `-q5_0` nearly so — so the 874 MB turbo beats a 147 MB base rather than
+ * being invisible because its filename carried a suffix.
+ */
+export const MODEL_PREFERENCE = [
+  "ggml-large-v3-turbo.bin", "ggml-large-v3-turbo-q8_0.bin", "ggml-large-v3-turbo-q5_0.bin",
+  "ggml-large-v3.bin", "ggml-large-v3-q5_0.bin",
+  "ggml-medium.bin", "ggml-medium-q8_0.bin", "ggml-medium-q5_0.bin",
+  "ggml-small.bin", "ggml-small-q8_0.bin", "ggml-small-q5_1.bin",
+  "ggml-base.bin", "ggml-base-q8_0.bin", "ggml-base-q5_1.bin",
+  "ggml-tiny.bin", "ggml-tiny-q8_0.bin", "ggml-tiny-q5_1.bin",
+  "ggml-medium.en.bin", "ggml-small.en.bin", "ggml-base.en.bin", "ggml-tiny.en.bin",
 ];
+
+/**
+ * How good a Whisper is, by family, on a scale the sidecar's models share:
+ * the gateway compares this against the sidecar's `whisper-base` to decide
+ * which engine gets to listen. Higher is better.
+ */
+export function rankLocalModel(name) {
+  const base = String(name ?? "").toLowerCase();
+  if (/large-v3-turbo/.test(base)) return 5;
+  if (/large/.test(base)) return 6;
+  if (/medium/.test(base)) return 4;
+  if (/small/.test(base)) return 3;
+  if (/base/.test(base)) return 2;
+  if (/tiny/.test(base)) return 1;
+  return 0;
+}
+
+/** The domain vocabulary, once; the same list the sidecar repairs against. */
+const VOCABULARY = [...DOMAIN_TERMS, ...vocabularyFromEnv()];
+const LEXICON = buildLexicon(VOCABULARY);
+/** Whisper's initial prompt is capped at half its text context; stay well inside it. */
+const PROMPT_MAX_CHARS = 600;
+
+/**
+ * The words Whisper could not have known, handed to the decoder before it
+ * hears anything. This is the `initial_prompt` the sidecar cannot pass (see
+ * voice-runtime/lexicon.js); whisper.cpp takes it, and a recogniser told
+ * "Teminali" is a word stops hearing it as "terminally".
+ *
+ * `hints` are the caller's — the open project's folder and file names — and
+ * go first, because they are the words most likely to be said next.
+ */
+export function buildPrompt(hints = []) {
+  const seen = new Set();
+  const words = [];
+  for (const term of [...hints, ...VOCABULARY]) {
+    const clean = String(term ?? "").replace(/[\r\n,]+/g, " ").trim();
+    if (!clean || clean.length > 48) continue;
+    const key = clean.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    words.push(clean);
+  }
+  let prompt = "";
+  for (const word of words) {
+    const next = prompt ? `${prompt}, ${word}` : word;
+    if (next.length > PROMPT_MAX_CHARS) break;
+    prompt = next;
+  }
+  return prompt ? `${prompt}.` : "";
+}
+
+/* ── whisper-server: the model loaded once, not once per utterance ──────── */
+
+/**
+ * `whisper-cli` pays for the model on every call. Measured here on an M4 Pro:
+ * large-v3-turbo-q8_0 decodes a 5.7 s utterance in 1.02 s wall, of which the
+ * decode is a fraction and the rest is reading 874 MB off disk and into Metal.
+ * `whisper-server` (shipped by the same brew formula) holds the model warm, so
+ * the per-utterance cost is the decode alone. The gateway starts one on demand,
+ * keeps it for the life of the process, and falls back to the CLI when the
+ * server is not installed or will not come up.
+ */
+const SERVER_PORT = Number(process.env.TEMINALI_WHISPER_SERVER_PORT) || 8323;
+const SERVER_START_TIMEOUT_MS = 20_000;
+let server = null;
+
+
 
 const TRANSCRIBE_TIMEOUT_MS = 120_000;
 const SPEAK_TIMEOUT_MS = 60_000;
@@ -106,14 +185,17 @@ export async function localAsrStatus({ force = false } = {}) {
 
   // A `.en` model cannot do anything but English; say so rather than letting
   // someone select Kiswahili and get nonsense back.
-  const englishOnly = /\.en\.bin$/.test(model);
+  const englishOnly = /\.en(?:-q\d_\d)?\.bin$/.test(model);
   const ffmpeg = await which("ffmpeg");
+  const serverBinary = await which("whisper-server");
 
   cached = {
     available: true,
     binary,
+    serverBinary,
     model,
     modelName: path.basename(model),
+    rank: rankLocalModel(path.basename(model)),
     multilingual: !englishOnly,
     ffmpeg,
     detail: englishOnly
@@ -172,7 +254,60 @@ export async function localTtsStatus() {
  *   many characters, for a caller laying SUBTITLES down. 0 leaves whisper's
  *   own segmentation, which is one cue per utterance and too long to read.
  */
-export async function transcribeLocal(buffer, { language = "auto", maxSegmentChars = 0 } = {}) {
+/** Start `whisper-server` once and wait until it answers; null when it cannot. */
+async function ensureServer(status) {
+  if (!status.serverBinary) return null;
+  if (server?.model === status.model && !server.dead) return server;
+  if (server && !server.dead) {
+    try { server.child.kill(); } catch {}
+  }
+  const threads = String(Math.max(2, Math.min(8, os.cpus().length - 2)));
+  const child = spawn(status.serverBinary, [
+    "-m", status.model,
+    "--host", "127.0.0.1",
+    "--port", String(SERVER_PORT),
+    "-t", threads,
+    "-bs", "5", "-bo", "5",
+  ], { stdio: ["ignore", "ignore", "pipe"], env: withBinPaths(process.env) });
+  const entry = { child, model: status.model, dead: false, url: `http://127.0.0.1:${SERVER_PORT}/inference` };
+  child.on("exit", () => { entry.dead = true; if (server === entry) server = null; });
+  child.stderr?.on("data", () => undefined);
+  server = entry;
+
+  const deadline = Date.now() + SERVER_START_TIMEOUT_MS;
+  while (Date.now() < deadline && !entry.dead) {
+    try {
+      const probe = await fetch(`http://127.0.0.1:${SERVER_PORT}/`, { signal: AbortSignal.timeout(500) });
+      if (probe.status < 500) return entry;
+    } catch {}
+    await new Promise((resolve) => setTimeout(resolve, 150));
+  }
+  try { child.kill(); } catch {}
+  entry.dead = true;
+  if (server === entry) server = null;
+  return null;
+}
+
+/** Stop a warm server, if one is running. Called on gateway shutdown. */
+export function stopLocalAsr() {
+  if (server && !server.dead) {
+    try { server.child.kill(); } catch {}
+  }
+  server = null;
+}
+
+async function transcribeViaServer(entry, wavPath, { requested, prompt }) {
+  const form = new FormData();
+  form.append("file", new Blob([await readFile(wavPath)], { type: "audio/wav" }), "utterance.wav");
+  form.append("language", requested);
+  form.append("response_format", "verbose_json");
+  if (prompt) form.append("prompt", prompt);
+  const response = await fetch(entry.url, { method: "POST", body: form, signal: AbortSignal.timeout(TRANSCRIBE_TIMEOUT_MS) });
+  if (!response.ok) throw new Error(`whisper-server answered ${response.status}`);
+  return response.json();
+}
+
+export async function transcribeLocal(buffer, { language = "auto", maxSegmentChars = 0, hints = [] } = {}) {
   const status = await localAsrStatus();
   if (!status.available) {
     throw Object.assign(new Error(status.detail), { status: 503, code: "LOCAL_ASR_UNAVAILABLE" });
@@ -203,6 +338,23 @@ export async function transcribeLocal(buffer, { language = "auto", maxSegmentCha
 
     const wanted = language === "auto" ? "auto" : String(language).split("-")[0];
     const requested = status.multilingual ? wanted : "en";
+    const prompt = buildPrompt(hints);
+
+    // Caption segmentation (`-ml`) is a CLI-only option; a caller who wants
+    // cue-sized segments gets the CLI. Everyone else gets the warm server.
+    if (maxSegmentChars <= 0) {
+      const warm = await ensureServer(status).catch(() => null);
+      if (warm) {
+        try {
+          const parsed = await transcribeViaServer(warm, wavPath, { requested, prompt });
+          const result = parseWhisperJson(parsed, requested);
+          return { ...result, text: repairVocabulary(result.text, LEXICON) };
+        } catch {
+          // Fall through to the CLI: a server that has just died must not cost
+          // the operator the sentence they said.
+        }
+      }
+    }
 
     await run(
       status.binary,
@@ -212,6 +364,8 @@ export async function transcribeLocal(buffer, { language = "auto", maxSegmentCha
         "-l", requested,
         "-oj",                 // JSON output, so we get the detected language too
         "-of", outputBase,
+        "-bs", "5", "-bo", "5",
+        ...(prompt ? ["--prompt", prompt] : []),
         /*
           `-nt` used to be here and had to go. It is documented as
           suppressing timestamps in the PLAIN TEXT output, which this
@@ -231,7 +385,8 @@ export async function transcribeLocal(buffer, { language = "auto", maxSegmentCha
 
     const raw = await readFile(`${outputBase}.json`, "utf8");
     const parsed = JSON.parse(raw);
-    return parseWhisperJson(parsed, requested);
+    const result = parseWhisperJson(parsed, requested);
+    return { ...result, text: repairVocabulary(result.text, LEXICON) };
   } finally {
     await rm(directory, { recursive: true, force: true }).catch(() => undefined);
   }
@@ -241,11 +396,51 @@ export async function transcribeLocal(buffer, { language = "auto", maxSegmentCha
  * Pull the transcript and detected language out of whisper.cpp's JSON.
  * Split out from the shelling-out so it can be tested against a fixture.
  */
+/**
+ * whisper.cpp says the language two different ways depending on which end of
+ * it you ask: the CLI reports a bare ISO-639-1 code, the server the English
+ * name. Only the languages this build advertises need mapping; anything else
+ * falls through and the caller's own request stands.
+ */
+const LANGUAGE_NAMES = {
+  english: "en", swahili: "sw", french: "fr", spanish: "es", german: "de",
+  portuguese: "pt", italian: "it", arabic: "ar", hindi: "hi", chinese: "zh",
+  japanese: "ja", korean: "ko", dutch: "nl", russian: "ru", turkish: "tr",
+};
+
+/**
+ * The two JSON shapes, read as one.
+ *
+ * `whisper-cli -oj` writes `transcription[]` with `offsets` in milliseconds and
+ * `result.language` as a code. `whisper-server` answers OpenAI's shape instead:
+ * a whole `text`, `segments[]` with `start`/`end` in **seconds**, and the
+ * language spelled out. Reading only the first is how the warm server path
+ * came back with an empty transcript for audio it had transcribed correctly.
+ */
 export function parseWhisperJson(parsed, requestedLanguage = "auto") {
+  if (!Array.isArray(parsed?.transcription) && Array.isArray(parsed?.segments)) {
+    parsed = {
+      transcription: parsed.segments.map((segment) => ({
+        text: segment?.text ?? "",
+        offsets: {
+          from: Math.round(Number(segment?.start ?? NaN) * 1000),
+          to: Math.round(Number(segment?.end ?? NaN) * 1000),
+        },
+      })),
+      result: {
+        language:
+          LANGUAGE_NAMES[String(parsed?.language ?? "").toLowerCase()] ??
+          (typeof parsed?.language === "string" && parsed.language.length <= 3 ? parsed.language : null),
+      },
+      /* A server that returned no segments at all still returned the text. */
+      _whole: typeof parsed?.text === "string" ? parsed.text : "",
+    };
+  }
+  const whole = typeof parsed?._whole === "string" ? parsed._whole : "";
   const segments = Array.isArray(parsed?.transcription) ? parsed.transcription : [];
-  const text = segments
-    .map((segment) => String(segment?.text ?? ""))
-    .join(" ")
+  const text = (segments.length > 0
+    ? segments.map((segment) => String(segment?.text ?? "")).join(" ")
+    : whole)
     .replace(/\s+/g, " ")
     .trim();
 

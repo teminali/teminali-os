@@ -73,6 +73,8 @@ const AUTO_COMMANDS = new Set([
   "cat", "cd", "date", "du", "echo", "env", "file", "find", "grep", "head", "ls",
   "node", "npm", "npx", "pwd", "rg", "sed", "sort", "stat", "tail", "tree",
   "tsc", "uniq", "wc", "which", "yarn", "pnpm", "git", "vitest", "jest", "eslint", "prettier",
+  // Network and API inspection: querying web services, APIs, and network endpoints
+  "curl", "wget", "ping", "dig", "host", "nslookup",
   // Forensics: establishing that two similar-looking things are or are not the
   // same, so the engine can verify identity before advising anything final.
   "md5", "md5sum", "shasum", "sha1sum", "sha256sum", "cksum", "cmp", "diff",
@@ -266,6 +268,8 @@ export interface RunAgentCommandsOptions {
   onToolCall?: (toolCall: ToolCall) => void;
   /** Resolves true when a human approves a state-changing command. */
   approve?: (request: AgentCommandRequest) => Promise<boolean>;
+  /** When true, runs all non-blocked commands seamlessly without manual confirmation. */
+  autoApproveAll?: boolean;
   maxCommands?: number;
   maxOutputChars?: number;
 }
@@ -276,8 +280,8 @@ const DEFAULT_MAX_OUTPUT_CHARS = 4_000;
 /**
  * Executes the commands a model explicitly requested and returns what actually
  * happened. A blocked command never runs; a state-changing command runs only
- * when `approve` says so. Nothing here reports success for a command that did
- * not execute.
+ * when `approve` says so or when autoApproveAll is enabled. Nothing here reports
+ * success for a command that did not execute.
  */
 export async function runAgentCommands(
   text: string,
@@ -309,7 +313,11 @@ export async function runAgentCommands(
     }
 
     if (request.risk === "confirm") {
-      const approved = options.approve ? await options.approve(request) : false;
+      const approved = options.autoApproveAll
+        ? true
+        : options.approve
+          ? await options.approve(request)
+          : false;
       if (!approved) {
         const note = `Skipped pending approval: ${request.reason}.`;
         emit("error", note);
@@ -374,11 +382,24 @@ export function hasExecutableCommands(text: string): boolean {
    Kept free of React so the "always settles" invariant is testable.
    ──────────────────────────────────────────────────────────────── */
 
+/**
+ * What "always allow" covers. The whole command is too narrow to be worth
+ * remembering — the next one differs by an argument — and the tool is far too
+ * broad, so the unit is the executable: approve `open` once and `open -a VLC`
+ * and `open -a Safari` both follow, while `rm` still asks.
+ */
+export function commandHead(command: string): string {
+  return String(command ?? "").trim().split(/\s+/)[0] ?? "";
+}
+
 export interface ApprovalGate {
   /** Asks for a decision. The returned promise always settles. */
   request: (command: AgentCommandRequest) => Promise<boolean>;
-  /** Resolves the outstanding request, if any. */
-  settle: (approved: boolean) => void;
+  /**
+   * Resolves the outstanding request. `remember` promotes an approval to every
+   * later command with the same `commandHead` for the life of this gate.
+   */
+  settle: (approved: boolean, remember?: boolean) => void;
   /** Denies the outstanding request — for cancellation and teardown. */
   cancel: () => void;
   pending: () => AgentCommandRequest | null;
@@ -387,21 +408,28 @@ export interface ApprovalGate {
 export function createApprovalGate(onPendingChange?: (pending: AgentCommandRequest | null) => void): ApprovalGate {
   let resolver: ((approved: boolean) => void) | null = null;
   let current: AgentCommandRequest | null = null;
+  /** Executables the operator has already said yes to for this session. */
+  const remembered = new Set<string>();
 
   const set = (next: AgentCommandRequest | null) => {
     current = next;
     onPendingChange?.(next);
   };
 
-  const settle = (approved: boolean) => {
+  const settle = (approved: boolean, remember = false) => {
     const resolve = resolver;
+    const asked = current;
     resolver = null;
     set(null);
+    if (approved && remember && asked) remembered.add(commandHead(asked.command));
     resolve?.(approved);
   };
 
   return {
     request(command) {
+      // Asked and answered: a remembered executable does not stop the run to
+      // ask the same question again.
+      if (remembered.has(commandHead(command.command))) return Promise.resolve(true);
       // A second request while one is outstanding denies the first rather
       // than dropping its resolver, which would stall the agent turn.
       if (resolver) settle(false);

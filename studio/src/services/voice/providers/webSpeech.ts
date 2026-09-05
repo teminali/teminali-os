@@ -325,8 +325,32 @@ export class WebSpeechProvider implements VoiceProvider {
 
     let spokenChars = 0;
     let speaking = true;
+    let levelTicker: number | null = null;
 
-    utterance.onstart = () => options.onStart?.();
+    const startLevelTicker = () => {
+      if (!options.onAudioLevel || levelTicker !== null) return;
+      let phase = 0;
+      levelTicker = window.setInterval(() => {
+        if (!speaking) return;
+        phase += 0.4;
+        const envelope = 0.42 + 0.28 * Math.sin(phase) * Math.cos(phase * 0.7);
+        const level = Math.max(0.12, Math.min(0.85, envelope));
+        options.onAudioLevel?.(level);
+      }, 45);
+    };
+
+    const stopLevelTicker = () => {
+      if (levelTicker !== null) {
+        clearInterval(levelTicker);
+        levelTicker = null;
+      }
+      options.onAudioLevel?.(0);
+    };
+
+    utterance.onstart = () => {
+      startLevelTicker();
+      options.onStart?.();
+    };
     utterance.onboundary = (event) => {
       spokenChars = event.charIndex ?? spokenChars;
       options.onBoundary?.(spokenChars);
@@ -334,6 +358,7 @@ export class WebSpeechProvider implements VoiceProvider {
     const finish = () => {
       if (!speaking) return;
       speaking = false;
+      stopLevelTicker();
       options.onEnd?.(spokenChars);
     };
     utterance.onend = () => {
@@ -348,6 +373,7 @@ export class WebSpeechProvider implements VoiceProvider {
 
     const cancel = () => {
       if (!speaking) return;
+      stopLevelTicker();
       synth.cancel();
       finish();
     };

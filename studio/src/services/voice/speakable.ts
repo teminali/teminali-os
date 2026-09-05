@@ -80,8 +80,13 @@ function collapseTitledLists(markdown: string): string {
  * Deliberately dependency-free: it is pure text in, pure text out.
  */
 export function speakableText(markdown: string): string {
-  return collapseTitledLists(
-    markdown.replace(/```(\w+)?\n[\s\S]*?```/g, (_match, lang: string | undefined) =>
+  const cleaned = collapseTitledLists(
+    // The info string is not just a word. This app's own fences are
+    // ```frontier-run and ```html path="outputs/x.html", and a tag pattern of
+    // `\w+` matched neither — so the block fell through unrecognised and the
+    // reply read the shell command, or the whole file, out loud a character at
+    // a time. Take the language word, then allow the rest of the line.
+    markdown.replace(/```([\w-]*)[^\n]*\n[\s\S]*?```/g, (_match, lang: string) =>
       lang ? ` — ${lang} code block — ` : " — code block — "),
   )
     .replace(/`([^`]+)`/g, "$1")
@@ -100,6 +105,8 @@ export function speakableText(markdown: string): string {
     .replace(/([:;,.!?])\s*\.(?=\s|$)/g, "$1")
     .replace(/\s{2,}/g, " ")
     .trim();
+
+  return smoothConversationalPunctuation(cleaned);
 }
 
 /** Chunks at or below this many words are read at the base rate. */
@@ -122,4 +129,38 @@ export function paceFor(base: number, text: string): number {
   const t = Math.min(1, Math.max(0, (words - PACE_SHORT_WORDS) / span));
   const boosted = base * (1 + (PACE_LONG_BOOST - 1) * t);
   return Math.round(Math.min(2, Math.max(0.5, boosted)) * 100) / 100;
+}
+
+/**
+ * Smooths conversational punctuation so TTS engines (like Kokoro) do not
+ * inject artificial 350ms dead-air pauses on commas before conjunctions,
+ * after common conversational fillers, or on duplicated punctuation.
+ */
+export function smoothConversationalPunctuation(text: string): string {
+  return text
+    // Remove stutter comma before common conversational conjunctions
+    .replace(/,\s+(and|but|so|because|then|or|which)\b/gi, " $1")
+    // Remove comma after common conversational introductory fillers and adverbs
+    .replace(/\b(well|okay|sure|now|first|next|finally),\s+/gi, "$1 ")
+    // Collapse multiple consecutive commas/semicolons/colons
+    .replace(/[,;]{2,}/g, ",")
+    // Collapse multiple periods or ellipsis to a single period
+    .replace(/\.{2,}/g, ".")
+    // Collapse multiple exclamation marks or question marks
+    .replace(/!{2,}/g, "!")
+    .replace(/\?{2,}/g, "?")
+    // Clean up comma/colon directly following period/question/exclamation
+    .replace(/([.!?])\s*[,;:]+/g, "$1");
+}
+
+/**
+ * For ongoing conversations, converts robotic "today" greetings to natural "now" assistance.
+ * "How can I assist you today?" -> "How can I assist you now?"
+ */
+export function sanitizeOngoingAssist(text: string): string {
+  return text
+    .replace(/\b([Hh]ow\s+(?:can|may)\s+I\s+assist\s+you\s+)today\b/g, "$1now")
+    .replace(/\b([Hh]ow\s+(?:can|may)\s+I\s+help\s+you\s+)today\b/g, "$1now")
+    .replace(/\b([Ww]hat\s+can\s+I\s+help\s+you\s+with\s+)today\b/g, "$1now")
+    .replace(/\b([Ww]hat\s+can\s+I\s+do\s+for\s+you\s+)today\b/g, "$1now");
 }

@@ -106,6 +106,8 @@ is the complete list.
 | `GET` | `/api/agents` | bearer | Which agent CLIs are installed and runnable. |
 | `GET` | `/api/agents/models` | bearer | What each CLI actually resolved its model alias to, learned from its own init event. |
 | `POST` | `/api/agents/run` | bearer | Runs a turn through one agent CLI. |
+| `POST` | `/api/agents/permission` | **per-run token** | Asked by the CLI, answered by the operator. Headless `claude -p` has no terminal, so `--permission-prompt-tool` names an MCP tool and this sits behind it: the shim posts `{ runId, toolName, input }` and blocks until an answer comes back as `{ behavior: "allow", updatedInput }` or `{ behavior: "deny", message }`. Authorised by `x-teminali-permission-token`, minted per run and good for this route alone — **not** the session bearer, which `agentEnvironment()` deliberately strips before an agent starts. Checked before the bearer gate. |
+| `POST` | `/api/agents/permission/resolve` | bearer | The operator's verdict: `{ runId, id, behavior, remember?, updatedInput? }`. Its own request, because the run's NDJSON stream only goes one way. `remember` allows every later call with the same approval key for the rest of that run. |
 
 ### Screen assistant
 
@@ -269,6 +271,8 @@ startup.
 | `TEMINALI_CUT_MCP_URL` | `http://127.0.0.1:3888` — `KERF_MCP_URL` is still read as a fallback, but it is the old name |
 | `TEMINALI_VOICE_URL` | `http://127.0.0.1:8321` |
 | `TEMINALI_VOICE_TIMEOUT_MS` | `30000` |
+| `TEMINALI_ASR_ENGINE` | `auto` — `local` or `sidecar` pins recognition instead of taking the better model |
+| `TEMINALI_WHISPER_SERVER_PORT` | `8323` — where the warm `whisper-server` listens |
 | `TEMINALI_VOICE_MAX_AUDIO_BYTES` | 25 MiB |
 | `ANTHROPIC_API_KEY` | unset; enables the Anthropic route |
 | `GITHUB_TOKEN` | unset; fallback when no token is in the provider store |

@@ -91,11 +91,38 @@ type AgentEvent =
   | { type: "result"; ok: boolean; durationMs: number | null; costUsd: number | null; sessionId: string | null; usage: AgentUsage | null; text: string | null; permissionDenials: unknown[] }
   | { type: "error"; code: string; message: string }
   | { type: "notice"; text: string }
+  /* A tool call is waiting on the operator. The turn is not stalled by choice:
+     the agent is blocked inside its own tool call until an answer is posted
+     back to /api/agents/permission/resolve. */
+  | { type: "permission"; id: string; toolName: string; input: Record<string, unknown>; key: string; expiresInMs: number }
+  | { type: "permission-resolved"; id: string; behavior: "allow" | "deny" }
   // Recorded by the gateway into the plan store, not consumed here — the pane
   // shows a turn, and plan headroom outlives any one turn. Listed so the switch
   // below is exhaustive over what the stream can actually carry.
   | { type: "limits"; status: string | null; isUsingOverage: boolean; windows: { id: string; utilization: number; resetsAt: number | null }[] }
   | { type: "done"; sessionId: string | null; durationMs: number; truncated: boolean; reason: string | null; stderr: string };
+
+/** A tool call the agent is blocked on, waiting for the operator. */
+export interface PermissionRequest {
+  runId: string;
+  id: string;
+  toolName: string;
+  input: Record<string, unknown>;
+  /** What "always allow" would cover — `Bash(open)` rather than all of `Bash`. */
+  key: string;
+  expiresInMs: number;
+}
+
+/**
+ * The agent stream carries two things the local engine's does not: a request
+ * for approval, and the news that one was answered (by a timeout, or from
+ * another window). Kept beside `StreamCallbacks` rather than added to it, so
+ * the local engine's contract stays what it was.
+ */
+export type AgentStreamCallbacks = StreamCallbacks & {
+  onPermission?: (request: PermissionRequest) => void;
+  onPermissionResolved?: (id: string) => void;
+};
 
 export class AgentCliService {
   /** Which agents are installed. Never throws: "not installed" is an answer. */
@@ -121,9 +148,24 @@ export class AgentCliService {
     }
   }
 
+  /** Answer one approval request. Resolves false when it was already settled. */
+  public static async answerPermission(
+    request: { runId: string; id: string; behavior: "allow" | "deny"; remember?: boolean; message?: string },
+  ): Promise<boolean> {
+    try {
+      const response = await GatewayClient.request("/api/agents/permission/resolve", {
+        method: "POST",
+        body: JSON.stringify(request),
+      });
+      return response.ok;
+    } catch {
+      return false;
+    }
+  }
+
   public static async streamTurn(
     options: AgentTurnOptions,
-    callbacks: StreamCallbacks,
+    callbacks: AgentStreamCallbacks,
   ): Promise<AgentTurnResult> {
     const startedAt = performance.now();
     const startedIso = new Date().toISOString();
@@ -174,6 +216,9 @@ export class AgentCliService {
     });
     await GatewayClient.expectOk(response);
     if (!response.body) throw new Error("The gateway returned no agent stream.");
+    // The gateway names every request on the way out and uses the same id as
+    // the run id, so an approval can be addressed without a second round trip.
+    const runId = response.headers.get("x-correlation-id") ?? "";
 
     const reader = response.body.getReader();
     const decoder = new TextDecoder();
@@ -218,6 +263,19 @@ export class AgentCliService {
           break;
         case "error":
           failure = new Error(event.message);
+          break;
+        case "permission":
+          callbacks.onPermission?.({
+            runId,
+            id: event.id,
+            toolName: event.toolName,
+            input: event.input,
+            key: event.key,
+            expiresInMs: event.expiresInMs,
+          });
+          break;
+        case "permission-resolved":
+          callbacks.onPermissionResolved?.(event.id);
           break;
         case "notice":
         case "limits":

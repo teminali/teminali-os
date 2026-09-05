@@ -54,7 +54,7 @@ route requires it. Roughly sixty routes across:
 | Hosted providers | `/api/providers` · `/api/providers/key` · `/api/providers/lanes` |
 | Workspace | `/api/workspace/{tree,file,write,delete,mkdir,search,open,projects}`, `/api/workspace/projects/{remember,forget}` |
 | Terminal | `/api/terminal/exec` |
-| Agent CLIs | `/api/agents` · `/api/agents/models` · `/api/agents/run` |
+| Agent CLIs | `/api/agents` · `/api/agents/models` · `/api/agents/run` · `/api/agents/permission` · `/api/agents/permission/resolve` |
 | Screen assistant | `/api/assistant/{capabilities,permissions,observe,act}` |
 | Voice | `/api/voice/{status,transcribe,speak}` |
 | Guardian | `/api/guardian/{snapshot,unload,governor,storage}` |
@@ -558,7 +558,7 @@ ollama serve              # local models on 127.0.0.1:11434
 
 ```bash
 npm run typecheck   # tsc --noEmit
-npm test            # 1010 tests, 0 failures
+npm test            # 1072 tests, 0 failures
 npm run build       # tsc && vite build
 npm run verify:core # all three
 ```
@@ -755,6 +755,8 @@ Everything is optional; every default is loopback.
 | `FRONTIER_ALLOWED_ORIGINS` | `127.0.0.1`/`localhost` on ports 3000 and 3001 |
 | `OLLAMA_BASE_URL` | `http://127.0.0.1:11434` |
 | `TEMINALI_VOICE_URL` | `http://127.0.0.1:8321` |
+| `TEMINALI_ASR_ENGINE` | `auto` — `local` or `sidecar` pins which recogniser listens |
+| `TEMINALI_WHISPER_SERVER_PORT` | `8323` |
 | `TEMINALI_CUT_MCP_URL` | `http://127.0.0.1:3888` |
 | `FRONTIER_WORKSPACE_ROOT` | the repository root |
 | `TEMINALI_RELEASE_REPO` | `teminali/releases` — public; published releases are read from here |

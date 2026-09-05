@@ -21,13 +21,16 @@ import {
   digestBudgetMs,
   digestPrompt,
   digestSource,
+  getImmediateAcknowledgment,
+  isNonSpeechOrBlank,
   planSpokenDigest,
   speakableText,
   summariseProgress,
+  VoiceDirector,
   type RunProgress,
   type SubmitOptions,
 } from "../../services/voice";
-import { FrontierEngine } from "../../services/frontierEngine";
+import { FrontierEngine, sanitizeOngoingAssist } from "../../services/frontierEngine";
 import { useGitHubStatus } from "../../hooks/useGitHubStatus";
 import { useProjectLibrary } from "../../hooks/useProjectLibrary";
 import { UsageService } from "../../services/usageService";
@@ -48,32 +51,6 @@ import type { ChatMessage } from "../../types";
  * back to be read aloud.
  */
 
-
-/**
- * Generates an immediate conversational verbal acknowledgment ("On it", "Looking into that now", etc.)
- * based on the user's spoken or typed prompt so the assistant acknowledges the task without dead silence.
- */
-function getImmediateAcknowledgment(text: string): string | null {
-  const t = text.toLowerCase().trim();
-  // 1. Simple greetings - answer directly without filler
-  if (/^(hi|hello|hey|greetings|howdy|good\s+(morning|afternoon|evening)|how\s+are\s+you)\b/i.test(t)) {
-    return null;
-  }
-  // 2. Affirmations / direct confirmations
-  if (/^(yes|yeah|yep|sure|ok|okay|go\s+ahead|do\s+it|please\s+do|proceed)\b/i.test(t)) {
-    const acks = ["Sure thing, on it.", "Right away.", "On it."];
-    return acks[Math.floor(Math.random() * acks.length)];
-  }
-  // 3. Search / inspection / explanations / queries
-  const queryWords = ["what", "why", "how", "where", "which", "who", "check", "inspect", "find", "search", "explain", "show", "tell", "read", "can you", "could you"];
-  if (queryWords.some((w) => t.startsWith(w) || t.includes(` ${w} `))) {
-    const queryAcks = ["Looking into that now.", "Let's take a look.", "Let me check that.", "Checking that now."];
-    return queryAcks[Math.floor(Math.random() * queryAcks.length)];
-  }
-  // 4. Action / code / build / fix / changes
-  const actionAcks = ["On it.", "I'm on it.", "Getting right on that.", "Working on it."];
-  return actionAcks[Math.floor(Math.random() * actionAcks.length)];
-}
 
 export const StudioChat: React.FC<{
   /** The one screen assistant, created by the shell. */
@@ -224,7 +201,7 @@ export const StudioChat: React.FC<{
     void currentVoice.enqueueSpeechChunk("", true);
   }, []);
   const turnIdRef = useRef(0);
-  const isSpeakingStreaming = useRef(false);
+  const hasSpokenModelTokens = useRef(false);
 
   const send = useCallback(
     async (text: string, options?: SubmitOptions) => {
@@ -261,7 +238,7 @@ export const StudioChat: React.FC<{
         images: images.length > 0 ? images : undefined,
         tokensCount: Math.max(1, Math.ceil(prompt.length / 4)),
       });
-      isSpeakingStreaming.current = false;
+      hasSpokenModelTokens.current = false;
       addMessageToEngine("frontier", {
         role: "assistant",
         content: "",
@@ -282,21 +259,37 @@ export const StudioChat: React.FC<{
       const currentVoice = voiceRef.current;
       if (
         currentVoice &&
-        currentVoice.mode === "conversation" &&
-        currentVoice.state !== "idle" &&
         currentVoice.settings.speakReplies &&
+        (currentVoice.mode === "conversation" || currentVoice.state !== "idle") &&
         typed
       ) {
         const ack = getImmediateAcknowledgment(typed);
         if (ack) {
-          isSpeakingStreaming.current = true;
           void currentVoice.enqueueSpeechChunk(ack, false);
         }
       }
 
       let accumulated = "";
-      let spokenLength = 0;
-      let streamedSentences = 0;
+      const isFreshConversation = history.length === 0 || history.every((m) => !m.content || m.role === "system");
+      const director = new VoiceDirector({
+        isFreshConversation,
+        maxStreamedChunks: STREAMED_SENTENCE_LIMIT,
+        onSpeechChunk: (chunk, isFinal) => {
+          if (currentTurnId !== turnIdRef.current) return;
+          const currentVoice = voiceRef.current;
+          if (
+            currentVoice &&
+            currentVoice.settings.speakReplies &&
+            (currentVoice.mode === "conversation" || currentVoice.state !== "idle")
+          ) {
+            if (chunk && !isNonSpeechOrBlank(chunk)) {
+              hasSpokenModelTokens.current = true;
+            }
+            void currentVoice.enqueueSpeechChunk(chunk, isFinal);
+          }
+        },
+      });
+
       await AIService.streamMessage(
         agentSelection?.engine ?? "frontier",
         prompt,
@@ -305,35 +298,23 @@ export const StudioChat: React.FC<{
           onToken: (token) => {
             if (currentTurnId !== turnIdRef.current) return;
             accumulated += token;
+            const textToDisplay = !isFreshConversation ? sanitizeOngoingAssist(accumulated) : accumulated;
             updateLastMessageInEngine("frontier", () => ({
-              content: accumulated,
-              tokensCount: Math.max(1, Math.ceil(accumulated.length / 4)),
+              content: textToDisplay,
+              tokensCount: Math.max(1, Math.ceil(textToDisplay.length / 4)),
               isStreaming: true,
             }));
 
-            if (runRef.current) runRef.current.lastText = accumulated;
+            if (runRef.current) runRef.current.lastText = textToDisplay;
 
-            // Streaming speech: say the opening sentences as they arrive rather
-            // than waiting for the whole message. After the first few, hold the
-            // rest — a long answer is summarised at the end, not read in full.
+            // Route tokens to real-time Voice Director agent to curate speech
             const currentVoice = voiceRef.current;
             if (
               currentVoice &&
-              currentVoice.mode === "conversation" &&
-              currentVoice.state !== "idle" &&
               currentVoice.settings.speakReplies &&
-              (!currentVoice.settings.summariseLongReplies || streamedSentences < STREAMED_SENTENCE_LIMIT)
+              (currentVoice.mode === "conversation" || currentVoice.state !== "idle")
             ) {
-              const pending = accumulated.slice(spokenLength);
-              // Match completed sentences or paragraph breaks
-              const sentenceMatch = pending.match(/^([\s\S]+?[.!?](?:\s+|$)|[\s\S]+?\n\n+)/);
-              if (sentenceMatch) {
-                const sentence = sentenceMatch[1];
-                spokenLength += sentence.length;
-                streamedSentences += 1;
-                isSpeakingStreaming.current = true;
-                void currentVoice.enqueueSpeechChunk(sentence, false);
-              }
+              director.pushToken(token);
             }
           },
           onToolCall: (call) => {
@@ -347,7 +328,7 @@ export const StudioChat: React.FC<{
             }
             // The voice layer's running commentary: one plain line when a step
             // starts, and the outcome of a test or build run.
-            const line = describeToolCall(call);
+            const line = director.onToolCall(call) ?? describeToolCall(call);
             if (line) voiceRef.current?.noteProgress(line);
             // Replace in place when the same call transitions running →
             // completed, so a step updates rather than duplicating.
@@ -377,8 +358,10 @@ export const StudioChat: React.FC<{
                 durationMs: data.telemetry.totalDurationMs,
               });
             }
+            const full = data.fullText || accumulated;
+            const cleanFull = !isFreshConversation ? sanitizeOngoingAssist(full) : full;
             updateLastMessageInEngine("frontier", () => ({
-              content: data.fullText,
+              content: cleanFull,
               isStreaming: false,
               costUsd: data.costUsd,
               costLabel: data.costLabel,
@@ -391,25 +374,26 @@ export const StudioChat: React.FC<{
             if (runRef.current) runRef.current.finishedAt = Date.now();
             runRef.current = null;
 
-            // What is left to say: the part that was not read while streaming.
+            // What is left to say: curated by Voice Director
             const currentVoice = voiceRef.current;
             if (
               currentVoice &&
-              currentVoice.mode === "conversation" &&
-              currentVoice.state !== "idle" &&
-              currentVoice.settings.speakReplies
+              currentVoice.settings.speakReplies &&
+              (currentVoice.mode === "conversation" || currentVoice.state !== "idle")
             ) {
-              const full = data.fullText || accumulated;
-              const remaining = full.slice(spokenLength);
-              spokenLength = full.length;
-              // The streaming path owns the read-back from here. Without this
-              // flag the settle effect below read short replies a second time.
-              isSpeakingStreaming.current = true;
-              void speakRemainder(currentVoice, remaining, currentTurnId);
+              const spokenLen = director.getSpokenLength();
+              const remaining = cleanFull.slice(spokenLen);
+              if (currentVoice.settings.summariseLongReplies && remaining.length > 250) {
+                hasSpokenModelTokens.current = true;
+                void speakRemainder(currentVoice, remaining, currentTurnId);
+              } else {
+                director.finish(cleanFull);
+              }
             }
           },
           onError: (failure) => {
             if (currentTurnId !== turnIdRef.current) return;
+            director.abort();
             runRef.current = null;
             const currentVoice = voiceRef.current;
             if (currentVoice && currentVoice.mode === "conversation" && currentVoice.state !== "idle") {
@@ -548,20 +532,30 @@ export const StudioChat: React.FC<{
     return () => assistant.attachVoice(null);
   }, [assistant, voice]);
 
-  // When a reply settles during a hands-free turn, read it back. Not while the
-  // assistant is speaking: two voices over one another is worse than either.
+  // When a reply settles, ensure it is spoken if it hasn't been spoken yet.
   useEffect(() => {
-    if (isStreaming || voice.mode !== "conversation" || voice.state === "idle") return;
+    if (isStreaming) return;
+    const currentVoice = voiceRef.current;
+    if (!currentVoice || !currentVoice.settings.speakReplies) return;
+    if (currentVoice.mode !== "conversation" && currentVoice.state === "idle") return;
+
     const last = messages[messages.length - 1];
     if (!last || last.role !== "assistant" || !last.content) return;
     if (spokenFor.current === last.id) return;
     spokenFor.current = last.id;
-    if (isSpeakingStreaming.current) {
-      isSpeakingStreaming.current = false;
+
+    if (hasSpokenModelTokens.current) {
+      hasSpokenModelTokens.current = false;
       return;
     }
-    void voice.speakReply(speakableText(last.content));
-  }, [isStreaming, messages, voice]);
+
+    const isOngoing = messages.filter((m) => m.role !== "system").length > 2;
+    const finalContent = isOngoing ? sanitizeOngoingAssist(last.content) : last.content;
+    const cleanSpeech = speakableText(finalContent).trim();
+    if (cleanSpeech && !isNonSpeechOrBlank(cleanSpeech)) {
+      void currentVoice.speakReply(cleanSpeech);
+    }
+  }, [isStreaming, messages]);
 
   /* ── Scrolling ─────────────────────────────────────────────────────────── */
 
@@ -643,6 +637,7 @@ export const StudioChat: React.FC<{
                 size={68}
                 state={voice.state}
                 level={voice.level}
+                caption={voice.narration ?? voice.transcript ?? undefined}
                 badge={
                   voice.state === "idle"
                     ? 'Say "Hey Temy"'
@@ -769,7 +764,7 @@ export const StudioChat: React.FC<{
               {commandApproval.pending && (
                 <CommandApprovalPrompt
                   request={commandApproval.pending}
-                  onApprove={commandApproval.approve}
+                  onApprove={(remember) => commandApproval.approve(remember)}
                   onDeny={commandApproval.deny}
                 />
               )}

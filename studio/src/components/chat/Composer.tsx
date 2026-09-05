@@ -229,30 +229,31 @@ export const Composer: React.FC<ComposerProps> = ({
         </p>
       )}
 
-      {conversation && !tall && (
-        <div className="w-full flex flex-col items-center gap-1 pb-3.5 overflow-visible">
-          <div className="relative p-2 overflow-visible animate-float">
-            <VoiceOrb
-              state={voice.state}
-              level={voice.level}
-              size={56}
-              onClick={() => void voice.stop()}
-              title="Click to end voice conversation"
-            />
-          </div>
-          {/* What the assistant last said about the run, or how it read what
-              you said over it. A decision you cannot see is one you cannot
-              correct, so "keep going" shows as carrying on, not as silence. */}
-          {(() => {
-            const caption = voiceCaption(voice, streaming);
-            return caption ? (
+      {conversation && !tall && (() => {
+        const caption = voiceCaption(voice, streaming);
+        return (
+          <div className="w-full flex flex-col items-center gap-1 pb-3.5 overflow-visible">
+            <div className="relative p-2 overflow-visible animate-float">
+              <VoiceOrb
+                state={voice.state}
+                level={voice.level}
+                size={56}
+                caption={caption ?? undefined}
+                onClick={() => void voice.stop()}
+                title="Click to end voice conversation"
+              />
+            </div>
+            {/* What the assistant last said about the run, or how it read what
+                you said over it. A decision you cannot see is one you cannot
+                correct, so "keep going" shows as carrying on, not as silence. */}
+            {caption ? (
               <p className="max-w-[28rem] px-2 text-2xs text-ink-muted text-center truncate" aria-live="polite">
                 {caption}
               </p>
-            ) : null;
-          })()}
-        </div>
-      )}
+            ) : null}
+          </div>
+        );
+      })()}
 
       {conversation ? (
         /* ChatGPT Astra Voice Input Bar — matches Screenshot 1, 2, 3 */

@@ -1,10 +1,11 @@
 import React, { useEffect, useRef } from "react";
 import { CornerDownLeft } from "lucide-react";
-import type { AgentCommandRequest } from "../../services/agentCommands";
+import { commandHead, type AgentCommandRequest } from "../../services/agentCommands";
 
 interface CommandApprovalPromptProps {
   request: AgentCommandRequest | null;
-  onApprove: () => void;
+  /** `remember` allows every later command with the same executable. */
+  onApprove: (remember?: boolean) => void;
   onDeny: () => void;
 }
 
@@ -30,7 +31,9 @@ export const CommandApprovalPrompt: React.FC<CommandApprovalPromptProps> = ({ re
         onDeny();
       } else if (event.key === "Enter" && !event.shiftKey) {
         event.preventDefault();
-        onApprove();
+        // Shift is taken by the composer's newline, so the modifier for
+        // "and stop asking" is the one that is free.
+        onApprove(event.metaKey || event.altKey);
       }
     };
     window.addEventListener("keydown", onKeyDown);
@@ -56,10 +59,23 @@ export const CommandApprovalPrompt: React.FC<CommandApprovalPromptProps> = ({ re
       <button
         ref={runRef}
         type="button"
-        onClick={onApprove}
+        onClick={() => onApprove(false)}
         className="flex items-center gap-1 px-2 h-6 rounded-md bg-success/15 text-success font-semibold hover:bg-success/25 focus-visible:outline focus-visible:outline-1 focus-visible:outline-success transition-colors flex-shrink-0"
       >
         Run <CornerDownLeft size={9} className="opacity-60" />
+      </button>
+
+      {/* Approving the same executable repeatedly is the friction that makes
+          people turn the gate off altogether. The unit is the executable, so
+          "always" covers `open -a Safari` after `open -a VLC` and still stops
+          at `rm`. */}
+      <button
+        type="button"
+        onClick={() => onApprove(true)}
+        title={`Run this and every later ${commandHead(request.command)} command this session`}
+        className="px-2 h-6 rounded-md text-ink-muted font-semibold hover:bg-surface-hover hover:text-ink-high focus-visible:outline focus-visible:outline-1 focus-visible:outline-edge-popover transition-colors flex-shrink-0"
+      >
+        Always {commandHead(request.command)}
       </button>
 
       <button
