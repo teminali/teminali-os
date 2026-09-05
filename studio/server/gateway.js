@@ -1,7 +1,7 @@
 import { createHash, randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
 import http from "node:http";
 import { dirname } from "node:path";
-import { Readable } from "node:stream";
+import { Readable, pipeline } from "node:stream";
 import {
   MODEL_MODES,
   PROFILES,
@@ -1392,7 +1392,16 @@ export async function createGateway(options = {}) {
             language: typeof speakRequest.language === "string" ? speakRequest.language : "en-US",
             voice: typeof speakRequest.voice === "string" ? speakRequest.voice : null,
             rate: Number.isFinite(speakRequest.rate) ? speakRequest.rate : 1,
+            stream: speakRequest.stream === true,
           }, { allowVibeVoice });
+          if (audio.stream) {
+            response.writeHead(200, { "content-type": audio.contentType, "cache-control": "no-store" });
+            // The studio hanging up (a barge-in) must reach the sidecar, which
+            // stops rendering. `pipeline` destroys the upstream when the
+            // response closes early; nothing here is an error to report.
+            pipeline(audio.stream, response, () => {});
+            return;
+          }
           response.writeHead(200, {
             "content-type": audio.contentType,
             "content-length": audio.body.length,

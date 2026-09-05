@@ -4,8 +4,9 @@ import assert from "node:assert/strict";
 import {
   assessTranscript, dominantScript, isDegenerate, isScriptMismatch, isSilenceArtefact,
 } from "../transcript-guard.js";
-import { encodeWav, rms, voicedFraction, SAMPLE_RATE } from "../audio.js";
-import { splitClauses } from "../tts.js";
+import { encodeWav, float32ToPcm16, rms, voicedFraction, SAMPLE_RATE } from "../audio.js";
+import { SPEECH_STREAM_TYPE, decodeFrames, encodeFrame } from "../stream.js";
+import { clauseOffsets, splitClauses } from "../tts.js";
 import { describeSound, isReportableSound, selectSounds } from "../sounds.js";
 
 /* ── Hallucination guards ─────────────────────────────────────────────────── */
@@ -117,6 +118,60 @@ test("a clause with nothing to break on is cut on word count", () => {
 
 test("a short line stays whole", () => {
   assert.deepEqual(splitClauses("Two edits were made."), ["Two edits were made."]);
+});
+
+test("a conjunction opens the next clause instead of vanishing", () => {
+  // Until 2026-09-05 the break consumed it: "I tried, it failed" was what got spoken.
+  assert.deepEqual(splitClauses("I tried but it failed"), ["I tried", "but it failed"]);
+  assert.deepEqual(splitClauses("I read the file, and then I ran the tests."),
+    ["I read the file,", "and then I ran the tests."]);
+  // Every word of the text is still spoken, in order.
+  const text = "It compiled, so I ran it, because that is what you asked, which took a while.";
+  assert.equal(splitClauses(text).join(" "), text);
+});
+
+/* ── Clause offsets and stream framing ────────────────────────────────────── */
+
+test("every clause is placed in the text it came from", () => {
+  const text = "I read the file,  and then\nI ran the tests. Two of them failed.";
+  const clauses = splitClauses(text);
+  const offsets = clauseOffsets(text, clauses);
+  assert.equal(offsets.length, clauses.length);
+  for (const [i, { start, end }] of offsets.entries()) {
+    assert.equal(text.slice(start, end).replace(/\s+/g, " "), clauses[i].replace(/\s+/g, " "));
+    if (i > 0) assert.ok(start >= offsets[i - 1].end, "offsets are monotonic");
+  }
+  assert.equal(offsets[0].start, 0);
+  assert.equal(offsets.at(-1).end, text.length);
+});
+
+test("a clause that cannot be placed still moves the cursor forward", () => {
+  assert.deepEqual(clauseOffsets("abc def", ["zzz", "def"]), [{ start: 0, end: 3 }, { start: 4, end: 7 }]);
+});
+
+test("a frame round-trips its header and body", () => {
+  const body = float32ToPcm16(new Float32Array([0, 1, -1]));
+  const audio = encodeFrame({ clause: "Hi,", start: 0, end: 3, sampleRate: 24_000, samples: 3 }, body);
+  const done = encodeFrame({ done: true });
+  const { frames, rest } = decodeFrames(Buffer.concat([audio, done]));
+  assert.equal(frames.length, 2);
+  assert.deepEqual(frames[0].header, { clause: "Hi,", start: 0, end: 3, sampleRate: 24_000, samples: 3 });
+  assert.equal(frames[0].body.length, 6);
+  assert.equal(frames[0].body.readInt16LE(2), 32767);
+  assert.deepEqual(frames[1].header, { done: true });
+  assert.equal(frames[1].body.length, 0);
+  assert.equal(rest.length, 0);
+  assert.equal(SPEECH_STREAM_TYPE, "application/vnd.teminali.speech-stream");
+});
+
+test("a half-received frame waits for the rest rather than being parsed in half", () => {
+  const frame = encodeFrame({ clause: "Hi", start: 0, end: 2, sampleRate: 24_000, samples: 2 }, Buffer.alloc(4));
+  for (const cut of [2, 6, frame.length - 1]) {
+    const { frames, rest } = decodeFrames(frame.subarray(0, cut));
+    assert.equal(frames.length, 0, `cut at ${cut}`);
+    assert.equal(rest.length, cut);
+  }
+  assert.equal(decodeFrames(frame).frames.length, 1);
 });
 
 /* ── Sound labels ─────────────────────────────────────────────────────────── */

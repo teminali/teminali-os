@@ -20,6 +20,8 @@
  */
 
 import { GatewayClient } from "../../gatewayClient";
+import { playSpeechStream } from "../clausePlayer";
+import { isSpeechStream } from "../speechStream";
 import {
   VoiceError,
   type AmbientSound,
@@ -336,9 +338,17 @@ export class VibeVoiceProvider implements VoiceProvider {
         language: options.language,
         voice: options.voice ?? null,
         rate: options.rate ?? 1,
+        // Ask for clause frames when the sidecar renders them, so the reply
+        // starts speaking after the first clause. A whole-file engine ignores
+        // the flag and answers with one WAV, which the path below plays.
+        stream: this.capabilities.streamingTts,
       }),
     });
     await GatewayClient.expectOk(response);
+
+    if (isSpeechStream(response.headers.get("content-type"))) {
+      return playSpeechStream(response, options, controller);
+    }
 
     const blob = await response.blob();
     const url = URL.createObjectURL(blob);

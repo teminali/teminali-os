@@ -122,7 +122,7 @@ is the complete list.
 | --- | --- | --- | --- |
 | `GET` | `/api/voice/status` | bearer | Whether the speech sidecar is up, and whether it offers ASR, TTS or both — each is routed independently, so a sidecar advertising only one is not asked for the other. Reports `gated: "voice.vibevoice"` when the plan cannot reach the sidecar tier, which no plan is since 2026-09-05. |
 | `POST` | `/api/voice/transcribe` | bearer | Speech to text. Refused when no ASR is available at all; served by whisper.cpp rather than the sidecar when the sidecar offers no `asr`, or when the plan does not carry `voice.vibevoice` (every plan does since 2026-09-05). Multipart fields: `audio`, `language` (`auto` guesses, and guesses badly on short or non-English takes), and `maxSegmentChars` — pass it and the local engine returns `segments` with real millisecond `startMs`/`endMs`, which is what a caption track needs. The sidecar returns none. |
-| `POST` | `/api/voice/speak` | bearer | Text to speech. Refused when no TTS is available at all; served by the system voices rather than the sidecar when the sidecar offers no `tts`, or when the plan does not carry `voice.vibevoice` (every plan does since 2026-09-05). |
+| `POST` | `/api/voice/speak` | bearer | Text to speech. Refused when no TTS is available at all; served by the system voices rather than the sidecar when the sidecar offers no `tts`, or when the plan does not carry `voice.vibevoice` (every plan does since 2026-09-05). Send `stream: true` to receive clause frames (`application/vnd.teminali.speech-stream`, see `docs/VOICE_SIDECAR.md`) relayed as the sidecar renders them; a whole-file engine ignores the flag and answers `audio/wav` with a length. |
 
 ### Entitlement
 

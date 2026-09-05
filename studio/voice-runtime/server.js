@@ -9,10 +9,11 @@
  * models load instead of waiting on a probe that cannot answer in time.
  */
 import { createServer } from "node:http";
-import { encodeWav } from "./audio.js";
+import { encodeWav, float32ToPcm16 } from "./audio.js";
 import { ASR_LANGUAGES, ASR_MODEL, loadAsr, transcribeClip } from "./asr.js";
 import { SOUND_MODEL, loadSounds } from "./sounds.js";
-import { DEFAULT_VOICE, TTS_MODEL, loadTts, listVoices, synthesise } from "./tts.js";
+import { SPEECH_STREAM_TYPE, encodeFrame } from "./stream.js";
+import { DEFAULT_VOICE, TTS_MODEL, loadTts, listVoices, synthesise, synthesiseClauses } from "./tts.js";
 
 const MAX_AUDIO_BYTES = Number(process.env.TEMINALI_VOICE_MAX_AUDIO_BYTES || 25 * 1024 * 1024);
 
@@ -80,6 +81,44 @@ async function readAudioPart(body, contentType) {
   };
 }
 
+/**
+ * The streaming form of `/speak`. Headers go out before the first clause is
+ * rendered, each clause follows as a frame the moment it is ready, and the
+ * render stops when the studio hangs up: a barge-in must not leave the CPU
+ * finishing a sentence nobody will hear. Inference holds the event loop, so the
+ * closed socket is noticed at the next clause boundary, not instantly; the
+ * clause rendered in between is discarded.
+ */
+async function streamSpeech(response, text, options, log) {
+  const controller = new AbortController();
+  response.on("close", () => controller.abort());
+  // Node holds the status line and headers until the first write, so they
+  // reach the wire with the first clause; the gateway's timeout covers that.
+  response.writeHead(200, { "content-type": SPEECH_STREAM_TYPE, "cache-control": "no-store" });
+
+  let sent = 0;
+  try {
+    for await (const clause of synthesiseClauses(text, { ...options, signal: controller.signal })) {
+      if (controller.signal.aborted) break;
+      const header = {
+        clause: clause.clause,
+        start: clause.start,
+        end: clause.end,
+        sampleRate: clause.sampleRate,
+        samples: clause.samples.length,
+      };
+      response.write(encodeFrame(header, float32ToPcm16(clause.samples)));
+      sent += 1;
+    }
+    if (controller.signal.aborted) log(`[voice] speak stream cut off by the client after ${sent} clause(s)`);
+    else response.write(encodeFrame({ done: true }));
+  } catch (error) {
+    log(`[voice] POST /speak stream failed after ${sent} clause(s): ${error?.message}`);
+    if (!controller.signal.aborted) response.write(encodeFrame({ error: error?.message ?? "Synthesis failed." }));
+  }
+  response.end();
+}
+
 export function createVoiceServer({ log = console.error } = {}) {
   return createServer(async (request, response) => {
     const url = new URL(request.url, "http://127.0.0.1");
@@ -89,7 +128,9 @@ export function createVoiceServer({ log = console.error } = {}) {
         if (warm.asr) {
           body.asr = { model: ASR_MODEL, languages: ASR_LANGUAGES, streaming: false, embedding: false, sounds: warm.sounds };
         }
-        if (warm.tts) body.tts = { model: TTS_MODEL, voices: warm.voices, streaming: false };
+        // `streaming` means `/speak` accepts `"stream": true` and answers in
+        // clause frames; a whole-file request is still served without it.
+        if (warm.tts) body.tts = { model: TTS_MODEL, voices: warm.voices, streaming: true };
         return json(response, 200, body);
       }
 
@@ -113,10 +154,9 @@ export function createVoiceServer({ log = console.error } = {}) {
         if (!warm.tts) return json(response, 503, { error: "Synthesis is still loading." });
         const payload = JSON.parse((await readBody(request)).toString("utf8") || "{}");
         if (!payload.text?.trim()) return json(response, 400, { error: "Nothing to speak." });
-        const { samples, sampleRate } = await synthesise(payload.text, {
-          voice: payload.voice || DEFAULT_VOICE,
-          rate: payload.rate,
-        });
+        const options = { voice: payload.voice || DEFAULT_VOICE, rate: payload.rate };
+        if (payload.stream === true) return streamSpeech(response, payload.text, options, log);
+        const { samples, sampleRate } = await synthesise(payload.text, options);
         const wav = encodeWav(samples, sampleRate);
         response.writeHead(200, { "content-type": "audio/wav", "content-length": wav.length });
         return response.end(wav);

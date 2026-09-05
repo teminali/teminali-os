@@ -7,6 +7,8 @@
  * entire file before returning anything. Long text is therefore split on
  * clause boundaries and rendered piece by piece: the same total work, but the
  * first audio is ready in the time it takes to say the first clause.
+ * `synthesiseClauses` hands each clause out as it lands, which is what the
+ * streaming form of `/speak` sends; `synthesise` is the same loop concatenated.
  */
 import { KokoroTTS } from "kokoro-js";
 
@@ -20,8 +22,17 @@ export const DEFAULT_VOICE = process.env.TEMINALI_TTS_VOICE || "af_heart";
  * A clause is the unit of synthesis. Kokoro's own splitter breaks on sentences
  * only, so a single long sentence would render as one 4-second block and give
  * up the latency win entirely.
+ *
+ * A conjunction opens the next clause rather than being the break itself:
+ * until 2026-09-05 the split consumed it, so "I tried, but it failed" was
+ * spoken as "I tried, it failed". Two conjunctions in a row ("and then") stay
+ * together, because "and" on its own is not a clause anyone would say.
  */
-const CLAUSE_BREAK = /(?<=[.!?,;:])\s+|(?<=\s)(?:and|but|so|because|then|which|while)\s+/gi;
+const CONJUNCTION = "(?:and|but|so|because|then|which|while)";
+const CLAUSE_BREAK = new RegExp(
+  `(?<=[.!?,;:])\\s+|(?<=\\s)(?<!\\b${CONJUNCTION}\\s)(?=${CONJUNCTION}\\s)`,
+  "gi",
+);
 const MAX_CLAUSE_WORDS = 18;
 
 let loading = null;
@@ -52,6 +63,30 @@ export function splitClauses(text, maxWords = MAX_CLAUSE_WORDS) {
   return clauses.length ? clauses : [String(text ?? "").trim()].filter(Boolean);
 }
 
+const escapeRegExp = (value) => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+/**
+ * Where each clause sits in the original text, as `[start, end)` character
+ * offsets. `splitClauses` trims and re-spaces, so the match tolerates any run
+ * of whitespace; a clause that still cannot be placed is assumed to follow the
+ * previous one, which keeps the offsets monotonic rather than exact.
+ */
+export function clauseOffsets(text, clauses) {
+  const source = String(text ?? "");
+  const offsets = [];
+  let cursor = 0;
+  for (const clause of clauses) {
+    const pattern = new RegExp(clause.split(/\s+/).map(escapeRegExp).join("\\s+"), "g");
+    pattern.lastIndex = cursor;
+    const match = pattern.exec(source);
+    const start = match ? match.index : cursor;
+    const end = match ? match.index + match[0].length : Math.min(source.length, cursor + clause.length);
+    offsets.push({ start, end });
+    cursor = end;
+  }
+  return offsets;
+}
+
 /** The voices this build serves, for `/status`. */
 export async function listVoices() {
   const tts = await loadTts();
@@ -60,24 +95,44 @@ export async function listVoices() {
 }
 
 /**
- * Render text to a single float32 waveform.
+ * Render clause by clause, yielding each one the moment it is ready:
+ * `{ clause, start, end, samples, sampleRate }`, with `start`/`end` the
+ * clause's character offsets in `text`.
  *
  * `rate` is the studio's pace multiplier, which `speakable.ts#paceFor` has
  * already shaped for the length of the line; it maps straight onto Kokoro's
  * `speed`, clamped to the range the model stays intelligible in.
+ *
+ * Rendering stops when `signal` aborts. A barge-in must not leave the CPU
+ * finishing a sentence nobody will hear.
  */
-export async function synthesise(text, { voice = DEFAULT_VOICE, rate = 1 } = {}) {
+export async function* synthesiseClauses(text, { voice = DEFAULT_VOICE, rate = 1, signal } = {}) {
   const tts = await loadTts();
   const speed = Math.max(0.5, Math.min(2, Number(rate) || 1));
   const clauses = splitClauses(text);
   if (!clauses.length) throw new Error("Nothing to speak.");
+  const offsets = clauseOffsets(text, clauses);
 
+  for (let i = 0; i < clauses.length; i += 1) {
+    if (signal?.aborted) return;
+    const audio = await tts.generate(clauses[i], { voice, speed });
+    yield {
+      clause: clauses[i],
+      start: offsets[i].start,
+      end: offsets[i].end,
+      samples: audio.audio,
+      sampleRate: audio.sampling_rate ?? 24_000,
+    };
+  }
+}
+
+/** Render text to a single float32 waveform: `synthesiseClauses`, concatenated. */
+export async function synthesise(text, options = {}) {
   const rendered = [];
   let sampleRate = 24_000;
-  for (const clause of clauses) {
-    const audio = await tts.generate(clause, { voice, speed });
-    rendered.push(audio.audio);
-    sampleRate = audio.sampling_rate ?? sampleRate;
+  for await (const clause of synthesiseClauses(text, options)) {
+    rendered.push(clause.samples);
+    sampleRate = clause.sampleRate;
   }
 
   const total = rendered.reduce((sum, part) => sum + part.length, 0);

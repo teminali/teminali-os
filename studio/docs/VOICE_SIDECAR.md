@@ -51,6 +51,10 @@ built-in tier for whatever is missing rather than losing voice altogether, and
 `server/voice.js` routes the two independently — until 2026-09-05 it did not,
 and a sidecar advertising only `tts` was still sent audio to transcribe.
 
+`tts.streaming` means `/speak` accepts `"stream": true` and answers in clause
+frames (below). A backend that renders whole files says `false` and is only
+ever asked for whole files.
+
 Advertising a capability only once its model is warm is the recommended way to
 start: a cold `{}` is read as "no models here" and costs the operator nothing,
 whereas a `/status` that blocks on a model load will exceed the gateway's 2.5 s
@@ -102,10 +106,49 @@ why that is where the labels are worth anything anyway.
 ### `POST /speak`
 
 ```json
-{ "text": "Three edits were made.", "language": "en-US", "voice": null, "rate": 1.0 }
+{ "text": "Three edits were made.", "language": "en-US", "voice": null, "rate": 1.0, "stream": false }
 ```
 
 Responds with audio bytes (`audio/wav` or `audio/mpeg`).
+
+#### Streaming
+
+When `"stream": true` is sent and `/status` advertised `"streaming": true` under
+`tts`, respond `200` with `content-type: application/vnd.teminali.speech-stream`
+and write one frame per rendered clause the moment it is rendered, so the studio
+starts playing after the first clause instead of after the whole reply. The
+status line and headers are written before rendering starts, but Node holds
+them until the first `write`, so on the wire they arrive with the first clause
+frame: a relay that waits for headers is waiting for the first clause, and its
+timeout bounds exactly that.
+
+```
+u32be headerLength | header JSON (UTF-8) | u32be bodyLength | body
+```
+
+- **Audio frame.** Header `{ "clause", "start", "end", "sampleRate", "samples" }`,
+  body `samples` × 16-bit little-endian mono PCM. `start`/`end` are character
+  offsets of the clause in `text` as sent; the studio uses them to report how
+  much of a reply was heard when the operator cuts in.
+- **Last frame.** `{ "done": true }` with an empty body. A stream that ends
+  without it was cut off; the studio plays what arrived and stops.
+- **Failure after the headers went out.** `{ "error": "..." }` with an empty
+  body, then end.
+
+Stop rendering when the connection closes. The studio hangs up on a barge-in
+and the gateway propagates it; a sidecar that keeps rendering is spending CPU on
+a sentence nobody will hear. Inference holds the event loop, so the closed
+socket is noticed at a clause boundary rather than instantly. Measured through
+the gateway from the app on 2026-09-05: the studio cut in during the second
+clause and the sidecar stopped after writing its fourth. Frames written in that
+window are discarded, and a reply requested in it starts late by the abandoned
+clause's render (its first clause came at 3.2 s instead of 1.2 s).
+
+A request without `stream`, or to a backend that does not stream, is answered
+with the whole file exactly as before. The gateway (`server/voice.js`) relays a
+streamed reply without parsing it, and the studio's reader is
+`src/services/voice/speechStream.ts`; each carries its own copy of the framing,
+because the contract is this document, not a shared import.
 
 ## Running it
 

@@ -1733,7 +1733,37 @@ as unvoiced — what makes the model hallucinate is featureless audio, not quiet
 audio. A rejected clip returns empty text and is indistinguishable from silence
 to the studio, which is the point.
 
-Neither route streams, and `/status` says so rather than claiming otherwise.
+**Synthesis streams; recognition does not.** `/speak` with `"stream": true`
+answers in clause frames — a length-prefixed JSON header and a body of 16-bit
+PCM per clause, written the moment Kokoro returns it (`voice-runtime/stream.js`;
+contract in `docs/VOICE_SIDECAR.md`). The gateway relays the bytes as they
+arrive: `server/voice.js#speak` hands back a stream instead of a buffer and the
+route pipes it. `src/services/voice/clausePlayer.ts` schedules each clause on a
+shared AudioContext to start the instant the previous one ends, so a reply plays
+as one utterance while its tail is still rendering. Measured on the M4 Pro for a
+36-word reply (13.4 s of speech): first audio at 1.1 s, where the whole-file
+path delivered it at 6.2 s; the total render is unchanged. Verified in the
+app's runtime on 2026-09-05 (Electron 44, the real `clausePlayer.ts` against
+the relay and the sidecar) for a 50-word reply (18.5 s of speech): the first
+clause was scheduled at 1.35 s where the whole file arrived at 9.2 s, six
+clauses played with no gap between them, and `onEnd` reported all 276
+characters. A barge-in 2.5 s in reported 35 characters, inside the second
+clause. `speak()` resolves
+when the first clause is scheduled, which keeps `onStart`'s meaning. Each
+frame's `start`/`end` are character offsets into the text, so `onBoundary`
+fires with the real offset of each clause and a barge-in reports the clause it
+landed in (`speechStream.ts#heardChars`) rather than a proportion of the
+playback clock. Hanging up propagates: `pipeline` destroys the upstream when the
+studio aborts, and the sidecar stops rendering at the next clause boundary
+(measured: cut in during clause two, the sidecar stopped after writing clause
+four). The whole-file
+path is untouched and still serves macOS `say` and any sidecar that answers
+`audio/wav`. `/transcribe` still takes one complete clip, and `asr.streaming`
+stays `false`.
+
+The same change fixed the clause splitter. Its break pattern consumed the
+conjunction it split on, so "I tried, but it failed" was spoken as "I tried, it
+failed". A conjunction now opens the next clause, and "and then" stays together.
 
 ### 6.4 What it overheard (`ambientMemory.ts`, 2026-09-05)
 

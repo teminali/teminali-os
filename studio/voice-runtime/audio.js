@@ -94,6 +94,16 @@ export function voicedFraction(samples, sampleRate = SAMPLE_RATE) {
   return energies.filter((energy) => energy > threshold).length / energies.length;
 }
 
+/** Float32 samples to little-endian 16-bit PCM, clamped so full scale cannot wrap. */
+export function float32ToPcm16(samples) {
+  const body = Buffer.alloc(samples.length * 2);
+  for (let i = 0; i < samples.length; i += 1) {
+    const clamped = Math.max(-1, Math.min(1, samples[i]));
+    body.writeInt16LE(Math.round(clamped * 32767), i * 2);
+  }
+  return body;
+}
+
 /** 16-bit PCM WAV, the format the studio's audio element will play. */
 export function encodeWav(samples, sampleRate = 24_000) {
   const header = Buffer.alloc(44);
@@ -111,11 +121,5 @@ export function encodeWav(samples, sampleRate = 24_000) {
   header.writeUInt16LE(16, 34);
   header.write("data", 36);
   header.writeUInt32LE(bytes, 40);
-
-  const body = Buffer.alloc(bytes);
-  for (let i = 0; i < samples.length; i += 1) {
-    const clamped = Math.max(-1, Math.min(1, samples[i]));
-    body.writeInt16LE(Math.round(clamped * 32767), i * 2);
-  }
-  return Buffer.concat([header, body]);
+  return Buffer.concat([header, float32ToPcm16(samples)]);
 }

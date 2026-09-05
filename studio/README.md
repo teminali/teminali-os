@@ -186,7 +186,8 @@ Local by default: **whisper.cpp** for recognition, macOS `say` for synthesis. An
 optional sidecar on `127.0.0.1:8321` upgrades either or both, and
 [`voice-runtime/`](voice-runtime/README.md) is the one shipped in this repo:
 Whisper, Kokoro-82M and an AudioSet sound classifier on CPU, started with
-`npm run voice:serve`. The browser
+`npm run voice:serve`. Its synthesis streams clause by clause, so a long reply
+starts speaking after its first clause. The browser
 speech engine is the always-available fallback. Each capability is routed
 independently, so a sidecar serving only synthesis still leaves recognition on
 the local tier. Push-to-talk dictation and
@@ -556,7 +557,7 @@ ollama serve              # local models on 127.0.0.1:11434
 
 ```bash
 npm run typecheck   # tsc --noEmit
-npm test            # 943 tests, 0 failures
+npm test            # 956 tests, 0 failures
 npm run build       # tsc && vite build
 npm run verify:core # all three
 ```

@@ -8,7 +8,7 @@ knowledge of which models sit behind them:
 | --- | --- | --- |
 | `GET /status` | — | Advertises only the capabilities that are already warm. |
 | `POST /transcribe` | Whisper (`onnx-community/whisper-base`) | multipart `audio` + `language`. |
-| `POST /speak` | Kokoro-82M (`onnx-community/Kokoro-82M-v1.0-ONNX`) | JSON in, `audio/wav` out. |
+| `POST /speak` | Kokoro-82M (`onnx-community/Kokoro-82M-v1.0-ONNX`) | JSON in, `audio/wav` out; with `"stream": true`, one frame per clause as it renders. |
 
 Both run on CPU through `onnxruntime-node`. Nothing leaves the machine.
 
@@ -140,15 +140,28 @@ An M4 Pro, int8, warm, over loopback:
 
 Long text is split on clause boundaries before synthesis (`splitClauses`).
 Kokoro's own splitter breaks on sentences only, so a single long sentence would
-render as one block and give up the latency win entirely.
+render as one block and give up the latency win entirely. A conjunction opens
+the next clause rather than being the break: until 2026-09-05 the split
+consumed it, and "I tried, but it failed" was spoken as "I tried, it failed".
+
+With `"stream": true` each clause is written as a frame (`stream.js`, format in
+[`../docs/VOICE_SIDECAR.md`](../docs/VOICE_SIDECAR.md)) the moment Kokoro
+returns it, and `/status` says `"streaming": true` under `tts`. Measured on this
+machine for a 36-word reply (13.4 s of speech): the first clause is on the wire
+at 1.1 s, where the whole file arrived at 6.2 s; the total render is the same.
+Each frame carries the clause's character offsets, so the studio can say how
+much of a reply was heard when the operator cuts in. The render stops when the
+client hangs up, at a clause boundary: inference holds the event loop, so the
+closed socket is noticed between clauses and the clause rendered in between is
+discarded. Measured through the gateway from the app on 2026-09-05: the studio
+cut in during the second clause and the sidecar stopped after writing its
+fourth, and a reply requested in that window got its first clause at 3.2 s
+instead of 1.2 s.
 
 ## Known limits
 
-- **Neither route streams.** `/speak` returns one complete WAV and `/transcribe`
-  takes one complete clip; `/status` says `"streaming": false` for both, which
-  is honest rather than aspirational. Streaming synthesis is the obvious next
-  step and is what would make a long reply start speaking in ~0.5 s instead of
-  after the whole render.
+- **`/transcribe` does not stream.** It takes one complete clip, and `/status`
+  says `"streaming": false` under `asr`. `/speak` streams since 2026-09-05.
 - **No speaker embedding.** `/status` reports `"embedding": false`, so the
   "only respond to my voice" gate falls back to the studio's own MFCC matcher.
 - **`confidence` is derived from voiced fraction**, not from the model — the
@@ -159,11 +172,11 @@ render as one block and give up the latency win entirely.
 ## Tests
 
 ```bash
-node --test tests/*.test.mjs     # 19 tests, no model required
+node --test tests/*.test.mjs     # 24 tests, no model required
 ```
 
-They cover the guards, the WAV header, clause splitting and every rule about
-which sounds are worth reporting — everything that runs without loading a model.
+They cover the guards, the WAV header, clause splitting and offsets, the stream
+framing, and every rule about which sounds are worth reporting — everything that runs without loading a model.
 `selectSounds` is separated from `classifySounds` for exactly this reason: the
 judgement is testable without the classifier. The end-to-end paths are exercised
 by hand against a running sidecar.

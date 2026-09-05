@@ -12,7 +12,9 @@
  *
  *   GET  /status      -> { asr?: {...}, tts?: {...} }
  *   POST /transcribe  -> multipart audio in, { text, language, ... } out
- *   POST /speak       -> { text, language, voice, rate } in, audio bytes out
+ *   POST /speak       -> { text, language, voice, rate, stream? } in; audio
+ *                        bytes out, or clause frames as they render when
+ *                        `stream` was asked for and `/status` offered it
  *
  * Reference implementation and model choices are documented in
  * docs/VOICE_SIDECAR.md.
@@ -31,7 +33,16 @@
  * anything having failed.
  */
 
+import { Readable } from "node:stream";
+
 import { localAsrStatus, localTtsStatus, speakLocal, transcribeLocal } from "./speech-local.js";
+
+/**
+ * The content type of a streamed `/speak` reply: one frame per rendered
+ * clause, defined in docs/VOICE_SIDECAR.md. The gateway never parses it — it
+ * relays the bytes as they arrive and lets the studio's player do the reading.
+ */
+export const SPEECH_STREAM_TYPE = "application/vnd.teminali.speech-stream";
 
 /**
  * Cached probe, so an always-open microphone does not poll a dead port.
@@ -187,7 +198,12 @@ export async function transcribe(config, {
   }
 }
 
-/** Render text to speech and stream the audio back. */
+/**
+ * Render text to speech. Answers `{ contentType, body }` with the whole file,
+ * or `{ contentType, stream }` when the sidecar was asked to stream and did:
+ * the first clause reaches the studio while the last is still rendering, which
+ * is the entire point, so the reply is relayed rather than buffered.
+ */
 export async function speak(config, payload, { allowVibeVoice = true } = {}) {
   const status = await voiceStatus(config, { allowVibeVoice });
   // As in `transcribe`: a sidecar with no `tts` falls back rather than being
@@ -216,11 +232,16 @@ export async function speak(config, payload, { allowVibeVoice = true } = {}) {
         code: "VOICE_SPEAK_FAILED",
       });
     }
-    return {
-      contentType: response.headers.get("content-type") || "audio/wav",
-      body: Buffer.from(await response.arrayBuffer()),
-    };
+    const contentType = response.headers.get("content-type") || "audio/wav";
+    if (contentType.startsWith(SPEECH_STREAM_TYPE) && response.body) {
+      return { contentType, stream: Readable.fromWeb(response.body) };
+    }
+    return { contentType, body: Buffer.from(await response.arrayBuffer()) };
   } finally {
+    // Clears the guard. The sidecar's headers reach us with its first clause
+    // frame (Node holds them until the first write), so the guard bounds the
+    // time to the first clause; a stream that is already flowing is bounded by
+    // the operator, who can cut it off, not by a timer.
     done();
   }
 }
