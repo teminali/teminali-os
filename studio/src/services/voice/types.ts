@@ -128,6 +128,13 @@ export interface RecognitionSession {
   stop: () => void;
   /** Abandon without waiting for a final result. */
   abort: () => void;
+  /**
+   * Chunked engines only. Close the slice being recorded now and deliver the
+   * utterance so far as one final result, without stopping the session. The
+   * endpointer calls it the moment a turn ends, so the tail of the sentence is
+   * not left waiting for the next slice boundary (or lost to the next turn).
+   */
+  flush?: () => void;
   readonly active: boolean;
 }
 

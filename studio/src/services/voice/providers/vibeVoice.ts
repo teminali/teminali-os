@@ -60,8 +60,20 @@ interface TranscribeResponse {
  * the whole utterance instead: feeding it 700ms slices would transcribe each
  * fragment out of context and produce far worse text than one pass over the
  * complete sentence.
+ *
+ * A slice boundary is never allowed to add its own latency to a turn: when the
+ * endpointer fires, `flush()` closes the open slice at once instead of waiting
+ * out the remainder of these 700ms.
  */
 const CHUNK_MS = 700;
+/**
+ * Longest a flush waits for its slices to come back before delivering what it
+ * has. It must stay under the engine's `STREAMING_FINAL_TIMEOUT_MS` (1200 ms):
+ * that fallback commits the transcript without the flushed tail, which is the
+ * very thing the flush exists to prevent, so a flush that outlasts it would
+ * never be the one to deliver.
+ */
+const FLUSH_SETTLE_MS = 900;
 
 export class VibeVoiceProvider implements VoiceProvider {
   capabilities: ProviderCapabilities = {
@@ -155,6 +167,9 @@ export class VibeVoiceProvider implements VoiceProvider {
     let active = true;
     let settled = "";
     let inFlight = 0;
+    /** Slices requested by `flush` whose `dataavailable` has not fired yet. */
+    let pendingSlices = 0;
+    let flushing = false;
     /** Buffered audio for the single-pass path. */
     const parts: Blob[] = [];
 
@@ -167,6 +182,7 @@ export class VibeVoiceProvider implements VoiceProvider {
     };
 
     recorder.ondataavailable = async (event) => {
+      if (pendingSlices > 0) pendingSlices -= 1;
       if (!active || event.data.size < 1200) return;
       if (!streaming) {
         // Hold everything; the whole utterance is transcribed on stop.
@@ -201,6 +217,37 @@ export class VibeVoiceProvider implements VoiceProvider {
       } finally {
         inFlight -= 1;
       }
+    };
+
+    /**
+     * The turn is over: close the slice being recorded, wait for it and any
+     * slice still in flight to come back, then hand over the whole utterance
+     * as one final result and start the next turn's transcript empty. The
+     * recorder keeps running — the session stays open for the next turn.
+     */
+    const flush = () => {
+      if (!active || !streaming || flushing) return;
+      flushing = true;
+      if (recorder.state === "recording") {
+        pendingSlices += 1;
+        recorder.requestData();
+      }
+      const startedAt = Date.now();
+      const settle = () => {
+        if (!active) return;
+        const waiting = pendingSlices > 0 || inFlight > 0;
+        if (waiting && Date.now() - startedAt < FLUSH_SETTLE_MS) {
+          window.setTimeout(settle, 30);
+          return;
+        }
+        flushing = false;
+        const text = settled.trim();
+        settled = "";
+        // Empty included: it is what lets the engine stop waiting on a turn
+        // that transcribed to nothing.
+        handlers.onResult({ transcript: text, isFinal: true, confidence: -1, language: "" });
+      };
+      window.setTimeout(settle, 30);
     };
 
     recorder.onstop = async () => {
@@ -269,6 +316,7 @@ export class VibeVoiceProvider implements VoiceProvider {
       stop: () => {
         if (recorder.state !== "inactive") recorder.stop();
       },
+      ...(streaming ? { flush } : {}),
       abort: close,
     };
   }

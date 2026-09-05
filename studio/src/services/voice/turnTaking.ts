@@ -4,12 +4,26 @@
  * A fixed silence timer is what makes most voice assistants feel robotic: too
  * short and it cuts you off mid-thought, too long and every exchange drags. We
  * use an adaptive endpointer instead. Silence starts the clock, but how long
- * that clock runs depends on whether the sentence sounds finished:
+ * that clock runs depends on whether the sentence sounds finished, judged two
+ * ways and blended:
  *
+ *   Syntax — the transcript so far, when the recogniser has given us one:
  *   - trailing "and", "but", "so", a preposition, a comma  → wait longer
  *   - a complete clause with a verb and an object          → fire sooner
- *   - a question that we just asked                        → fire sooner
  *   - mid-word or mid-number                               → wait longer
+ *
+ *   Prosody — the audio of the last few hundred milliseconds (`prosody.ts`):
+ *   - energy trailing off and pitch falling                → fire sooner
+ *   - level energy, or pitch rising (a question, an open   → wait longer
+ *     clause)
+ *
+ *   And either way, a reply to a question we just asked   → fire sooner
+ *
+ * Prosody matters because a one-shot recogniser (the sidecar's Whisper) has no
+ * transcript to offer until the recording closes. Before it was added, that
+ * empty transcript scored as "clearly unfinished" and every hands-free turn
+ * waited the full ceiling. An unknown syntax now counts as unknown, not as
+ * incomplete, and the audio decides.
  *
  * The result is that "open the file, uhh…" holds the turn while "open the file"
  * releases it, which is the difference between an assistant that listens and
@@ -52,15 +66,24 @@ export const DEFAULT_ENDPOINTER: EndpointerConfig = {
 export type TurnEvent =
   | { type: "speech-start" }
   /** The speaker paused but we are still holding the turn open. */
-  | { type: "holding"; remainingMs: number }
-  | { type: "speech-end"; durationMs: number; reason: "endpoint" | "max-length" }
+  | { type: "holding"; remainingMs: number; windowMs: number }
+  | { type: "speech-end"; durationMs: number; reason: "endpoint" | "max-length"; windowMs: number }
   /** Speech too short to be a turn — discarded without disturbing the state. */
   | { type: "discarded"; durationMs: number };
+
+/** Per-frame evidence beyond the VAD bit and the transcript. */
+export interface PushExtras {
+  /** End-of-turn likelihood from the audio, 0–1, or null when there is not enough of it yet. */
+  prosody?: number | null;
+  /** Frame time in ms; defaults to `Date.now()`. Tests pass it to drive the clock. */
+  at?: number;
+}
 
 /**
  * Scores how finished a transcript sounds, 0 (clearly mid-thought) to 1
  * (clearly complete). Purely lexical — no model call, so it costs nothing and
- * runs every frame.
+ * runs every frame. An empty transcript scores 0 here; `syntaxFinality` is
+ * the caller that knows empty means "unknown" rather than "unfinished".
  */
 export function completenessScore(text: string): number {
   const trimmed = text.trim();
@@ -94,6 +117,38 @@ export function completenessScore(text: string): number {
   }
 
   return Math.max(0, Math.min(1, score));
+}
+
+/** The syntactic finality, or null when there is no transcript to read. */
+export function syntaxFinality(text: string): number | null {
+  return text.trim() ? completenessScore(text) : null;
+}
+
+/**
+ * Blend the two finality estimates. Either may be unknown: a one-shot
+ * recogniser has no transcript mid-utterance, and a turn shorter than the
+ * prosody window has no tail to read. Both unknown is neutral — the midpoint
+ * of the window — not the ceiling.
+ */
+export function combineFinality(syntax: number | null, prosody: number | null): number {
+  if (syntax === null && prosody === null) return 0.5;
+  if (syntax === null) return prosody as number;
+  if (prosody === null) return syntax;
+  return 0.5 * syntax + 0.5 * prosody;
+}
+
+/**
+ * Interpolate between the min and max windows by how finished it sounds:
+ * finality 1 → `minSilenceMs`, 0 → `maxSilenceMs`. Right after we asked
+ * something the operator's reply is expected, so `eager` shortens the window
+ * — and its floor — by 30% without risking a cut-off.
+ */
+export function silenceWindowMs(config: EndpointerConfig, finality: number, eager = false): number {
+  const { minSilenceMs, maxSilenceMs } = config;
+  const clamped = Math.max(0, Math.min(1, finality));
+  let window = maxSilenceMs - (maxSilenceMs - minSilenceMs) * clamped;
+  if (eager) window *= 0.7;
+  return Math.round(Math.max(minSilenceMs * (eager ? 0.7 : 1), window));
 }
 
 /**
@@ -133,9 +188,10 @@ export class Endpointer {
    * @param voiced      whether this frame carried speech
    * @param transcript  best transcript so far, used to size the silence window
    * @param eager       shorten the window — set when we just asked a question
+   * @param extras      prosodic finality for this frame, and the frame clock
    */
-  push(voiced: boolean, transcript: string, eager = false): TurnEvent | null {
-    const now = Date.now();
+  push(voiced: boolean, transcript: string, eager = false, extras: PushExtras = {}): TurnEvent | null {
+    const now = extras.at ?? Date.now();
     if (this.lastFrameAt) this.frameMs = Math.min(120, Math.max(8, now - this.lastFrameAt));
     this.lastFrameAt = now;
 
@@ -157,29 +213,20 @@ export class Endpointer {
     if (!this.speaking) return null;
 
     this.silenceRun += this.frameMs;
-    const window = this.silenceWindow(transcript, eager);
+    const window = this.silenceWindow(transcript, eager, extras.prosody ?? null);
 
     if (this.silenceRun >= window) {
       const durationMs = now - this.speechStartedAt - this.silenceRun;
       this.speaking = false;
       this.silenceRun = 0;
       if (durationMs < this.config.minUtteranceMs) return { type: "discarded", durationMs };
-      return { type: "speech-end", durationMs, reason: "endpoint" };
+      return { type: "speech-end", durationMs, reason: "endpoint", windowMs: window };
     }
 
-    return { type: "holding", remainingMs: window - this.silenceRun };
+    return { type: "holding", remainingMs: window - this.silenceRun, windowMs: window };
   }
 
-  /** Interpolate between the min and max windows by how finished it sounds. */
-  private silenceWindow(transcript: string, eager: boolean): number {
-    const { minSilenceMs, maxSilenceMs } = this.config;
-    const complete = completenessScore(transcript);
-    const span = maxSilenceMs - minSilenceMs;
-    // complete === 1 -> minSilenceMs; complete === 0 -> maxSilenceMs
-    let window = maxSilenceMs - span * complete;
-    // Right after we asked something, the operator's reply is expected, so we
-    // can commit faster without risking a cut-off.
-    if (eager) window *= 0.7;
-    return Math.round(Math.max(minSilenceMs * (eager ? 0.7 : 1), window));
+  private silenceWindow(transcript: string, eager: boolean, prosody: number | null): number {
+    return silenceWindowMs(this.config, combineFinality(syntaxFinality(transcript), prosody), eager);
   }
 }

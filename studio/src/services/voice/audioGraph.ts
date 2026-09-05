@@ -3,7 +3,8 @@
  *
  * One shared WebAudio graph feeds everything downstream: the level meter the
  * HUD draws, the voice-activity detector that decides when a turn starts and
- * ends, and the rolling PCM buffer the speaker matcher reads from.
+ * ends, the per-frame pitch the endpointer's prosody reads (`prosody.ts`), and
+ * the rolling PCM buffer the speaker matcher reads from.
  *
  * Echo cancellation matters more here than anywhere else. In conversation mode
  * the microphone stays open while the assistant is speaking, so without the
@@ -12,9 +13,12 @@
  * what makes barge-in possible instead of a feedback loop.
  */
 
+import { estimatePitch } from "./prosody";
 import { VoiceError } from "./types";
 
 export interface AudioFrame {
+  /** Wall-clock ms the frame was read — the endpointer's clock. */
+  at: number;
   /** Root-mean-square amplitude of the frame, 0–1. */
   rms: number;
   /** RMS mapped to a perceptual 0–1 for the meter. */
@@ -25,6 +29,8 @@ export interface AudioFrame {
   voiced: boolean;
   /** Spectral centroid in Hz — separates speech from steady-state hum. */
   centroid: number;
+  /** Fundamental frequency in Hz on a voiced, periodic frame; 0 otherwise. */
+  pitch: number;
   /** Raw time-domain samples for this frame. */
   samples: Float32Array;
 }
@@ -236,16 +242,20 @@ export class AudioGraph {
     const margin = this.ducked ? 4.2 : 2.6;
     const speechBand = centroid > 180 && centroid < 4200;
     const voiced = rms > Math.max(floor * margin, 0.006) && speechBand;
+    // Only voiced frames pay for the autocorrelation; silence has no pitch.
+    const pitch = voiced ? estimatePitch(this.timeData, this.sampleRate).f0 : 0;
 
     this.floor.update(rms, voiced);
     this.appendHistory(this.timeData);
 
     this.options.onFrame?.({
+      at: Date.now(),
       rms,
       level: Math.min(1, Math.sqrt(rms) * 3.2),
       noiseFloor: floor,
       voiced,
       centroid,
+      pitch,
       samples: this.timeData,
     });
   }
