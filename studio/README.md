@@ -159,8 +159,9 @@ descriptions of which button to press.
 emits a ```` ```player-tool ```` fence holding `{"action":…,"value":…}` and
 `services/playerToolCalls.ts` hands it straight to the mounted pane — no
 gateway, no run stream, because the pane is in the same renderer. It accepts
-the same seventeen actions the MCP tool does, and a test asserts the two lists
-are identical. Its prompt block carries what the player is showing *right now*,
+the same seventeen actions the MCP tool does, plus one the CLI lane gets as a
+separate `player` tool: `status`, which reads what is showing and changes
+nothing. A test asserts that is the *only* difference between the two lists. Its prompt block carries what the player is showing *right now*,
 so "play it" needs no clarifying question, and says in as many words that the
 player is not the Teminali Cut timeline: without that, a model asked to play an
 open file reached for `video-tool`, read the timeline instead, and reported
@@ -873,7 +874,7 @@ ollama serve              # local models on 127.0.0.1:11434
 
 ```bash
 npm run typecheck   # tsc --noEmit
-npm test            # 1615 tests, 0 failures
+npm test            # 1617 tests, 0 failures
 npm run build       # tsc && vite build
 npm run verify:core # all three
 ```

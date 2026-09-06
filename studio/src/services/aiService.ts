@@ -12,8 +12,8 @@ import { AgentCliService, type AgentStreamCallbacks, type PermissionRequest } fr
 import { TerminalService } from "./terminalService";
 import { FrontierEngine, type EngineCapabilities, type StreamCallbacks, type VideoToolSummary } from "./frontierEngine";
 import { executeTool, getToolManifest } from "../video/mcp/toolRegistry";
-import { dispatchPlayerCommand, PLAYER_ACTIONS, type PlayerSnapshot } from "./playerControl";
-import { describeLivePlayer } from "./playerToolCalls";
+import { dispatchPlayerCommand, type PlayerCommand, type PlayerSnapshot } from "./playerControl";
+import { describeLivePlayer, LOCAL_PLAYER_ACTIONS, PLAYER_READ_ACTION } from "./playerToolCalls";
 import { usePlayerStore } from "../store/playerStore";
 import type { AgentCommandRequest } from "./agentCommands";
 import type { TurnOrigin } from "./voice/types";
@@ -126,10 +126,18 @@ function studioCapabilities(workingDirectory?: string): EngineCapabilities {
       long way round — gateway route, run stream, `dispatchPlayerCommand` — and
       lands on the identical listener, so both lanes drive one player.
     */
-    playerActions: PLAYER_ACTIONS,
+    playerActions: LOCAL_PLAYER_ACTIONS,
     playerState: () => describeLivePlayer(usePlayerStore.getState().live),
     runPlayer: async (command) => {
-      const delivered = dispatchPlayerCommand(command);
+      // The read never reaches a pane. Dispatching it would ask the player to
+      // perform "status", which no pane implements, and the honest answer is
+      // already in the store.
+      if (command.action === PLAYER_READ_ACTION) {
+        return { delivered: true, snapshot: usePlayerStore.getState().live };
+      }
+      // Narrowed by the return above: everything past it is one of the pane's
+      // own actions, which is what `PlayerCommand` means.
+      const delivered = dispatchPlayerCommand(command as PlayerCommand);
       if (!delivered) {
         return {
           delivered: false,

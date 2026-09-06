@@ -1333,12 +1333,27 @@ Three things are deliberate:
   to change. `settledPlayerState` waits for the next publish and gives up after
   600 ms, since an already-paused file produces none.
 
+**The verbs alone were not enough.** Shipped without a read action, the first
+thing the operator saw was a loop: the model asked for `{"action":"status"}`,
+was refused, apologised, and asked again — six times, 66 seconds, no answer and
+nothing spoken until it was over. The CLI lane splits reading (`player`) from
+acting (`player_control`); one fence has no room for that, so `status` is a
+local-lane action and `LOCAL_PLAYER_ACTIONS` is `PLAYER_ACTIONS` plus exactly
+that one — the test asserts the difference is exactly one, in that direction.
+Its aliases (`state`, `current`, `describe`, `get_state`) are accepted rather
+than corrected, because every refusal costs a whole round trip on a 9 t/s model.
+
+`progressNarration.ts` grew a `player.*` case in the same change. The generic
+fallback said *"Using player dot seek by"* — the interface describing itself
+instead of narrating — and these are the only tool calls whose result the
+operator can also *see*, so the words have to match what the pane is doing.
+
 A malformed fence comes back as a sentence — `"seek" needs a numeric "value"`
 — for the reason the gateway's refusals do: the reader is a model that will
 try again, and a code is a dead end. A mistyped tag (```` ```player_tool ````,
 ```` ```player ````) is executed anyway; a ```` ```json ```` block never is.
 
-Tested in `tests/player-tool-calls.test.mjs` (16), including a parity test that
+Tested in `tests/player-tool-calls.test.mjs` (18), including a parity test that
 reads `server/player-state.js` and asserts the fence accepts exactly the
 actions the gateway does.
 

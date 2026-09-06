@@ -131,6 +131,35 @@ export function describeToolCall(call: NarratableToolCall): string | null {
     return "Handing part of this to a helper.";
   }
   if (/(^|_)(todo|plan)(_|$)/.test(name)) return "Updating the plan.";
+  /*
+    The player, said the way a person would say it.
+
+    The generic fallback below would read "Using player dot seek by", which is
+    the interface describing itself instead of narrating. These are the only
+    tool calls the operator can *see* the result of, so the words have to match
+    what the pane is visibly doing.
+  */
+  if (/^player[._]/.test(name)) {
+    switch (name.split(/[._]/)[1]) {
+      case "status": return "Checking what the player is showing.";
+      case "play": return "Playing it.";
+      case "pause": return "Pausing it.";
+      case "toggle": return "Toggling playback.";
+      case "restart": return "Starting it over.";
+      case "seek": case "seek_by": case "seekby": return "Skipping to another point.";
+      case "volume": return "Changing the volume.";
+      case "mute": return "Muting it.";
+      case "unmute": return "Unmuting it.";
+      case "rate": return "Changing the speed.";
+      case "subtitles": return "Changing the subtitles.";
+      case "fullscreen": return "Going fullscreen.";
+      case "next": return "Moving to the next one.";
+      case "previous": return "Going back one.";
+      case "episode": return "Starting that episode.";
+      case "episodes": return "Opening the episode list.";
+      default: return "Working the player.";
+    }
+  }
   return `Using ${name.replace(/[_-]+/g, " ")}.`;
 }
 

@@ -19,7 +19,7 @@
 // looking at, and writes nothing. A prompt before every pause would make the
 // tool not worth calling.
 import type { ToolCall } from "../types";
-import { PLAYER_ACTIONS, type PlayerAction, type PlayerCommand, type PlayerSnapshot } from "./playerControl.ts";
+import { PLAYER_ACTIONS, type PlayerAction, type PlayerSnapshot } from "./playerControl.ts";
 
 /**
  * Only an explicit opt-in fence is executed, for the same reason the shell and
@@ -35,6 +35,28 @@ const PLAYER_FENCE = /```player-tool[^\n]*\n([\s\S]*?)(?:```|$)/g;
  * understood the protocol and mistyped the tag has earned its call.
  */
 const FALLBACK_FENCE = /```(?:player_tool|playertool|player-control|player_control|player)[^\n]*\n([\s\S]*?)(?:```|$)/g;
+
+/**
+ * Reading the player is an action here, and it is not in `PLAYER_ACTIONS`.
+ *
+ * The agent CLI lane has two tools — `player` reads, `player_control` acts —
+ * and one fence has no room for that split. A model given only verbs asks for
+ * `{"action":"status"}`, is refused, apologises, and asks again; six times, in
+ * front of the operator, before it says anything. `status` reads the snapshot
+ * and changes nothing.
+ */
+export const PLAYER_READ_ACTION = "status";
+const READ_ALIASES = new Set(["status", "state", "current", "describe", "get_state", "player"]);
+
+/** Every action this fence accepts: the gateway's verbs, plus the read. */
+export const LOCAL_PLAYER_ACTIONS = [PLAYER_READ_ACTION, ...PLAYER_ACTIONS] as const;
+
+export type LocalPlayerAction = PlayerAction | typeof PLAYER_READ_ACTION;
+
+export interface LocalPlayerCommand {
+  action: LocalPlayerAction;
+  value?: number | string | boolean;
+}
 
 /** Actions whose `value` is required, and what it has to be. */
 const VALUE_RULES: Partial<Record<PlayerAction, "number" | "string" | "boolean">> = {
@@ -63,7 +85,7 @@ function tryParse(text: string): unknown {
 
 /** One parsed command, or the sentence explaining why it is not one. */
 export interface PlayerToolRequest {
-  command: PlayerCommand;
+  command: LocalPlayerCommand;
 }
 
 export interface PlayerToolRejection {
@@ -85,13 +107,16 @@ export function checkPlayerCommand(raw: unknown): PlayerToolRequest | PlayerTool
   // model that has just used that one writes it here out of habit. Unwrap it
   // rather than refusing: the intent is unambiguous.
   const body = isRecord(raw.arguments) ? { ...raw.arguments, ...(raw.action ? { action: raw.action } : {}) } : raw;
-  const action = typeof body.action === "string" ? body.action.trim().toLowerCase() : "";
-  if (!action) return { raw, reason: `no "action" — one of: ${PLAYER_ACTIONS.join(", ")}` };
-  if (!(PLAYER_ACTIONS as readonly string[]).includes(action)) {
-    return { raw, reason: `"${action}" is not a player action. Use one of: ${PLAYER_ACTIONS.join(", ")}` };
+  const wanted = typeof body.action === "string" ? body.action.trim().toLowerCase() : "";
+  // A model that wants to look writes any of half a dozen words. They all mean
+  // the same thing here, and refusing five of them buys nothing but a retry.
+  const action = READ_ALIASES.has(wanted) ? PLAYER_READ_ACTION : wanted;
+  if (!action) return { raw, reason: `no "action" — one of: ${LOCAL_PLAYER_ACTIONS.join(", ")}` };
+  if (!(LOCAL_PLAYER_ACTIONS as readonly string[]).includes(action)) {
+    return { raw, reason: `"${wanted}" is not a player action. Use one of: ${LOCAL_PLAYER_ACTIONS.join(", ")}` };
   }
   const rule = VALUE_RULES[action as PlayerAction];
-  if (!rule) return { command: { action: action as PlayerAction } };
+  if (!rule) return { command: { action: action as LocalPlayerAction } };
 
   let value = body.value;
   // A local model writes `"value": "30"` about as often as it writes 30, and
@@ -112,7 +137,7 @@ export function checkPlayerCommand(raw: unknown): PlayerToolRequest | PlayerTool
   } else if (rule === "boolean") {
     if (typeof value !== "boolean") return { raw, reason: `"${action}" needs a boolean "value"` };
   }
-  return { command: { action: action as PlayerAction, value: value as number | string | boolean } };
+  return { command: { action: action as LocalPlayerAction, value: value as number | string | boolean } };
 }
 
 function toRequests(body: string): (PlayerToolRequest | PlayerToolRejection)[] {
@@ -148,7 +173,7 @@ export function isRejection(item: PlayerToolRequest | PlayerToolRejection): item
 }
 
 export interface PlayerToolExecution {
-  command: PlayerCommand | null;
+  command: LocalPlayerCommand | null;
   ok: boolean;
   /** What the player was showing after the command, in a sentence. */
   note: string;
@@ -164,7 +189,7 @@ export interface PlayerToolExecution {
  * contract the editor runner has with `executeTool`.
  */
 export type PlayerExecutor = (
-  command: PlayerCommand,
+  command: LocalPlayerCommand,
 ) => Promise<{ delivered: boolean; snapshot: PlayerSnapshot | null; error?: string }>;
 
 export interface RunPlayerToolCallsOptions {

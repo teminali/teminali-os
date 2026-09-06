@@ -32,6 +32,7 @@ import {
   parsePlayerToolCalls,
 } from "../src/services/playerToolCalls.ts";
 import { PLAYER_ACTIONS } from "../src/services/playerControl.ts";
+import { LOCAL_PLAYER_ACTIONS, PLAYER_READ_ACTION } from "../src/services/playerToolCalls.ts";
 
 const here = dirname(fileURLToPath(import.meta.url));
 
@@ -121,6 +122,13 @@ test("every action the gateway accepts, this fence accepts too", () => {
   assert.ok(list, "server/player-state.js must still export a frozen PLAYER_ACTIONS list");
   const serverActions = [...list[1].matchAll(/"([a-z_]+)"/g)].map((match) => match[1]);
   assert.deepEqual([...PLAYER_ACTIONS].sort(), serverActions.sort());
+  // The fence accepts one more than the gateway does, and only one: reading.
+  // The CLI lane reads with a separate `player` tool; a fence has no room for
+  // that split, and a model with only verbs loops asking for status.
+  assert.deepEqual(
+    LOCAL_PLAYER_ACTIONS.filter((action) => !serverActions.includes(action)),
+    [PLAYER_READ_ACTION],
+  );
   // A value each rule accepts, so the loop proves the action is known rather
   // than re-testing the value rules a test above already covers.
   const value = { subtitles: "English", fullscreen: true };
@@ -186,4 +194,20 @@ test("a gallery is described with the action that starts an episode", () => {
 test("what the player cannot play is said, not hidden behind paused", () => {
   const described = describeLivePlayer(snapshot({ playing: false, error: "unsupported codec" }));
   assert.match(described, /cannot play \(unsupported codec\)/);
+});
+
+test("asking to read the player is an action, not a refusal and a retry", () => {
+  // The loop the operator watched: six `{"action":"status"}` fences, six
+  // refusals, six apologies, sixty-six seconds, and no answer.
+  for (const word of ["status", "state", "current", "describe", "get_state"]) {
+    const checked = checkPlayerCommand({ action: word });
+    assert.equal(isRejection(checked), false, word);
+    assert.equal(checked.command.action, PLAYER_READ_ACTION);
+  }
+});
+
+test("a refusal names the read action too, so looking is always reachable", () => {
+  const checked = checkPlayerCommand({ action: "rewind_a_bit" });
+  assert.equal(isRejection(checked), true);
+  assert.ok(checked.reason.includes(PLAYER_READ_ACTION));
 });
