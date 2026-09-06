@@ -78,8 +78,9 @@ test("the engine splices the notice into the system prompt it already builds", a
   const engine = await read("services/frontierEngine.ts");
   assert.match(engine, /origin: TurnOrigin = "text",/);
   assert.match(engine, /const transcriptInstruction = transcriptNotice\(origin\);/);
-  // One system message, not a second mechanism: the fragment lands beside the
-  // skill, editor and multi-agent sections in the same template.
-  assert.match(engine, /\$\{multiAgentPrompt\}\$\{transcriptInstruction\}/);
+  // One system message, not a second mechanism: the fragment is a section of
+  // the same budgeted assembly as the skill, editor and multi-agent blocks —
+  // and a required one, because a spoken turn read as typed is answered wrong.
+  assert.match(engine, /\{ name: "transcript", required: true, text: transcriptInstruction \}/);
   assert.equal(engine.split("transcriptInstruction").length - 1, 2);
 });

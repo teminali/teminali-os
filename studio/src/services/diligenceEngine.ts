@@ -179,6 +179,11 @@ export class DiligenceEngine {
 4. Say what your number measures. A size from \`du\` is binary (GiB) while Finder shows decimal (GB); a count from \`find\` may include symlinks. Name the caveat so a mismatch does not read as an error.
 5. Report the commands you actually ran and what they returned. Never describe the result of a command whose output you did not receive — end your turn at the closing fence and wait, because the real output comes back to you before you answer again.`;
 
+  /** The doctrine on its own, for a caller assembling a prompt under a budget. */
+  public static doctrine(): string {
+    return this.DOCTRINE;
+  }
+
   public static wrapSystemPrompt(basePrompt: string): string {
     return `${basePrompt}\n\n${this.DOCTRINE}`;
   }

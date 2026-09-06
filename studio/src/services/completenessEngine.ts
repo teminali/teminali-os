@@ -107,19 +107,30 @@ NON-NEGOTIABLE OUTPUT QUALITY:
 - Icons as inline SVG. Never reference an image path you have not created — a broken asset is a failed build.
 - Include <meta name="description"> on a full page.`;
 
+  private static MANDATE = `[FRONTIER ABSOLUTE COMPLETENESS & ZERO-HALF-WORK MANDATE]:
+1. You are forbidden from emitting "// TODO", "// implement later", or mock placeholders.
+2. Every component must be 100% complete, fully styled, and completely wired with working event handlers, state hooks, and error handling.
+3. If creating an algorithm, build the entire working mathematical implementation.
+4. If styling a UI, match every single pixel, color gradient, margin, and responsiveness rule completely.`;
+
+  /** The completeness mandate, on its own. */
+  public static mandate(): string {
+    return this.MANDATE;
+  }
+
+  /**
+   * The visual contract, on its own. It only earns its place when the model is
+   * about to author UI, which is why the engine ranks it last under a budget.
+   */
+  public static houseStyle(): string {
+    return this.HOUSE_STYLE;
+  }
+
   /**
    * Enforces prompt instructions with the Absolute Completeness Mandate
    */
   public static wrapSystemPrompt(basePrompt: string): string {
-    return `${basePrompt}
-
-[FRONTIER ABSOLUTE COMPLETENESS & ZERO-HALF-WORK MANDATE]:
-1. You are forbidden from emitting "// TODO", "// implement later", or mock placeholders.
-2. Every component must be 100% complete, fully styled, and completely wired with working event handlers, state hooks, and error handling.
-3. If creating an algorithm, build the entire working mathematical implementation.
-4. If styling a UI, match every single pixel, color gradient, margin, and responsiveness rule completely.
-
-${this.HOUSE_STYLE}`;
+    return `${basePrompt}\n\n${this.MANDATE}\n\n${this.HOUSE_STYLE}`;
   }
   /**
    * Audits the files a model just emitted against the delivery rules that

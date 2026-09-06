@@ -275,6 +275,9 @@ export interface RunAgentCommandsOptions {
 }
 
 const DEFAULT_MAX_COMMANDS = 4;
+// A fallback for a caller that names no window. The engine passes the lane's
+// real allowance from contextBudget.ts — a share of the model's window, not a
+// constant — and this figure is what a 10k window would be given.
 const DEFAULT_MAX_OUTPUT_CHARS = 4_000;
 
 /**

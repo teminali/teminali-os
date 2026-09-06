@@ -1574,13 +1574,52 @@ exit code is not the whole truth — had nothing to read. Measured on a run
 that exits 0 while printing `2 failed, 8 passed`: the fold showed
 `exit 0 · 900 ms` and the assistant said *“Tests passed.”*
 `runAgentCommands` (`services/agentCommands.ts`) now leads with the exit line
-and follows it with the output, capped at the same 4,000 characters the model's
-own observation is; the same run now shows the failure and says *“Tests
-failed — looking at that.”* The exit line is kept and leads because it
+and follows it with the output, capped at the lane's tool-result allowance (see
+**The context budget** below); the same run now shows the failure and says
+*“Tests failed — looking at that.”* The exit line is kept and leads because it
 is worth knowing and no lane carries it otherwise. `videoToolCalls.ts` and
 `playerToolCalls.ts` already put a real result in the field and are unchanged.
 Pinned end to end — emitter through narrator — in
 `tests/agent-commands.test.mjs`.
+
+**The context budget** (`services/contextBudget.ts`). Every character Teminali
+puts in front of a local model is a share of the window that model actually
+has, never a constant. The measurement that forced this, taken on
+`frontier-qwen2.5-coder-14b-8k` by asking it to tokenise its own prompt: the
+assembled system prompt was **3,127 tokens — 38% of an 8,192-token window** —
+before one message of history, the operator's sentence, or a tool result. Six
+history messages at the old 4,000-character cap could add another ~5,000
+tokens, so the window overflowed before the prompt being answered was even
+appended. Asked to play a song with the player fence wired, the model answered
+in prose and emitted no fence: there was no room to think in.
+
+The mechanism is one module and per-lane calibration. `budgetFor(engine,
+windowTokens)` derives four limits from the window — system prompt 22%,
+history 30%, any single message 12%, one tool result 10%, the rest left for the
+answer — at a chars-per-token rate that was measured, not assumed (4.63 on the
+real prompt; tool output is planned at a pessimistic 3.2). The local lane's
+window is `selection.contextTokens`, the `-8k`/`-32k` its Modelfile pins.
+`assemblePrompt` takes the system prompt as **named sections in priority order**
+and drops whole sections from the tail when the budget is spent — never
+mid-sentence, because a model follows the half it can see — and reports what it
+dropped in `InferenceTelemetry.contextBudget`. `fitHistory` keeps turns newest
+first within their share, clamping each on its own so one pasted file cannot
+evict the turns around it. The ranking is written down in
+`frontierEngine.ts`: the operator's contract and the live state of any mounted
+surface are `required`; the concise doctrine outranks the long mandate that
+says the same thing; the visual house style is last because it matters only
+when authoring UI and was costing every "play that song" turn 1,858
+characters. Measured after, same model, same prompt: **1,848 tokens, 23%** at
+8k with five sections dropped; at 32k everything fits at 11%.
+
+**The CLI lanes are deliberately not governed.** Claude Code and Codex compact
+their own context against their own windows; a cap sized for an 8k local model
+would starve a 200k one and discard detail the agent's own compactor kept. So
+they get the same shape of budget from their real window — `governed: false`,
+every ceiling more than four times the largest local window's — and nothing in
+`agentCliService` truncates. One mechanism, not two, and on those lanes it is a
+number they can be asked for rather than a knife. Pinned in
+`tests/context-budget.test.mjs`.
 
 The strip is **open while the turn is live and closes when it settles**. During
 the turn it is the only thing to look at; afterwards it is a footnote under the

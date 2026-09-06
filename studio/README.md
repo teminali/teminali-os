@@ -337,8 +337,9 @@ The light lane insists on a model that can actually write code and drive a tool
 fence; it falls back to a general chat model only when nothing installed can.
 That distinction is catalogue data, and it was wrong: `llama3.2:3b` was declared
 code-capable, so at 2.0 GB it was the lightest coder on this machine and won the
-Flash lane — where it answered tool-driving prompts in prose and emitted no
-fence at all. Matching was the second half of the same fault: an installed tag
+Flash lane in the picker and the Models panel. (The chat itself resolves through
+`gateway/frontier-runner.js` profiles and never ran it — the two surfaces
+disagreed, which is its own fault.) Matching was the second half: an installed tag
 carries decoration the catalogue does not, so `qwen2.5-coder:14b-instruct` and
 every `frontier-*` build fell into the unknown-model branch and lost the
 capability data that puts them in a lane. `buildLibrary` now resolves a tag
@@ -348,6 +349,19 @@ weights, and takes the window from the `-8k`/`-32k` the Modelfile pinned rather
 than the stock model's. Measured on this M4 Pro: Flash went from `llama3.2:3b`
 to `frontier-qwen2.5-coder-14b-8k` (15 tok/s), the heavy lane from `gpt-oss:20b`
 to `frontier-gpt-oss-20b-32k`.
+
+**Context is budgeted as a share of the window, per lane**
+(`src/services/contextBudget.ts`). The local lane's system prompt tokenised at
+3,127 tokens — 38% of the 8,192-token window `frontier-qwen2.5-coder-14b-8k`
+pins — before any history or the operator's own sentence, which is why a model
+asked to drive the player answered in prose and emitted no fence. The prompt is
+now assembled from named sections in priority order under 22% of the window,
+history gets 30% newest-first with each message capped at 12%, and a tool
+result 10%; what the window could not afford is reported in the turn's
+telemetry rather than silently lost. Measured after on the same model and
+prompt: 1,848 tokens, 23%. Claude Code and Codex are not truncated by this —
+they compact their own context — and receive the same budget shape from their
+real window only so the ceilings provably never bind.
 
 Mixture-of-experts models are budgeted separately: memory against the whole
 file, speed against the `activeBytes` a single token actually reads. GPT-OSS 20B
@@ -890,7 +904,7 @@ ollama serve              # local models on 127.0.0.1:11434
 
 ```bash
 npm run typecheck   # tsc --noEmit
-npm test            # 1628 tests, 0 failures
+npm test            # 1641 tests, 0 failures
 npm run build       # tsc && vite build
 npm run verify:core # all three
 ```

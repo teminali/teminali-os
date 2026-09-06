@@ -117,4 +117,14 @@ export interface InferenceTelemetry {
   promptTokensPerSec: number | null;
   outputTokensPerSec: number | null;
   source: "ollama" | "anthropic" | "mcp" | "ui-command" | "agent-cli";
+  /**
+   * How the turn's prompt was fitted to the model's window. Present only on
+   * lanes Teminali governs; a CLI lane manages its own context and reports none.
+   */
+  contextBudget?: {
+    windowTokens: number;
+    systemPromptChars: number;
+    /** Prompt sections the window could not afford, most important first. */
+    dropped: string[];
+  };
 }

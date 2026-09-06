@@ -10,6 +10,7 @@
  * its own, and keeps editor faults from being scored against the model.
  */
 import { ASTPrunerService } from "./astPrunerService";
+import { assemblePrompt, budgetFor, fitHistory } from "./contextBudget";
 import { CompletenessEngine } from "./completenessEngine";
 import { DiligenceEngine } from "./diligenceEngine";
 import { parseWorkspaceEdits } from "./liveEditProtocol";
@@ -262,6 +263,10 @@ async function streamFromOllama(
     }
   }
   const selection = await GatewayClient.resolveModelMode(mode, groundedPrompt);
+  // Every limit below is a share of the window this model actually has — the
+  // `-8k`/`-32k` its Modelfile pins — not a constant that is generous for one
+  // model and fatal for another. See contextBudget.ts for the measurement.
+  const budget = budgetFor("frontier", selection.contextTokens);
 
   let skillInstruction = "";
   if (skill) {
@@ -415,17 +420,56 @@ Whenever you are about to run a tool or command (\`\`\`frontier-run, \`\`\`video
 5. FILE WRITING: When creating or updating files, always emit complete fenced blocks with \`\`\`<lang> path="workspace/path.ext"\`\`\`.
 6. COMMAND EXECUTION: When executing terminal actions, emit \`\`\`frontier-run\n<command>\n\`\`\`. The real output will be returned to you in the next observation.`;
 
+  /*
+    The system prompt, assembled in priority order under the window's budget.
+
+    Earlier is more important: a section that does not fit is dropped whole,
+    and everything after it goes too. The ranking is a judgement, so it is
+    written down. The contract the operator sees — who the assistant is, how a
+    file is written, how a command is run — and the live state of any surface
+    the host mounted come first, because a turn without them is wrong. The
+    doctrine is the concise statement of "act, measure, do not refuse"; the
+    long mandate that says the same thing at five times the length comes after
+    it. The visual contract is last: it matters only when the model is about to
+    author UI, and it was costing every "play that song" turn 1,858 characters.
+  */
+  const system = assemblePrompt(
+    [
+      {
+        name: "base",
+        required: true,
+        text: `You are Teminali ${selection.label}. Be precise, disclose uncertainty, and never claim a tool or test ran unless its result is present in the conversation. When the user asks you to edit workspace files, emit every intended final file as a complete fenced block with path="workspace/relative/path.ext" directly on the code fence tag (e.g. \`\`\`html path="outputs/live-edit-vision-canary.html" or \`\`\`ts path="src/example.ts"). Use one explicit path block per file, never an ambiguous patch fragment, so Teminali can apply, display, and verify the edits safely. To actually run a workspace command, emit it in a \`\`\`frontier-run fence (one command per line); its real output is returned to you before you answer again. A \`\`\`bash or \`\`\`sh block is documentation and is never executed. All workspace and system terminal commands run automatically and seamlessly with full computer access.`,
+      },
+      { name: "identity", required: true, text: identityInstruction },
+      { name: "transcript", required: true, text: transcriptInstruction },
+      { name: "skill", text: skillInstruction },
+      { name: "player", required: true, text: playerInstruction },
+      { name: "editor", text: editorInstruction },
+      { name: "doctrine", text: DiligenceEngine.doctrine() },
+      { name: "step-explanation", text: stepExplanationInstruction },
+      { name: "conversational", text: conversationalInstruction },
+      { name: "tool-execution-mandate", text: toolExecutionMandate },
+      { name: "completeness", text: CompletenessEngine.mandate() },
+      { name: "multi-agent", text: multiAgentPrompt },
+      { name: "house-style", text: CompletenessEngine.houseStyle() },
+    ].map((section) => ({ ...section, text: section.text.replace(/^\n+/, "") })),
+    budget.systemPromptChars,
+  );
+
+  /*
+    History is fitted newest-first to its own share of the window, and each
+    message is capped on its own so one pasted file cannot evict every turn
+    around it. A long TypeScript message is pruned to its shape before it is
+    cut, which keeps the declarations a model actually needs to refer back to.
+  */
+  const recent = fitHistory(history.slice(-6), budget, (message, limit) => {
+    const pruned = message.content.length > 4_000 ? ASTPrunerService.pruneTypeScript(message.content) : message.content;
+    return { ...message, content: pruned.length > limit ? `${pruned.slice(0, limit)}\n…` : pruned };
+  });
+
   const messages = [
-    {
-      role: "system",
-      content: DiligenceEngine.wrapSystemPrompt(CompletenessEngine.wrapSystemPrompt(
-        `You are Teminali ${selection.label}. Be precise, disclose uncertainty, and never claim a tool or test ran unless its result is present in the conversation. When the user asks you to edit workspace files, emit every intended final file as a complete fenced block with path="workspace/relative/path.ext" directly on the code fence tag (e.g. \`\`\`html path="outputs/live-edit-vision-canary.html" or \`\`\`ts path="src/example.ts"). Use one explicit path block per file, never an ambiguous patch fragment, so Teminali can apply, display, and verify the edits safely. To actually run a workspace command, emit it in a \`\`\`frontier-run fence (one command per line); its real output is returned to you before you answer again. A \`\`\`bash or \`\`\`sh block is documentation and is never executed. All workspace and system terminal commands run automatically and seamlessly with full computer access.${skillInstruction}${editorInstruction}${playerInstruction}${multiAgentPrompt}${transcriptInstruction}${identityInstruction}${conversationalInstruction}${stepExplanationInstruction}${toolExecutionMandate}`,
-      )),
-    },
-    ...history.slice(-6).map((message) => ({
-      role: message.role,
-      content: message.content.length > 4_000 ? ASTPrunerService.pruneTypeScript(message.content) : message.content,
-    })),
+    { role: "system", content: system.text },
+    ...recent.map((message) => ({ role: message.role, content: message.content })),
     {
       role: "user",
       content: groundedPrompt,
@@ -576,6 +620,7 @@ Whenever you are about to run a tool or command (\`\`\`frontier-run, \`\`\`video
           signal: controller.signal,
           onToolCall: callbacks.onToolCall,
           approve: approveCommand,
+          maxOutputChars: budget.toolResultChars,
         });
         allExecutions.push(...executions);
         if (executions.some((execution) => execution.executed)) {
@@ -597,6 +642,7 @@ Whenever you are about to run a tool or command (\`\`\`frontier-run, \`\`\`video
           execute: capabilities.runVideoTool,
           signal: controller.signal,
           onToolCall: callbacks.onToolCall,
+          maxOutputChars: budget.toolResultChars,
         });
         if (executions.length > 0) {
           // Appended, not substituted. A turn may both run a command and edit
@@ -617,6 +663,7 @@ Whenever you are about to run a tool or command (\`\`\`frontier-run, \`\`\`video
             execute: capabilities.runVideoTool,
             signal: controller.signal,
             onToolCall: callbacks.onToolCall,
+            maxOutputChars: budget.toolResultChars,
           });
           if (executions.length > 0) {
             const evidence = buildVideoToolEvidence(executions);
@@ -824,6 +871,11 @@ Whenever you are about to run a tool or command (\`\`\`frontier-run, \`\`\`video
     promptTokensPerSec: rate(finalChunk.prompt_eval_count, finalChunk.prompt_eval_duration),
     outputTokensPerSec: rate(finalChunk.eval_count, finalChunk.eval_duration),
     source: "ollama",
+    contextBudget: {
+      windowTokens: budget.windowTokens,
+      systemPromptChars: system.chars,
+      dropped: system.dropped,
+    },
   };
   RuntimeTelemetryService.record(telemetry);
   await GatewayClient.recordAudit({

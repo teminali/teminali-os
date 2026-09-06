@@ -142,6 +142,11 @@ const DEFAULT_MAX_CALLS = 6;
  * and a truncated timeline is worse than a short one: the clip ids the model
  * needs are spread through the whole structure, so cutting the tail silently
  * removes the tracks it was about to edit.
+ *
+ * A fallback for a caller that names no window. The engine passes the lane's
+ * real allowance from contextBudget.ts instead, which on an 8k model is less
+ * than this — the honest price of that window, flagged `truncated` so the model
+ * knows the tail is missing rather than believing it saw the whole timeline.
  */
 const DEFAULT_MAX_OUTPUT_CHARS = 12_000;
 
