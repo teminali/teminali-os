@@ -169,7 +169,7 @@ export const BrowserHome: React.FC<{ onOpen: (url: string) => void; private?: bo
                 aria-label={`Search engine: ${engine.name}. Change it.`}
                 className="flex-shrink-0 w-7 h-7 rounded-full flex items-center justify-center hover:bg-surface-hover transition-colors duration-ds ease-ds"
               >
-                <Mark url={engine.home} size={26} round icon iconScale={0.86} />
+                <Mark url={engine.home} size={22} icon plain iconScale={1} />
               </button>
               <input
                 value={query}
@@ -188,7 +188,7 @@ export const BrowserHome: React.FC<{ onOpen: (url: string) => void; private?: bo
               items={SEARCH_ENGINES.map((candidate) => ({
                 id: candidate.id,
                 label: candidate.name,
-                icon: <Mark url={candidate.home} size={18} round icon iconScale={0.86} />,
+                icon: <Mark url={candidate.home} size={16} icon plain iconScale={1} />,
                 onSelect: () => setEngine(candidate.id),
               }))}
             />
@@ -340,10 +340,19 @@ const Mark: React.FC<{
    * A shortcut's favicon sits inside its circle with the site's colour showing
    * around it, which is what keeps a grid of them looking like one grid. A
    * search engine's logo is the control itself rather than a tile in a set, so
-   * it is drawn nearly edge to edge.
+   * it is drawn edge to edge.
    */
   iconScale?: number;
-}> = ({ url, size, round = false, icon = false, iconScale = 0.62 }) => {
+  /**
+   * No chip behind it: the logo alone.
+   *
+   * A shortcut is a *tile*, and the coloured disc is what makes a grid of them
+   * read as one grid. A search engine's mark is not a tile — it is the icon of
+   * the field it sits in — and putting a second circle behind Google's own
+   * round logo draws a ring around a ring.
+   */
+  plain?: boolean;
+}> = ({ url, size, round = false, icon = false, iconScale = 0.62, plain = false }) => {
   const hue = siteHue(url);
   const favicon = icon ? faviconUrl(url) : null;
   // Keyed on the address: a tile whose bookmark is replaced must try again
@@ -360,8 +369,10 @@ const Mark: React.FC<{
         height: size,
         fontSize: size * 0.44,
         color: `hsl(${hue} 70% 72%)`,
-        background: `hsl(${hue} 45% 22%)`,
-        border: `1px solid hsl(${hue} 45% 32%)`,
+        // Bare: no disc, no hairline. The letter keeps its hue, so a site
+        // whose icon fails is still the same colour it is everywhere else.
+        background: plain ? "transparent" : `hsl(${hue} 45% 22%)`,
+        border: plain ? "none" : `1px solid hsl(${hue} 45% 32%)`,
       }}
     >
       {favicon && !failed ? (

@@ -467,7 +467,11 @@ Three consequences worth writing down:
   service that was refused is a third party told the whole list at once. A page
   that points elsewhere with `<link rel="icon">` keeps its letter, because
   finding that out means loading the page.
-- **The field's icon is the search engine, and it is a button.** A magnifying
+- **The field's icon is the search engine, and it is a button** — the logo
+  alone, with no disc behind it. A shortcut is a tile and the coloured disc is
+  what makes a grid of them read as one grid; the engine's mark is the icon of
+  the field it sits in, and a circle behind Google's own round logo is a ring
+  around a ring. A magnifying
   glass says a search is coming; the engine's mark says where it is going,
   which is the part an operator might want to change. Google, Bing,
   DuckDuckGo, Brave and Perplexity (`utils/searchEngines.ts`), persisted in
