@@ -66,6 +66,43 @@ most conservative code in its area:
   only, gated on typecheck → test → build → preflight, and it ships what is
   committed.
 
+### The local lane is not OpenCode, and scaling it is measured, not assumed
+
+Two things in this repository are called Frontier, and they are not the same
+program. `gateway/frontier-runner.js` and the `opencode.*.jsonc` configs drive
+the **OpenCode binary** (`findOpenCodeBinary`) — that is the CLI/gateway path.
+The **Studio chat's local lane** posts straight to `/api/ollama/chat` and runs
+its own agent loop in `studio/src/services/frontierEngine.ts`; there is no
+reference to opencode anywhere in `studio/src` or `studio/server`. All it
+borrows from the runner is the routing table — `PROFILES`,
+`selectProfileForMode`, `isExpertModelQualified` — which says which model a mode
+resolves to and at what `num_ctx`.
+
+The obvious question is why the app does not simply route through OpenCode, or
+reimplement it, to inherit a fuller tool surface. The answer is measured rather
+than argued. On 2026-09-06 the local lane's binding constraint was not tool
+count but **window**: the system prompt tokenised at 3,127 tokens of an 8,192
+window — 38% — before any history, and a turn asking the model to drive the
+player produced no tool call at all. Removing prompt, on the same model with
+the same tools, took that turn from 0/2 to 3/3. A larger tool catalogue spends
+tokens in exactly the place that was already full, so on a small local model it
+makes this worse, not better.
+
+**Therefore: a new local-lane capability earns its place against the eval, in
+that order.** Write the case in `studio/evals/local-lane.mjs` first, run
+`npm run eval:local` to establish the score, then build the tool, then re-run.
+A capability that does not raise the score does not ship, and one that lowers it
+comes back out. This is not caution for its own sake — the eval's first day
+found that *giving the system prompt more room made the lane worse*, 100% → 71%,
+because the section that newly fitted told the model to narrate its next step
+and it narrated instead of acting. Nobody would have predicted that, and no
+amount of reasoning about tool surfaces would have caught it.
+
+The corollary, already recorded in `studio/DESIGN.md` §3: parity with a frontier
+agent's tool count is the wrong target. Claude Code carries dozens of tools
+because it has a 200k window and a frontier model to choose among them. The goal
+here is a narrow, high-quality surface plus scaffolding.
+
 ### No shell strings
 
 Every subprocess in the repository is `execFile`/`spawn` with an argument array.

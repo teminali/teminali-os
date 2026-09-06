@@ -57,12 +57,27 @@ it. That duplication is what drifted last time.
    intention the code has not reached, mark it explicitly as not yet true.
 4. **A code comment is a doc.** Correct it in the same edit that invalidates it.
 
+## Scaling the local lane
+
+Two things here are called Frontier. `gateway/frontier-runner.js` drives the
+**OpenCode binary**; the Studio chat's local lane does not — it posts to
+`/api/ollama/chat` and runs its own agent loop, borrowing only the runner's
+routing table. Do not route the chat through OpenCode or reimplement it; see
+root `DESIGN.md`, "The local lane is not OpenCode".
+
+**A new local-lane capability earns its place against the eval, in that order:**
+write the case in `studio/evals/local-lane.mjs`, run `npm run eval:local` for a
+baseline, build the tool, re-run. A capability that does not raise the score does
+not ship. The lane's constraint is window, not tool count — the eval exists
+because reasoning about this was wrong twice in one session.
+
 ## Verification
 
 ```bash
 npm test              # root gateway/runner/licence/billing suite — 143 tests
 npm run studio:test   # application suite — 1643 tests
 npm run verify:all    # both, plus studio typecheck and production build
+cd studio && npm run eval:local   # the local lane vs the real model — a score, not a pass/fail
 ```
 
 Landmines worth knowing: `ELECTRON_RUN_AS_NODE=1` may be set in the shell — use
