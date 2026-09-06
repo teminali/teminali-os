@@ -392,6 +392,45 @@ export function commandHead(command: string): string {
   return String(command ?? "").trim().split(/\s+/)[0] ?? "";
 }
 
+/** What a prompt is actually asking about: a shell command, or a tool call. */
+export interface ApprovalAction {
+  kind: "shell" | "tool";
+  /** For a tool: which server it belongs to, or null for a built-in tool. */
+  server: string | null;
+  /** The thing itself, shown to the operator: a command line, or a tool name. */
+  label: string;
+  /** What "always" covers, in as few characters as will still mean something. */
+  scope: string;
+}
+
+/**
+ * Read a pending approval's subject.
+ *
+ * The prompt used to show every request as a shell command: a `$` sigil in
+ * front of it and, on the "always" button, `commandHead` — the first word. For
+ * a command that is the executable and reads well. For a tool call the first
+ * word is the *whole* name, so the button became
+ * `Always mcp__teminali-workspace__recent_projects`, which pushed the deny
+ * button off the end of the row and left the operator with a prompt they could
+ * not refuse without reaching for the keyboard.
+ *
+ * MCP tool names are `mcp__<server>__<tool>`, and both halves are worth
+ * showing: which server is asking is most of what makes a tool call
+ * judgeable. A built-in tool (`Bash`, `Edit`) has no `mcp__` prefix and no
+ * server, and a shell command is anything with whitespace in it.
+ */
+export function describeApprovalAction(command: string): ApprovalAction {
+  const text = String(command ?? "").trim();
+  const mcp = /^mcp__([^\s]+?)__([^\s]+)$/.exec(text);
+  if (mcp) return { kind: "tool", server: mcp[1], label: mcp[2], scope: mcp[2] };
+  // A bare word with no shell metacharacter is a built-in tool name, not a
+  // command: `Bash` on its own is the tool, `bash -lc "..."` is the command.
+  if (text && !/\s/.test(text) && /^[A-Za-z][A-Za-z0-9_]*$/.test(text)) {
+    return { kind: "tool", server: null, label: text, scope: text };
+  }
+  return { kind: "shell", server: null, label: text, scope: commandHead(text) };
+}
+
 export interface ApprovalGate {
   /** Asks for a decision. The returned promise always settles. */
   request: (command: AgentCommandRequest) => Promise<boolean>;

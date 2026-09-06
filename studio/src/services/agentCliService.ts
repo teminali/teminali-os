@@ -108,7 +108,7 @@ type AgentEvent =
   | { type: "edit"; path: string; before: string; after: string; existedBefore: boolean; size: number | null; modified: string | null }
   | { type: "workspace"; action: "reveal"; path: string }
   | { type: "workspace"; action: "open-file"; path: string }
-  | { type: "workspace"; action: "open-project"; path: string; name: string }
+  | { type: "workspace"; action: "open-project"; path: string; name: string; kind?: "video" | "code" }
   | { type: "workspace"; action: "browse"; url: string; newTab: boolean }
   // Recorded by the gateway into the plan store, not consumed here — the pane
   // shows a turn, and plan headroom outlives any one turn. Listed so the switch

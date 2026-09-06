@@ -3,6 +3,7 @@ import test from "node:test";
 
 import {
   classifyCommand,
+  describeApprovalAction,
   closedFenceEnd,
   documentationShellFence,
   formatCommandEvidence,
@@ -353,4 +354,37 @@ test("an unclosed or empty shell fence is not a stall", () => {
   assert.equal(documentationShellFence("```bash\ndu -sh ~/Desktop"), null);
   assert.equal(documentationShellFence("```bash\n\n```"), null);
   assert.equal(documentationShellFence("no fence here"), null);
+});
+
+
+test("a prompt knows whether it is asking about a tool or a command", () => {
+  /*
+    The button that says "always" carried the first word of the request. For a
+    shell command that is the executable; for `mcp__teminali-workspace__recent_projects`
+    it is the whole name, and the button grew until it pushed the deny button
+    off the end of the row — an approval the operator could not refuse with the
+    mouse. What is pinned here is that the scope stays short for every shape a
+    request can take.
+  */
+  const tool = describeApprovalAction("mcp__teminali-workspace__recent_projects");
+  assert.equal(tool.kind, "tool");
+  assert.equal(tool.server, "teminali-workspace");
+  assert.equal(tool.label, "recent_projects");
+  assert.equal(tool.scope, "recent_projects");
+
+  const builtin = describeApprovalAction("Bash");
+  assert.equal(builtin.kind, "tool");
+  assert.equal(builtin.server, null);
+  assert.equal(builtin.scope, "Bash");
+
+  const shell = describeApprovalAction("npm run build -- --verbose");
+  assert.equal(shell.kind, "shell");
+  assert.equal(shell.label, "npm run build -- --verbose");
+  assert.equal(shell.scope, "npm");
+
+  // Whatever the request, the scope is one short token, never the whole line.
+  for (const command of ["mcp__a__b", "Edit", "rm -rf /tmp/x", "  git   status  "]) {
+    const scope = describeApprovalAction(command).scope;
+    assert.ok(scope.length <= 32 && !/\s/.test(scope), `${command} -> "${scope}"`);
+  }
 });

@@ -227,7 +227,13 @@ export const AgentPane: React.FC<{ panel: PanelTab & { kind: AgentEngine } }> = 
             if (event.action === "reveal") store.revealPath(event.path);
             else if (event.action === "open-file") void store.showFile(event.path);
             else if (event.action === "browse") openBrowserAt(event.url, { newTab: event.newTab });
-            else store.setWorkspacePath(event.path);
+            else {
+              // Exactly what a click in the sidebar does, and in the same
+              // order: the video editor has to be on screen before the load
+              // runs, because it reports through the video pane's own toasts.
+              if (event.kind === "video") focusOrOpen({ kind: "video" });
+              store.setWorkspacePath(event.path);
+            }
           },
           /*
             Every file the agent wrote becomes a row in the dock below.

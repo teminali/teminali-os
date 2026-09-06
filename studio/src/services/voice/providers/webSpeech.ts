@@ -179,11 +179,37 @@ export class WebSpeechProvider implements VoiceProvider {
     // silence. Restart transparently so the operator sees one unbroken session.
     let restartWanted = options.continuous;
 
+    /*
+      How many final results have already been handed on.
+
+      `event.resultIndex` is supposed to be where the new results start, and in
+      Chromium it is not reliable: an event routinely arrives with an index at
+      or before a result that was already delivered as final, so the loop below
+      emits that result a second time. The consumer accumulates finals — a turn
+      is built by appending each one — so every duplicate is appended again, and
+      what the operator sees is their sentence written down twice:
+      *"Thank you. Thank you."*, *"Hey, how are you? Hey, how are you?"*.
+
+      It is not cosmetic. It is what a doubled "yes" is made of, and a doubled
+      "yes" answered no permission prompt — see `approvalIntent.ts`, which now
+      also collapses a repetition, because two guards against a transcript
+      being wrong twice is the right number for something that gates approvals.
+
+      The index of a final result is stable for the life of a recognition
+      session, so remembering how far the finals have been read is enough, and
+      a restart begins a fresh `results` list — hence the reset in `onend`.
+    */
+    let finalsDelivered = 0;
+
     recognition.onresult = (event) => {
       for (let i = event.resultIndex; i < event.results.length; i += 1) {
         const result = event.results[i];
         const alternative = result[0];
         if (!alternative) continue;
+        if (result.isFinal) {
+          if (i < finalsDelivered) continue;
+          finalsDelivered = i + 1;
+        }
         handlers.onResult({
           transcript: alternative.transcript,
           isFinal: result.isFinal,
@@ -215,6 +241,9 @@ export class WebSpeechProvider implements VoiceProvider {
     recognition.onend = () => {
       if (restartWanted && active) {
         try {
+          // A restart is a new session with an empty `results` list, so the
+          // count of finals already read starts again with it.
+          finalsDelivered = 0;
           recognition.start();
           return;
         } catch {

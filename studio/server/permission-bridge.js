@@ -24,7 +24,7 @@ import { randomBytes, timingSafeEqual } from "node:crypto";
 /** A prompt nobody answers must not hold the agent open indefinitely. */
 export const APPROVAL_TIMEOUT_MS = 5 * 60_000;
 
-/** runId -> { token, emit, pending, remembered, closed } */
+/** runId -> { token, emit, pending, cameras, remembered, closed } */
 const runs = new Map();
 
 /**
@@ -60,7 +60,7 @@ export function approvalKey(toolName, input) {
 /** Begin a run. `emit` puts an event on that run's NDJSON stream. */
 export function openRun(runId, emit) {
   const token = randomBytes(32).toString("base64url");
-  runs.set(runId, { token, emit, pending: new Map(), remembered: new Set(), closed: false });
+  runs.set(runId, { token, emit, pending: new Map(), cameras: new Map(), remembered: new Set(), closed: false });
   return token;
 }
 
@@ -157,6 +157,81 @@ export function resolveApproval({ runId, id, behavior, message, updatedInput, re
     entry.settle({ behavior: "deny", message: message || "The operator declined this." });
   }
   run.emit?.({ type: "permission-resolved", id, behavior: behavior === "allow" ? "allow" : "deny" });
+  return { ok: true };
+}
+
+/**
+ * How long the agent waits for a photograph.
+ *
+ * Shorter than an approval, and for the opposite reason: nobody is being asked
+ * anything here. The operator has already said yes — the camera is opening,
+ * a frame is being taken and sent straight back. All this covers is a window
+ * that went away mid-capture, and a turn should not hang for a minute on one.
+ */
+const CAMERA_TIMEOUT_MS = 15_000;
+
+/**
+ * Ask the window holding this run for one frame from the camera.
+ *
+ * The gateway is a plain Node process. It has `screencapture` for the screen
+ * and nothing at all for a camera: on macOS the only way to open one is
+ * `getUserMedia`, which needs a renderer. So the request goes out on the run's
+ * own NDJSON stream — the same one-way channel `emitToRun` uses for the file
+ * tree — and the answer comes back on its own request, exactly as an
+ * approval's does.
+ *
+ * Rejects rather than resolving to a failure shape: unlike an approval, there
+ * is no useful "no" to hand the model. A camera that could not be opened is a
+ * tool error the agent should report and move on from, not a verdict.
+ */
+export function requestCameraFrame({ runId, token }) {
+  const run = runs.get(runId);
+  if (!run || run.closed) return Promise.reject(new Error("That agent turn is no longer running."));
+  if (!constantTimeEqual(token, run.token)) return Promise.reject(new Error("The camera bridge rejected the caller."));
+
+  const id = randomBytes(9).toString("base64url");
+  return new Promise((resolve, reject) => {
+    let settled = false;
+    const settle = (error, frame) => {
+      if (settled) return;
+      settled = true;
+      if (error) reject(error); else resolve(frame);
+    };
+    const timer = setTimeout(() => {
+      run.cameras.delete(id);
+      settle(new Error("The window did not send a camera frame in time."));
+    }, CAMERA_TIMEOUT_MS);
+    if (typeof timer.unref === "function") timer.unref();
+
+    run.cameras.set(id, { settle, timer });
+    const delivered = run.emit?.({ type: "camera", id, expiresInMs: CAMERA_TIMEOUT_MS });
+    if (delivered === false) {
+      run.cameras.delete(id);
+      clearTimeout(timer);
+      settle(new Error("This turn's stream is closed, so no window could be asked for a frame."));
+    }
+  });
+}
+
+/**
+ * The frame, arriving on its own request because the run's stream only goes
+ * one way. An `error` is the window saying why it could not — a denied camera
+ * permission, no camera at all — and that reaches the agent as the tool's
+ * failure rather than as a silence that times out.
+ */
+export function resolveCameraFrame({ runId, id, image, error }) {
+  const run = runs.get(runId);
+  if (!run) return { ok: false, reason: "No such agent run." };
+  const entry = run.cameras.get(id);
+  if (!entry) return { ok: false, reason: "That frame was already sent, or nothing asked for it." };
+
+  run.cameras.delete(id);
+  clearTimeout(entry.timer);
+  if (error || typeof image !== "string" || !image) {
+    entry.settle(new Error(String(error || "The window could not take a photograph.")));
+  } else {
+    entry.settle(null, { image, capturedAt: new Date().toISOString() });
+  }
   return { ok: true };
 }
 

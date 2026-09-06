@@ -2341,6 +2341,17 @@ server under both names and reading `mcp_servers` back. `WORKSPACE_SERVER_NAME`
 carries the reason, and a test asserts the name is not `workspace` — because
 every other test in that file passes happily on a name the CLI throws away.
 
+**An opened project has a kind, and opening one is not only rebinding a root.**
+A human clicking a recent project in the sidebar gets the video editor brought
+up first when that project is a recording (`ProjectsPanel`), because the load
+reports through the video pane's own toasts and there is nowhere else for them
+to appear. The agent's `open_project` stopped at `setWorkspacePath`, so the
+workspace switched, the agent read the timeline through the video bridge and
+described it track by track, and the operator was looking at an empty pane
+being told in detail what was on a timeline they could not see. The
+`open-project` event now carries `kind`, and both panes do exactly what the
+click does, in the same order.
+
 **"Open the last project" is a filter, not a model call.** `server/projects.js`
 already stored every recent as `{ path, name, openedAt, kind }`, most-recent-
 first, with `kind` re-read from the marker file on disk rather than trusted from
@@ -3410,6 +3421,23 @@ saw it**. Both halves were built and neither could reach the other. So
 asked when the line finishes speaking — the same mark `speakReply` leaves when
 its text ends in a question mark, which the spoken prompt does not.
 
+**And the answer has to arrive once** (fixed 2026-09-06, again by hand: the
+prompt read itself out, the operator said "yes", and it went on standing —
+twice over, for two unrelated reasons). Chromium's `SpeechRecognition` does not
+keep its promise about `event.resultIndex`: an event arrives whose index points
+at or before a result that was already delivered as final, and
+`providers/webSpeech.ts` handed that result on a second time. The engine
+accumulates finals — a turn is built by appending each one — so the operator's
+sentence was written down twice. It is visible in every transcript in the pane:
+*"Thank you. Thank you."*, *"Hey, how are you? Hey, how are you?"*. A bare "yes"
+therefore reached the table below as "yes yes" and matched nothing at all. The
+provider now remembers how many finals it has read and skips a redelivery, and
+`approvalIntent.ts` *also* collapses an exact repetition of a whole utterance —
+two guards, deliberately, because this one gates approvals and a transcript
+that is wrong twice should still not be able to leave a prompt standing.
+Collapsing is a normalisation and not a widening: only an exact repeat folds,
+so "yes no" and "no yes no yes" both stay unmatched.
+
 **Who answers, and how narrowly.** `services/voice/approvalIntent.ts` is pure
 and holds the whole decision. The risk it is built around is a false allow: the
 microphone hears the room, and running a command the operator never agreed to is
@@ -3522,7 +3550,27 @@ The whole command would be too narrow to be worth remembering, since the next
 one differs by an argument; the tool name would be far too broad, since one
 `Bash` would cover everything. `⌘⏎` / `⌥⏎` on the prompt is "always".
 
-Tests: `tests/agent-commands-approval.test.mjs` (5).
+**The prompt is a card, not a row** (2026-09-06). It began as one 32-pixel
+line — a `$`, the command truncated into whatever space was left, three buttons
+— which held while every request was a short shell command and broke the moment
+agent tool calls came through the same component. The "always" button carried
+`commandHead`, and for `mcp__teminali-workspace__recent_projects` the first word
+*is* the whole name, so the button grew to the width of the row and pushed
+**Skip off the end of it**: an approval the operator could see, could approve,
+and could not refuse with the mouse. `describeApprovalAction` now reads the
+subject instead of assuming it is a shell command — `mcp__<server>__<tool>` is
+shown as its server and its tool, since which server is asking is most of what
+makes a tool call judgeable — and the layout is three bands, so nothing
+competes for horizontal space: who is asking and the voice hint; the request
+itself across the full width and up to two lines, because truncating the text
+the operator is being asked to judge is the one thing that makes judging it
+impossible; then the answers, with "Always" a fixed word and only the scope
+after it able to grow, and truncating when it does. The keyboard contract is
+unchanged.
+
+Tests: `tests/agent-commands-approval.test.mjs` (5), and
+`tests/agent-commands.test.mjs` pins that the remembered scope stays one short
+token for every shape a request can take.
 
 ### 7.3 Answering a headless agent's prompts (2026-09-05)
 

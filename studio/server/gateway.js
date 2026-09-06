@@ -828,7 +828,19 @@ export async function createGateway(options = {}) {
         config.workspaceRoot = project.path;
         const updatedRecent = await rememberProject(config.projectsStorePath, project);
         await audit.write({ event: "workspace-opened-by-agent", correlationId, method: request.method, route, path: project.path });
-        emitToRun(runId, token, { type: "workspace", action: "open-project", path: project.path, name: project.name });
+        /*
+          `kind` rides along because opening a video recording is not the same
+          act as opening a folder of code. A human clicking one in the sidebar
+          gets the video editor brought up first (`ProjectsPanel`), and the
+          agent's open used to stop at rebinding the root: the workspace
+          switched, the agent could read the timeline through the video bridge
+          and describe it in detail, and the operator was looking at an empty
+          pane being told what was on a timeline they could not see.
+        */
+        emitToRun(runId, token, {
+          type: "workspace", action: "open-project",
+          path: project.path, name: project.name, kind: project.kind === "video" ? "video" : "code",
+        });
         replyJson(response, 200, { result: { opened: project, recent: updatedRecent } });
         return;
       }

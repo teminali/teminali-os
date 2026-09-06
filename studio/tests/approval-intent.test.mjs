@@ -27,6 +27,27 @@ test("plain negatives deny it", () => {
   }
 });
 
+test("a doubled transcript is still one answer", () => {
+  /*
+    The recogniser writes an utterance down twice — "Thank you. Thank you." is
+    what one "thank you" looks like coming out of it — so the operator's spoken
+    "yes" arrived as "yes yes" and answered nothing. What is pinned here is
+    that collapsing a repetition cannot invent an answer: only an exact repeat
+    of the whole phrase folds, and a phrase that was not an answer before is
+    not one after.
+  */
+  assert.equal(classifyApprovalReply("Yes. Yes."), "allow");
+  assert.equal(classifyApprovalReply("yes allow yes allow"), "allow");
+  assert.equal(classifyApprovalReply("No. No."), "deny");
+  assert.equal(classifyApprovalReply("don't run it don't run it"), "deny");
+  assert.equal(classifyApprovalReply("always allow always allow"), "allow-always");
+
+  // Not repetitions, and so not answers.
+  assert.equal(classifyApprovalReply("yes no"), null);
+  assert.equal(classifyApprovalReply("no yes no yes"), null);
+  assert.equal(classifyApprovalReply("yes yes yes yes yes"), null);
+});
+
 test("\"always\" beats the plain yes inside it", () => {
   // Every one of these also matches an affirmative; the wider grant has to win,
   // or "yes always" would allow once and ask again immediately.

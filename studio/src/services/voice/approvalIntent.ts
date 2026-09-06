@@ -100,11 +100,42 @@ function tidy(text: string): string {
 }
 
 /**
+ * One utterance, said once, however many times the recogniser wrote it down.
+ *
+ * Transcripts arrive doubled — *"Thank you. Thank you."*, *"Hey, how are you?
+ * Hey, how are you?"* — and a bare "yes" therefore reached this table as
+ * "yes yes" and matched nothing. The operator answered a prompt out loud,
+ * correctly, and watched it go on standing.
+ *
+ * This is a normalisation and not a widening, which matters here more than
+ * anywhere: only an *exact* repetition of the whole phrase collapses, so no
+ * utterance can become an answer that was not already one. "yes no" is not a
+ * repetition and stays unmatched; "no yes no yes" collapses to "no yes", which
+ * is also unmatched. The three narrowness rules are untouched.
+ */
+function collapseRepetition(phrase: string): string {
+  const words = phrase.split(" ");
+  for (const times of [2, 3]) {
+    if (words.length % times !== 0) continue;
+    const unit = words.length / times;
+    const head = words.slice(0, unit).join(" ");
+    let repeated = true;
+    for (let part = 1; part < times && repeated; part += 1) {
+      if (words.slice(part * unit, (part + 1) * unit).join(" ") !== head) repeated = false;
+    }
+    if (repeated) return head;
+  }
+  return phrase;
+}
+
+/**
  * Read an utterance as an answer to a pending prompt, or `null` when it is not
  * one — which is the ordinary case and must stay cheap and unsurprising.
  */
 export function classifyApprovalReply(text: string): ApprovalAnswer {
-  const phrase = tidy(text ?? "");
+  // Collapsed before the length check, so a doubled two-word answer is still
+  // measured as the two words the operator actually said.
+  const phrase = collapseRepetition(tidy(text ?? ""));
   if (!phrase) return null;
   if (phrase.split(" ").length > MAX_ANSWER_WORDS) return null;
 
