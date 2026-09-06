@@ -316,7 +316,16 @@ your screen and either explains it or acts on it.
   different things. The model thinks before it answers and cannot be told not
   to, so a described look takes 10–16 s warm (longer while the model loads) —
   `look` with `describe: false` is the fast path when the control names are
-  enough. There is no camera: "look" means the screen.
+  enough. `look` means the screen and only the screen; the camera is a separate
+  tool on a separate server, below.
+
+**The camera.** An agent CLI also gets `mcp__teminali-camera__look_at_me`: one
+photograph from the webcam, handed back as a picture rather than a description,
+so the model that is reasoning is the one doing the looking. Nothing on that
+server is pre-approved — it opens hardware pointed at a person — so every call
+raises the permission prompt, which can be answered out loud. The camera is
+opened for one frame and closed again, so the light beside the lens means what
+it says. A machine with no camera gets a sentence saying so, not a failed turn.
 
 ### Voice
 

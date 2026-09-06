@@ -1,4 +1,5 @@
 import { GatewayClient } from "./gatewayClient";
+import { answerCameraRequest } from "./cameraFrame";
 import type { StreamCallbacks } from "./frontierEngine";
 import type { ToolCall } from "../types";
 
@@ -110,6 +111,11 @@ type AgentEvent =
   | { type: "workspace"; action: "open-file"; path: string }
   | { type: "workspace"; action: "open-project"; path: string; name: string; kind?: "video" | "code" }
   | { type: "workspace"; action: "browse"; url: string; newTab: boolean }
+  /* The agent asking to look through the camera. Answered here rather than
+     bubbled to a pane: there is no decision left to make by the time it
+     arrives — the operator has already approved the tool call — and a frame is
+     a frame whichever surface started the turn. See services/cameraFrame.ts. */
+  | { type: "camera"; id: string; expiresInMs: number }
   // Recorded by the gateway into the plan store, not consumed here — the pane
   // shows a turn, and plan headroom outlives any one turn. Listed so the switch
   // below is exhaustive over what the stream can actually carry.
@@ -295,6 +301,11 @@ export class AgentCliService {
           break;
         case "workspace":
           callbacks.onWorkspace?.(event);
+          break;
+        case "camera":
+          // Deliberately not awaited: the stream must keep being read while
+          // the camera warms up, or the turn's own output stalls behind it.
+          void answerCameraRequest(runId, event.id);
           break;
         case "edit":
           callbacks.onEdit?.(event);

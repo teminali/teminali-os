@@ -95,12 +95,27 @@ const WORKSPACE = [
   "`open_project` switches the whole workspace to another project. It rebinds the file tree, the search and every terminal at once, so it raises a prompt they have to answer; `recent_projects` is free and read-only, and it is usually the right first call when they say \"the last project\" or \"the one from yesterday\".",
 ];
 
-export function agentBriefing({ screen = false, video = false, workspace = false } = {}) {
+/**
+ * The camera, mentioned only when the tool is attached.
+ *
+ * Two sentences, and the second one is the load-bearing one. Asked *"can you
+ * see me?"* the agent looked at the screen, explained that it has no camera,
+ * and was right about the tools it had — the question is whether it reaches
+ * for the right sense now that it has both. The screen is what the operator is
+ * doing; the camera is where they are.
+ */
+const CAMERA = [
+  "You can also look at the operator themselves: `look_at_me` takes one photograph with their webcam and gives you the picture. That is the call when they ask whether you can see them, or ask about anything in front of the camera — how they look, what they are holding, who is with them. Their *screen* is a different sense and a different tool; do not answer a question about the room by looking at a display.",
+  "It opens a camera pointed at a person, so it asks their permission every time until they say to stop asking. Take one frame and answer; do not take another unless something has changed or they ask again.",
+];
+
+export function agentBriefing({ screen = false, video = false, workspace = false, camera = false } = {}) {
   return [
     ...PLACE, "",
     ...COMPANY, "",
     ...(screen ? HANDS : NO_HANDS),
     ...(workspace ? ["", ...WORKSPACE] : []),
+    ...(camera ? ["", ...CAMERA] : []),
     ...(video ? ["", ...CUT] : []),
   ].join("\n");
 }

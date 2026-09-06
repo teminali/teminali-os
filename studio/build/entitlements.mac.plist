@@ -17,5 +17,14 @@
     <true/>
     <key>com.apple.security.automation.apple-events</key>
     <true/>
+    <!-- The hardened runtime withholds the camera and the microphone from a
+         signed app that does not ask for them here, whatever Info.plist says:
+         the usage string is what produces the dialog, and these are what let
+         the answer mean yes. Naming a custom entitlements file replaces
+         electron-builder's defaults, which had been carrying these two. -->
+    <key>com.apple.security.device.camera</key>
+    <true/>
+    <key>com.apple.security.device.audio-input</key>
+    <true/>
   </dict>
 </plist>

@@ -34,6 +34,7 @@ import { videoMcpArgs } from "./video-mcp.js";
 import { permissionMcpArgs } from "./permission-mcp.js";
 import { screenMcpArgs } from "./screen-mcp.js";
 import { workspaceMcpArgs } from "./workspace-mcp.js";
+import { cameraMcpArgs } from "./camera-mcp.js";
 import { briefingArgs } from "./agent-briefing.js";
 import { closeRun, openRun } from "./permission-bridge.js";
 import { createEditWatcher } from "./agent-edits.js";
@@ -95,7 +96,7 @@ export function agentEnvironment(source = process.env) {
   return environment;
 }
 
-function argsFor(engine, { prompt, cwd, sessionId, model, permission, approval = null, screen = null, workspace = null }) {
+function argsFor(engine, { prompt, cwd, sessionId, model, permission, approval = null, screen = null, workspace = null, camera = null }) {
   /*
     The video panel, when one is open.
 
@@ -122,6 +123,7 @@ function argsFor(engine, { prompt, cwd, sessionId, model, permission, approval =
     screen: (screen?.args?.length ?? 0) > 0,
     video: mcp.length > 0,
     workspace: (workspace?.args?.length ?? 0) > 0,
+    camera: (camera?.args?.length ?? 0) > 0,
   });
 
   if (engine === "claude") {
@@ -137,6 +139,7 @@ function argsFor(engine, { prompt, cwd, sessionId, model, permission, approval =
       ...(approval?.args ?? []),
       ...(screen?.args ?? []),
       ...(workspace?.args ?? []),
+      ...(camera?.args ?? []),
       ...briefing,
       "-p", prompt,
       "--output-format", "stream-json",
@@ -547,8 +550,19 @@ export function runAgentTurn(options) {
   */
   const workspace = runToken ? workspaceMcpArgs(engine, runId, runToken) : null;
 
+  /*
+    The camera, on the same run's token again.
+
+    No `available` flag and no capability check. Whether this machine has a
+    webcam, and whether the operator will let it be opened, are both answered
+    where they can actually be answered — in the window, when the tool is
+    called — and an approval prompt stands between the two regardless. A probe
+    here could only guess, and guessing wrong takes the tool away.
+  */
+  const camera = runToken ? cameraMcpArgs(engine, runId, runToken) : null;
+
   const args = argsFor(engine, {
-    prompt, cwd: workingDirectory, sessionId, model, permission: mode, approval, screen, workspace,
+    prompt, cwd: workingDirectory, sessionId, model, permission: mode, approval, screen, workspace, camera,
   });
 
   return new Promise((resolvePromise) => {

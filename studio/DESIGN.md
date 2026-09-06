@@ -2366,6 +2366,82 @@ that starts at 23:00 and runs past midnight is stamped the previous day.
 
 Codex gets no workspace server, for the third time and the same reason.
 
+### Looking at the operator, not their screen (`camera-mcp.js`, `cameraFrame.ts`, 2026-09-06)
+
+Asked *"hey, can you see me?"*, the assistant took a screenshot and explained
+that it can see the screen but not the person, because there was no camera in
+its tools. That answer was correct and it was not what was wanted.
+
+**The camera is a separate server, not a screen tool.** They sound like one
+sense and are not. The screen is what the operator is *doing*; the camera is
+where they are. They also have different gates: the screen tools attach only
+when Accessibility is granted, because without the element inventory every
+acting tool fails on its first call, and a camera has nothing to do with
+Accessibility. Folding one into the other would have made two grants one and
+taken the camera from anyone who had not given the other. So
+`server/camera-mcp.js` is a third small server beside `screen` and
+`teminali-workspace`, carrying one tool, `look_at_me`.
+
+**The picture goes back, not a description of it.** `observe()` describes a
+screenshot with a local vision model because a screen is mostly text and layout
+and a caption of it is cheap, private and enough to reason over. A person is
+not that: asked "what am I holding", a thirty-word local caption has thrown away
+the thing being asked about, and the model doing the reasoning can already see.
+So the shim answers with an MCP image block and the agent's own eyes do the
+work — which is also precisely why it is not free.
+
+**Nothing here is pre-approved, and that is the whole posture.** `reveal` is
+pre-approved because showing a folder in a tree someone is already looking at
+changes nothing. This turns on hardware pointed at a person and sends what it
+sees to a model; there is no reading of that which makes it a showing.
+`CAMERA_READ_TOOLS` is an empty frozen array — exported rather than left
+implicit, so anyone widening it has to delete a line that says why — and
+`cameraMcpArgs` passes no `--allowedTools` at all. The tool therefore falls to
+the CLI's own `--permission-prompt-tool` dialog: the same prompt, in the same
+pane, answerable out loud (§6.18). "Always allow" is the operator's to give and
+lasts the run.
+
+**The frame comes from the window, because nowhere else has one.** The gateway
+is a plain Node process; it has `screencapture` for the screen and nothing
+whatever for a camera, since on macOS the only way to open one is
+`getUserMedia`. So `requestCameraFrame` puts a `camera` event on the run's own
+NDJSON stream — the same one-way channel `emitToRun` uses for the file tree —
+and `services/cameraFrame.ts` answers on its own request, exactly as an
+approval's answer does. `agentCliService` handles that event itself rather than
+bubbling it to a pane: by the time it arrives the operator has already approved
+the call, so there is no decision left to make, and a frame is a frame whichever
+surface started the turn.
+
+The camera is opened for one frame and closed again — not as a courtesy, but
+because the light beside the lens is the only honest indicator a person has, and
+a stream left running leaves it on long after the assistant has stopped looking.
+`WARMUP_MS` (700 ms) is spent with the camera already on: a webcam's first
+frames are black, then grey, then correctly exposed, and a frame read the
+instant the track goes live is a photograph of nothing. The frame is scaled to
+1024 px wide at quality 0.82, which is worth looking at and worth sending.
+
+Every failure is a sentence rather than a rejection — *"there is no camera on
+this machine"*, *"the camera is in use by something else"* — because those are
+answers the agent can give, and a broken tool call is not. `CAMERA_TIMEOUT_MS`
+(15 s) covers only a window that went away mid-capture; nobody is being asked
+anything at that point.
+
+Packaging: macOS refuses the camera outright and without a dialog unless
+`NSCameraUsageDescription` is declared, and the hardened runtime withholds it
+from a signed app that does not claim `com.apple.security.device.camera`.
+Naming a custom entitlements file replaces electron-builder's defaults, which
+had been carrying that and `com.apple.security.device.audio-input`; both are
+declared now.
+
+Tested in `tests/camera-mcp.test.mjs` (10) — the name, the token, that nothing
+is pre-approved, that the shim offers exactly one tool and turns an unreachable
+gateway into a result rather than an aborted turn — and in
+`tests/agent-permissions.test.mjs`, which pins the round trip, the single
+answer, the reported failure and the token check.
+
+Codex gets no camera, for the fourth time and the same reason: it has no
+`--permission-prompt-tool`, so the one gate this feature has could not be asked.
+
 ## 6. Voice (`studio/src/services/voice/`)
 
 Two tiers: the browser engine (always available) and **VibeVoice** run locally

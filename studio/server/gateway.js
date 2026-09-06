@@ -15,7 +15,7 @@ import { TERMINAL_LIMITS, runWorkspaceCommand } from "./terminal.js";
 import { forgetVoiceStatus, readBounded, speak, transcribe, voiceStatus } from "./voice.js";
 import { act, assistantCapabilities, observe, requestAccessibility } from "./assistant.js";
 import { AGENTS, AGENT_LIMITS, agentAvailability, isAgentEngine, runAgentTurn } from "./agent-cli.js";
-import { emitToRun, requestApproval, resolveApproval, runAuthorises, runHasEnded } from "./permission-bridge.js";
+import { emitToRun, requestApproval, requestCameraFrame, resolveApproval, resolveCameraFrame, runAuthorises, runHasEnded } from "./permission-bridge.js";
 import { agentModels, recordResolution } from "./agent-models.js";
 import { appendUsage, summariseUsage, usageRecord } from "./usage-ledger.js";
 import { agentAccounts, readPlanLimits, recordPlanLimits } from "./plan.js";
@@ -654,6 +654,42 @@ export async function createGateway(options = {}) {
         CLI has already asked the operator about it — `workspaceMcpArgs`
         pre-approves `reveal` and nothing else.
       */
+      /*
+        The camera, reachable by an agent CLI on the same credential as the
+        screen and the workspace, and answered before the bearer gate for the
+        same reason: the caller is a live agent run, not a browser session.
+
+        The gateway is a plain Node process. It has `screencapture` for the
+        screen and nothing whatever for a camera — on macOS the only way to
+        open one is `getUserMedia`, which needs a renderer. So this asks the
+        window that opened this run's stream, and waits for the frame to come
+        back on its own request. `requestCameraFrame` owns that wait.
+
+        Nothing is pre-approved on the camera server, so by the time this route
+        is reached the operator has already been asked and has said yes.
+      */
+      if (request.method === "POST" && route === "/api/assistant/agent/camera") {
+        const body = await readJson(request, config.maxJsonBytes);
+        const runId = typeof body?.runId === "string" ? body.runId : "";
+        if (!runAuthorises(runId, request.headers["x-teminali-camera-token"] || "")) {
+          if (runHasEnded(runId)) {
+            throw new GatewayError(410, "CAMERA_RUN_ENDED",
+              "This agent turn has ended, so the camera can no longer be opened from it. The next turn gets its own.");
+          }
+          throw new GatewayError(403, "CAMERA_BRIDGE_FORBIDDEN", "The camera bridge rejected the caller.");
+        }
+        const token = request.headers["x-teminali-camera-token"] || "";
+        let frame;
+        try {
+          frame = await requestCameraFrame({ runId, token });
+        } catch (error) {
+          throw new GatewayError(503, "CAMERA_UNAVAILABLE", error instanceof Error ? error.message : "The camera could not be opened.");
+        }
+        await audit.write({ event: "camera-frame-taken-by-agent", correlationId, method: request.method, route });
+        replyJson(response, 200, { frame });
+        return;
+      }
+
       if (request.method === "POST" && WORKSPACE_AGENT_ROUTES.has(route)) {
         const body = await readJson(request, config.maxJsonBytes);
         const runId = typeof body?.runId === "string" ? body.runId : "";
@@ -847,6 +883,27 @@ export async function createGateway(options = {}) {
 
       if (!bearerMatches(request.headers.authorization, sessionToken)) {
         throw new GatewayError(401, "AUTH_REQUIRED", "A valid session bearer token is required.");
+      }
+
+      /*
+        The frame, on its own request, for the same reason an approval's answer
+        arrives that way: the run's stream is one-way. An `error` here is the
+        window saying why it could not — no camera, permission refused — and it
+        reaches the agent as the tool failing rather than as a silent timeout.
+      */
+      if (request.method === "POST" && route === "/api/assistant/camera-frame") {
+        const body = await readJson(request, config.maxJsonBytes);
+        if (typeof body?.runId !== "string" || typeof body?.id !== "string") {
+          throw new GatewayError(400, "CAMERA_FRAME_ID_REQUIRED", "A run id and a request id are required.");
+        }
+        const outcome = resolveCameraFrame({
+          runId: body.runId,
+          id: body.id,
+          image: typeof body.image === "string" ? body.image : "",
+          error: typeof body.error === "string" ? body.error : "",
+        });
+        replyJson(response, outcome.ok ? 200 : 409, outcome);
+        return;
       }
 
       /* The operator's answer, on its own request: the run's stream is one-way. */

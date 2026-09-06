@@ -5,7 +5,9 @@ import {
   closeRun,
   openRun,
   requestApproval,
+  requestCameraFrame,
   resolveApproval,
+  resolveCameraFrame,
   runCount,
 } from "../server/permission-bridge.js";
 import { permissionMcpArgs, PERMISSION_TOOL } from "../server/permission-mcp.js";
@@ -150,4 +152,48 @@ test("the CLI is handed a prompt tool, and the tool is pre-approved", () => {
 test("no run and no token means no flags at all", () => {
   assert.deepEqual(permissionMcpArgs(null, null).args, []);
   assert.deepEqual(permissionMcpArgs("run", "").args, []);
+});
+
+
+/* ── The camera, on the same run's token ────────────────────────────────── */
+
+test("a frame is asked for on the run's stream and answered on its own request", async () => {
+  /*
+    The gateway is a plain Node process: it has `screencapture` for the screen
+    and nothing at all for a camera, because opening one needs `getUserMedia`
+    and that lives in a renderer. So the ask goes out on the stream the window
+    already opened by starting this turn, and the picture comes back the way an
+    approval's answer does.
+  */
+  const events = [];
+  const token = openRun("cam-1", (event) => events.push(event));
+
+  const frame = requestCameraFrame({ runId: "cam-1", token });
+  const asked = events.find((event) => event.type === "camera");
+  assert.ok(asked, "the window is asked on its own stream");
+
+  assert.deepEqual(resolveCameraFrame({ runId: "cam-1", id: asked.id, image: "aGVsbG8=" }), { ok: true });
+  assert.equal((await frame).image, "aGVsbG8=");
+
+  // A frame is answered once. A second answer is not a second photograph.
+  assert.equal(resolveCameraFrame({ runId: "cam-1", id: asked.id, image: "again" }).ok, false);
+  closeRun("cam-1");
+});
+
+test("a window that cannot open the camera says so, and the tool fails with its words", async () => {
+  const events = [];
+  const token = openRun("cam-2", (event) => events.push(event));
+  const frame = requestCameraFrame({ runId: "cam-2", token });
+  const asked = events.find((event) => event.type === "camera");
+
+  resolveCameraFrame({ runId: "cam-2", id: asked.id, error: "There is no camera on this machine." });
+  await assert.rejects(frame, /no camera on this machine/);
+  closeRun("cam-2");
+});
+
+test("the camera is not reachable without this run's token", async () => {
+  const token = openRun("cam-3", () => {});
+  await assert.rejects(requestCameraFrame({ runId: "cam-3", token: "not-it" }), /rejected the caller/);
+  await assert.rejects(requestCameraFrame({ runId: "no-such-run", token }), /no longer running/);
+  closeRun("cam-3");
 });

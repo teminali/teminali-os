@@ -165,13 +165,17 @@ mac:
         # Last, so the re-include above cannot bring it back: a later pattern
         # wins, and the root copy has the same bin/ layout as the nested one.
         - "!onnxruntime-node/**"
-  # macOS refuses the microphone outright, without a dialog, if the reason is
-  # not declared. Screen Recording and Accessibility need no key — they are
-  # granted only in System Settings, by hand, and cannot be prompted around.
+  # macOS refuses the microphone and the camera outright, without a dialog, if
+  # the reason is not declared. Screen Recording and Accessibility need no key
+  # — they are granted only in System Settings, by hand, and cannot be
+  # prompted around.
   extendInfo:
     NSMicrophoneUsageDescription: >-
       Teminali Code listens when you press its microphone or its shortcut, so
       you can dictate and ask about what is on your screen.
+    NSCameraUsageDescription: >-
+      Teminali Code takes a single photograph with your camera when you ask its
+      assistant to look at you, and only after you approve that request.
     NSAppleEventsUsageDescription: >-
       Teminali Code reads the controls of the application in front so its
       assistant can point at them by name rather than guessing where they are.
