@@ -10,6 +10,9 @@ import { useVoice, type UseVoiceResult } from "../../hooks/useVoice";
 import { useAttachments } from "../../hooks/useAttachments";
 import { composePrompt } from "../../services/fileService";
 import { useCommandApproval } from "../../hooks/useCommandApproval";
+import { useSpokenApproval } from "../../hooks/useSpokenApproval";
+import { useApprovalStore } from "../../store/approvalStore";
+import { commandHead } from "../../services/agentCommands";
 import { CommandApprovalPrompt } from "./CommandApprovalPrompt";
 import { Composer } from "./Composer";
 import { MessageBlock } from "./MessageBlock";
@@ -136,6 +139,38 @@ export const StudioChat: React.FC<{
   const stopRef = useRef<() => void>(() => {});
   const voiceRef = useRef<UseVoiceResult | null>(null);
   const spokenFor = useRef<string | null>(null);
+
+  /*
+    The command gate, offered to the voice layer as well as to the mouse.
+
+    Publishing is all this does; the prompt below still draws itself and its
+    buttons still settle the same gate. What the store adds is a second door —
+    whichever engine has the microphone reads the command out and listens for
+    "yes". See hooks/useSpokenApproval.ts.
+  */
+  const spokenApproval = useSpokenApproval(voiceRef);
+  const approveRef = useRef(commandApproval);
+  approveRef.current = commandApproval;
+  useEffect(() => {
+    const store = useApprovalStore.getState();
+    const request = commandApproval.pending;
+    if (!request) return;
+    // The gate holds one command at a time, so its identity is the command
+    // itself — there is no id to carry, and a re-render must not re-ask.
+    const id = `chat:${request.command}`;
+    store.offer({
+      id,
+      source: "chat",
+      asker: "The assistant",
+      action: request.command,
+      alwaysLabel: commandHead(request.command),
+      answer: (behavior, remember) => {
+        if (behavior === "allow") approveRef.current.approve(remember);
+        else approveRef.current.deny();
+      },
+    });
+    return () => store.withdraw(id);
+  }, [commandApproval.pending]);
   // What the current run has done so far — the tool calls and the prose — so
   // the voice layer can answer "how's it going?" from facts rather than filler.
   const runRef = useRef<RunProgress | null>(null);
@@ -553,6 +588,9 @@ export const StudioChat: React.FC<{
      * the composer's microphone *be* the assistant rather than sit beside it.
      */
     submit: (text, options) => {
+      // A standing permission prompt gets first refusal on the words. "Yes" is
+      // an answer to it, not a message for the model — see useSpokenApproval.
+      if (spokenApproval.consume(text)) return;
       // Direct bridge to normal chatbox — voice does not have its own workflow.
       // The origin rides along so the turn reaches the model marked as heard,
       // not typed: the words are a transcript and the names in them are its
@@ -821,6 +859,7 @@ export const StudioChat: React.FC<{
                   request={commandApproval.pending}
                   onApprove={(remember) => commandApproval.approve(remember)}
                   onDeny={commandApproval.deny}
+                  listening={spokenApproval.listening}
                 />
               )}
             </div>

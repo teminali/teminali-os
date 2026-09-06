@@ -336,6 +336,15 @@ to download a natural one — System Settings › Accessibility › Live Speech 
 Spoken Content) › Voice, which installs it system-wide; Live Speech itself does
 not need to be switched on.
 
+While a conversation is live, a permission prompt is read out and can be
+answered out loud: the assistant asks ("Claude Code wants to run npm test — say
+yes to allow it, or no to refuse"), and "yes", "always" or "no" settles it. The
+prompt keeps every button it had, so a click still works and is often faster; the
+`say yes` hint only appears while something is actually listening. What counts as
+an answer is deliberately narrow — a whole short utterance, never a word inside a
+sentence — so *"yes and then push the branch"* reaches the model as an
+instruction with the prompt still standing. See `DESIGN.md` §6.18.
+
 ### Guardian
 
 What the machine is holding, right now. **Every number is measured or it is
@@ -680,7 +689,7 @@ ollama serve              # local models on 127.0.0.1:11434
 
 ```bash
 npm run typecheck   # tsc --noEmit
-npm test            # 1308 tests, 0 failures
+npm test            # 1318 tests, 0 failures
 npm run build       # tsc && vite build
 npm run verify:core # all three
 ```

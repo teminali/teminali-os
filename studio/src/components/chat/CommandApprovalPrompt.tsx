@@ -1,5 +1,5 @@
 import React, { useEffect, useRef } from "react";
-import { CornerDownLeft } from "lucide-react";
+import { CornerDownLeft, Mic } from "lucide-react";
 import { commandHead, type AgentCommandRequest } from "../../services/agentCommands";
 
 interface CommandApprovalPromptProps {
@@ -7,6 +7,9 @@ interface CommandApprovalPromptProps {
   /** `remember` allows every later command with the same executable. */
   onApprove: (remember?: boolean) => void;
   onDeny: () => void;
+  /** The assistant has read this out and is listening for "yes" — say so, so
+   *  the operator knows the words are live as well as the buttons. */
+  listening?: boolean;
 }
 
 /**
@@ -16,7 +19,7 @@ interface CommandApprovalPromptProps {
  * and gets out of the way. Read-only checks never reach it and blocked commands
  * never run at all, so the only question here is "run this one?".
  */
-export const CommandApprovalPrompt: React.FC<CommandApprovalPromptProps> = ({ request, onApprove, onDeny }) => {
+export const CommandApprovalPrompt: React.FC<CommandApprovalPromptProps> = ({ request, onApprove, onDeny, listening = false }) => {
   const runRef = useRef<HTMLButtonElement>(null);
 
   useEffect(() => {
@@ -55,6 +58,15 @@ export const CommandApprovalPrompt: React.FC<CommandApprovalPromptProps> = ({ re
       <code className="flex-1 min-w-0 truncate font-mono text-ink-high" title={request.command}>
         {request.command}
       </code>
+
+      {/* The buttons are not replaced by the voice path and never will be —
+          this only says the second door is open. */}
+      {listening && (
+        <span className="flex items-center gap-1 text-ink-muted flex-shrink-0" title={'Say "yes", "always", or "no"'}>
+          <Mic size={9} className="opacity-70" />
+          say yes
+        </span>
+      )}
 
       <button
         ref={runRef}

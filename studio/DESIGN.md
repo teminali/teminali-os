@@ -3245,6 +3245,87 @@ a navigation message that says nothing about audio not being read as silence,
 and that the engine consults the monitor at both gates.
 
 
+### 6.18 A permission prompt can be answered out loud (`approvalIntent.ts`, `hooks/useSpokenApproval.ts`, 2026-09-06)
+
+The operator's words: *"we have to handle accepting commands and other
+permissions hands free, the assistant has to ask me if i say yes it accepts
+itself, but do show the option incase i wanted to click myself"*.
+
+Two subsystems in this application stop and ask before they act — the built-in
+chat's command gate (`hooks/useCommandApproval.ts`, §7) and an agent CLI's own
+permission prompt (`panels/AgentPane.tsx`). Both were mouse-only. That is fine
+at a keyboard and useless the moment the operator is talking to Temy from across
+the room: the run stalls on a button nobody is near, and the assistant that is
+mid-conversation with them says nothing about it.
+
+**The prompt is not replaced.** Every button that settled a request still
+settles it, still with the same keyboard shortcuts, and a request answered by
+voice and one answered by a click travel the same path. The voice route is a
+second door onto the same decision — which is what the operator asked for
+explicitly, and what `tests/approval-intent.test.mjs` asserts by reading both
+components back.
+
+**Where the request lives.** `store/approvalStore.ts` — one slot, not a queue,
+and not persisted. One slot because "yes" can only mean the request the operator
+was just read; a pane with several blocked tool calls publishes only the head,
+and the rest wait on screen as they already did. Not persisted because a pending
+approval belongs to a live run, and restoring one across a restart would offer
+to allow a command whose process is long gone. The store never resolves
+anything: it carries an `answer` callback, because the promise, the run and the
+socket all belong to the pane that raised it.
+
+**Who asks.** Every chat surface builds its own `VoiceEngine`, so three may be
+mounted at once, and the question must be asked once by the one actually holding
+the microphone. `useSpokenApproval` speaks only when that engine has
+`mode === "conversation"` and is not idle — a push-to-talk engine is not
+listening between presses and must not narrate. `SideChatPane` is dictation-only
+by design and so never asks. A prompt raised while nothing is listening is
+simply never spoken, which is correct rather than a gap: the operator is at the
+keyboard and the buttons are in front of them.
+
+It is spoken with `speakAside`, not `speakReply` — the question is not part of
+the model's turn and must not queue behind one.
+
+**Who answers, and how narrowly.** `services/voice/approvalIntent.ts` is pure
+and holds the whole decision. The risk it is built around is a false allow: the
+microphone hears the room, and running a command the operator never agreed to is
+the one failure that cannot be taken back. So it refuses far more than it
+accepts —
+
+- only a **short** utterance can be an answer at all (six words). A sentence is
+  an instruction: *"yes and then push the branch"* is the operator talking, and
+  it goes to the model with the prompt still standing;
+- the phrase must be the **whole** utterance, never a word inside one —
+  "nothing" is not "no", "yesterday" is not "yes";
+- **"always" is tested before "yes"**, because every way of saying it contains
+  one, and the wider grant has to win the tie or *"yes, always"* would allow once
+  and ask again immediately;
+- anything unmatched is `null`, and null is the safe answer: nothing approved,
+  nothing denied, the words travel on as ordinary speech.
+
+`stop` is deliberately not a deny word — it is the interrupt word, and §6.8
+settles it before an utterance ever reaches here.
+
+The pane's `submit` calls `consume` before it sends anything to the model, so an
+answer never also becomes a prompt. The request is withdrawn from the store at
+the moment of answering rather than when the pane's own state catches up: an
+agent answer is a round trip through the gateway, and until it returns a second
+"yes" would answer the same prompt twice. The verdict is acknowledged aloud —
+"Allowed.", "Refused.", "Allowed, and I won't ask again." — because an operator
+who speaks to a machine and hears nothing says it again louder.
+
+**On screen**, both prompts grow a `say yes` hint with a microphone glyph while
+an engine is listening, and nothing at all when none is. An operator who has just
+been read a command needs to know "yes" is a word something is waiting for;
+otherwise they say it to an assistant that was never armed.
+
+Tested in `tests/approval-intent.test.mjs` (10): the affirmatives, the
+negatives, "always" beating the "yes" inside it, six sentences that contain an
+answer word and must not be read as answers, words that merely contain one, the
+phrasing of the spoken question, a shell one-liner announced rather than
+recited, and that both prompts still render every button they had.
+
+
 ## 7. The agent command loop (`services/agentCommands.ts`, `services/commandThrashing.ts`)
 
 ### 7.1 Diagnose before retrying (2026-09-05)

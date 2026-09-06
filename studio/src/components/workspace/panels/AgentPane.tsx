@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from "react";
-import { ChevronDown, ShieldAlert } from "lucide-react";
+import { ChevronDown, Mic, ShieldAlert } from "lucide-react";
 import {
   AgentCliService,
   type AgentDescriptor,
@@ -9,7 +9,9 @@ import {
 import { usePanelStore, type PanelTab } from "../../../store/panelStore";
 import { useStudioStore } from "../../../store/studioStore";
 import { useAttachments } from "../../../hooks/useAttachments";
-import { useVoice } from "../../../hooks/useVoice";
+import { useVoice, type UseVoiceResult } from "../../../hooks/useVoice";
+import { useSpokenApproval } from "../../../hooks/useSpokenApproval";
+import { useApprovalStore } from "../../../store/approvalStore";
 import { composePrompt } from "../../../services/fileService";
 import { MessageBlock } from "../../chat/MessageBlock";
 import { Composer } from "../../chat/Composer";
@@ -78,11 +80,27 @@ export const AgentPane: React.FC<{ panel: PanelTab & { kind: AgentEngine } }> = 
   const surfaceRef = useRef<HTMLDivElement>(null);
   const attachments = useAttachments();
 
+  /*
+    The engine, reachable from the effects that outlive a render.
+
+    Needed for the same reason the main chat needs it: an approval this tab is
+    blocked on has to be read aloud by whichever engine is actually listening,
+    and that is decided after the component has rendered.
+  */
+  const voiceRef = useRef<UseVoiceResult | null>(null);
+  const spokenApproval = useSpokenApproval(voiceRef);
+
   const voice = useVoice({
-    submit: (text) => void send(text),
+    // A standing permission prompt gets first refusal on the words: "yes" is
+    // an answer to it rather than a new instruction for the agent.
+    submit: (text) => {
+      if (spokenApproval.consume(text)) return;
+      void send(text);
+    },
     lastAssistantText: () => messages.filter((m) => m.role === "assistant").at(-1)?.content ?? "",
     isBusy: () => streaming,
   });
+  voiceRef.current = voice;
 
   useEffect(() => {
     const controller = new AbortController();
@@ -274,6 +292,40 @@ export const AgentPane: React.FC<{ panel: PanelTab & { kind: AgentEngine } }> = 
     });
   };
 
+  const label = descriptor?.label ?? (engine === "claude" ? "Claude Code" : "Codex");
+
+  /*
+    The head of the queue, offered to the voice layer.
+
+    Only the head: several tool calls can be blocked at once, but "yes" can only
+    mean the one the operator was just read. The rest wait their turn exactly as
+    they already do on screen.
+
+    Publishing changes nothing about the prompt below — it draws itself, its
+    buttons still call `answer`, and a tab whose engine is silent simply never
+    gets asked out loud. See hooks/useSpokenApproval.ts.
+  */
+  const head = approvals[0] ?? null;
+  const answerRef = useRef(answer);
+  answerRef.current = answer;
+  useEffect(() => {
+    if (!head) return;
+    const store = useApprovalStore.getState();
+    store.offer({
+      id: head.id,
+      source: "agent",
+      asker: label,
+      // The command if it is one, the tool's name if it is not: "Bash" alone
+      // tells the ear nothing, and reading raw JSON aloud tells it less.
+      action: typeof head.input?.command === "string" ? head.input.command : head.toolName,
+      alwaysLabel: head.key,
+      answer: (behavior, remember) => void answerRef.current(head, behavior, remember),
+    });
+    return () => store.withdraw(head.id);
+    // `label` is derived from the descriptor and stable for the life of a tab.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [head]);
+
   /**
    * Stops this tab's run.
    *
@@ -292,7 +344,6 @@ export const AgentPane: React.FC<{ panel: PanelTab & { kind: AgentEngine } }> = 
   /* Escape stops this tab, as it stops the main chat — same rule, same hook. */
   useInterruptKey(streaming, surfaceRef, stop);
 
-  const label = descriptor?.label ?? (engine === "claude" ? "Claude Code" : "Codex");
   const current = permission ? PERMISSION_COPY[permission] : null;
 
   if (!probing && !descriptor?.installed) {
@@ -401,6 +452,14 @@ export const AgentPane: React.FC<{ panel: PanelTab & { kind: AgentEngine } }> = 
             <ShieldAlert size={12} className="text-warning flex-shrink-0" />
             <span className="text-ink-high">{label} is asking to run {approvals[0].toolName}</span>
             <span className="flex-1" />
+            {/* The buttons below are not replaced by the voice path; this only
+                says that saying it works too. */}
+            {spokenApproval.listening && (
+              <span className="flex items-center gap-1 text-ink-muted" title={'Say "yes", "always", or "no"'}>
+                <Mic size={10} className="opacity-70" />
+                say yes
+              </span>
+            )}
             {approvals.length > 1 && <span className="text-ink-disabled">{approvals.length - 1} more waiting</span>}
           </div>
 
