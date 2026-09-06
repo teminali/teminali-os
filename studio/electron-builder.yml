@@ -138,7 +138,25 @@ mac:
       arch:
         - arm64
         - x64
-  artifactName: ${productName}-${version}-macOS-${arch}.${ext}
+  # `Teminali-OS`, spelled out, rather than ${productName} — which is
+  # "Teminali OS", with a space GitHub will not accept in an asset name. GitHub
+  # substitutes a dot, and electron-builder only anticipates that for the
+  # artifact itself: it computes a safe name for the .zip and uploads under it,
+  # but the .zip.blockmap beside it goes up under the name on disk and lands as
+  # `Teminali.OS-...zip.blockmap`.
+  #
+  # That one dot cost the whole macOS build of v0.0.3. Re-running the job made
+  # electron-builder look for `Teminali OS-...zip.blockmap` to overwrite, miss
+  # it because GitHub is holding a dotted name, upload instead, and take a 422
+  # `already_exists` — four times, then the run died, after the DMGs were up but
+  # before it had finished. A published release cannot be rebuilt as long as any
+  # asset name round-trips differently from the name on disk.
+  #
+  # Naming it safely here costs nothing: the uploaded names are byte-identical
+  # to what v0.0.3 already published. Only the blockmaps change, from
+  # `Teminali.OS-` to `Teminali-OS-`. The DMG volume title below keeps the space
+  # — that one is read by a person, not by an API.
+  artifactName: Teminali-OS-${version}-macOS-${arch}.${ext}
   darkModeSupport: true
   gatekeeperAssess: false
   entitlements: build/entitlements.mac.plist
@@ -200,7 +218,8 @@ mac:
       assistant can point at them by name rather than guessing where they are.
 
 dmg:
-  artifactName: ${productName}-${version}-macOS-${arch}.${ext}
+  # Space-free for the reason spelled out under `mac.artifactName`.
+  artifactName: Teminali-OS-${version}-macOS-${arch}.${ext}
   # No ${arch}: it expanded to "-arm64", so mounting the Apple Silicon image
   # opened a volume called "Teminali OS 1.1.0 -arm64" — contradicting the file
   # the reader just chose, in the machine vocabulary the rename exists to avoid.
@@ -247,7 +266,10 @@ win:
     - target: nsis
       arch:
         - x64
-  artifactName: ${productName}-Setup-${version}-Windows-${arch}.${ext}
+  # Space-free for the reason spelled out under `mac.artifactName`. NSIS emits
+  # a .exe.blockmap too, so Windows carries the identical re-run trap; it has
+  # simply never been observed, because no Windows job has ever finished.
+  artifactName: Teminali-OS-Setup-${version}-Windows-${arch}.${ext}
   # The speech sidecar's dependencies, pruned to Windows and ${arch}. See the
   # macOS entry for what each pattern is for.
   extraResources:
@@ -294,7 +316,8 @@ linux:
       arch:
         - x64
   category: Development
-  artifactName: ${productName}-${version}-Linux-${arch}.${ext}
+  # Space-free for the reason spelled out under `mac.artifactName`.
+  artifactName: Teminali-OS-${version}-Linux-${arch}.${ext}
   # The speech sidecar's dependencies, pruned to Linux and ${arch}. See the
   # macOS entry for what each pattern is for.
   extraResources:

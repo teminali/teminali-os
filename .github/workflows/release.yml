@@ -65,13 +65,65 @@ jobs:
       # package's, and its suite lives there. No install: it has no dependencies.
       - run: npm test
 
+  prepare:
+    name: Create the release
+    # One release, created once, before any platform builds. Each matrix job
+    # publishes through electron-builder, and electron-builder creates the
+    # release itself when none exists for the tag — so three jobs reaching that
+    # point within seconds of each other all try, and the losers die with
+    # `422 Published releases must have a valid tag`. On v0.0.1 and v0.0.2 that
+    # was a red mark on a job whose assets were already up; on v0.0.3 it was the
+    # entire macOS build. With the release already there, the three jobs only
+    # ever upload to it.
+    #
+    # Gated at the step, not the job: a skipped job skips every job that needs
+    # it, and `build` needs this one. A rehearsal passes through in seconds
+    # with nothing created.
+    needs: verify
+    runs-on: ubuntu-latest
+    steps:
+      - name: Create the release, once
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          # RELEASES_TOKEN alone, no GITHUB_TOKEN fallback: the fallback cannot
+          # write to teminali/releases and would fail here with a permissions
+          # error that says nothing about the secret. The build job's guard
+          # explains what to add and why.
+          GH_TOKEN: ${{ secrets.RELEASES_TOKEN }}
+          TAG_NAME: ${{ github.ref_name }}
+          RELEASE_REPO: teminali/releases
+        run: |
+          set -e
+          if [ -z "$GH_TOKEN" ]; then
+            echo "::error::RELEASES_TOKEN is not set. Add a PAT with contents:write on teminali/releases."
+            exit 1
+          fi
+          # Idempotent, so re-running any later job finds the release it had.
+          if gh release view "$TAG_NAME" --repo "$RELEASE_REPO" >/dev/null 2>&1; then
+            echo "Release $TAG_NAME already exists in $RELEASE_REPO."
+            exit 0
+          fi
+          # Published, not draft — electron-builder's `releaseType: release`
+          # would end up there anyway, and a draft is invisible to the landing
+          # site and to every installed copy asking /releases/latest. Empty
+          # body, so `release-notes` below still writes the real one.
+          gh release create "$TAG_NAME" --repo "$RELEASE_REPO" \
+            --title "Teminali OS ${TAG_NAME#v}" --notes ""
+
   build:
     name: ${{ matrix.name }}
     # Nothing is published unless the same checks an operator would run by hand
     # have passed. A release whose tests did not run is the thing a release
-    # process exists to prevent.
-    needs: verify
+    # process exists to prevent. And nothing builds until the release exists,
+    # so no job ever has to create one.
+    needs: [verify, prepare]
     runs-on: ${{ matrix.os }}
+    # Bounded, because the default is 360 minutes and Windows has twice spent
+    # most of that packaging in silence. A run that cannot finish inside this
+    # should fail and hand over its log, which is the one thing a job still
+    # in progress will not do — GitHub serves no log until a job stops, so
+    # every hung Windows build so far had to be cancelled to be read at all.
+    timeout-minutes: 60
     strategy:
       # One platform failing must not cancel the two that are already building.
       fail-fast: false
@@ -187,6 +239,23 @@ jobs:
           APPLE_ID: ${{ secrets.APPLE_ID }}
           APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          # Windows only, and the reason no Windows build has ever finished.
+          #
+          # NSIS packs the whole app into `app-64.7z` first, and electron-builder
+          # hardcodes `-mx=9` for 7z — ultra, solid LZMA — regardless of the
+          # `compression` setting, which only ever reaches `store`. That was fine
+          # while the payload was ~200 MB: Windows packaged v1.2.7 in 2m05s and
+          # v1.2.9 in 2m42s. Shipping the speech sidecar added 943 MB of
+          # `voice-runtime/node_modules`, and the same step has not finished since
+          # — the last run sat in it for five and a half hours, silently, because
+          # makensis prints nothing while it compresses. macOS and Linux packaged
+          # that identical payload in 2m12s and 1m29s; they do not use 7z ultra.
+          #
+          # This is app-builder-lib's own escape hatch (`compute7zCompressArgs`),
+          # a single digit that replaces the 9. `1` is fastest-LZMA: a bigger
+          # .exe, and a Windows build that exists. Raise it once a real run has
+          # reported a real time.
+          ELECTRON_BUILDER_COMPRESSION_LEVEL: ${{ matrix.os == 'windows-latest' && '1' || '' }}
         # bash on every runner, including Windows, which defaults to PowerShell
         # and cannot parse the guard below — that is a build this workflow has
         # already lost once. Git Bash ships on the Windows image.
@@ -203,6 +272,13 @@ jobs:
           # and three empty strings are a set that is present and unusable.
           if [ -z "${APPLE_ID}" ]; then
             unset APPLE_ID APPLE_APP_SPECIFIC_PASSWORD APPLE_TEAM_ID
+          fi
+          # And again, with teeth: app-builder-lib validates this one as
+          # /^[0-9]$/ whenever it is merely NON-NULL, so the empty string the
+          # two non-Windows runners interpolate would abort their packaging with
+          # `must be a single digit 0-9, got: ""`. Unset is the only inert value.
+          if [ -z "${ELECTRON_BUILDER_COMPRESSION_LEVEL}" ]; then
+            unset ELECTRON_BUILDER_COMPRESSION_LEVEL
           fi
           npx electron-builder ${{ matrix.args }} \
             --publish ${{ (github.event_name == 'push' && 'always') || 'never' }}

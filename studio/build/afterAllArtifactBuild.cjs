@@ -53,6 +53,13 @@ function relabel(file) {
  * on disk has to be the safe one. This is the same substitution
  * `computeSafeArtifactNameIfNeeded` makes, and it is what put the hyphens in
  * every asset of v1.1.0.
+ *
+ * Since v0.0.4 the `artifactName` templates in electron-builder.yml spell
+ * `Teminali-OS` out, so the name on disk already has no space and this is a
+ * no-op on the current configuration. It stays because this hook must not
+ * assume the yml was kept that way — the day someone restores ${productName}
+ * there, the .dmg would arrive dotted again, and the test feeds this hook
+ * spaced names for exactly that reason.
  */
 function githubSafe(name) {
   return name.replace(/ /g, '-');
