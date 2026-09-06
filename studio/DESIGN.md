@@ -566,6 +566,42 @@ artifact preview, the agent — did not ask for it to be private.
 
 Tested in `tests/browser-private.test.mjs` (11).
 
+#### Importing from another browser (`server/browser-import.js`, 2026-09-06)
+
+A new browser starts empty, which is honest and is also why nobody opens it
+twice. **More › Import from another browser…** reads the lists another browser
+already keeps on this machine and folds them into the same store the panel
+already uses (`server/browser-data.js`).
+
+It lives in the gateway rather than in main or the renderer for the reason the
+store does: the agent has to be able to read what was imported, and the gateway
+is the only process both the panel and an agent CLI's shim can reach.
+
+| Decision | Why |
+| --- | --- |
+| The database is **copied** before it is opened | Chrome and Edge are normally running and hold their own database open. The copy — with its `-wal` sidecar — also means an import can never write a byte into another browser's profile. |
+| Time is converted **inside SQL** | Chromium stores a visit as microseconds since 1601, e.g. `13432985205915271`. That is past `Number.MAX_SAFE_INTEGER`, and `node:sqlite` throws `ERR_OUT_OF_RANGE` the moment such a column is read into a JS number. Every query divides it to seconds first. Bookmarks' `date_added` is a *string* for the same reason and is divided as a `BigInt`. |
+| Discovery is **evidence, not a vendor list** | A browser is offered only when a profile directory really holds a `Bookmarks` or a `History` file. On this machine four vendors have an Application Support folder containing nothing but `NativeMessagingHosts`, left by extensions; none is a browser anyone could import from. |
+| The renderer names a **source and a profile**, never a path | Turning those into a location on disk is `browser-import.js`'s job alone, and a profile id is one directory name — no separator, no `..`. |
+| Safari is listed **unavailable, with its reason** | `~/Library/Safari/History.db` is TCC-protected: reading it answers `unable to open database file` however correct the SQL is, until the app has Full Disk Access. Measured, not assumed. Hiding Safari would only make the operator wonder where it went. |
+| **Autofill is not offered at all** | This browser has no autofill store, so importing saved addresses and cards would move sensitive data into a void. The dialog says so in the footer rather than showing a tick box that does nothing. |
+| Bookmarks **append**, history **merges as a timeline** | The operator's own bookmarks are never displaced or re-dated by an import, and an address already kept is skipped rather than duplicated. History is concatenated, deduplicated by address keeping the later visit, sorted newest first and cut to `MAX_HISTORY` — so an import cannot bury what the operator did here today under a year of somebody else's visits. |
+| The dialog is a **`Modal`** | It opens from the browser panel, and `services/browserView.ts` hides the native view on exactly `[role="dialog"], [role="menu"]`. A hand-rolled backdrop would have no `role="dialog"`, so the page would paint straight over it. The same fault the command palette had. |
+
+Chromium bookmarks are plain JSON and need no database at all; Chromium history
+and both Firefox lists are SQLite, read with `node:sqlite` — **bundled by
+Electron 44 (Node 24.19.0), measured in the Electron runtime**, so no native
+module and no new dependency. Both lists are capped at `IMPORT_LIMIT` (500),
+which is what the store can hold; Edge's history on this machine is 40 MB and
+nothing would read the rest.
+
+The result is reported with numbers in it, because "imported" alone is the
+least useful word available: an import that added nothing because everything
+was already kept has to read differently from one that found nothing to read.
+
+Tested in `tests/browser-import.test.mjs` (22) and `tests/browser-data.test.mjs`
+(7 of its 17 cover the merge).
+
 #### Passkeys, and the silence that read as a bug (2026-09-06)
 
 Signing in to Google with a passkey did nothing: no fingerprint dialog, no

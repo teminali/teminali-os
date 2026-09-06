@@ -194,3 +194,71 @@ export function searchHistory(history, query, limit = 50) {
     : history;
   return rows.slice(0, cap);
 }
+
+/**
+ * Folds bookmarks and history read out of another browser into this store.
+ *
+ * Two different merges, because the two lists mean different things:
+ *
+ * - **Bookmarks are a set the operator curated.** Theirs come first and are
+ *   never displaced or re-dated by an import; an imported address already
+ *   bookmarked here is skipped, not duplicated and not re-titled. What is left
+ *   of `MAX_BOOKMARKS` is filled with the rest, newest first.
+ * - **History is a timeline.** The two are concatenated, sorted newest first,
+ *   deduplicated by address keeping the more recent visit, and cut to
+ *   `MAX_HISTORY` — so an import cannot bury what the operator did here today
+ *   under a year of somebody else's visits.
+ *
+ * The counts come back because "imported" is only a useful word with a number
+ * after it: an import that added nothing because everything was already here
+ * has to look different from one that found nothing to read.
+ */
+export async function mergeImported(storePath, imported) {
+  const data = await readStore(storePath);
+  const source = imported && typeof imported === "object" ? imported : {};
+
+  const existingBookmarks = new Set(data.bookmarks.map((bookmark) => bookmark.url));
+  let bookmarksAdded = 0;
+  let bookmarksSkipped = 0;
+  const incomingBookmarks = [];
+  for (const entry of Array.isArray(source.bookmarks) ? source.bookmarks : []) {
+    const clean = cleanBookmark(entry);
+    if (!clean) continue;
+    if (existingBookmarks.has(clean.url)) {
+      bookmarksSkipped += 1;
+      continue;
+    }
+    existingBookmarks.add(clean.url);
+    incomingBookmarks.push(clean);
+  }
+  incomingBookmarks.sort((a, b) => (a.addedAt < b.addedAt ? 1 : a.addedAt > b.addedAt ? -1 : 0));
+  const room = Math.max(0, MAX_BOOKMARKS - data.bookmarks.length);
+  const keptBookmarks = incomingBookmarks.slice(0, room);
+  bookmarksAdded = keptBookmarks.length;
+  data.bookmarks = [...data.bookmarks, ...keptBookmarks];
+
+  const byUrl = new Map();
+  for (const entry of data.history) byUrl.set(entry.url, entry);
+  let historyAdded = 0;
+  for (const entry of Array.isArray(source.history) ? source.history : []) {
+    const clean = cleanVisit(entry);
+    if (!clean) continue;
+    const existing = byUrl.get(clean.url);
+    if (existing) {
+      // The same page in both lists is one row, dated by whichever visit is later.
+      if (clean.visitedAt > existing.visitedAt) existing.visitedAt = clean.visitedAt;
+      continue;
+    }
+    byUrl.set(clean.url, clean);
+    historyAdded += 1;
+  }
+  data.history = [...byUrl.values()]
+    .sort((a, b) => (a.visitedAt < b.visitedAt ? 1 : a.visitedAt > b.visitedAt ? -1 : 0))
+    .slice(0, MAX_HISTORY);
+
+  await writeStore(storePath, data);
+  return {
+    bookmarks: { added: bookmarksAdded, skipped: bookmarksSkipped, total: data.bookmarks.length },
+    history: { added: historyAdded, total: data.history.length },
+  };
+}

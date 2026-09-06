@@ -25,6 +25,7 @@ import {
   type Bookmark,
   type DownloadEntry,
   type HistoryEntry,
+  type ImportResult,
 } from "../services/browserDataService";
 
 /** A download that has not finished, as main reports it. */
@@ -54,6 +55,13 @@ interface BrowserState {
   clearHistory: () => Promise<void>;
   /** A download that has ended. Only ever called on `done`. */
   record: (entry: Omit<DownloadEntry, "savedAt">) => Promise<void>;
+  /**
+   * Folds another browser's lists in, and adopts what the gateway answers with.
+   *
+   * The merge happens in the gateway, so the lists that come back are already
+   * capped, deduplicated and ordered — this never merges a second time here.
+   */
+  importFrom: (request: { source: string; profile: string; bookmarks: boolean; history: boolean }) => Promise<ImportResult>;
   /** A download is in flight, or has moved. */
   setActive: (id: string, download: ActiveDownload) => void;
   clearActive: (id: string) => void;
@@ -105,6 +113,17 @@ export const useBrowserStore = create<BrowserState>((set, get) => ({
   record: async (entry) => {
     const downloads = await BrowserDataService.recordDownload(entry);
     set({ downloads });
+  },
+
+  importFrom: async (request) => {
+    const result = await BrowserDataService.runImport(request);
+    set({
+      bookmarks: result.data.bookmarks,
+      history: result.data.history,
+      downloads: result.data.downloads,
+      loaded: true,
+    });
+    return result;
   },
 
   setActive: (id, download) => set({ active: { ...get().active, [id]: download } }),

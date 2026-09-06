@@ -6,6 +6,7 @@ import {
   EyeOff,
   Globe,
   House,
+  Import,
   KeyRound,
   MoreHorizontal,
   RotateCw,
@@ -19,6 +20,7 @@ import { BrowserHome } from "./BrowserHome";
 import { usePanelStore, type PanelTab } from "../../../store/panelStore";
 import { addressLabel, normaliseAddress } from "../../../utils/address";
 import { isBookmarked, useBrowserStore } from "../../../store/browserStore";
+import { BrowserImportModal } from "../../modals/BrowserImportModal";
 import { useSearchEngine } from "../../../store/searchStore";
 import {
   boundsEqual,
@@ -84,6 +86,7 @@ export const BrowserPane: React.FC<{ panel: PanelTab }> = ({ panel }) => {
   const [draft, setDraft] = useState(panel.url ?? "");
   const [omniOpen, setOmniOpen] = useState(false);
   const [moreOpen, setMoreOpen] = useState(false);
+  const [importOpen, setImportOpen] = useState(false);
   // A tab opened without an address opens onto home; one opened at a page does not.
   const [home, setHome] = useState(!panel.url);
   const [error, setError] = useState<string | null>(null);
@@ -444,6 +447,14 @@ export const BrowserPane: React.FC<{ panel: PanelTab }> = ({ panel }) => {
                 onSelect: () => openPanel({ kind: "browser", label: "Private", private: true }),
               },
               {
+                id: "import",
+                label: "Import from another browser\u2026",
+                icon: <Import size={13} />,
+                // Opens a Modal, so the native view hides itself on
+                // `role="dialog"` exactly as it does for every other dialog.
+                onSelect: () => setImportOpen(true),
+              },
+              {
                 id: "clear",
                 label: "Clear history",
                 icon: <Trash2 size={13} />,
@@ -512,6 +523,14 @@ export const BrowserPane: React.FC<{ panel: PanelTab }> = ({ panel }) => {
           />
         )}
       </div>
+
+      {/*
+        Kept inside the panel because it is the panel's own action, and safe
+        there only because it is a `Modal`: the native view hides itself
+        whenever a `[role="dialog"]` is in the document, so this draws over the
+        page rather than under it. See services/browserView.ts.
+      */}
+      <BrowserImportModal isOpen={importOpen} onClose={() => setImportOpen(false)} />
     </div>
   );
 };

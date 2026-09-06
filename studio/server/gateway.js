@@ -71,7 +71,8 @@ import {
   writeStore,
 } from "./providers.js";
 import { forgetProject, listRecentProjects, rememberProject, validateProjectRoot } from "./projects.js";
-import { addBookmark, clearHistory, isBrowsableUrl, readBrowserData, recordDownload, recordVisit, removeBookmark, searchHistory } from "./browser-data.js";
+import { addBookmark, clearHistory, isBrowsableUrl, mergeImported, readBrowserData, recordDownload, recordVisit, removeBookmark, searchHistory } from "./browser-data.js";
+import { BrowserImportError, discoverImportSources, readImport } from "./browser-import.js";
 import { resolveProjectPhrase } from "./project-phrase.js";
 import { GatewayError, classifyUpstreamStatus, publicError } from "./errors.js";
 import {
@@ -1600,6 +1601,47 @@ export async function createGateway(options = {}) {
           throw new GatewayError(400, "BROWSER_DOWNLOAD_INVALID", "A download needs its http(s) address and a filename.");
         }
         replyJson(response, 200, { downloads });
+        return;
+      }
+
+      /*
+        Bringing bookmarks and history over from the browser used before.
+
+        Two routes because they are two different questions. Discovery is a GET
+        that reads nothing but directory entries and answers what is on this
+        machine; the import itself is a POST because it writes the store. The
+        renderer never names a path — it names a source and a profile, and
+        `browser-import.js` is the only thing that turns those into a path.
+
+        Safari is discovered but not importable, and says why rather than being
+        hidden; autofill is reported unsupported rather than half-built. See
+        server/browser-import.js.
+      */
+      if (request.method === "GET" && route === "/api/workspace/browser/import/sources") {
+        replyJson(response, 200, await discoverImportSources());
+        return;
+      }
+
+      if (request.method === "POST" && route === "/api/workspace/browser/import") {
+        const body = await readJson(request, config.maxJsonBytes);
+        let read;
+        try {
+          read = await readImport(body?.source, body?.profile, {
+            kinds: {
+              bookmarks: body?.bookmarks !== false,
+              history: body?.history !== false,
+            },
+          });
+        } catch (error) {
+          if (error instanceof BrowserImportError) throw new GatewayError(400, error.code, error.message);
+          throw new GatewayError(500, "BROWSER_IMPORT_FAILED", "That browser's data could not be read.");
+        }
+        const counts = await mergeImported(config.browserStorePath, read);
+        replyJson(response, 200, {
+          ...counts,
+          read: { bookmarks: read.bookmarks.length, history: read.history.length },
+          data: await readBrowserData(config.browserStorePath),
+        });
         return;
       }
 

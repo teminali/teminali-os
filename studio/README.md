@@ -52,7 +52,7 @@ route requires it. Roughly sixty routes across:
 | Model mode & routing | `/api/frontier/status` · `/api/frontier/resolve-mode` · `/api/models/*` |
 | Entitlement | `/api/entitlement` · `/api/entitlement/{refresh,sign-in,sign-in/poll,sign-out}` · `/api/entitlement/{plans,checkout}` · `/api/entitlement/order/:id` |
 | Hosted providers | `/api/providers` · `/api/providers/key` · `/api/providers/lanes` |
-| Workspace | `/api/workspace/{tree,file,write,delete,mkdir,search,machine-search,open,projects}`, `/api/workspace/projects/{remember,forget}`, `/api/workspace/browser`, `/api/workspace/browser/{bookmark,unbookmark,visit,download}`, `/api/workspace/browser/history/clear`, `/api/workspace/agent/{reveal,open-file,projects,open-project,browse,bookmarks,bookmark,browsing-history,downloads}` |
+| Workspace | `/api/workspace/{tree,file,write,delete,mkdir,search,machine-search,open,projects}`, `/api/workspace/projects/{remember,forget}`, `/api/workspace/browser`, `/api/workspace/browser/{bookmark,unbookmark,visit,download}`, `/api/workspace/browser/history/clear`, `/api/workspace/browser/import`, `/api/workspace/browser/import/sources`, `/api/workspace/agent/{reveal,open-file,projects,open-project,browse,bookmarks,bookmark,browsing-history,downloads}` |
 | Terminal | `/api/terminal/exec` |
 | Agent CLIs | `/api/agents` · `/api/agents/models` · `/api/agents/run` · `/api/agents/permission` · `/api/agents/permission/resolve` |
 | Screen assistant | `/api/assistant/{capabilities,permissions,observe,act}` · `/api/assistant/agent/{observe,act}` (the chat pane's agent, on its run's token) |
@@ -147,6 +147,22 @@ glyph and the toolbar carries a `Private` pill. The file you download is still
 saved where you put it, and the network still sees the traffic — the panel's own
 home page says both. A page opened by the agent or by an artifact preview never
 lands in a private tab.
+
+**Import from another browser.** `More → Import from another browser…` brings
+bookmarks and history over from Chrome, Brave, Edge, Chromium, Vivaldi, Arc,
+Opera or Firefox. It lists the browsers that are really on this machine — a
+browser is offered only when one of its profiles actually holds the files —
+with each profile under the name you gave it in that browser, and you choose
+which of the two lists to take. The other browser's database is copied before
+it is read, so the import never opens the live file and can never write to it;
+run it twice and the second run adds nothing. Your own bookmarks are never
+displaced or renamed, and imported history cannot bury what you did here today.
+
+**Safari** is listed but cannot be read: macOS protects `~/Library/Safari`
+until the app is granted Full Disk Access, so it says that instead of failing.
+**Autofill is not imported** — Teminali Code has no autofill store yet, so
+there would be nowhere for saved addresses or cards to go, and the dialog says
+so rather than offering a tick box that does nothing. macOS only for now.
 
 **Passkeys do not work in the panel, and it now says so.** macOS grants the
 platform authenticator — Touch ID — only to registered web browsers, so
@@ -760,7 +776,7 @@ ollama serve              # local models on 127.0.0.1:11434
 
 ```bash
 npm run typecheck   # tsc --noEmit
-npm test            # 1437 tests, 0 failures
+npm test            # 1466 tests, 0 failures
 npm run build       # tsc && vite build
 npm run verify:core # all three
 ```
