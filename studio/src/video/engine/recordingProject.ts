@@ -253,6 +253,19 @@ export interface AssembleReport {
 
 /* ── Canvas ─────────────────────────────────────────────────────── */
 
+/**
+ * How far the screen file may fall short of the clock before the clip is
+ * cut to the file. A MediaRecorder's last chunk can trail the stop by a
+ * few hundred milliseconds; anything past this is frames that never came.
+ */
+const SCREEN_SHORTFALL_TOLERANCE_MS = 1500;
+
+/** m:ss, for a note a person reads. */
+const clock = (ms: number) => {
+  const s = Math.max(0, Math.round(ms / 1000));
+  return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
+};
+
 /** H.264 refuses odd dimensions, and every export path here ends in it. */
 const even = (n: number) => Math.max(2, Math.round(n / 2) * 2);
 
@@ -464,13 +477,36 @@ export async function assembleRecording(
 
   /* ── 5. The screen ──────────────────────────────────────────────── */
 
+  /*
+    The clip is as long as the FILE when the file is materially shorter
+    than the clock. The two normally agree to a frame or two; they did
+    not on 2026-09-06, when the display stopped delivering frames at
+    3:57 of a 10:04 take while the camera ran on. A clip cut to the
+    clock then holds its last frame for the remaining six minutes, with
+    the pointer still moving over it — which reads as the recording
+    having frozen, not as the display having stopped. So the screen clip
+    ends where the frames did, the camera and narration keep going, and
+    the note says so. A raw .webm carries no duration and is left alone.
+  */
+  const screenFileMs = screen.durationMs;
+  const screenClipMs = screenFileMs !== undefined && take.durationMs - screenFileMs > SCREEN_SHORTFALL_TOLERANCE_MS
+    ? screenFileMs
+    : take.durationMs;
+  if (screenClipMs !== take.durationMs) {
+    notes.push(
+      `The display stopped delivering frames at ${clock(screenClipMs)} of a ${clock(take.durationMs)} take, `
+      + 'so the screen clip ends there instead of holding its last frame to the end. '
+      + 'The camera and narration run on.',
+    );
+  }
+
   const screenAsset: MediaAsset = {
     id: `media_rec_screen_${seq}_${now.toString(36)}`,
     name: 'Screen.mp4',
     type: 'video',
     url: screen.url,
     thumbnailUrl: '',
-    durationMs: take.durationMs,
+    durationMs: screenClipMs,
     width: screen.width,
     height: screen.height,
     fileSizeFormatted: formatFileSize(screen.bytes),

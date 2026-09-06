@@ -81,6 +81,16 @@ export interface TakeTrack {
   height: number;
   bytes: number;
   hasAudio: boolean;
+  /**
+   * How long the FILE is, read back off it once converted — as against
+   * the take's `durationMs`, which is the clock. Absent for a raw .webm,
+   * whose header carries no duration. The two disagree when the capture
+   * stopped delivering frames before the take stopped: on 2026-09-06 a
+   * screen take ran 237 s against a 604 s clock, and the timeline held
+   * its last frame for six minutes without a word. `assembleRecording`
+   * reads this so the clip ends where the frames did.
+   */
+  durationMs?: number;
   /** Still a raw .webm, because ffmpeg was missing or refused it. */
   raw: boolean;
   error?: string;
@@ -703,6 +713,37 @@ export async function startCapture(
     let speechRecognition: SpeechRecognitionLike | null = null;
     const startWallTime = performance.now();
 
+    /* ── Frames that stop arriving ──────────────────────────────────
+       Chromium mutes a capture track when its source stops delivering,
+       and a display source can do that without the display going dark:
+       on 2026-09-06 a screen take stopped at 3:57 of a 10:04 recording
+       while the camera beside it ran to the end, and the file simply
+       ended there. Nothing in a renderer can restart the frames. What
+       it can do is say WHEN they stopped — the one fact the take
+       otherwise loses, and the one the operator needs to know whether
+       the last six minutes are worth keeping. The camera gets the same
+       watch. Capped, because a source that flaps would otherwise write
+       the same line a hundred times. */
+    const clock = (ms: number) => {
+      const s = Math.max(0, Math.round(ms / 1000));
+      return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
+    };
+    let frameNotes = 0;
+    const watchFrames = (track: MediaStreamTrack, what: string) => {
+      const note = (text: string) => { if (frameNotes++ < 6) warnings.push(text); };
+      track.addEventListener('mute', () => {
+        note(`The ${what} stopped delivering frames at ${clock(performance.now() - startWallTime)}.`);
+      });
+      track.addEventListener('unmute', () => {
+        note(`The ${what} resumed at ${clock(performance.now() - startWallTime)}.`);
+      });
+      track.addEventListener('ended', () => {
+        note(`The ${what} ended at ${clock(performance.now() - startWallTime)}, before the take did.`);
+      });
+    };
+    watchFrames(screen.video, 'display');
+    if (cameraVideo) watchFrames(cameraVideo, 'camera');
+
     let onMouseMove: ((e: MouseEvent) => void) | undefined;
     let onClick: ((e: MouseEvent) => void) | undefined;
 
@@ -1197,14 +1238,21 @@ export async function cancelCapture(discard: boolean): Promise<void> {
  * Falls back to the track's numbers if the element will not report:
  * being two pixels out is much better than having no size at all.
  */
-export function probeVideo(url: string): Promise<{ width: number; height: number } | null> {
+export interface ProbedVideo {
+  width: number;
+  height: number;
+  /** Absent when the header has none — a raw MediaRecorder .webm says Infinity. */
+  durationMs?: number;
+}
+
+export function probeVideo(url: string): Promise<ProbedVideo | null> {
   return new Promise((resolve) => {
     const element = document.createElement('video');
     element.preload = 'metadata';
     element.muted = true;
 
     let settled = false;
-    const done = (value: { width: number; height: number } | null) => {
+    const done = (value: ProbedVideo | null) => {
       if (settled) return;
       settled = true;
       element.onloadedmetadata = null;
@@ -1216,7 +1264,13 @@ export function probeVideo(url: string): Promise<{ width: number; height: number
 
     element.onloadedmetadata = () =>
       done(element.videoWidth > 0
-        ? { width: element.videoWidth, height: element.videoHeight }
+        ? {
+          width: element.videoWidth,
+          height: element.videoHeight,
+          ...(Number.isFinite(element.duration) && element.duration > 0
+            ? { durationMs: Math.round(element.duration * 1000) }
+            : {}),
+        }
         : null);
     element.onerror = () => done(null);
     /* A file that never reports must not hold the review screen for ever. */
@@ -1252,6 +1306,7 @@ async function assemble(current: Session, result: RecordingResult): Promise<Take
       height: probed?.height ?? entry.height,
       bytes: file.bytes,
       hasAudio: entry.hasAudio,
+      ...(probed?.durationMs !== undefined ? { durationMs: probed.durationMs } : {}),
       raw: file.raw,
       ...(file.error ? { error: file.error } : {}),
     };
