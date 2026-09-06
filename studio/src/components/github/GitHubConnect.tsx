@@ -4,6 +4,7 @@ import {
 } from "lucide-react";
 import { GitHubService, type GitHubRepo, type GitHubStatus } from "../../services/modelService";
 import { useStudioStore } from "../../store/studioStore";
+import { WorkspaceService } from "../../services/workspaceService";
 import { refreshGitHubStatus } from "../../hooks/useGitHubStatus";
 import { IconButton, StatusDot } from "../ui";
 
@@ -32,7 +33,7 @@ export const GitHubConnect: React.FC<{ compact?: boolean; onCloned?: (path: stri
   const [token, setToken] = useState("");
   const [query, setQuery] = useState("");
 
-  const setWorkspace = useStudioStore((state) => state.setWorkspace);
+  const setWorkspacePath = useStudioStore((state) => state.setWorkspacePath);
 
   const refresh = useCallback(async (signal?: AbortSignal) => {
     setLoading(true);
@@ -89,9 +90,13 @@ export const GitHubConnect: React.FC<{ compact?: boolean; onCloned?: (path: stri
     setError(null);
     try {
       const result = await GitHubService.clone(repo.fullName);
-      onCloned?.(result.path);
-      // The clone is now a known project; point the workspace at it.
-      setWorkspace("teminali");
+      // Open the clone that was just made. This used to call
+      // `setWorkspace("teminali")`, which pointed the shell at a path hardcoded
+      // in the store rather than at the repository the operator had asked for —
+      // so cloning anything moved the workspace somewhere else entirely.
+      const opened = await WorkspaceService.openProject(result.path);
+      setWorkspacePath(opened.current.path);
+      onCloned?.(opened.current.path);
     } catch (failure) {
       setError((failure as Error).message);
     } finally {

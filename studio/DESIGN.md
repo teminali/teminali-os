@@ -2180,6 +2180,27 @@ written down now:
    any file was opened — so the editor could show text that was not what was on
    disk. Gone. A tab with no content yet is empty and fills in from the real
    file.
+4. **A status is measured or it is not shown.** The General settings screen had
+   a hardcoded green "Connected" badge and the line "Running locally at
+   http://127.0.0.1:4310 · Ollama connected", neither of which was ever read
+   from anything — and the port is not even fixed, since a taken 4310 moves the
+   app to an ephemeral one. It now probes `/api/health` and renders
+   Checking / Connected / Degraded / Unreachable, with the address the renderer
+   is actually talking to.
+5. **A claim about where data goes is load-bearing; get it right.** The same
+   screen asserted "100% Local Execution · Zero Telemetry Exfiltration — your
+   codebase, prompt context, and file mutations never leave this machine",
+   unconditionally. False: the Claude Code, Codex and cloud lanes send prompt
+   context to their providers, which is what those engines are. Somebody could
+   have picked an engine on the strength of it. The card now separates what is
+   true per lane from what is true of the app itself (no analytics; the update
+   check asks GitHub for a version number and sends nothing about you).
+
+Four controls went the same way in that sweep — Tips, Window Restoration,
+System Notifications, Completion Sound — each a `useState` read nowhere else,
+for features that were never built: there is no rotating-tips surface, no
+Electron `Notification` anywhere in the app, no completion-sound player, and no
+notion of the three restoration modes. Rule 1 says remove, not fake.
 
 The audit that found these is reproducible: build the import graph from
 `main.tsx` and anything unreachable is dead; grep `<button` for tags with no

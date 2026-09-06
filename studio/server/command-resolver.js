@@ -27,7 +27,7 @@
  */
 
 import { spawn } from "node:child_process";
-import { existsSync, readFileSync, statSync } from "node:fs";
+import { accessSync, constants, existsSync, readFileSync, statSync } from "node:fs";
 import path from "node:path";
 
 const DEFAULT_PATHEXT = ".COM;.EXE;.BAT;.CMD";
@@ -163,6 +163,39 @@ export function resolveCommand(command, args = [], {
     windowsVerbatimArguments: true,
     via: "cmd",
   };
+}
+
+/**
+ * Where `command` is on this machine, or null — `which`, without a subprocess.
+ *
+ * There is a real `which` on macOS and Linux and none on Windows, which has
+ * `where.exe` and a different output shape. Both call sites used to spawn the
+ * Unix one, so on Windows every tool answered "not installed": file ingestion
+ * reported no video, no audio, no OCR and no archives on a machine with ffmpeg
+ * on PATH. Walking PATH ourselves also fixes the macOS half of the same bug —
+ * a Finder-launched app inherits launchd's PATH, so `which ffmpeg` found
+ * nothing there either unless the caller passed an augmented environment.
+ *
+ * Pass `withBinPaths()` as the environment to search the package-manager
+ * prefixes too; that is what both callers do.
+ */
+export function lookupCommand(command, env = process.env, platform = process.platform) {
+  if (typeof command !== "string" || !command) return null;
+  if (platform === "win32") return findExecutable(command, env, platform);
+
+  const directories = (env[pathKey(env)] ?? "").split(path.delimiter).filter(Boolean);
+  for (const directory of directories) {
+    const candidate = path.join(directory, command);
+    // Executable, not merely present: a directory or a data file of the same
+    // name on an earlier PATH entry must not shadow the real tool.
+    try {
+      accessSync(candidate, constants.X_OK);
+      if (statSync(candidate).isFile()) return candidate;
+    } catch {
+      /* next directory */
+    }
+  }
+  return null;
 }
 
 /**

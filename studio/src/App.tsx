@@ -297,9 +297,11 @@ export default function App() {
   /*
     Which project the gateway is bound to, adopted at boot.
 
-    The store opens on a hardcoded `workspacePath`, but the gateway remembers
+    The store opens with an empty `workspacePath`, and the gateway remembers
     the last project across restarts — so the tree, the file panes and the
     media protocol are all relative to a root the shell has never been told.
+    (It used to open on a hardcoded one, which was worse than empty: on any
+    machine but its author's it named a folder that does not exist.)
     Nothing else adopts it: `useProjectLibrary` reads the same endpoint but
     keeps the answer in local state, and every other `setWorkspacePath` is
     behind a click. Until this lands the root is a guess, and a restored media

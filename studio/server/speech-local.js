@@ -23,17 +23,35 @@ import { constants } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { withBinPaths } from "./bin-paths.js";
+import { lookupCommand } from "./command-resolver.js";
 import { DOMAIN_TERMS, buildLexicon, repairVocabulary, vocabularyFromEnv } from "../voice-runtime/lexicon.js";
 
 const run = promisify(execFile);
 
 const WHISPER_BINARIES = ["whisper-cli", "whisper-cpp", "main"];
-const MODEL_SEARCH_PATHS = [
-  path.join(os.homedir(), ".cache/whisper"),
-  path.join(os.homedir(), ".local/share/whisper"),
-  "/opt/homebrew/share/whisper-cpp",
-  "/usr/local/share/whisper-cpp",
-];
+/* Where a ggml model may already be sitting. The first entry is the one the
+   "no model found" message names, so it must be a directory the operator can
+   actually write to on the platform reading it. */
+const MODEL_SEARCH_PATHS = process.platform === "win32"
+  ? [
+      path.join(process.env.LOCALAPPDATA || path.join(os.homedir(), "AppData", "Local"), "whisper"),
+      path.join(os.homedir(), ".cache", "whisper"),
+    ]
+  : [
+      path.join(os.homedir(), ".cache/whisper"),
+      path.join(os.homedir(), ".local/share/whisper"),
+      "/opt/homebrew/share/whisper-cpp",
+      "/usr/local/share/whisper-cpp",
+    ];
+
+/* Named per platform because an instruction that cannot be followed is worse
+   than none: `brew install` is the normal route on macOS and not on the other
+   two, and there is no canonical whisper.cpp package for either of them. The
+   sidecar covers this lane anyway — this is the fully-local upgrade, not a
+   requirement. */
+const WHISPER_INSTALL_HINT = process.platform === "darwin"
+  ? "whisper.cpp is not installed. `brew install whisper-cpp` enables fully local transcription."
+  : "whisper.cpp is not installed. Build it and put `whisper-cli` on PATH to enable fully local transcription.";
 /**
  * Preferred first: quality per second of audio, on a laptop. A quantised file
  * ranks with its parent — `-q8_0` is indistinguishable from fp16 by ear and
@@ -121,18 +139,13 @@ let server = null;
 const TRANSCRIBE_TIMEOUT_MS = 120_000;
 const SPEAK_TIMEOUT_MS = 60_000;
 
-async function which(binary) {
-  try {
-    const { stdout } = await run("which", [binary], {
-      timeout: 3000,
-      encoding: "utf8",
-      env: withBinPaths(),
-    });
-    const resolved = stdout.trim();
-    return resolved || null;
-  } catch {
-    return null;
-  }
+/**
+ * Where a tool is, or null. `lookupCommand` walks PATH itself rather than
+ * spawning `which`, which Windows does not have — there it answered "not
+ * installed" for whisper and for ffmpeg whatever was on the machine.
+ */
+function which(binary) {
+  return lookupCommand(binary, withBinPaths());
 }
 
 async function exists(file) {
@@ -158,7 +171,7 @@ export async function localAsrStatus({ force = false } = {}) {
   if (!binary) {
     cached = {
       available: false,
-      detail: "whisper.cpp is not installed. `brew install whisper-cpp` enables fully local transcription.",
+      detail: WHISPER_INSTALL_HINT,
     };
     return cached;
   }

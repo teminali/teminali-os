@@ -209,15 +209,15 @@ interface StudioState {
    * not persisted: a root is confirmed for a session, by that session.
    */
   workspaceRootConfirmed: boolean;
-  activeWorkspaceId: "teminali" | "teminali-code-tests" | "argus-vpn";
-  setWorkspace: (ws: "teminali" | "teminali-code-tests" | "argus-vpn") => void;
   /**
    * Points the shell at a root the gateway has already been rebound to.
    *
-   * `setWorkspace` above only knows three hardcoded ids, which cannot serve
-   * a recent list read off disk. This one takes the path and nothing else;
-   * the caller is responsible for `WorkspaceService.openProject` first, as
-   * the gateway — not this store — owns which root the routes read.
+   * The only way to change workspace. There used to be a `setWorkspace` beside
+   * it offering three hardcoded ids whose paths were one developer's own
+   * folders — on anybody else's install it pointed the shell at three
+   * directories that do not exist. The gateway, not this store, owns which
+   * root the routes read, so the caller runs `WorkspaceService.openProject`
+   * first and passes the path it confirms.
    */
   setWorkspacePath: (path: string) => void;
   files: FileItem[];
@@ -334,31 +334,11 @@ export const useStudioStore = create<StudioState>()(
       setBudget: (budget) => set({ budgetUsd: budget }),
       purgeVRAM: purgeOllamaMemory,
       
-      activeWorkspaceId: "teminali",
-      workspacePath: "/Users/teminali/Documents/my_projects/teminali/teminaliCode",
+      // Empty until the gateway says what it is bound to — which it does on
+      // boot, through `setWorkspacePath`. A literal here would be one machine's
+      // folder on everybody's install.
+      workspacePath: "",
       workspaceRootConfirmed: false,
-      // Switching workspace moves the root, and nothing else. It used to also
-      // select that workspace's canned demo tab; those tabs are gone, so a
-      // per-workspace activeTabId would only ever name a tab that does not
-      // exist. Open tabs survive the switch, so the selection does too.
-      setWorkspace: (ws) => {
-        if (ws === "teminali-code-tests") {
-          set({
-            activeWorkspaceId: "teminali-code-tests",
-            workspacePath: "/Users/teminali/Downloads/frontier code tests",
-          });
-        } else if (ws === "argus-vpn") {
-          set({
-            activeWorkspaceId: "argus-vpn",
-            workspacePath: "/Users/teminali/Documents/my_projects/argus-vpn-landing",
-          });
-        } else {
-          set({
-            activeWorkspaceId: "teminali",
-            workspacePath: "/Users/teminali/Documents/my_projects/teminali/teminaliCode",
-          });
-        }
-      },
 
       setWorkspacePath: (workspacePath) => set({
         workspacePath,

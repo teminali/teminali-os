@@ -11,12 +11,18 @@ import { existsSync } from "node:fs";
 
 export const SAMPLE_RATE = 16_000;
 
-const FFMPEG_CANDIDATES = [
-  process.env.TEMINALI_FFMPEG,
-  "/opt/homebrew/bin/ffmpeg",
-  "/usr/local/bin/ffmpeg",
-  "/usr/bin/ffmpeg",
-];
+/* TEMINALI_FFMPEG first, and in a packaged app it is always set: electron
+   main.cjs resolves ffmpeg with the same search the video exporter uses and
+   hands the path to the sidecar. The rest is for `npm run voice:serve` from a
+   terminal, where PATH is usually enough on its own. */
+const FFMPEG_CANDIDATES = process.platform === "win32"
+  ? [process.env.TEMINALI_FFMPEG]
+  : [
+      process.env.TEMINALI_FFMPEG,
+      "/opt/homebrew/bin/ffmpeg",
+      "/usr/local/bin/ffmpeg",
+      "/usr/bin/ffmpeg",
+    ];
 
 let resolved;
 

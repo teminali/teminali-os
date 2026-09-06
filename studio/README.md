@@ -783,7 +783,7 @@ ollama serve              # local models on 127.0.0.1:11434
 
 ```bash
 npm run typecheck   # tsc --noEmit
-npm test            # 1473 tests, 0 failures
+npm test            # 1476 tests, 0 failures
 npm run build       # tsc && vite build
 npm run verify:core # all three
 ```
@@ -844,6 +844,13 @@ platform work rather than platform limits:
   appends each platform's usual tool prefixes to PATH — npm's, Claude Code's
   installer's, winget's on Windows; `~/.local/bin`, `~/.npm-global/bin`,
   `/snap/bin` on Linux.
+- **Finding a tool.** `lookupCommand` in the same module walks PATH itself
+  instead of spawning `which` — which Windows does not have. Both callers used
+  the Unix one, so on Windows `fileCapabilities()` reported no video, no audio,
+  no OCR and no archives however much was installed, and whisper.cpp was never
+  found. It also fixes the macOS half: those probes ran with the bare
+  environment, which for a Finder-launched app is launchd's PATH, so Homebrew's
+  ffmpeg was invisible to file ingestion in every packaged build.
 - **Startup.** `electron/main.cjs` sets the Windows AppUserModelId to the
   appId so a pinned shortcut and the running window are one taskbar button;
   takes the single-instance lock in packaged builds (a second launch focuses
@@ -851,6 +858,16 @@ platform work rather than platform limits:
   drops Chromium's sandbox **only** when running from an AppImage on a kernel
   whose AppArmor forbids unprivileged user namespaces (Ubuntu 24.04), which
   otherwise kills the app before its first window.
+
+What stays macOS-only, and says so rather than failing: the screen assistant's
+pointer helper, Spotlight machine search, `say` for local speech synthesis, and
+Guardian's `vm_stat`/`pmset` telemetry. The recorder runs everywhere; on Linux
+it warns that the floating bar cannot be excluded from the capture, because
+`setContentProtection` does not exclude there. Hardware video encoding covers
+VideoToolbox on macOS and NVENC/QSV/AMF on Windows; Linux encodes in software,
+since VAAPI needs a render node the call sites do not have. The speech sidecar
+runs on all three — `electron/main.cjs` hands it a resolved ffmpeg path, since
+it decodes every utterance and a launched app's PATH rarely has one.
 
 ### Publishing across two repositories
 

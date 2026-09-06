@@ -6,6 +6,7 @@ import { useVoice } from "../../hooks/useVoice";
 import { ModelsPane } from "../models/ModelsPane";
 import { MacCloseButton } from "../ui";
 import { GitHubConnect } from "../github/GitHubConnect";
+import { resolveGatewayUrl } from "../../services/gatewayClient";
 import {
   Search,
   Settings,
@@ -123,11 +124,15 @@ export const CursorSettingsModal: React.FC<{
 }> = ({ isOpen, onClose }) => {
   const [activeCategory, setActiveCategory] = useState("general");
   const [searchQuery, setSearchQuery] = useState("");
-  const [tipsEnabled, setTipsEnabled] = useState(true);
-  const [systemNotifs, setSystemNotifs] = useState(true);
-  const [warningNotifs, setWarningNotifs] = useState(false);
-  const [menuBarIcon, setMenuBarIcon] = useState(true);
-  const [completionSound, setCompletionSound] = useState(false);
+  /* What the gateway card reports. Null while the first probe is in flight;
+     everything in it is measured, because a settings screen that invents a
+     green badge is worse than one that says it does not know yet. */
+  const [gatewayHealth, setGatewayHealth] = useState<{
+    url: string;
+    state: "healthy" | "degraded" | null;
+    ollama: string | null;
+    error: string | null;
+  } | null>(null);
 
   // Local models state
   const [localModels, setLocalModels] = useState<LocalOllamaModel[]>([]);
@@ -140,6 +145,29 @@ export const CursorSettingsModal: React.FC<{
   const [pullSuccess, setPullSuccess] = useState<string | null>(null);
 
   const { setBenchmarkModalOpen, setSkillsModalOpen } = useStudioStore();
+
+  /* The address is only known at runtime — 4310 is preferred, but a second
+     instance or a development gateway holding it moves this app to an
+     ephemeral port, and the card used to print 4310 either way. */
+  const probeGateway = async () => {
+    const url = resolveGatewayUrl("/api/health");
+    try {
+      const res = await fetch(url);
+      if (!res.ok) {
+        setGatewayHealth({ url, state: null, ollama: null, error: `The gateway answered ${res.status}.` });
+        return;
+      }
+      const body = await res.json();
+      setGatewayHealth({
+        url: url.replace(/\/api\/health$/, ""),
+        state: body?.state === "healthy" ? "healthy" : "degraded",
+        ollama: body?.dependencies?.ollama?.state ?? null,
+        error: null,
+      });
+    } catch {
+      setGatewayHealth({ url, state: null, ollama: null, error: "The gateway could not be reached." });
+    }
+  };
 
   const fetchLocalModels = async () => {
     setIsLoadingModels(true);
@@ -171,6 +199,7 @@ export const CursorSettingsModal: React.FC<{
   useEffect(() => {
     if (isOpen) {
       fetchLocalModels();
+      void probeGateway();
     }
   }, [isOpen, activeCategory]);
 
@@ -371,11 +400,31 @@ export const CursorSettingsModal: React.FC<{
                 <div className="p-4 flex items-center justify-between">
                   <div>
                     <h3 className="text-xs font-semibold text-ink-bright">Teminali Local Gateway</h3>
-                    <p className="text-2xs text-ink-muted mt-0.5">Running locally at http://127.0.0.1:4310 · Ollama connected</p>
+                    <p className="text-2xs text-ink-muted mt-0.5">
+                      {gatewayHealth === null
+                        ? "Checking…"
+                        : gatewayHealth.error
+                          ? gatewayHealth.error
+                          : `Running locally at ${gatewayHealth.url} · Ollama ${gatewayHealth.ollama ?? "unknown"}`}
+                    </p>
                   </div>
-                  <span className="px-2.5 py-1 rounded-md bg-success/10 text-success border border-success/25 text-xs font-medium">
-                    Connected
-                  </span>
+                  {gatewayHealth === null ? (
+                    <span className="px-2.5 py-1 rounded-md bg-surface-chip text-ink-muted border border-edge text-xs font-medium">
+                      Checking
+                    </span>
+                  ) : gatewayHealth.state === "healthy" ? (
+                    <span className="px-2.5 py-1 rounded-md bg-success/10 text-success border border-success/25 text-xs font-medium">
+                      Connected
+                    </span>
+                  ) : gatewayHealth.state === "degraded" ? (
+                    <span className="px-2.5 py-1 rounded-md bg-warning/10 text-warning border border-warning/25 text-xs font-medium">
+                      Degraded
+                    </span>
+                  ) : (
+                    <span className="px-2.5 py-1 rounded-md bg-danger/10 text-danger border border-danger/25 text-xs font-medium">
+                      Unreachable
+                    </span>
+                  )}
                 </div>
 
                 <div className="p-4 flex items-center justify-between">
@@ -395,108 +444,42 @@ export const CursorSettingsModal: React.FC<{
                 </div>
               </div>
 
-              {/* Section: Startup */}
-              <div className="space-y-3">
-                <h2 className="text-xs font-semibold text-ink-muted uppercase tracking-wider">Startup & Windows</h2>
-                <div className="lit lit-inner bg-surface -chrome rounded-xl divide-y divide-edge-chrome">
-                  <div className="p-4 flex items-center justify-between">
-                    <div>
-                      <h3 className="text-xs font-semibold text-ink-bright">Tips</h3>
-                      <p className="text-2xs text-ink-muted mt-0.5">Show rotating tips on the empty screen</p>
-                    </div>
-                    <button
-                      type="button"
-                      onClick={() => setTipsEnabled((prev) => !prev)}
-                      className={`w-10 h-5 flex items-center rounded-full p-0.5 transition-colors ${
-                        tipsEnabled ? "bg-accent" : "bg-surface-hover"
-                      }`}
-                    >
-                      <div
-                        className={`bg-ink-high w-4 h-4 rounded-full shadow-md transform transition-transform ${
-                          tipsEnabled ? "translate-x-5" : "translate-x-0"
-                        }`}
-                      />
-                    </button>
-                  </div>
+              {/* ── Where a prompt actually goes ─────────────────────────────
+                  This card used to claim "100% Local Execution · Zero Telemetry
+                  Exfiltration", unconditionally. It is not true: the Claude Code
+                  and Codex engines send prompt context to Anthropic and OpenAI,
+                  and Frontier's own cloud lane sends it to its provider — that
+                  is what those engines are. The claim was the most load-bearing
+                  sentence on the screen and the only false one, and somebody
+                  could have chosen an engine on the strength of it.
 
-                  <div className="p-4 flex items-center justify-between">
-                    <div>
-                      <h3 className="text-xs font-semibold text-ink-bright">Window Restoration</h3>
-                      <p className="text-2xs text-ink-muted mt-0.5">Controls which workspace tabs Teminali restores on startup</p>
-                    </div>
-                    <select className="lit lit-inner px-3 py-1.5 bg-surface-raised rounded-lg text-xs text-ink-prose focus:outline-none">
-                      <option>Restore Active Workspace</option>
-                      <option>Restore All Tabs</option>
-                      <option>Start Blank</option>
-                    </select>
-                  </div>
-                </div>
-              </div>
-
-              {/* Section: Notifications */}
-              <div className="space-y-3">
-                <h2 className="text-xs font-semibold text-ink-muted uppercase tracking-wider">Notifications</h2>
-                <div className="lit lit-inner bg-surface -chrome rounded-xl divide-y divide-edge-chrome">
-                  <div className="p-4 flex items-center justify-between">
-                    <div>
-                      <h3 className="text-xs font-semibold text-ink-bright">System Notifications</h3>
-                      <p className="text-2xs text-ink-muted mt-0.5">
-                        Show notifications when Teminali agents complete builds
-                      </p>
-                    </div>
-                    <button
-                      type="button"
-                      onClick={() => setSystemNotifs((prev) => !prev)}
-                      className={`w-10 h-5 flex items-center rounded-full p-0.5 transition-colors ${
-                        systemNotifs ? "bg-accent" : "bg-surface-hover"
-                      }`}
-                    >
-                      <div
-                        className={`bg-ink-high w-4 h-4 rounded-full shadow-md transform transition-transform ${
-                          systemNotifs ? "translate-x-5" : "translate-x-0"
-                        }`}
-                      />
-                    </button>
-                  </div>
-
-                  <div className="p-4 flex items-center justify-between">
-                    <div>
-                      <h3 className="text-xs font-semibold text-ink-bright">Completion Sound</h3>
-                      <p className="text-2xs text-ink-muted mt-0.5">Play audio feedback when tasks pass verification</p>
-                    </div>
-                    <button
-                      type="button"
-                      onClick={() => setCompletionSound((prev) => !prev)}
-                      className={`w-10 h-5 flex items-center rounded-full p-0.5 transition-colors ${
-                        completionSound ? "bg-accent" : "bg-surface-hover"
-                      }`}
-                    >
-                      <div
-                        className={`bg-ink-high w-4 h-4 rounded-full shadow-md transform transition-transform ${
-                          completionSound ? "translate-x-5" : "translate-x-0"
-                        }`}
-                      />
-                    </button>
-                  </div>
-                </div>
-              </div>
-
-              {/* Section: Privacy */}
+                  What is true is narrower and worth saying plainly: nothing is
+                  sent anywhere the operator did not choose an engine for, and
+                  the local lane really is local. */}
               <div className="space-y-3">
                 <h2 className="text-xs font-semibold text-ink-muted uppercase tracking-wider">Privacy & Security</h2>
-                <div className="lit lit-inner bg-surface -chrome rounded-xl p-4 flex items-center justify-between">
-                  <div>
-                    <div className="flex items-center gap-1.5 text-xs font-semibold text-ink-bright">
-                      <ShieldCheck size={14} className="text-success" />
-                      <span>100% Local Execution · Zero Telemetry Exfiltration</span>
-                    </div>
-                    <p className="text-2xs text-ink-muted mt-0.5">
-                      Your codebase, prompt context, and file mutations never leave this machine.
-                    </p>
+                <div className="lit lit-inner bg-surface -chrome rounded-xl p-4 space-y-2">
+                  <div className="flex items-center gap-1.5 text-xs font-semibold text-ink-bright">
+                    <ShieldCheck size={14} className="text-ink-muted" />
+                    <span>Where your code goes depends on the engine</span>
                   </div>
-                  <span className="px-2.5 py-1 rounded bg-success/12 text-success border border-success/25 text-2xs font-semibold">
-                    Strict Local
-                  </span>
+                  <p className="text-2xs text-ink-muted leading-relaxed">
+                    The local lane runs on this machine: prompts, file contents and edits reach
+                    Ollama over the loopback gateway and nothing else. The Claude Code, Codex and
+                    cloud lanes send prompt context — including the files they are asked to read —
+                    to their provider, because that is what those engines are.
+                  </p>
+                  <p className="text-2xs text-ink-muted leading-relaxed">
+                    The app itself collects no analytics and phones nothing home. Its only
+                    unprompted outbound request is the update check, which asks the public GitHub
+                    releases API for a version number and sends nothing about you.
+                  </p>
+                  <button
+                    onClick={() => setActiveCategory("models")}
+                    className="text-2xs font-semibold text-accent hover:text-accent-hover transition-colors"
+                  >
+                    Choose which engine runs →
+                  </button>
                 </div>
               </div>
             </>

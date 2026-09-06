@@ -24,6 +24,8 @@ import { promisify } from "node:util";
 import { mkdtemp, readFile, rm, writeFile, readdir } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
+import { withBinPaths } from "./bin-paths.js";
+import { lookupCommand } from "./command-resolver.js";
 import { transcribeLocal } from "./speech-local.js";
 
 const run = promisify(execFile);
@@ -98,13 +100,17 @@ function looksLikeText(buffer) {
 
 let capabilityCache = null;
 
-async function which(binary) {
-  try {
-    const { stdout } = await run("which", [binary], { timeout: 3000, encoding: "utf8" });
-    return stdout.trim() || null;
-  } catch {
-    return null;
-  }
+/**
+ * Where a tool is, or null.
+ *
+ * `withBinPaths()` rather than the bare environment: a Finder-launched app
+ * inherits launchd's PATH, so without it every capability below reported
+ * missing on a packaged macOS build with Homebrew's ffmpeg installed. And
+ * `lookupCommand` rather than spawning `which`, which does not exist on
+ * Windows — where this therefore answered "nothing installed" for all of them.
+ */
+function which(binary) {
+  return lookupCommand(binary, withBinPaths());
 }
 
 async function hasPython(module) {

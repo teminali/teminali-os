@@ -6,6 +6,7 @@ import path from "node:path";
 
 import {
   escapeArgument,
+  lookupCommand,
   escapeCommand,
   findExecutable,
   parseNpmShim,
@@ -109,4 +110,32 @@ test("escaping matches what cmd.exe expects", () => {
   assert.equal(escapeArgument("trail\\"), '^"trail\\\\^"');
   // A .cmd target is expanded twice, so its arguments are escaped twice.
   assert.equal(escapeArgument("a&b", true), '^^^"a^^^&b^^^"');
+});
+
+test("lookupCommand finds an executable file on PATH, not a directory or a data file", () => {
+  const dir = mkdtempSync(path.join(tmpdir(), "which-"));
+  const first = path.join(dir, "first");
+  const second = path.join(dir, "second");
+  mkdirSync(first);
+  mkdirSync(second);
+  // A directory of the right name on the earlier entry must not shadow the tool.
+  mkdirSync(path.join(first, "ffmpeg"));
+  writeFileSync(path.join(second, "ffmpeg"), "#!/bin/sh\n", { mode: 0o755 });
+  const env = { PATH: [first, second].join(path.delimiter) };
+  assert.equal(lookupCommand("ffmpeg", env, "darwin"), path.join(second, "ffmpeg"));
+  assert.equal(lookupCommand("nothing-here", env, "darwin"), null);
+});
+
+test("lookupCommand ignores a file on PATH that is not executable", () => {
+  const dir = mkdtempSync(path.join(tmpdir(), "which-"));
+  writeFileSync(path.join(dir, "ffmpeg"), "notes", { mode: 0o644 });
+  assert.equal(lookupCommand("ffmpeg", { PATH: dir }, "darwin"), null);
+});
+
+test("lookupCommand on Windows uses PATHEXT", () => {
+  const dir = mkdtempSync(path.join(tmpdir(), "which-"));
+  writeFileSync(path.join(dir, "ffmpeg.exe"), "");
+  const env = { Path: dir, PATHEXT: ".COM;.EXE;.CMD" };
+  assert.equal(lookupCommand("ffmpeg", env, "win32"), path.join(dir, "ffmpeg.exe"));
+  assert.equal(lookupCommand("ffprobe", env, "win32"), null);
 });

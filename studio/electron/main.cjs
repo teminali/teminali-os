@@ -7,7 +7,7 @@ const { attachAssistantTray } = require("./assistant-tray.cjs");
 const { attachAssistantOverlay } = require("./assistant-overlay.cjs");
 const { initVideoToolBridge, setBridgeWindow, videoBridge } = require("./videoToolBridge.cjs");
 const { startVideoRpcServer } = require("./videoRpc.cjs");
-const { resolveRealPath, processWithFfmpeg, formatAuditLine } = require("./mediaAccess.cjs");
+const { resolveRealPath, processWithFfmpeg, formatAuditLine, findFfmpeg } = require("./mediaAccess.cjs");
 const { initScreenRecorder, shutdownScreenRecorder } = require("./screenRecorder.cjs");
 const { initVideoProjects, shutdownVideoProjects } = require("./videoProjects.cjs");
 const { initVideoExport, shutdownVideoExport } = require("./videoExport.cjs");
@@ -268,6 +268,12 @@ async function startVoiceSidecar() {
     process.env.TEMINALI_VOICE_CACHE || path.join(app.getPath("userData"), "voice-models");
   fs.mkdirSync(cache, { recursive: true });
 
+  // The sidecar decodes every utterance with ffmpeg and looks for it on PATH,
+  // which a Finder- or Start-menu-launched app does not have a useful one of.
+  // findFfmpeg() is the same search the video exporter uses, and it knows where
+  // each platform's package managers put it; null is passed as an empty string,
+  // which the sidecar treats as "not set" and falls back to PATH.
+  const ffmpeg = findFfmpeg();
   const child = spawn(process.execPath, [entry], {
     cwd: root,
     env: {
@@ -275,6 +281,7 @@ async function startVoiceSidecar() {
       ELECTRON_RUN_AS_NODE: "1",
       TEMINALI_VOICE_PORT: String(port),
       TEMINALI_VOICE_CACHE: cache,
+      ...(ffmpeg ? { TEMINALI_FFMPEG: ffmpeg } : {}),
     },
     stdio: ["ignore", "pipe", "pipe"],
     windowsHide: true,
