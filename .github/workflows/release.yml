@@ -50,6 +50,11 @@ jobs:
           cache-dependency-path: studio/package-lock.json
       - run: npm ci
         working-directory: studio
+      # voice-runtime/tests import the sidecar's modules, and tts.js imports
+      # kokoro-js at load — so without the sidecar's own node_modules the whole
+      # file fails to import and the suite is one red test short of the truth.
+      - run: npm run voice:install
+        working-directory: studio
       - run: npm run build:pointer
         working-directory: studio
       - run: npm run typecheck
