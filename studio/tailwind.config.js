@@ -369,6 +369,24 @@ export default {
           "0%,100%": { boxShadow: "0 0 0 0 rgba(78,201,122,.45)" },
           "50%": { boxShadow: "0 0 0 5px rgba(78,201,122,0)" },
         },
+        // The voice orb at rest. A face that never moves at all reads as a
+        // logo; a slow breath is the smallest thing that reads as alive.
+        orbBreathe: {
+          "0%,100%": { transform: "scale(1)" },
+          "50%": { transform: "scale(1.022)" },
+        },
+        // The same breath while it is being spoken to: shallower and quicker,
+        // which is what attention looks like on a person.
+        orbAttend: {
+          "0%,100%": { transform: "scale(1.012)" },
+          "50%": { transform: "scale(1.028)" },
+        },
+        // One thin arc orbiting the face while it thinks. Not a spinner: it is
+        // behind the face, and it stops the moment there is an answer.
+        orbThink: {
+          from: { transform: "rotate(0deg)" },
+          to: { transform: "rotate(360deg)" },
+        },
         // The assistant's target ring arriving on a control. One settle, not a
         // loop: a ring that keeps moving competes with the thing it points at.
         overlayTarget: {
@@ -395,6 +413,9 @@ export default {
         caret: "caret 1.05s steps(1) infinite",
         pulseDot: "pulseDot 1.6s var(--ease) infinite",
         listening: "listening 1.4s var(--ease) infinite",
+        orbBreathe: "orbBreathe 4.2s ease-in-out infinite",
+        orbAttend: "orbAttend 1.9s ease-in-out infinite",
+        orbThink: "orbThink 2.4s linear infinite",
         overlayTarget: "overlayTarget var(--dur-slow) var(--ease) both",
         "fade-in": "fade-in var(--dur-fast) var(--ease)",
         "scale-in": "scale-in var(--dur) var(--ease)",

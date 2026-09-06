@@ -669,6 +669,53 @@ function voiceQualityScore(name) {
   return 0;
 }
 
+/**
+ * The voices macOS ships that are a woman's, by first name.
+ *
+ * Temy has a woman's voice; that is a decision about who the assistant is,
+ * made by the operator, and not a ranking of the voices themselves. It is
+ * applied as a weight rather than a filter for the same reason the tier is:
+ * a machine whose only good voice is `Daniel (Enhanced)` should still hear
+ * Daniel rather than a compact voice that happens to be a woman's, because a
+ * robotic voice is a worse answer to "be someone" than the wrong someone.
+ *
+ * `say -v '?'` carries no gender, so this is a list, and the list is of
+ * Apple's own English voices as they are named in the picker. A name absent
+ * here simply gets no weight.
+ */
+const WOMENS_VOICES = Object.freeze([
+  "ava", "zoe", "samantha", "allison", "susan", "nicky", "joelle",
+  "serena", "kate", "karen", "moira", "tessa", "fiona", "catherine", "veena", "shelley",
+]);
+
+function isWomansVoice(name) {
+  const first = String(name).toLowerCase().split(/[\s(]/)[0];
+  return WOMENS_VOICES.includes(first);
+}
+
+/**
+ * How much being Temy's voice is worth, given how the voice sounds.
+ *
+ * Sized against the other weights on purpose. The system locale on the
+ * operator's own machine is `en_GB@rg=uszzzz`, so `navigator.language` is
+ * en-GB and `Daniel (Enhanced)` scored 155 there against `Ava (Enhanced)` at
+ * 105 — the assistant spoke as a man because of a region flag. Sixty lets an
+ * Enhanced or Premium woman's voice cross that boundary (165 > 155). An
+ * ordinary woman's voice gets four: enough to win a tie among ordinary voices
+ * in its own region, and not enough to beat an Enhanced voice from the next
+ * region over (104 < 105) — "one downloaded voice is heard" still holds, and
+ * it holds because a robotic voice is a worse answer to "be someone" than the
+ * wrong someone. A Premium `Ava` scores 240 and wins everything, which is
+ * what downloading it buys.
+ */
+function voiceCharacterScore(name) {
+  if (!isWomansVoice(name)) return 0;
+  const lower = name.toLowerCase();
+  if (lower.includes("premium") || lower.includes("enhanced")) return 60;
+  if (lower.includes("compact")) return 0;
+  return 4;
+}
+
 /** Best installed voice for a language tag, or null for the system default. */
 export function pickVoice(voices, languageTag) {
   if (!Array.isArray(voices) || voices.length === 0) return null;
@@ -684,6 +731,7 @@ export function pickVoice(voices, languageTag) {
     else continue;
 
     score += voiceQualityScore(entry.name);
+    score += voiceCharacterScore(entry.name);
     // Enough to lose to any real voice, including one from another region,
     // but not enough to fall below zero: alone in its language it is still a
     // better answer than whatever `say` would have defaulted to.

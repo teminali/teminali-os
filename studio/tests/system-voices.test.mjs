@@ -145,3 +145,35 @@ test('a downloaded premium voice beats the flagship default', () => {
   ]);
   assert.equal(pickVoice(voices, 'en-US'), 'Ava (Premium)');
 });
+
+test("Temy has a woman's voice, and a good one crosses a region to be heard", () => {
+  /*
+    The operator's Mac is `en_GB@rg=uszzzz`, so the browser reports en-GB and
+    `Daniel (Enhanced)` outscored `Ava (Enhanced)` by the region alone: the
+    assistant spoke as a man because of a locale flag. Who Temy is was decided
+    by the operator; the picker carries it as a weight, not a filter, so the
+    rule "one downloaded good voice is heard" survives it.
+  */
+  const voices = parseVoices([
+    'Ava (Enhanced)      en_US    # Hello! My name is Ava.',
+    'Daniel (Enhanced)   en_GB    # Hello! My name is Daniel.',
+    'Samantha (English (US)) en_US    # Hello! My name is Samantha.',
+  ]);
+  assert.equal(pickVoice(voices, 'en-GB'), 'Ava (Enhanced)');
+  assert.equal(pickVoice(voices, 'en-US'), 'Ava (Enhanced)');
+
+  // An ordinary woman's voice does not beat an Enhanced voice from the next
+  // region: a robotic voice is a worse answer than the wrong someone.
+  assert.equal(pickVoice(parseVoices(SAY_OUTPUT), 'en-US'), 'Daniel (Enhanced)');
+
+  // Among ordinary voices in one region, hers wins the tie.
+  const plain = parseVoices([
+    'Fred                en_US    # Hello! My name is Fred.',
+    'Samantha (English (US)) en_US    # Hello! My name is Samantha.',
+  ]);
+  assert.equal(pickVoice(plain, 'en-US'), 'Samantha (English (US))');
+
+  // A Premium woman's voice wins everything, which is what downloading it buys.
+  const premium = parseVoices([...SAY_OUTPUT, 'Ava (Premium)       en_US    # Hello! My name is Ava.']);
+  assert.equal(pickVoice(premium, 'en-GB'), 'Ava (Premium)');
+});

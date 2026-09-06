@@ -795,6 +795,42 @@ second line turned into a lozenge. `Composer.tsx` derives `pill` from the
 measured field height and the attachment count, and falls back to `rounded-2xl`
 the moment the bar grows. The collapsed bar is unchanged.
 
+### Temy, the face of the voice assistant (`voice/VoiceOrb.tsx`, `utils/orbExpression.ts`, 2026-09-06)
+
+The operator, watching it while they talked to it: *"when i speak make her look
+like he is listening instead of showing his mouth move, how can his mouth move
+and i'm the one talking."* They were right, and the cause was structural. The
+orb has one `level` prop that carries the microphone while the operator is
+heard and the synthesiser while Temy speaks, and the state says whose it is —
+and the first version ran an "equaliser" on the mouth in hearing mode. The
+operator's own words came back to them as Temy's lips.
+
+**Whose sound is it** is now the rule the whole face is built on, and it lives
+in `utils/orbExpression.ts` — pure, dependency-free, and pinned by
+`tests/orb-expression.test.mjs` (4): `mouthFor("hearing", 1)` equals
+`mouthFor("hearing", 0)`, for every state but `speaking`. Only Temy's own
+voice may reach the mouth. The operator's voice shows in the **aura** — a
+radial glow behind the face, smoothed with a fast attack and a slow release
+so it reads as breath rather than flicker — and nowhere on the face itself.
+Each state therefore has its own tell, and they do not share body parts:
+
+| state | the tell |
+| --- | --- |
+| idle | a slow breath (`orbBreathe`, 4.2 s), a blink every 4.5 s, and now and then the eyes wander off and come back |
+| listening | the same, a little brighter, eyes forward |
+| **hearing** | the face leans in (`rotateX(-3.5°)`, scale 1.035), the eyes widen to 1.1 and hold still on the operator — the pointer is ignored for gaze — the mouth closes, the blink slows to every 6.5 s, and the aura breathes with the operator |
+| thinking | a thin arc orbits behind the face (`orbThink`, 2.4 s), the eyes go asymmetric the way a person's do looking for a word; the arc stops the instant there is an answer |
+| speaking | phonemic visemes from the caption, gated at `SPEECH_FLOOR` (0.035) and sized by Temy's own level; the aura pulses with it |
+
+Breath is a CSS animation on an outer layer and posture an inline transform on
+an inner one, so the two never fight over `transform`.
+
+**The pointer is an eye, not a hand.** The face tracks the cursor and leans
+toward it slightly when hovered. The earlier version also dodged, hopped and
+jumped away from a pointer that came close — charming once, and a control that
+runs from the click it exists to receive breaks the first rule of controls
+(§2, *no dead affordances*). Gone; `hoverMode` and `jumpOffset` with it.
+
 ### Stopping a turn (`services/interruption.ts`, 2026-09-06)
 
 Reported as "I cannot interrupt the chatbot on the go … it is either weak or
@@ -2622,8 +2658,22 @@ refusing to use it. Alex is on neither set now, and Eddy, Flo and Reed no
 longer collect a quality bonus in `scoreVoice` — macOS files them under
 Eloquence. `ttsVoice` stays `null` in
 `DEFAULT_VOICE_SETTINGS`: the default is "the best installed voice", which is
-portable, rather than a name that is right on one machine. Tests:
-`tests/system-voices.test.mjs` (11).
+portable, rather than a name that is right on one machine.
+
+**Temy has a woman's voice** (2026-09-06). A decision about who the assistant
+is, made by the operator, and carried by `pickVoice` as a weight rather than a
+filter. The operator's own Mac is `en_GB@rg=uszzzz`, so the browser reports
+en-GB and `Daniel (Enhanced)` outscored `Ava (Enhanced)` by the region alone:
+the assistant spoke as a man because of a locale flag. `voiceCharacterScore`
+gives an Enhanced or Premium woman's voice +60 — enough to cross a region
+(165 > 155) — and an ordinary one +4, enough to win a tie among ordinary voices
+in its own region and not enough to beat an Enhanced voice from the next one
+(104 < 105), so "one downloaded good voice is heard" survives it: a robotic
+voice is a worse answer to "be someone" than the wrong someone. `say -v '?'`
+carries no gender, so `WOMENS_VOICES` is a list of Apple's own English voices
+by first name. When the sidecar is up none of this is consulted — synthesis
+goes to Kokoro's `af_heart` (§6.3), which is also a woman's voice and a far
+better one. Tests: `tests/system-voices.test.mjs` (12).
 
 **Explainability.** `VoiceSnapshot.narration` and `VoiceSnapshot.lastIntent`
 drive the caption under the orb: "Heard “keep going” — carrying on". A turn that

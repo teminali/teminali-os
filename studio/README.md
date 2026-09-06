@@ -335,7 +335,10 @@ Local by default: **whisper.cpp** for recognition, macOS `say` for synthesis. An
 optional sidecar on `127.0.0.1:8321` upgrades either or both, and
 [`voice-runtime/`](voice-runtime/README.md) is the one shipped in this repo:
 Whisper, Kokoro-82M and an AudioSet sound classifier on CPU, started with
-`npm run voice:serve`. Its synthesis streams clause by clause, so a long reply
+`npm run voice:serve`. Temy speaks with a woman's voice: Kokoro's `af_heart`
+when the sidecar is up, and otherwise the best installed macOS voice with the
+same preference — an Enhanced or Premium Ava, Samantha, Serena or Kate wins
+over a man's voice across a region boundary, while a robotic one never does. Its synthesis streams clause by clause, so a long reply
 starts speaking after its first clause. The browser
 speech engine is the always-available fallback. Each capability is routed
 independently, so a sidecar serving only synthesis still leaves recognition on
