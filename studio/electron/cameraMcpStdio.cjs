@@ -60,16 +60,27 @@ const TOOLS = [
   {
     name: "look_at_me",
     description:
-      "Take one photograph with the operator's webcam and look at it. Use it when they ask whether you can see them, "
-      + "or ask about something in front of the camera — how they look, what they are holding, what is behind them. "
-      + "This is the room, not the screen: use `look` on the screen server for anything that is on their display. "
-      + "It turns on the camera, so they are asked first, every time until they say to stop asking.",
+      "Look at the operator through their webcam. Use it when they ask whether you can see them, or ask about anything "
+      + "in front of the camera — how they look, what they are holding, what they are doing, who is with them. "
+      + "This is the room, not the screen: use `look` on the screen server for anything on their display. "
+      + "Ask for several frames when the question is about MOVEMENT or a process — what they are doing with their hands, "
+      + "whether they are nodding, how something is being assembled — because one still cannot answer that. "
+      + "The camera stays warm for about ten seconds after a look, so a follow-up in that window is nearly instant; "
+      + "looking again to check on something is cheap and expected.",
     inputSchema: {
       type: "object",
       properties: {
         reason: {
           type: "string",
           description: "One short phrase for why you are looking, shown to the operator with the request. e.g. \"to see what you're holding\".",
+        },
+        frames: {
+          type: "number",
+          description: "How many frames to take, 1 to 6. One (the default) is a photograph and is sharper. More than one is a sequence and shows movement.",
+        },
+        span_ms: {
+          type: "number",
+          description: "How long to spread a multi-frame sequence over, in milliseconds. Default 1200, maximum 5000.",
         },
       },
     },
@@ -117,20 +128,33 @@ async function handle(request) {
 
       case "tools/call": {
         if (params?.name !== "look_at_me") throw new Error(`"${params?.name}" is not a camera tool.`);
-        const data = await call("camera", { reason: typeof params?.arguments?.reason === "string" ? params.arguments.reason : "" });
+        const args = params?.arguments ?? {};
+        const data = await call("camera", {
+          reason: typeof args.reason === "string" ? args.reason : "",
+          frames: Number(args.frames) || 1,
+          spanMs: Number(args.span_ms) || 1200,
+        });
         const frame = data.frame ?? data;
-        if (!frame?.image) throw new Error("The camera returned no picture.");
+        const images = Array.isArray(frame?.images) ? frame.images : [];
+        if (images.length === 0) throw new Error("The camera returned no picture.");
         /*
-          The image first, then the note. An agent reading this is being handed
-          a photograph; the sentence after it is there so a client that cannot
-          render images still says something true rather than nothing.
+          The pictures first, in the order they were taken, then the note. An
+          agent reading this is being handed photographs; the sentence after
+          them is there so a client that cannot render images still says
+          something true rather than nothing, and so the model knows whether it
+          is looking at one moment or at a stretch of time.
         */
         respond({
           id,
           result: {
             content: [
-              { type: "image", data: frame.image, mimeType: "image/jpeg" },
-              { type: "text", text: `One frame from the operator's webcam, taken ${frame.capturedAt}.` },
+              ...images.map((image) => ({ type: "image", data: image, mimeType: "image/jpeg" })),
+              {
+                type: "text",
+                text: images.length === 1
+                  ? `One frame from the operator's webcam, taken ${frame.capturedAt}.`
+                  : `${images.length} frames from the operator's webcam in the order they were taken, spanning about ${frame.tookMs} ms up to ${frame.capturedAt}. Read them as a sequence: what changed between them is the answer to a question about movement.`,
+              },
             ],
           },
         });

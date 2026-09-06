@@ -681,7 +681,11 @@ export async function createGateway(options = {}) {
         const token = request.headers["x-teminali-camera-token"] || "";
         let frame;
         try {
-          frame = await requestCameraFrame({ runId, token });
+          frame = await requestCameraFrame({
+            runId, token,
+            frames: Number(body?.frames) || 1,
+            spanMs: Number(body?.spanMs) || 1200,
+          });
         } catch (error) {
           throw new GatewayError(503, "CAMERA_UNAVAILABLE", error instanceof Error ? error.message : "The camera could not be opened.");
         }

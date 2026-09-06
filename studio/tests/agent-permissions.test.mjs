@@ -172,11 +172,19 @@ test("a frame is asked for on the run's stream and answered on its own request",
   const asked = events.find((event) => event.type === "camera");
   assert.ok(asked, "the window is asked on its own stream");
 
-  assert.deepEqual(resolveCameraFrame({ runId: "cam-1", id: asked.id, image: "aGVsbG8=" }), { ok: true });
-  assert.equal((await frame).image, "aGVsbG8=");
+  // The request's shape travels with the ask, so the window takes what was
+  // wanted rather than what it assumes.
+  assert.equal(asked.frames, 1);
+  assert.equal(asked.spanMs, 1200);
+
+  assert.deepEqual(resolveCameraFrame({ runId: "cam-1", id: asked.id, images: ["aGVsbG8="], warm: true, tookMs: 31 }), { ok: true });
+  const answered = await frame;
+  assert.deepEqual(answered.images, ["aGVsbG8="]);
+  assert.equal(answered.warm, true);
+  assert.equal(answered.tookMs, 31);
 
   // A frame is answered once. A second answer is not a second photograph.
-  assert.equal(resolveCameraFrame({ runId: "cam-1", id: asked.id, image: "again" }).ok, false);
+  assert.equal(resolveCameraFrame({ runId: "cam-1", id: asked.id, images: ["again"] }).ok, false);
   closeRun("cam-1");
 });
 
@@ -196,4 +204,26 @@ test("the camera is not reachable without this run's token", async () => {
   await assert.rejects(requestCameraFrame({ runId: "cam-3", token: "not-it" }), /rejected the caller/);
   await assert.rejects(requestCameraFrame({ runId: "no-such-run", token }), /no longer running/);
   closeRun("cam-3");
+});
+
+test("a sequence is asked for as one, and comes back in order", async () => {
+  const events = [];
+  const token = openRun("cam-4", (event) => events.push(event));
+  const frame = requestCameraFrame({ runId: "cam-4", token, frames: 4, spanMs: 2000 });
+  const asked = events.find((event) => event.type === "camera");
+  assert.equal(asked.frames, 4);
+  assert.equal(asked.spanMs, 2000);
+  resolveCameraFrame({ runId: "cam-4", id: asked.id, images: ["a", "b", "c", "d"] });
+  assert.deepEqual((await frame).images, ["a", "b", "c", "d"]);
+  closeRun("cam-4");
+});
+
+test("an empty answer is a failure, not a photograph of nothing", async () => {
+  const events = [];
+  const token = openRun("cam-5", (event) => events.push(event));
+  const frame = requestCameraFrame({ runId: "cam-5", token });
+  const asked = events.find((event) => event.type === "camera");
+  resolveCameraFrame({ runId: "cam-5", id: asked.id, images: [] });
+  await assert.rejects(frame, /could not take a photograph/);
+  closeRun("cam-5");
 });

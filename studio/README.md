@@ -323,9 +323,11 @@ your screen and either explains it or acts on it.
 photograph from the webcam, handed back as a picture rather than a description,
 so the model that is reasoning is the one doing the looking. Nothing on that
 server is pre-approved — it opens hardware pointed at a person — so every call
-raises the permission prompt, which can be answered out loud. The camera is
-opened for one frame and closed again, so the light beside the lens means what
-it says. A machine with no camera gets a sentence saying so, not a failed turn.
+raises the permission prompt, which can be answered out loud. A cold look is
+about 0.9 s to a usable frame (measured); the camera then stays warm for ten
+seconds, so a follow-up look is ~31 ms, and `frames: 2–6` over up to five
+seconds returns a sequence that shows movement. A machine with no camera gets a
+sentence saying so, not a failed turn.
 
 ### Voice
 

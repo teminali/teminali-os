@@ -2412,19 +2412,47 @@ bubbling it to a pane: by the time it arrives the operator has already approved
 the call, so there is no decision left to make, and a frame is a frame whichever
 surface started the turn.
 
-The camera is opened for one frame and closed again — not as a courtesy, but
-because the light beside the lens is the only honest indicator a person has, and
-a stream left running leaves it on long after the assistant has stopped looking.
-`WARMUP_MS` (700 ms) is spent with the camera already on: a webcam's first
-frames are black, then grey, then correctly exposed, and a frame read the
-instant the track goes live is a photograph of nothing. The frame is scaled to
-1024 px wide at quality 0.82, which is worth looking at and worth sending.
+**How fast, measured.** In Electron on this machine, against the real camera:
+`getUserMedia` resolving (the hardware opening) takes 320–700 ms, the first
+presented frame arrives ~540 ms after that, so a **cold look is ~0.9 s** to a
+frame worth sending; encoding is 6 ms at 1024 px and 2 ms at 640 px; and **a
+second look while the camera is still open is ~31 ms**. Two decisions follow.
+The first version awaited `play()` and then slept a flat 700 ms for the sensor
+to settle, and both were guesses: `play()` resolving is not a frame arriving,
+and on this camera the very first presented frame is already correctly
+exposed, so the sleep was 700 ms of a lit camera and no picture — cold looks
+were ~2.1 s. `cameraFrame.ts` now waits on `requestVideoFrameCallback`, which
+waits for the actual thing being waited for and is *longer* exactly where it
+should be, on a camera whose first frames really are black. And the stream is
+**held open for `WARM_HOLD_MS` (10 s) after each capture**, so a follow-up look
+inside that window skips the opening entirely: 31 ms against 900 ms is the
+difference between "take a photograph" and "watch what I am doing".
+
+**The light stays on for those ten seconds, and that is the more honest
+signal.** The first version closed the camera the instant it had its frame, on
+the grounds that the light beside the lens is the only indicator a person has.
+During the hold the assistant genuinely may look again, and a light that goes
+dark between two looks a second apart says something untrue. The hold is
+bounded, it is reset only by an actual capture, and nothing renews it silently.
+
+**Movement is a sequence, because a still cannot show it.** `look_at_me` takes
+`frames` (1–6) and `span_ms` (≤ 5000): more than one frame is taken at 640 px
+and quality 0.7 rather than 1024/0.82, because a burst is asked for to see
+*movement* and movement survives a smaller frame far better than it survives
+having only one of them — six at that size cost about what two stills do. Every
+frame is one the compositor has actually presented, never whatever the element
+happens to be holding. The tool's own description tells the model when to ask
+for a sequence and that a follow-up inside the warm window is cheap, which is
+what turns "can you see me" into "tell me what I'm doing wrong with this".
+The spacing and the limits are pure functions in `utils/cameraSequence.ts`,
+because the camera itself can only be exercised by driving Electron with a
+lens in front of it.
 
 Every failure is a sentence rather than a rejection — *"there is no camera on
 this machine"*, *"the camera is in use by something else"* — because those are
 answers the agent can give, and a broken tool call is not. `CAMERA_TIMEOUT_MS`
-(15 s) covers only a window that went away mid-capture; nobody is being asked
-anything at that point.
+(20 s) covers a full sequence plus a window that went away mid-capture; nobody
+is being asked anything at that point.
 
 Packaging: macOS refuses the camera outright and without a dialog unless
 `NSCameraUsageDescription` is declared, and the hardened runtime withholds it
@@ -2435,9 +2463,11 @@ declared now.
 
 Tested in `tests/camera-mcp.test.mjs` (10) — the name, the token, that nothing
 is pre-approved, that the shim offers exactly one tool and turns an unreachable
-gateway into a result rather than an aborted turn — and in
-`tests/agent-permissions.test.mjs`, which pins the round trip, the single
-answer, the reported failure and the token check.
+gateway into a result rather than an aborted turn — in
+`tests/agent-permissions.test.mjs`, which pins the round trip, that the
+request's shape travels with the ask, the single answer, an ordered sequence,
+an empty answer being a failure, and the token check — and in
+`tests/camera-frame.test.mjs` (2) for the spacing and the limits.
 
 Codex gets no camera, for the fourth time and the same reason: it has no
 `--permission-prompt-tool`, so the one gate this feature has could not be asked.

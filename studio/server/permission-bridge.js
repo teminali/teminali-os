@@ -168,7 +168,7 @@ export function resolveApproval({ runId, id, behavior, message, updatedInput, re
  * a frame is being taken and sent straight back. All this covers is a window
  * that went away mid-capture, and a turn should not hang for a minute on one.
  */
-const CAMERA_TIMEOUT_MS = 15_000;
+const CAMERA_TIMEOUT_MS = 20_000;
 
 /**
  * Ask the window holding this run for one frame from the camera.
@@ -184,7 +184,7 @@ const CAMERA_TIMEOUT_MS = 15_000;
  * is no useful "no" to hand the model. A camera that could not be opened is a
  * tool error the agent should report and move on from, not a verdict.
  */
-export function requestCameraFrame({ runId, token }) {
+export function requestCameraFrame({ runId, token, frames = 1, spanMs = 1200 }) {
   const run = runs.get(runId);
   if (!run || run.closed) return Promise.reject(new Error("That agent turn is no longer running."));
   if (!constantTimeEqual(token, run.token)) return Promise.reject(new Error("The camera bridge rejected the caller."));
@@ -204,7 +204,7 @@ export function requestCameraFrame({ runId, token }) {
     if (typeof timer.unref === "function") timer.unref();
 
     run.cameras.set(id, { settle, timer });
-    const delivered = run.emit?.({ type: "camera", id, expiresInMs: CAMERA_TIMEOUT_MS });
+    const delivered = run.emit?.({ type: "camera", id, frames, spanMs, expiresInMs: CAMERA_TIMEOUT_MS });
     if (delivered === false) {
       run.cameras.delete(id);
       clearTimeout(timer);
@@ -219,7 +219,7 @@ export function requestCameraFrame({ runId, token }) {
  * permission, no camera at all — and that reaches the agent as the tool's
  * failure rather than as a silence that times out.
  */
-export function resolveCameraFrame({ runId, id, image, error }) {
+export function resolveCameraFrame({ runId, id, images, error, warm = false, tookMs = 0 }) {
   const run = runs.get(runId);
   if (!run) return { ok: false, reason: "No such agent run." };
   const entry = run.cameras.get(id);
@@ -227,10 +227,11 @@ export function resolveCameraFrame({ runId, id, image, error }) {
 
   run.cameras.delete(id);
   clearTimeout(entry.timer);
-  if (error || typeof image !== "string" || !image) {
+  const list = Array.isArray(images) ? images.filter((image) => typeof image === "string" && image) : [];
+  if (error || list.length === 0) {
     entry.settle(new Error(String(error || "The window could not take a photograph.")));
   } else {
-    entry.settle(null, { image, capturedAt: new Date().toISOString() });
+    entry.settle(null, { images: list, warm: Boolean(warm), tookMs: Number(tookMs) || 0, capturedAt: new Date().toISOString() });
   }
   return { ok: true };
 }
