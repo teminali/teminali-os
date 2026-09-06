@@ -102,6 +102,12 @@ jobs:
       # to run without the token.
       - name: Refuse to build a release nobody can download
         if: startsWith(github.ref, 'refs/tags/v')
+        # Windows runners default to pwsh, where this bash test is a syntax
+        # error — the step then fails for the one reason its own message rules
+        # out, and says the token is missing when it is present. v0.0.1's first
+        # tag run died exactly here. `workflow_dispatch` skips the step, so no
+        # rehearsal can catch it; only a real tag can.
+        shell: bash
         env:
           RELEASES_TOKEN: ${{ secrets.RELEASES_TOKEN }}
         run: |
