@@ -37,6 +37,7 @@ import {
 } from "../../services/voice";
 import { FrontierEngine, sanitizeOngoingAssist } from "../../services/frontierEngine";
 import { interruptTurn } from "../../services/interruption";
+import { openBrowserAt } from "../../services/browserNavigation";
 import { useInterruptKey } from "../../hooks/useInterruptKey";
 import { useGitHubStatus } from "../../hooks/useGitHubStatus";
 import { useProjectLibrary } from "../../hooks/useProjectLibrary";
@@ -521,6 +522,7 @@ export const StudioChat: React.FC<{
             const store = useStudioStore.getState();
             if (event.action === "reveal") store.revealPath(event.path);
             else if (event.action === "open-file") void store.showFile(event.path);
+            else if (event.action === "browse") openBrowserAt(event.url, { newTab: event.newTab });
             else store.setWorkspacePath(event.path);
           },
           /*

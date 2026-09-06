@@ -52,7 +52,7 @@ route requires it. Roughly sixty routes across:
 | Model mode & routing | `/api/frontier/status` · `/api/frontier/resolve-mode` · `/api/models/*` |
 | Entitlement | `/api/entitlement` · `/api/entitlement/{refresh,sign-in,sign-in/poll,sign-out}` · `/api/entitlement/{plans,checkout}` · `/api/entitlement/order/:id` |
 | Hosted providers | `/api/providers` · `/api/providers/key` · `/api/providers/lanes` |
-| Workspace | `/api/workspace/{tree,file,write,delete,mkdir,search,open,projects}`, `/api/workspace/projects/{remember,forget}`, `/api/workspace/agent/{reveal,open-file,projects,open-project}` |
+| Workspace | `/api/workspace/{tree,file,write,delete,mkdir,search,open,projects}`, `/api/workspace/projects/{remember,forget}`, `/api/workspace/browser`, `/api/workspace/browser/{bookmark,unbookmark,visit,download}`, `/api/workspace/browser/history/clear`, `/api/workspace/agent/{reveal,open-file,projects,open-project,browse,bookmarks,bookmark,browsing-history,downloads}` |
 | Terminal | `/api/terminal/exec` |
 | Agent CLIs | `/api/agents` · `/api/agents/models` · `/api/agents/run` · `/api/agents/permission` · `/api/agents/permission/resolve` |
 | Screen assistant | `/api/assistant/{capabilities,permissions,observe,act}` · `/api/assistant/agent/{observe,act}` (the chat pane's agent, on its run's token) |
@@ -128,10 +128,20 @@ It also runs with web security on, sandboxed, with no preload and no access to
 the workspace media scheme — none of which was true of a frame inside the
 shell's own renderer. The omnibox still takes a bare port (`5173`), a host, or
 a full URL, and still refuses `file:`, `javascript:`, `data:` and `blob:`, now
-in both the renderer and the main process. Because the page is a layer above
-the window rather than part of it, the panel hides it while a menu or a dialog
-is open and while another tab is in front. A browser build keeps the sandboxed
-iframe.
+in both the renderer and the main process; anything that is only words becomes
+a Google search. Because the page is a layer above the window rather than part
+of it, the panel hides it while a menu or a dialog is open and while another
+tab is in front. `⇧⌘B` and the add-menu open another browser tab each time.
+A browser build keeps the sandboxed iframe.
+
+What the browser remembers — bookmarks, history and downloads — is a gateway
+store (`browser-data.json`, `TEMINALI_BROWSER_STORE`), not renderer state, so
+the assistant can read it: the `workspace` MCP server gives an agent CLI
+`browse` (show a page in the panel), `bookmarks`, `browsing_history` and
+`downloads` pre-approved, and `bookmark`, which writes, behind the permission
+prompt. The panel's own home page, bookmark star, history and download
+recording are not yet wired to that store — the store and the agent's side of
+it landed first.
 
 It is also where you **drop** a file. Drag a row out of the Explorer, or a file
 out of Finder or Windows Explorer, and it opens in the panel. A file from
@@ -689,7 +699,7 @@ ollama serve              # local models on 127.0.0.1:11434
 
 ```bash
 npm run typecheck   # tsc --noEmit
-npm test            # 1318 tests, 0 failures
+npm test            # 1328 tests, 0 failures
 npm run build       # tsc && vite build
 npm run verify:core # all three
 ```

@@ -20,6 +20,7 @@ import { useChangeStore } from "../../../store/changeStore";
 import { languageForPath } from "../../../services/language";
 import { interruptTurn } from "../../../services/interruption";
 import { useInterruptKey } from "../../../hooks/useInterruptKey";
+import { openBrowserAt } from "../../../services/browserNavigation";
 import { BrandGlyph, EmptyState } from "../../ui";
 import type { ChatMessage } from "../../../types";
 
@@ -225,6 +226,7 @@ export const AgentPane: React.FC<{ panel: PanelTab & { kind: AgentEngine } }> = 
             const store = useStudioStore.getState();
             if (event.action === "reveal") store.revealPath(event.path);
             else if (event.action === "open-file") void store.showFile(event.path);
+            else if (event.action === "browse") openBrowserAt(event.url, { newTab: event.newTab });
             else store.setWorkspacePath(event.path);
           },
           /*

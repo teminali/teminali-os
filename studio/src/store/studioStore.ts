@@ -764,13 +764,12 @@ export const useStudioStore = create<StudioState>()(
           ...(targetUrl ? { browserPreviewUrl: targetUrl } : {}),
         });
         // The redesigned shell renders panels, not the old single split slot,
-        // so an artifact preview has to open one. Imported lazily to keep the
-        // two stores from depending on each other at module load.
-        void import("./panelStore").then(({ usePanelStore }) => {
-          usePanelStore.getState().focusOrOpen({
-            kind: "browser",
-            ...(targetUrl ? { url: targetUrl } : {}),
-          });
+        // so an artifact preview has to open one — and navigate its view,
+        // which a store update alone does not do. Imported lazily to keep the
+        // stores from depending on each other at module load.
+        void import("../services/browserNavigation").then(({ openBrowserAt }) => {
+          if (targetUrl) openBrowserAt(targetUrl);
+          else void import("./panelStore").then(({ usePanelStore }) => usePanelStore.getState().open({ kind: "browser" }));
         });
       },
       

@@ -70,6 +70,7 @@ import {
   writeStore,
 } from "./providers.js";
 import { forgetProject, listRecentProjects, rememberProject, validateProjectRoot } from "./projects.js";
+import { addBookmark, clearHistory, isBrowsableUrl, readBrowserData, recordDownload, recordVisit, removeBookmark, searchHistory } from "./browser-data.js";
 import { resolveProjectPhrase } from "./project-phrase.js";
 import { GatewayError, classifyUpstreamStatus, publicError } from "./errors.js";
 import {
@@ -329,7 +330,7 @@ const bootedAt = Date.now();
 const SCREEN_AGENT_ROUTES = new Set(["/api/assistant/agent/observe", "/api/assistant/agent/act"]);
 
 /**
- * The four routes an agent CLI's workspace shim may reach, and the only four.
+ * The nine routes an agent CLI's workspace shim may reach, and the only nine.
  *
  * `reveal`, `open-file` and `projects` only show — the first two at a path the
  * workspace guard has already proved is inside the root, and neither writes a
@@ -337,12 +338,22 @@ const SCREEN_AGENT_ROUTES = new Set(["/api/assistant/agent/observe", "/api/assis
  * because the operator has already been asked: the CLI pre-approves the
  * showing tools alone, so that call arrived through the same permission prompt
  * that gates a shell command.
+ *
+ * The browser five: `browse` shows a page in the operator's browser panel,
+ * `bookmarks`, `browsing-history` and `downloads` read what the panel
+ * remembers, and `bookmark` is the one that writes — so it is the one the
+ * CLI does not pre-approve. See server/browser-data.js.
  */
 const WORKSPACE_AGENT_ROUTES = new Set([
   "/api/workspace/agent/reveal",
   "/api/workspace/agent/open-file",
   "/api/workspace/agent/projects",
   "/api/workspace/agent/open-project",
+  "/api/workspace/agent/browse",
+  "/api/workspace/agent/bookmarks",
+  "/api/workspace/agent/bookmark",
+  "/api/workspace/agent/browsing-history",
+  "/api/workspace/agent/downloads",
 ]);
 
 export async function createGateway(options = {}) {
@@ -738,6 +749,58 @@ export async function createGateway(options = {}) {
               ? { opened, note: "It is open in the operator's editor and is the tab they are looking at." }
               : { opened, note: "The file is readable, but this turn's stream is closed, so no tab was opened." },
           });
+          return;
+        }
+
+        /*
+          The browser, from the agent's side.
+
+          `browse` puts a page in front of the operator the way `open-file`
+          puts a file there: one event on the run's stream, and the window
+          opens or navigates a browser panel. The address is checked here to
+          the same line main draws — http(s) only — so a refusal comes back
+          as a tool result rather than as a panel that opens onto nothing.
+        */
+        if (route === "/api/workspace/agent/browse") {
+          const url = typeof body?.url === "string" ? body.url.trim() : "";
+          if (!isBrowsableUrl(url)) {
+            throw new GatewayError(400, "BROWSER_URL_INVALID",
+              "Give a full http or https address. The browser panel opens nothing else — not file:, not javascript:, and not a bare search term.");
+          }
+          const newTab = body?.newTab === true;
+          const delivered = emitToRun(runId, token, { type: "workspace", action: "browse", url, newTab });
+          replyJson(response, 200, {
+            result: delivered
+              ? { url, note: newTab ? "It is open in a new browser tab in front of the operator." : "It is showing in the operator's browser panel." }
+              : { url, note: "The address is valid, but this turn's stream is closed, so no panel was opened." },
+          });
+          return;
+        }
+
+        if (route === "/api/workspace/agent/bookmarks") {
+          replyJson(response, 200, { result: { bookmarks: (await readBrowserData(config.browserStorePath)).bookmarks } });
+          return;
+        }
+
+        if (route === "/api/workspace/agent/bookmark") {
+          const url = typeof body?.url === "string" ? body.url.trim() : "";
+          if (!isBrowsableUrl(url)) {
+            throw new GatewayError(400, "BROWSER_URL_INVALID", "A bookmark needs a full http or https address.");
+          }
+          const bookmarks = await addBookmark(config.browserStorePath, { url, title: body?.title });
+          await audit.write({ event: "browser-bookmarked-by-agent", correlationId, method: request.method, route, url });
+          replyJson(response, 200, { result: { bookmarked: bookmarks.find((entry) => entry.url === url), bookmarks } });
+          return;
+        }
+
+        if (route === "/api/workspace/agent/browsing-history") {
+          const { history } = await readBrowserData(config.browserStorePath);
+          replyJson(response, 200, { result: { history: searchHistory(history, body?.query, Number(body?.limit)) } });
+          return;
+        }
+
+        if (route === "/api/workspace/agent/downloads") {
+          replyJson(response, 200, { result: { downloads: (await readBrowserData(config.browserStorePath)).downloads } });
           return;
         }
 
@@ -1412,6 +1475,57 @@ export async function createGateway(options = {}) {
           throw new GatewayError(400, "INVALID_PROJECT_PATH", "A project path is required.");
         }
         replyJson(response, 200, { recent: await forgetProject(config.projectsStorePath, forgetRequest.path) });
+        return;
+      }
+
+      /*
+        The browser panel's memory: bookmarks, history, downloads.
+
+        Read whole and written one row at a time. A visit is the panel's
+        global subscriber reporting a navigation; a download is main reporting
+        where Electron's own save dialog put a file. Neither carries progress:
+        that stays on IPC. See server/browser-data.js.
+      */
+      if (request.method === "GET" && route === "/api/workspace/browser") {
+        replyJson(response, 200, await readBrowserData(config.browserStorePath));
+        return;
+      }
+
+      if (request.method === "POST" && route === "/api/workspace/browser/bookmark") {
+        const body = await readJson(request, config.maxJsonBytes);
+        if (!isBrowsableUrl(body?.url)) throw new GatewayError(400, "BROWSER_URL_INVALID", "A bookmark needs a full http or https address.");
+        replyJson(response, 200, { bookmarks: await addBookmark(config.browserStorePath, { url: body.url, title: body.title }) });
+        return;
+      }
+
+      if (request.method === "POST" && route === "/api/workspace/browser/unbookmark") {
+        const body = await readJson(request, config.maxJsonBytes);
+        if (typeof body?.url !== "string") throw new GatewayError(400, "BROWSER_URL_INVALID", "An address is required.");
+        replyJson(response, 200, { bookmarks: await removeBookmark(config.browserStorePath, body.url) });
+        return;
+      }
+
+      if (request.method === "POST" && route === "/api/workspace/browser/visit") {
+        const body = await readJson(request, config.maxJsonBytes);
+        if (!isBrowsableUrl(body?.url)) throw new GatewayError(400, "BROWSER_URL_INVALID", "A visit needs a full http or https address.");
+        replyJson(response, 200, { visit: await recordVisit(config.browserStorePath, { url: body.url, title: body.title }) });
+        return;
+      }
+
+      if (request.method === "POST" && route === "/api/workspace/browser/history/clear") {
+        replyJson(response, 200, { history: await clearHistory(config.browserStorePath) });
+        return;
+      }
+
+      if (request.method === "POST" && route === "/api/workspace/browser/download") {
+        const body = await readJson(request, config.maxJsonBytes);
+        let downloads;
+        try {
+          downloads = await recordDownload(config.browserStorePath, body ?? {});
+        } catch {
+          throw new GatewayError(400, "BROWSER_DOWNLOAD_INVALID", "A download needs its http(s) address and a filename.");
+        }
+        replyJson(response, 200, { downloads });
         return;
       }
 

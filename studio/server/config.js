@@ -55,6 +55,9 @@ export function createConfig(environment = process.env, overrides = {}) {
     terminalMaxOutputBytes: positiveInteger(environment.FRONTIER_TERMINAL_MAX_OUTPUT_BYTES, 1024 * 1024),
     auditPath: resolve(environment.FRONTIER_AUDIT_PATH || resolve(process.cwd(), "benchmark-results", "gateway-audit.jsonl")),
     projectsStorePath: resolve(environment.FRONTIER_PROJECTS_STORE || resolve(process.cwd(), "benchmark-results", "recent-projects.json")),
+    // The browser panel's bookmarks, history and downloads. In the gateway
+    // rather than the renderer so the agent routes can read them too.
+    browserStorePath: resolve(environment.TEMINALI_BROWSER_STORE || resolve(process.cwd(), "benchmark-results", "browser-data.json")),
     // Hosted-provider API keys. Written 0600; never returned to the renderer.
     providerStorePath: resolve(environment.TEMINALI_PROVIDER_STORE || resolve(process.cwd(), "benchmark-results", "provider-keys.json")),
     guardianStorePath: resolve(environment.TEMINALI_GUARDIAN_STORE || resolve(process.cwd(), "benchmark-results", "guardian-settings.json")),

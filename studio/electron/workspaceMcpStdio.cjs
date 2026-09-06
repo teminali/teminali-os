@@ -2,7 +2,8 @@
    Workspace MCP shim.
 
    Lets the agent drive the application it is running inside: show a folder in
-   the file tree, open a file into an editor tab, and switch the whole workspace
+   the file tree, open a file into an editor tab, show a page in the browser
+   panel and read what that browser remembers, and switch the whole workspace
    to another project. Every call is forwarded to the gateway, which owns the
    workspace root, re-checks every path and is the only thing holding a channel
    back to the window; this process decides nothing.
@@ -92,6 +93,61 @@ const TOOLS = [
     },
   },
   {
+    name: "browse",
+    description:
+      "Show a web page in the operator's browser panel — the panel inside this app, beside their files, not their system browser. "
+      + "Give a full http or https address. By default it navigates the browser tab they are looking at (opening one if there is none); "
+      + "`new_tab` opens another. Read-only from the workspace's point of view and no permission is needed. "
+      + "A search is an address too: https://www.google.com/search?q=… ",
+    inputSchema: {
+      type: "object",
+      properties: {
+        url: { type: "string", description: "A full http(s) address." },
+        new_tab: { type: "boolean", description: "Open a new browser tab rather than navigating the current one." },
+      },
+      required: ["url"],
+    },
+  },
+  {
+    name: "bookmarks",
+    description: "The operator's browser bookmarks, newest first: address, title and when it was kept. Read-only.",
+    inputSchema: { type: "object", properties: {} },
+  },
+  {
+    name: "bookmark",
+    description:
+      "Keep a page in the operator's bookmarks, which they see on the browser's home page. Give a full http(s) address and, "
+      + "ideally, a title. Writes a row, so the operator is asked first.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        url: { type: "string", description: "A full http(s) address." },
+        title: { type: "string", description: "What to call it. Defaults to the address." },
+      },
+      required: ["url"],
+    },
+  },
+  {
+    name: "browsing_history",
+    description:
+      "Pages the operator has visited in the browser panel, newest first, with titles and times. Optional `query` narrows to "
+      + "rows whose address or title contains it; `limit` caps the rows (default 50). Read-only. At most 500 visits are kept.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        query: { type: "string", description: "Text to look for in the address or title." },
+        limit: { type: "number", description: "How many rows at most." },
+      },
+    },
+  },
+  {
+    name: "downloads",
+    description:
+      "Files the operator has downloaded through the browser panel, newest first: address, filename, where it was saved, size "
+      + "and whether it completed. A saved path is somewhere on their machine, chosen by them in the save dialog. Read-only.",
+    inputSchema: { type: "object", properties: {} },
+  },
+  {
     name: "recent_projects",
     description:
       "List the projects the operator has opened recently, most recent first, each with when it was opened and whether it is "
@@ -109,6 +165,32 @@ async function runTool(name, args) {
     case "open_file": {
       const data = await call("open-file", { path: String(args.path ?? "") });
       return data.result ?? { ok: true };
+    }
+    case "browse": {
+      const data = await call("browse", { url: String(args.url ?? ""), newTab: args.new_tab === true });
+      return data.result ?? { ok: true };
+    }
+    case "bookmarks": {
+      const data = await call("bookmarks", {});
+      return data.result ?? data;
+    }
+    case "bookmark": {
+      const data = await call("bookmark", {
+        url: String(args.url ?? ""),
+        title: typeof args.title === "string" ? args.title : undefined,
+      });
+      return data.result ?? data;
+    }
+    case "browsing_history": {
+      const data = await call("browsing-history", {
+        query: typeof args.query === "string" ? args.query : undefined,
+        limit: typeof args.limit === "number" ? args.limit : undefined,
+      });
+      return data.result ?? data;
+    }
+    case "downloads": {
+      const data = await call("downloads", {});
+      return data.result ?? data;
     }
     case "recent_projects": {
       const data = await call("projects", {});

@@ -95,13 +95,12 @@ export const StudioTitleBar: React.FC<StudioTitleBarProps> = ({
     label: PANEL_DEFAULTS[kind].label,
     shortcut: PANEL_DEFAULTS[kind].shortcut,
     icon: <PanelGlyph kind={kind} size={14} />,
-    // A terminal and a side chat are cheap to have several of; a browser or a
-    // canvas is not, so those focus an existing one instead of stacking up.
-    // A terminal and a side chat are cheap to have several of; a browser, a
-    // canvas or an agent is not — an agent tab holds a live CLI session, and a
+    // A terminal, a side chat and a browser are cheap to have several of — a
+    // browser tab is its own page with its own history, like any browser's. A
+    // canvas or an agent is not: an agent tab holds a live CLI session, and a
     // second one starts a conversation with an agent that remembers nothing.
     onSelect: () =>
-      kind === "terminal" || kind === "side" ? open({ kind }) : focusOrOpen({ kind }),
+      kind === "terminal" || kind === "side" || kind === "browser" ? open({ kind }) : focusOrOpen({ kind }),
   }));
 
   return (

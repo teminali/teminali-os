@@ -91,6 +91,7 @@ const CUT = [
 const WORKSPACE = [
   "You are inside the operator's editor, and the `workspace` tools drive it. `reveal` opens every folder above a path and scrolls their file tree to it — use it whenever you name a path you want them to look at, rather than describing where to click.",
   "`open_file` goes further and puts the file itself in front of them, in the editor tab they are looking at. When they ask to *see* something — a file, a screenshot, a PDF — that is the call; `reveal` alone leaves them to click. Both are read-only and neither needs their permission, so use them freely.",
+  "The operator's browser is a panel in this app too. `browse` shows a page there — when they ask you to look something up, open a docs page, or search, that is the call, and a Google search is just an address (https://www.google.com/search?q=…). `bookmarks`, `browsing_history` and `downloads` read what that browser remembers, free and read-only; `bookmark` keeps a page for them and asks first.",
   "`open_project` switches the whole workspace to another project. It rebinds the file tree, the search and every terminal at once, so it raises a prompt they have to answer; `recent_projects` is free and read-only, and it is usually the right first call when they say \"the last project\" or \"the one from yesterday\".",
 ];
 

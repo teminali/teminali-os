@@ -92,9 +92,20 @@ is the complete list.
 | `POST` | `/api/workspace/open` | bearer | Opens a project and rebinds the workspace root. An unopenable or over-broad root is refused. |
 | `POST` | `/api/workspace/projects/remember` | bearer | Records a project in the recents **without** rebinding the workspace root. What a video project uses, so opening a timeline does not repoint the file tree, search and terminals at the folder holding it. |
 | `POST` | `/api/workspace/projects/forget` | bearer | Drops one project from the recents. |
+| `GET` | `/api/workspace/browser` | bearer | Everything the browser panel remembers: `{ bookmarks, history, downloads }`, newest first, from `server/browser-data.js`. |
+| `POST` | `/api/workspace/browser/bookmark` | bearer | Keeps `{ url, title }`. One row per address; re-bookmarking re-titles and keeps the original date. http(s) only. |
+| `POST` | `/api/workspace/browser/unbookmark` | bearer | Drops the bookmark at `url`. |
+| `POST` | `/api/workspace/browser/visit` | bearer | Records a navigation `{ url, title }`. A repeat of the newest row refreshes it rather than adding one — a navigation reports itself several times. History is capped at 500. |
+| `POST` | `/api/workspace/browser/history/clear` | bearer | Empties the history. |
+| `POST` | `/api/workspace/browser/download` | bearer | Records a download that has **ended**: `{ url, filename, path, bytes, state }`. Progress never comes here; the path is kept only for `state: "completed"`. |
 | `POST` | `/api/workspace/agent/reveal` | **per-run token** | Opens every folder above a workspace-relative path in the operator's file tree and scrolls to it. Read-only: it resolves the path through the same `resolveWorkspacePath` guard the read routes use, then puts a `workspace` event on the run's own NDJSON stream — the only channel back to the window during a turn. Authorised by `x-teminali-workspace-token`, the run token minted by `openRun`; checked before the bearer gate for the same reason the screen agent routes are. |
 | `POST` | `/api/workspace/agent/open-file` | **per-run token** | Opens a workspace-relative file in the operator's file panel and makes it the one they are looking at. Sends no bytes: it resolves the path through the same guard, refuses a folder, a symlink, a format with no viewer (`isViewableWorkspaceFile`) or a file past the 8 MB cap, then puts an `open-file` event on the run's NDJSON stream — the window reads the file back through `/api/workspace/file`, so an agent-opened tab and a clicked one are the same tab under the same limits. Read-only, and pre-approved in `--allowedTools` beside `reveal`. |
 | `POST` | `/api/workspace/agent/projects` | **per-run token** | The current project plus the recents, for the agent. The same data as `GET /api/workspace/projects`, on the run token instead of the bearer. |
+| `POST` | `/api/workspace/agent/browse` | **per-run token** | Shows an http(s) page in the operator's browser panel: one `workspace` event (`action: "browse"`, `url`, `newTab`) on the run's stream, and the window navigates the browser tab in front or opens another. Refuses anything but http(s). Pre-approved. |
+| `POST` | `/api/workspace/agent/bookmarks` | **per-run token** | The bookmarks, for the agent. Pre-approved. |
+| `POST` | `/api/workspace/agent/bookmark` | **per-run token** | Keeps `{ url, title }`. Writes, so it is **not** pre-approved. |
+| `POST` | `/api/workspace/agent/browsing-history` | **per-run token** | The history, newest first, narrowed by an optional `query` over address and title and capped by `limit` (default 50). Pre-approved. |
+| `POST` | `/api/workspace/agent/downloads` | **per-run token** | The downloads, newest first. Pre-approved. |
 | `POST` | `/api/workspace/agent/open-project` | **per-run token** | Switches the workspace to another project, by `path` or by `phrase` — the operator's own words ("the last video project", "the one from yesterday"), resolved against the recents by `server/project-phrase.js`. Rebinds `config.workspaceRoot`, so it is deliberately **not** pre-approved in `--allowedTools`: the call only arrives after the CLI's permission prompt was answered. |
 
 ### Terminal
@@ -304,6 +315,7 @@ State files, all defaulting under `benchmark-results/` in the working directory:
 | Variable | Holds |
 | --- | --- |
 | `FRONTIER_PROJECTS_STORE` | `recent-projects.json` |
+| `TEMINALI_BROWSER_STORE` | `browser-data.json` — the browser panel's bookmarks, history (capped at 500) and downloads |
 | `TEMINALI_PROVIDER_STORE` | `provider-keys.json`, written `0600` |
 | `TEMINALI_GUARDIAN_STORE` | `guardian-settings.json` |
 | `TEMINALI_AGENT_MODEL_STORE` | `agent-models.json` |

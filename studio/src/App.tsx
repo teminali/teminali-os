@@ -139,7 +139,8 @@ export default function App() {
       if (event.shiftKey) {
         if (key === "b") {
           event.preventDefault();
-          focusOrOpen({ kind: "browser" });
+          // Another tab each time, like ⌘T: every browser tab is its own page.
+          openPanel({ kind: "browser" });
           return;
         }
         if (key === "a") {

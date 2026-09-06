@@ -53,10 +53,21 @@ const here = path.dirname(fileURLToPath(import.meta.url));
  */
 export const WORKSPACE_SERVER_NAME = "workspace";
 
-/** The tools that only show. `open_project` is deliberately absent. */
+/**
+ * The tools that only show or read. `open_project` is deliberately absent, and
+ * so is `bookmark`: it writes a row the operator will see on their home page,
+ * which is small, but it is a change and not a showing, and the line is the
+ * line. `browse` is on this side for the same reason `open_file` is — it puts
+ * a page in front of them that they could have opened with one click, and a
+ * prompt before every page would make the tool not worth calling.
+ */
 export const WORKSPACE_READ_TOOLS = Object.freeze([
   `mcp__${WORKSPACE_SERVER_NAME}__reveal`,
   `mcp__${WORKSPACE_SERVER_NAME}__open_file`,
+  `mcp__${WORKSPACE_SERVER_NAME}__browse`,
+  `mcp__${WORKSPACE_SERVER_NAME}__bookmarks`,
+  `mcp__${WORKSPACE_SERVER_NAME}__browsing_history`,
+  `mcp__${WORKSPACE_SERVER_NAME}__downloads`,
 ]);
 
 /**

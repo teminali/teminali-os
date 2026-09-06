@@ -627,8 +627,40 @@ and either loaded in the same view or handed to the real browser.
 
 A browser build has no bridge and keeps the iframe, sandbox attribute and all.
 
+**Words are a search.** `normaliseAddress` used to answer "That does not look
+like an address" to anything that was not a port, a host or a URL; it now
+routes it to `searchUrl` (`SEARCH_ENGINE`, Google) and flags the result
+`search: true`. The scheme refusals above it are unchanged — `javascript:` is
+refused, not searched for. `addressLabel` names a tab by its host, or by the
+query when the address is a search.
+
+**Any number of browser tabs.** `⇧⌘B` and the add-menu call `open`, not
+`focusOrOpen`, and `panelStore.matches` no longer folds browsers into one —
+a browser tab is its own page with its own history, like a terminal is its
+own shell. `services/browserNavigation.ts` (`openBrowserAt`) is how the rest
+of the app puts a page in one: it updates the store *and* asks the bridge to
+navigate, because the view outlives its pane and a store update alone reaches
+no view whose tab is not in front. The artifact preview and the agent's
+`browse` both go through it.
+
+**What the browser remembers lives in the gateway** —
+`server/browser-data.js`, one JSON file (`browserStorePath`,
+`TEMINALI_BROWSER_STORE`) holding `{ bookmarks, history, downloads }`, on the
+`projects.js` pattern: sanitise every row on read, atomic tmp+rename on write,
+http(s) only, history capped at 500. It is there rather than in the renderer
+so the agent can read it: the `workspace` MCP server offers `browse`,
+`bookmarks`, `browsing_history` and `downloads` pre-approved and `bookmark`
+behind the prompt (it writes). `browse` is a `workspace` event on the run
+stream (`action: "browse"`) handled in both `AgentPane` and `StudioChat`.
+`services/browserDataService.ts` is the renderer's client. **Not yet true:**
+the pane does not yet show a home page, fill its bookmark star, record visits
+or downloads — the store and the agent's side landed first; the pane's side
+is the open lane.
+
 Tested in `tests/browser-view.test.mjs` (6): the scheme refusals on both sides,
-the zoom scaling, the malformed-rectangle refusal, and the clamping.
+the zoom scaling, the malformed-rectangle refusal, and the clamping; and in
+`tests/browser-data.test.mjs` (10): the store's refusals, the visit folding,
+the caps, the history search, and which browser tools are pre-approved.
 
 ### What the workspace will open (`server/workspace.js`, `panels/FilePane.tsx`)
 

@@ -132,9 +132,10 @@ function panelId(): string {
 function matches(panel: PanelTab, seed: PanelSeed): boolean {
   if (panel.kind !== seed.kind) return false;
   // A file panel is identified by its path; everything else by kind alone, so
-  // that "open the browser" twice does not leave two browsers behind.
+  // that "open the usage panel" twice does not leave two behind. Terminals,
+  // side chats and browser tabs are the kinds there may be many of.
   if (seed.kind === "file") return Boolean(seed.path) && panel.path === seed.path;
-  return seed.kind !== "side" && seed.kind !== "terminal";
+  return seed.kind !== "side" && seed.kind !== "terminal" && seed.kind !== "browser";
 }
 
 export const usePanelStore = create<PanelState>()(

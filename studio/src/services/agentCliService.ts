@@ -97,8 +97,8 @@ type AgentEvent =
   | { type: "permission"; id: string; toolName: string; input: Record<string, unknown>; key: string; expiresInMs: number }
   | { type: "permission-resolved"; id: string; behavior: "allow" | "deny" }
   /* The agent driving the editor it is running inside: a folder revealed in
-     the file tree, a file opened into the file panel, or the whole workspace
-     switched to another project. The run's own stream is the only channel back
+     the file tree, a file opened into the file panel, a page shown in the
+     browser panel, or the whole workspace switched to another project. The run's own stream is the only channel back
      to this window during a turn — see `emitToRun` in
      server/permission-bridge.js. */
   /* One file the agent wrote, with both sides of it, so the review dock can
@@ -109,6 +109,7 @@ type AgentEvent =
   | { type: "workspace"; action: "reveal"; path: string }
   | { type: "workspace"; action: "open-file"; path: string }
   | { type: "workspace"; action: "open-project"; path: string; name: string }
+  | { type: "workspace"; action: "browse"; url: string; newTab: boolean }
   // Recorded by the gateway into the plan store, not consumed here — the pane
   // shows a turn, and plan headroom outlives any one turn. Listed so the switch
   // below is exhaustive over what the stream can actually carry.

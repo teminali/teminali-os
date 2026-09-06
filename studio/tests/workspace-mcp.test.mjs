@@ -49,13 +49,23 @@ test("only the showing tools are pre-approved — naming the server would allow 
   const { args } = workspaceMcpArgs("claude", "run-2", "tok-2", { tmpDir, execPath: "/bin/node" });
   const allowed = args[args.indexOf("--allowedTools") + 1];
   /*
-    Two tools now, and that widening was deliberate: `open_file` opens a file
+    Six tools now, and each widening was deliberate: `open_file` opens a file
     the operator could open with one click, through the same route and the same
-    limits, and writes nothing. What must never join them is anything that
+    limits, and writes nothing; `browse` shows a page the same way, and the
+    three browser reads read. What must never join them is anything that
     changes something — a confirmation the operator can answer is the only
-    thing standing between the agent and the ground under their feet.
+    thing standing between the agent and the ground under their feet. That is
+    why `bookmark` is not here.
   */
-  assert.deepEqual(allowed.split(","), ["mcp__workspace__reveal", "mcp__workspace__open_file"]);
+  assert.deepEqual(allowed.split(","), [
+    "mcp__workspace__reveal",
+    "mcp__workspace__open_file",
+    "mcp__workspace__browse",
+    "mcp__workspace__bookmarks",
+    "mcp__workspace__browsing_history",
+    "mcp__workspace__downloads",
+  ]);
+  assert.equal(allowed.includes("mcp__workspace__bookmark,"), false);
   assert.deepEqual(allowed.split(","), [...WORKSPACE_READ_TOOLS]);
   assert.equal(WORKSPACE_READ_TOOL, "mcp__workspace__reveal");
   assert.equal(allowed.includes("open_project"), false);
@@ -140,7 +150,7 @@ function askShim(requests) {
   });
 }
 
-test("the shim speaks MCP and offers exactly the four tools the design names", async () => {
+test("the shim speaks MCP and offers exactly the nine tools the design names", async () => {
   const replies = await askShim([
     { jsonrpc: "2.0", id: 1, method: "initialize", params: {} },
     { jsonrpc: "2.0", id: 2, method: "tools/list", params: {} },
@@ -148,7 +158,7 @@ test("the shim speaks MCP and offers exactly the four tools the design names", a
 
   assert.equal(replies.find((reply) => reply.id === 1).result.serverInfo.name, "workspace");
   const names = replies.find((reply) => reply.id === 2).result.tools.map((tool) => tool.name).sort();
-  assert.deepEqual(names, ["open_file", "open_project", "recent_projects", "reveal"]);
+  assert.deepEqual(names, ["bookmark", "bookmarks", "browse", "browsing_history", "downloads", "open_file", "open_project", "recent_projects", "reveal"]);
 });
 
 test("an unknown tool is a result the agent can act on, not an aborted turn", async () => {
