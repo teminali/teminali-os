@@ -24,6 +24,7 @@
   event back for the toolbar.
 */
 const { app, WebContentsView, ipcMain, session, shell } = require("electron");
+const { attachContextMenu } = require("./contextMenu.cjs");
 const fs = require("node:fs");
 const path = require("node:path");
 
@@ -135,6 +136,20 @@ function initBrowserViews({ getMainWindow, log }) {
     window.contentView.addChildView(view);
 
     const contents = view.webContents;
+
+    /*
+      Right-click on someone else's page. A React menu could never appear over
+      this: the page is its own `webContents`, layered above the document, and
+      nothing the renderer draws reaches it. `isBrowserPage` is what adds Back,
+      Forward and Reload — this is the one surface in the app where those mean
+      something — and a Google search from a selection opens in this same panel
+      rather than in Safari.
+    */
+    attachContextMenu(contents, {
+      isBrowserPage: true,
+      openInPanel: (url) => { contents.loadURL(url).catch(() => {}); },
+    });
+
     // A link that would open a window navigates the panel instead when it is a
     // page, and goes to the real browser when it is anything else.
     contents.setWindowOpenHandler(({ url }) => {

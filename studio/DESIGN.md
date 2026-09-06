@@ -410,6 +410,43 @@ forwarding the callbacks and the chat supplying them — because either alone is
 still silence. `ArenaPane` remains deliberately unsubscribed: its contestants
 work in sandboxes and must not move the operator's tree.
 
+### Right-click (`electron/contextMenu.cjs`, 2026-09-06)
+
+The operator: *"the editor does not have context menus, for copy and other
+things."* It read as the editor being unfinished. It was the whole application
+missing something: **Electron ships no context menu at all** — not a reduced
+one, none — so right-clicking a field does nothing anywhere until the app
+builds the menu itself. The editor, the composer, the terminal, the file tree
+and every page in the browser panel were all equally without one.
+
+One handler on every `webContents` this app owns, rather than a React menu per
+surface, for three reasons in order of weight. **Roles, not handlers:**
+`{ role: "copy" }` is the operating system's own copy, respecting the focused
+element, the platform shortcut and the clipboard permissions a renderer shim
+does not have — a drawn menu would get `paste` wrong outright, because a
+renderer cannot read the clipboard unprompted. **The browser panel is not in
+our document:** its pages are separate `webContents` layered above it, so
+nothing the renderer draws can appear over one. **Spelling comes free:**
+Chromium already knows the misspelled word and its suggestions, and
+`params.dictionarySuggestions` is unreachable from the renderer.
+
+The menu is built per invocation from `params`, because what is under the
+cursor decides it. The suggestions for a misspelling go **first**, above Cut
+and Copy: it is the one thing the operator right-clicked *at* rather than near.
+Back, Forward and Reload appear only on a browser page — the shell's own window
+has one document, so offering them there would be a control that does nothing
+(§2). A search from a selection opens in the operator's own browser panel, not
+in Safari. Inspect Element exists only when `!app.isPackaged`: in a shipped app
+it is a door into a window that was never meant to have one.
+
+`contextMenuTemplate` is pure and takes plain `params`, so the shape of the
+menu is checkable — `tests/context-menu.test.mjs` (9) pins the editing roles,
+the suggestions-first ordering, that a read-only pane offers no `paste`, that a
+right-click on nothing still offers something true (an empty menu is the bug
+this replaced), and that no two separators ever sit together.
+
+`electron/*.cjs` needs a **full application restart**, not a reload.
+
 ### Every row in the sidebar does something (`sidebar/StudioSidebar.tsx`, `sidebar/FileTree.tsx`, 2026-09-06)
 
 The operator, with the whole repository list circled: *"I do not know if these

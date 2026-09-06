@@ -13,6 +13,7 @@ const { initVideoProjects, shutdownVideoProjects } = require("./videoProjects.cj
 const { initVideoExport, shutdownVideoExport } = require("./videoExport.cjs");
 const { registerWorkspaceMediaScheme, initWorkspaceMedia } = require("./workspaceMedia.cjs");
 const { initBrowserViews } = require("./browserView.cjs");
+const { attachContextMenu } = require("./contextMenu.cjs");
 
 // The file pane's video and audio come over `teminali-media://`, and Electron
 // only grants a scheme its privileges before `app.ready`. Handled after it.
@@ -343,6 +344,14 @@ function createWindow() {
       mainWindow.loadURL(DEV_URL).catch(() => {});
     });
   }
+
+  /*
+    Right-click. Electron ships no context menu at all, so without this the
+    editor, the composer and every other field in the shell had none — which
+    read as the editor being unfinished rather than as the whole application
+    missing something. See electron/contextMenu.cjs.
+  */
+  attachContextMenu(mainWindow.webContents, { allowInspect: !app.isPackaged });
 
   // A reload replaces the document but not the views layered over it, and the
   // fresh page has no idea they are there — it would draw under pages it never
