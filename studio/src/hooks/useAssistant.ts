@@ -25,6 +25,9 @@ import { AssistantService } from "../services/assistant/assistantService";
 import { askEngine } from "../services/assistant/engine";
 import { inventoryText, rankElements } from "../services/assistant/elements";
 import { readPlan } from "../services/assistant/plan";
+import { BUILT_IN_BROWSER } from "../services/assistant/apps";
+import { openBrowserAt } from "../services/browserNavigation";
+import { usePanelStore } from "../store/panelStore";
 import { buildPrompt } from "../services/assistant/prompt";
 import {
   DEFAULT_ASSISTANT_SETTINGS,
@@ -346,6 +349,31 @@ export function useAssistant(): UseAssistantResult {
 
         setPhase("acting");
         mark("running");
+
+        /*
+          "Open it in the browser" means this one.
+
+          The gateway's launcher runs `/usr/bin/open`, which is the right tool
+          for Safari and the wrong one for a panel in the window that is
+          already in front of the operator. So the step is answered here
+          instead and never crosses the boundary: nothing about a pseudo
+          application has to exist on the gateway side, and the screen is not
+          replaced — which is why this does not set `relocated`, and why the
+          observation the next step was planned against is still true.
+        */
+        if ((step.kind === "launch" || step.kind === "focus") && step.app === BUILT_IN_BROWSER.id) {
+          const url = step.kind === "launch" ? step.url : undefined;
+          if (url) openBrowserAt(url);
+          else {
+            const panels = usePanelStore.getState();
+            const open = panels.panels.filter((panel) => panel.kind === "browser" && !panel.private);
+            if (open.length > 0) panels.activate(open[open.length - 1].id);
+            else panels.open({ kind: "browser" });
+          }
+          mark("done");
+          continue;
+        }
+
         try {
           const result = await AssistantService.act(observationId, step, abortRef.current?.signal);
           if (step.kind === "launch" || step.kind === "focus") {

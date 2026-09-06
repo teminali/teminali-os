@@ -24,15 +24,80 @@
   event back for the toolbar.
 */
 const { app, WebContentsView, ipcMain, session, shell } = require("electron");
-const { attachContextMenu } = require("./contextMenu.cjs");
+const { attachContextMenu, setSearchEngine } = require("./contextMenu.cjs");
 const fs = require("node:fs");
 const path = require("node:path");
 
 const PARTITION = "persist:teminali-browser";
+/*
+  The private session.
+
+  No `persist:` prefix — that is the whole mechanism: Electron keeps an
+  unprefixed partition in memory, so its cookies, storage and cache exist only
+  while the process does. One session shared by every private tab, the way a
+  browser's private *window* holds several tabs that can see each other's
+  login, and cleared the moment the last of them closes so the next private tab
+  starts from nothing.
+*/
+const PRIVATE_PARTITION = "teminali-browser-private";
 const STATE_CHANNEL = "browser-view:state";
 const DOWNLOAD_CHANNEL = "browser-view:download";
 /** How many saved paths stay revealable. Old enough is off the operator's Home anyway. */
 const MAX_KNOWN_DOWNLOADS = 200;
+
+/*
+  Passkeys, and the silence that made them look broken.
+
+  macOS gates the platform authenticator — Touch ID — behind
+  `com.apple.developer.web-browser.public-key-credential`, an entitlement Apple
+  grants to registered web browsers and to nothing else; an Electron app cannot
+  hold it. Measured in this app rather than assumed: `PublicKeyCredential` is
+  defined, `navigator.credentials.get` is a function, and
+  `isUserVerifyingPlatformAuthenticatorAvailable()` answers false. So the page
+  asks correctly and there is simply nothing to answer, which the operator
+  experiences as a button that does nothing at all.
+
+  The limit is not fixable here. The silence is. The probe wraps
+  `credentials.get` and `.create` in the page's own world, calls through
+  untouched, and — only when the platform authenticator really is absent —
+  says so on the console. `console.info` is the channel deliberately: this view
+  has no preload precisely so that someone else's page has no bridge to find,
+  and a sentinel string main happens to read is not one.
+*/
+const PASSKEY_SENTINEL = "teminali:passkey-unavailable:";
+const PASSKEY_PROBE = `(() => {
+  const creds = navigator.credentials;
+  if (!creds || creds.__teminaliPasskeyWatch) return;
+  Object.defineProperty(creds, "__teminaliPasskeyWatch", { value: true });
+  const sentinel = ${JSON.stringify(PASSKEY_SENTINEL)};
+  for (const name of ["get", "create"]) {
+    const original = creds[name];
+    if (typeof original !== "function") continue;
+    Object.defineProperty(creds, name, {
+      configurable: true,
+      writable: true,
+      value: function (options) {
+        if (options && options.publicKey) {
+          try {
+            const api = window.PublicKeyCredential;
+            const ask = api && api.isUserVerifyingPlatformAuthenticatorAvailable;
+            Promise.resolve(ask ? ask.call(api) : false)
+              .then((available) => { if (!available) console.info(sentinel + name); })
+              .catch(() => {});
+          } catch (error) {
+            /* A page is free to have replaced the API; that is not an argument to have. */
+          }
+        }
+        return original.call(creds, options);
+      },
+    });
+  }
+})();`;
+
+/** Is this console line the probe above, rather than the page talking? */
+function isPasskeyNotice(text) {
+  return typeof text === "string" && text.startsWith(PASSKEY_SENTINEL);
+}
 
 /** A page the panel may load. Anything else is a way out of the panel. */
 function isAllowedUrl(url) {
@@ -110,6 +175,12 @@ function initBrowserViews({ getMainWindow, log }) {
       // has to, because a page playing a video is a page the microphone will
       // transcribe as an operator. See src/services/voice/selfAudio.ts.
       audible: contents.isCurrentlyAudible(),
+      // Which session this view is on. The renderer cannot infer it — the tab
+      // that asked for a private view may since have been closed and reopened
+      // — and it decides whether the visit is written down at all.
+      private: entry.private === true,
+      // The page asked for a passkey and nothing can answer. See PASSKEY_PROBE.
+      passkey: entry.passkey === true,
     });
   };
 
@@ -119,12 +190,12 @@ function initBrowserViews({ getMainWindow, log }) {
     window.webContents.send(STATE_CHANNEL, { id, error: message });
   };
 
-  function create(window, id) {
+  function create(window, id, isPrivate) {
     const view = new WebContentsView({
       webPreferences: {
         // Deliberately none of the shell's relaxations: this is someone else's
         // page. No preload means there is no bridge for it to find.
-        session: session.fromPartition(PARTITION),
+        session: session.fromPartition(isPrivate ? PRIVATE_PARTITION : PARTITION),
         contextIsolation: true,
         nodeIntegration: false,
         sandbox: true,
@@ -136,6 +207,10 @@ function initBrowserViews({ getMainWindow, log }) {
     window.contentView.addChildView(view);
 
     const contents = view.webContents;
+    /* Registered before the listeners below, because they read it: `passkey`
+       has to be cleared by a navigation before that same navigation publishes. */
+    const entry = { view, bounds: null, visible: false, private: isPrivate === true, passkey: false };
+    views.set(id, entry);
 
     /*
       Right-click on someone else's page. A React menu could never appear over
@@ -147,6 +222,10 @@ function initBrowserViews({ getMainWindow, log }) {
     */
     attachContextMenu(contents, {
       isBrowserPage: true,
+      // The one surface where Inspect Element belongs: it opens the devtools of
+      // this page, which is someone else's document, and reaches nothing of the
+      // app's own. The shell window deliberately has none — see main.cjs.
+      allowInspect: true,
       openInPanel: (url) => { contents.loadURL(url).catch(() => {}); },
     });
 
@@ -160,6 +239,26 @@ function initBrowserViews({ getMainWindow, log }) {
     contents.on("will-navigate", (event, url) => {
       if (!isAllowedUrl(url)) event.preventDefault();
     });
+
+    // A new page has not asked for anything yet, so the notice from the last
+    // one must not still be on the toolbar. Ordered before the publishing loop
+    // below: the same `did-navigate` that clears it is the one that reports.
+    contents.on("did-navigate", () => {
+      entry.passkey = false;
+    });
+    contents.on("dom-ready", () => {
+      contents.executeJavaScript(PASSKEY_PROBE, false).catch(() => {
+        // A page that refused the injection is a page we say nothing about.
+      });
+    });
+    contents.on("console-message", (event, _level, message) => {
+      // Electron 36 moved the text onto the event; older builds pass it third.
+      const text = typeof event?.message === "string" ? event.message : message;
+      if (!isPasskeyNotice(text)) return;
+      entry.passkey = true;
+      publish(id);
+    });
+
     for (const event of ["did-navigate", "did-navigate-in-page", "did-start-loading", "did-stop-loading", "page-title-updated", "audio-state-changed"]) {
       contents.on(event, () => publish(id));
     }
@@ -171,15 +270,34 @@ function initBrowserViews({ getMainWindow, log }) {
       fail(id, description || `Could not load (${code})`);
     });
 
-    const entry = { view, bounds: null, visible: false };
-    views.set(id, entry);
     return entry;
   }
+
+  /*
+    The end of private browsing.
+
+    An unprefixed partition is already in memory, so nothing survives the
+    process — but a second private tab opened an hour later would otherwise
+    inherit the first one's cookies, which is not what "private" is taken to
+    mean. Cleared when the last private view goes, and not before: private tabs
+    share one session on purpose, the way a private window holds several tabs.
+  */
+  const clearPrivateSession = () => {
+    try {
+      const store = session.fromPartition(PRIVATE_PARTITION);
+      void store.clearStorageData();
+      void store.clearCache();
+      void store.clearAuthCache();
+    } catch (error) {
+      log("Could not clear the private session:", error?.message ?? error);
+    }
+  };
 
   function destroy(id) {
     const entry = views.get(id);
     if (!entry) return;
     views.delete(id);
+    if (entry.private && ![...views.values()].some((other) => other.private)) clearPrivateSession();
     const window = getMainWindow();
     // A page that was playing has stopped, and it will never say so itself: it
     // is about to have no web contents. Left unsaid, the renderer goes on
@@ -204,7 +322,7 @@ function initBrowserViews({ getMainWindow, log }) {
     So a mount asks for a view rather than for a navigation: an existing one is
     left exactly as it is and merely re-announces itself to the new toolbar.
   */
-  ipcMain.handle("browser-view:ensure", (event, id, url) => {
+  ipcMain.handle("browser-view:ensure", (event, id, url, options) => {
     const window = mainWindowOf(event.sender);
     if (!window || typeof id !== "string" || !id) return { ok: false, reason: "unavailable" };
     if (views.has(id)) {
@@ -212,18 +330,20 @@ function initBrowserViews({ getMainWindow, log }) {
       return { ok: true, existing: true };
     }
     if (!isAllowedUrl(url)) return { ok: false, reason: "scheme" };
-    const entry = create(window, id);
+    const entry = create(window, id, options?.private === true);
     entry.view.webContents.loadURL(url).catch((error) => {
       log(`Browser view ${id} could not load ${url}:`, error?.message ?? error);
     });
     return { ok: true, existing: false };
   });
 
-  ipcMain.handle("browser-view:navigate", (event, id, url) => {
+  ipcMain.handle("browser-view:navigate", (event, id, url, options) => {
     const window = mainWindowOf(event.sender);
     if (!window || typeof id !== "string" || !id) return { ok: false, reason: "unavailable" };
     if (!isAllowedUrl(url)) return { ok: false, reason: "scheme" };
-    const entry = views.get(id) ?? create(window, id);
+    // An existing view keeps the session it was made on: privacy is decided
+    // once, when the tab is opened, and a later navigation cannot change it.
+    const entry = views.get(id) ?? create(window, id, options?.private === true);
     entry.view.webContents.loadURL(url).catch((error) => {
       log(`Browser view ${id} could not load ${url}:`, error?.message ?? error);
     });
@@ -285,9 +405,13 @@ function initBrowserViews({ getMainWindow, log }) {
     // No file yet, which is what a first run looks like.
   }
 
-  const remember = (filePath) => {
+  const remember = (filePath, persist) => {
     if (!filePath || known.has(filePath)) return;
     known.add(filePath);
+    // A private download is still a file the operator asked for and can still
+    // be revealed while the app is open — but the list of what was downloaded
+    // is exactly the thing private browsing promises not to write down.
+    if (!persist) return;
     const kept = [...known].slice(-MAX_KNOWN_DOWNLOADS);
     known = new Set(kept);
     try {
@@ -314,45 +438,55 @@ function initBrowserViews({ getMainWindow, log }) {
     } catch {}
   };
 
-  try {
-    session.fromPartition(PARTITION).on("will-download", (_event, item, contents) => {
-      const downloadId = `dl-${Date.now()}-${++downloadSeq}`;
-      const panelId = panelIdOf(contents);
-      const url = item.getURL();
-      const filename = item.getFilename();
-      // `done` rather than a state the renderer has to interpret: an
-      // `interrupted` mid-flight can still resume, and only the final one is a
-      // row worth writing. Inferring that from the word alone would record a
-      // failed download every time the network hiccuped.
-      const report = (state, done) =>
-        sendDownload({
-          downloadId,
-          panelId,
-          url,
-          filename,
-          state,
-          done,
-          received: item.getReceivedBytes(),
-          total: item.getTotalBytes(),
-          path: done && state === "completed" ? item.getSavePath() : "",
-        });
+  const armDownloads = (partition) => {
+    try {
+      session.fromPartition(partition).on("will-download", (_event, item, contents) => {
+        const downloadId = `dl-${Date.now()}-${++downloadSeq}`;
+        const panelId = panelIdOf(contents);
+        // The panel is the truth when it is still open; the session it arrived on
+        // is the answer when the tab has already been closed under the download.
+        const isPrivate = panelId ? views.get(panelId)?.private === true : partition === PRIVATE_PARTITION;
+        const url = item.getURL();
+        const filename = item.getFilename();
+        // `done` rather than a state the renderer has to interpret: an
+        // `interrupted` mid-flight can still resume, and only the final one is a
+        // row worth writing. Inferring that from the word alone would record a
+        // failed download every time the network hiccuped.
+        const report = (state, done) =>
+          sendDownload({
+            downloadId,
+            panelId,
+            url,
+            filename,
+            state,
+            done,
+            received: item.getReceivedBytes(),
+            total: item.getTotalBytes(),
+            path: done && state === "completed" ? item.getSavePath() : "",
+            // The renderer writes the finished row to the gateway; a private one
+            // is shown while it arrives and then forgotten.
+            private: isPrivate,
+          });
 
-      report("progressing", false);
-      item.on("updated", (__event, state) => {
-        if (state === "interrupted") report("interrupted", false);
-        else report(item.isPaused() ? "paused" : "progressing", false);
+        report("progressing", false);
+        item.on("updated", (__event, state) => {
+          if (state === "interrupted") report("interrupted", false);
+          else report(item.isPaused() ? "paused" : "progressing", false);
+        });
+        item.once("done", (__event, state) => {
+          // `cancelled` is also what dismissing the save dialog reports, so the
+          // renderer drops those rather than writing a row for a file that was
+          // never asked for.
+          if (state === "completed") remember(item.getSavePath(), !isPrivate);
+          report(state, true);
+        });
       });
-      item.once("done", (__event, state) => {
-        // `cancelled` is also what dismissing the save dialog reports, so the
-        // renderer drops those rather than writing a row for a file that was
-        // never asked for.
-        if (state === "completed") remember(item.getSavePath());
-        report(state, true);
-      });
-    });
-  } catch (error) {
-    log("Browser downloads could not be armed:", error?.stack || error?.message || error);
-  }
+    } catch (error) {
+      log("Browser downloads could not be armed:", error?.stack || error?.message || error);
+    }
+  };
+  armDownloads(PARTITION);
+  armDownloads(PRIVATE_PARTITION);
 
   ipcMain.handle("browser-view:reveal-download", (event, filePath) => {
     if (!mainWindowOf(event.sender)) return false;
@@ -379,6 +513,21 @@ function initBrowserViews({ getMainWindow, log }) {
     return true;
   });
 
+  /*
+    Which engine the right-click menu offers to search with.
+
+    The preference is the renderer's — it is drawn in the home page's search
+    box — and the menu that has to honour it is drawn here, in another process
+    that cannot read a store. So the renderer says it once on start-up and
+    again whenever it changes. Refused rather than trusted: `setSearchEngine`
+    takes only an https prefix, because this ends up as an argument to a
+    navigation.
+  */
+  ipcMain.on("browser-view:search-engine", (event, engine) => {
+    if (!mainWindowOf(event.sender)) return;
+    if (!setSearchEngine(engine)) log("Ignored a search engine that was not an https address:", engine?.query);
+  });
+
   /** The window is going away, or the renderer is reloading into a fresh page. */
   function destroyAllBrowserViews() {
     for (const id of [...views.keys()]) destroy(id);
@@ -394,10 +543,13 @@ function initBrowserViews({ getMainWindow, log }) {
 
 module.exports = {
   initBrowserViews,
+  isPasskeyNotice,
+  PASSKEY_PROBE,
   isAllowedUrl,
   scaleBounds,
   isBounds,
   parseKnownDownloads,
   isRevealable,
   BROWSER_VIEW_PARTITION: PARTITION,
+  BROWSER_VIEW_PRIVATE_PARTITION: PRIVATE_PARTITION,
 };

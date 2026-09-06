@@ -4,7 +4,18 @@
  * Pure and dependency-free so it can be reasoned about — and tested — on its
  * own. What gets typed into a developer's address bar is usually not a URL:
  * it is a port number, a bare host, or a path.
+ *
+ * Which engine a search goes to is the operator's choice and lives in
+ * `utils/searchEngines.ts`; it is passed in rather than read from a store,
+ * because this file has no store and is the poorer for having none.
  */
+
+import {
+  DEFAULT_SEARCH_ENGINE_ID,
+  searchEngineById,
+  searchQueryOf,
+  searchUrlWith,
+} from "./searchEngines.ts";
 
 export interface NormalisedAddress {
   url: string | null;
@@ -13,7 +24,7 @@ export interface NormalisedAddress {
   search?: boolean;
 }
 
-export function normaliseAddress(input: string): NormalisedAddress {
+export function normaliseAddress(input: string, engineId: string = DEFAULT_SEARCH_ENGINE_ID): NormalisedAddress {
   const value = input.trim();
   if (!value) return { url: null };
 
@@ -41,21 +52,21 @@ export function normaliseAddress(input: string): NormalisedAddress {
   // Anything else is words, and words are a search — what an address bar does
   // with them everywhere else. The refusals above still stand: a scheme that
   // is not http(s) is refused, not searched for.
-  return { url: searchUrl(value), search: true };
+  return { url: searchUrl(value, engineId), search: true };
 }
 
 /** Where a search goes. The home page's search box and the omnibox agree on it. */
-export const SEARCH_ENGINE = "https://www.google.com/search?q=";
-
-export function searchUrl(query: string): string {
-  return `${SEARCH_ENGINE}${encodeURIComponent(query.trim())}`;
+export function searchUrl(query: string, engineId: string = DEFAULT_SEARCH_ENGINE_ID): string {
+  return searchUrlWith(searchEngineById(engineId), query);
 }
 
 /** What a tab is called: the host, with the port when there is one. */
 export function addressLabel(url: string): string {
   try {
     const parsed = new URL(url);
-    if (parsed.href.startsWith(SEARCH_ENGINE)) return parsed.searchParams.get("q") || "Search";
+    // A search tab is named by what was searched for, whichever engine it was.
+    const query = searchQueryOf(parsed.href);
+    if (query !== null) return query || "Search";
     return parsed.port ? `${parsed.hostname}:${parsed.port}` : parsed.hostname;
   } catch {
     return "Browser";

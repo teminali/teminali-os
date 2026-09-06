@@ -38,7 +38,7 @@ const SHAPE = `{
     { "kind": "scroll", "element": "e4", "dy": -300 },
     { "kind": "drag",   "element": "e7", "to": "e9" },
     { "kind": "drag",   "element": "e7", "dx": 120, "dy": 0 },
-    { "kind": "launch", "app": "safari", "url": "https://example.com" },
+    { "kind": "launch", "app": "teminali", "url": "https://example.com" },
     { "kind": "focus",  "app": "slack" },
     { "kind": "wait",   "ms": 400 }
   ]
@@ -100,6 +100,13 @@ export function observationBlock(options: PromptOptions): string {
   if (options.mode === "agent" && observation.launchable && observation.launchable.length > 0) {
     lines.push("", "Applications installed on this machine, which a `launch` step may open:");
     lines.push(launchableInventory(observation.launchable));
+    // The operator is inside this application. When they say "open it in the
+    // browser" without naming one, the browser they mean is the one they are
+    // looking at — not whichever browser the machine happens to have.
+    lines.push(
+      "",
+      "A web address goes to `teminali` — this application's own browser panel — unless the operator names a different browser.",
+    );
   }
 
   return lines.join("\n");

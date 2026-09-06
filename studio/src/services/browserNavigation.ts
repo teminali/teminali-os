@@ -17,11 +17,16 @@ import { browserViewBridge } from "./browserView";
  * browser tab most recently opened. Every browser tab is its own page with
  * its own history — there can be as many as the operator likes — so this
  * never folds two of them into one.
+ *
+ * Private tabs are never the one in front. Whatever asked for this page — an
+ * artifact preview, the agent, a link from a chat — did not ask for it to be
+ * private, and dropping it into a private tab would put it on the wrong
+ * session and hide it from the history the assistant reads back.
  */
 export function openBrowserAt(url: string, options: { newTab?: boolean } = {}): string {
   const store = usePanelStore.getState();
   const label = addressLabel(url);
-  const browsers = store.panels.filter((panel) => panel.kind === "browser");
+  const browsers = store.panels.filter((panel) => panel.kind === "browser" && !panel.private);
   const active = browsers.find((panel) => panel.id === store.activePanelId) ?? browsers[browsers.length - 1];
   const id = !options.newTab && active
     ? (store.update(active.id, { url, label }), store.activate(active.id), active.id)

@@ -3,8 +3,10 @@ import {
   ArrowLeft,
   ArrowRight,
   ExternalLink,
+  EyeOff,
   Globe,
   House,
+  KeyRound,
   MoreHorizontal,
   RotateCw,
   Search,
@@ -17,6 +19,7 @@ import { BrowserHome } from "./BrowserHome";
 import { usePanelStore, type PanelTab } from "../../../store/panelStore";
 import { addressLabel, normaliseAddress } from "../../../utils/address";
 import { isBookmarked, useBrowserStore } from "../../../store/browserStore";
+import { useSearchEngine } from "../../../store/searchStore";
 import {
   boundsEqual,
   browserViewBridge,
@@ -46,6 +49,17 @@ import {
  * A browser build has no such view and keeps the iframe.
  * See services/browserView.ts and electron/browserView.cjs.
  *
+ * ## Private tabs
+ *
+ * A private tab is a tab on another session — unprefixed, therefore in memory
+ * — and that is the whole of the mechanism; everything else follows from it.
+ * The flag travels to main only when the view is *made*, because a view cannot
+ * change session: privacy is decided when the tab opens and a later navigation
+ * cannot revoke it. What comes back is `state.private`, which is what stops
+ * the visit being written down (utils/browserRecording.ts) — read from main
+ * rather than from `panel.private`, because main owns the session and the tab
+ * is only what asked for it.
+ *
  * Home is a state rather than an address. Because the view is an OS layer that
  * nothing can be drawn over, showing a home page means hiding the view — and
  * hiding it is all it means: the page behind stays loaded, at its scroll, with
@@ -62,6 +76,10 @@ const SUGGESTIONS = [
 
 export const BrowserPane: React.FC<{ panel: PanelTab }> = ({ panel }) => {
   const update = usePanelStore((state) => state.update);
+  const openPanel = usePanelStore((state) => state.open);
+  const isPrivate = panel.private === true;
+  // Where words go. The home page's field and this bar are the same choice.
+  const engine = useSearchEngine();
   const bridge = useMemo(() => browserViewBridge(), []);
   const [draft, setDraft] = useState(panel.url ?? "");
   const [omniOpen, setOmniOpen] = useState(false);
@@ -70,6 +88,9 @@ export const BrowserPane: React.FC<{ panel: PanelTab }> = ({ panel }) => {
   const [home, setHome] = useState(!panel.url);
   const [error, setError] = useState<string | null>(null);
   const [reloadKey, setReloadKey] = useState(0);
+  // The passkey notice, once read, is not news any more. Kept per page: main
+  // clears `state.passkey` on the next navigation, and that resets this too.
+  const [passkeyRead, setPasskeyRead] = useState(false);
 
   /*
     History.
@@ -131,7 +152,11 @@ export const BrowserPane: React.FC<{ panel: PanelTab }> = ({ panel }) => {
         return;
       }
       setError(null);
-      setViewState(state);
+      // Merged, not replaced: main sends partial updates — a passkey notice, a
+      // page falling silent — and a whole toolbar rebuilt from one of those
+      // would forget whether Back is available.
+      setViewState((previous) => ({ ...(previous ?? { id: panel.id }), ...state }));
+      if (state.passkey === false) setPasskeyRead(false);
       if (state.url) {
         setDraft((previous) => (previous === state.url ? previous : (state.url as string)));
         update(panel.id, { url: state.url, label: addressLabel(state.url) });
@@ -205,7 +230,7 @@ export const BrowserPane: React.FC<{ panel: PanelTab }> = ({ panel }) => {
   }, [bridge, show, visible]);
 
   const go = (raw: string) => {
-    const { url, error: failure } = normaliseAddress(raw);
+    const { url, error: failure } = normaliseAddress(raw, engine.id);
     if (!url) {
       setError(failure ?? null);
       return;
@@ -218,7 +243,7 @@ export const BrowserPane: React.FC<{ panel: PanelTab }> = ({ panel }) => {
     setDraft(url);
     update(panel.id, { url, label: addressLabel(url) });
     if (bridge) {
-      void bridge.navigate(panel.id, url).then((result) => {
+      void bridge.navigate(panel.id, url, { private: isPrivate }).then((result) => {
         if (!result?.ok) setError("Only http and https addresses can be opened in a panel.");
       });
     }
@@ -236,7 +261,7 @@ export const BrowserPane: React.FC<{ panel: PanelTab }> = ({ panel }) => {
   */
   useEffect(() => {
     if (!bridge || !current) return;
-    void bridge.ensure(panel.id, current);
+    void bridge.ensure(panel.id, current, { private: isPrivate });
     // Only on mount: afterwards `go` and the toolbar drive the view.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [bridge]);
@@ -277,10 +302,10 @@ export const BrowserPane: React.FC<{ panel: PanelTab }> = ({ panel }) => {
       onSelect: () => go(suggestion.value),
     }));
     const typed = draft.trim();
-    if (typed && normaliseAddress(typed).search) {
+    if (typed && normaliseAddress(typed, engine.id).search) {
       rows.unshift({
         id: "search",
-        label: `Search Google for “${typed}”`,
+        label: `Search ${engine.name} for “${typed}”`,
         icon: <Search size={13} />,
         onSelect: () => go(typed),
       });
@@ -288,7 +313,7 @@ export const BrowserPane: React.FC<{ panel: PanelTab }> = ({ panel }) => {
     return rows;
     // `go` closes over the cursor, which is what the next navigation appends to.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [draft, cursor, history]);
+  }, [draft, cursor, history, engine]);
 
   return (
     <div className="flex-1 min-h-0 flex flex-col">
@@ -339,7 +364,9 @@ export const BrowserPane: React.FC<{ panel: PanelTab }> = ({ panel }) => {
             onKeyDown={(event) => {
               if (event.key === "Enter") setOmniOpen(true);
             }}
-            className="lit lit-inner h-7 rounded-md bg-surface-raised flex items-center gap-2.5 px-3 cursor-text"
+            // `lit-focus` for the same reason the home field has it: the ring
+            // belongs on the bar, not on the input inside it.
+            className="lit lit-inner lit-focus h-7 rounded-md bg-surface-raised flex items-center gap-2.5 px-3 cursor-text"
           >
             <Search size={12} className="text-ink-faint flex-shrink-0" />
             {omniOpen ? (
@@ -372,6 +399,19 @@ export const BrowserPane: React.FC<{ panel: PanelTab }> = ({ panel }) => {
           />
         </div>
 
+        {/* Which session this tab is on, said where the operator is already
+            looking. A private tab that looks like every other tab is one whose
+            page ends up in the wrong place. */}
+        {isPrivate && (
+          <span
+            className="flex-shrink-0 h-6 pl-1.5 pr-2 rounded-md bg-surface-chip border border-edge-chrome flex items-center gap-1.5 text-2xs text-ink-muted"
+            title="Nothing from this tab is written to your history or downloads"
+          >
+            <EyeOff size={11} />
+            Private
+          </span>
+        )}
+
         <div className="relative flex-shrink-0">
           <IconButton title="More" size={24} active={moreOpen} onClick={() => setMoreOpen((open) => !open)}>
             <MoreHorizontal size={15} />
@@ -395,6 +435,15 @@ export const BrowserPane: React.FC<{ panel: PanelTab }> = ({ panel }) => {
                 },
               },
               {
+                id: "private",
+                label: "New private tab",
+                icon: <EyeOff size={13} />,
+                // A new tab rather than a switch: a view cannot change session,
+                // so "make this one private" would mean discarding the page the
+                // operator is looking at without being asked.
+                onSelect: () => openPanel({ kind: "browser", label: "Private", private: true }),
+              },
+              {
                 id: "clear",
                 label: "Clear history",
                 icon: <Trash2 size={13} />,
@@ -407,12 +456,44 @@ export const BrowserPane: React.FC<{ panel: PanelTab }> = ({ panel }) => {
 
       {error && <div className="px-3 py-2 text-2xs text-danger border-b border-edge-chrome">{error}</div>}
 
+      {/*
+        The page asked for a passkey and nothing answered.
+
+        macOS grants the platform authenticator only to registered web
+        browsers, so Touch ID cannot work in this panel and no amount of work
+        here will change that (see electron/browserView.cjs). What was wrong
+        was the silence: the operator pressed a button and the app said
+        nothing, which reads as a bug rather than as a limit. This is the whole
+        fix — one line, and the two routes that do work.
+      */}
+      {viewState?.passkey && !passkeyRead && (
+        <div className="px-3 py-2 flex items-center gap-2 border-b border-edge-chrome text-2xs text-ink-dim">
+          <KeyRound size={12} className="text-ink-faint flex-shrink-0" />
+          <span className="min-w-0">
+            This page asked for a passkey. Touch ID is not available inside this panel — choose
+            another sign-in method on the page, or open it in your browser.
+          </span>
+          {shown && bridge && (
+            <button
+              type="button"
+              onClick={() => void bridge.openExternal(shown)}
+              className="flex-shrink-0 ml-auto text-accent hover:underline"
+            >
+              Open in browser
+            </button>
+          )}
+          <IconButton size={20} title="Dismiss" onClick={() => setPasskeyRead(true)}>
+            <X size={11} />
+          </IconButton>
+        </div>
+      )}
+
       {/* ── Viewport ───────────────────────────────────────────────────── */}
       <div ref={viewportRef} className="flex-1 min-h-0 relative flex flex-col bg-frame-bot">
         {home || !shown ? (
           // Drawn in the box the view would cover — which is exactly why the
           // view is hidden while this is up. See `visible` above.
-          <BrowserHome onOpen={go} />
+          <BrowserHome onOpen={go} private={isPrivate} />
         ) : bridge ? (
           // Deliberately empty: the page is a view above this box, and main is
           // told where the box is. Anything drawn here would be hidden by it.

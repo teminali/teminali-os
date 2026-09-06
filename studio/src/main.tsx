@@ -8,7 +8,9 @@ import { useStudioStore } from "./store/studioStore";
 import { registerVideoToolBridge } from "./services/videoToolBridge";
 import { installWindowDropGuard } from "./services/dropGuard";
 import { syncWorkspaceMediaRoot } from "./services/workspaceMedia";
-import { browserViewBridge, reapClosedBrowserViews } from "./services/browserView";
+import { announceSearchEngine, browserViewBridge, reapClosedBrowserViews } from "./services/browserView";
+import { useSearchStore } from "./store/searchStore";
+import { searchEngineById } from "./utils/searchEngines";
 import { watchBrowserHistory } from "./services/browserHistory";
 import { watchBrowserDownloads } from "./services/browserDownloads";
 import { selfAudio, watchBrowserAudio, watchMediaElements, watchTimelineAudio } from "./services/voice/selfAudio";
@@ -93,6 +95,14 @@ watchBrowserHistory(browserViewBridge());
   See services/browserDownloads.ts.
 */
 watchBrowserDownloads(browserViewBridge());
+
+/*
+  The right-click menu's "Search … for" is drawn in main, and the engine it
+  means is chosen in here. Published once now — main starts on the default and
+  cannot read what was persisted — and again whenever it changes.
+  See services/browserView.ts.
+*/
+announceSearchEngine(useSearchStore, searchEngineById);
 
 /*
   The app has to know when it is the one making noise.

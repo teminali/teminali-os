@@ -17,6 +17,7 @@
 
 import { create } from "zustand";
 import { persist, createJSONStorage } from "zustand/middleware";
+import { persistablePanels } from "../utils/privateBrowsing";
 
 export type PanelKind = "terminal" | "browser" | "canvas" | "side" | "file" | "guardian" | "claude" | "codex" | "usage" | "release" | "arena" | "video";
 
@@ -30,6 +31,12 @@ export interface PanelTab {
   url?: string;
   /** Working directory, for terminal and agent panels. */
   cwd?: string;
+  /**
+   * A browser tab on the in-memory session: nothing it visits is written down,
+   * and the tab itself is not persisted. Settled when the tab opens — a view
+   * cannot change session, so neither can this. See utils/privateBrowsing.ts.
+   */
+  private?: boolean;
   createdAt: number;
 }
 
@@ -160,6 +167,7 @@ export const usePanelStore = create<PanelState>()(
           path: seed.path,
           url: seed.url,
           cwd: seed.cwd,
+          private: seed.private,
           createdAt: Date.now(),
         };
         set((state) => ({
@@ -252,9 +260,11 @@ export const usePanelStore = create<PanelState>()(
                 : null,
         };
       },
+      /* A private tab is not written down — see utils/privateBrowsing.ts. The
+         filter is here rather than in `close`, because nothing calls a reducer
+         for a panel that was simply still open when the app quit. */
       partialize: (state) => ({
-        panels: state.panels,
-        activePanelId: state.activePanelId,
+        ...persistablePanels(state.panels, state.activePanelId),
         isOpen: state.isOpen,
         isExpanded: state.isExpanded,
         width: state.width,

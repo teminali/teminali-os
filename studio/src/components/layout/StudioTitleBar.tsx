@@ -227,15 +227,15 @@ export const StudioTitleBar: React.FC<StudioTitleBarProps> = ({
                   onKeyDown={(event) => {
                     if (event.key === "Enter" || event.key === " ") activate(panel.id);
                   }}
-                  title={panel.label}
-                  aria-label={panel.label}
+                  title={panel.private ? `${panel.label} — private` : panel.label}
+                  aria-label={panel.private ? `${panel.label}, private tab` : panel.label}
                   className={`group flex items-center justify-center h-7 rounded-sm cursor-pointer text-xs whitespace-nowrap transition-all duration-ds ease-ds ${
                     active
                       ? "gap-2 px-2 bg-surface-tab text-ink-strong"
                       : "w-7 text-ink-muted hover:text-ink-dim hover:bg-surface-hover"
                   }`}
                 >
-                  <PanelGlyph kind={panel.kind} size={13} />
+                  <PanelGlyph kind={panel.kind} size={13} private={panel.private} />
                   {/* Square icon tiles, because the strip has to hold a growing
                       set of tools — the video editor is only the first. Just
                       the active tile spends width on its label, which is what

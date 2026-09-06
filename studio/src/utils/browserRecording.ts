@@ -19,6 +19,10 @@ const MAX_CACHED_HISTORY = 500;
 /** A page worth remembering, or null. The same line main and the gateway draw. */
 export function visitOf(state: BrowserViewState | null | undefined): { url: string; title: string } | null {
   if (!state || state.closed) return null;
+  // The whole of private browsing, on this side: a page on the in-memory
+  // session is never written down. Decided here rather than in the
+  // subscription because it is a rule, and rules in this codebase are testable.
+  if (state.private) return null;
   // An error page is not a page the operator visited.
   if (state.error) return null;
   if (typeof state.url !== "string" || !/^https?:\/\/\S+$/i.test(state.url)) return null;
@@ -75,6 +79,11 @@ export type DownloadAction =
  * rather than recorded: it is what dismissing Electron's own save dialog
  * reports, and a row for a file the operator declined is noise on their home
  * page that they never asked for and cannot explain.
+ *
+ * A private download ends the same way a cancelled one does — dropped, not
+ * recorded. The file is on disk, because the operator chose where to put it;
+ * the *list* of what was fetched is the thing a private tab promises not to
+ * keep, and that list is what this writes.
  */
 export function downloadAction(download: BrowserDownload | null | undefined): DownloadAction | null {
   if (!download?.downloadId) return null;
@@ -91,6 +100,7 @@ export function downloadAction(download: BrowserDownload | null | undefined): Do
       },
     };
   }
+  if (download.private) return { kind: "drop", id };
   if (download.state !== "completed" && download.state !== "interrupted") return { kind: "drop", id };
   return {
     kind: "record",

@@ -51,11 +51,11 @@ assistant hotkey and the screen overlay — run `npm start` inside `studio/`.
 
 ```bash
 npm test            # root gateway/runner/licence/billing suite — 143 tests
-npm run studio:test # application suite — 1339 tests
+npm run studio:test # application suite — 1408 tests
 npm run verify:all  # both, plus the studio typecheck and production build
 ```
 
-Both suites are green: 143/143 and 1339/1339, no skips.
+Both suites are green: 143/143 and 1408/1408, no skips.
 
 ## Product modes
 

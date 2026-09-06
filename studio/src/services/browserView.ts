@@ -27,6 +27,26 @@ export interface BrowserViewState {
   audible?: boolean;
   /** The view is gone; sent once, so nothing keeps believing it is still playing. */
   closed?: boolean;
+  /**
+   * The view is on the in-memory session, so nothing about it is written down.
+   * Reported by main rather than read from the tab, because the tab is a
+   * renderer object and the session is the thing that actually decides.
+   */
+  private?: boolean;
+  /**
+   * The page asked for a passkey and no platform authenticator answered.
+   *
+   * Not a failure of the page or of the request: macOS grants Touch ID only to
+   * registered web browsers, so inside this app the answer is always no. Main
+   * clears this on the next navigation. See electron/browserView.cjs.
+   */
+  passkey?: boolean;
+}
+
+/** What a view is made with. Settled when the tab opens; a navigation cannot change it. */
+export interface BrowserViewOptions {
+  /** Put the view on the in-memory session shared by every private tab. */
+  private?: boolean;
 }
 
 export type BrowserViewCommand = "back" | "forward" | "reload" | "stop";
@@ -50,12 +70,14 @@ export interface BrowserDownload {
   total: number;
   /** Where it was saved. Empty unless the download finished. */
   path: string;
+  /** It came from a private tab: shown while it arrives, then not written down. */
+  private?: boolean;
 }
 
 export interface BrowserViewBridge {
-  navigate(id: string, url: string): Promise<{ ok: boolean; reason?: string }>;
+  navigate(id: string, url: string, options?: BrowserViewOptions): Promise<{ ok: boolean; reason?: string }>;
   /** The view for this panel, created at `url` only if it does not exist yet. */
-  ensure(id: string, url: string): Promise<{ ok: boolean; reason?: string; existing?: boolean }>;
+  ensure(id: string, url: string, options?: BrowserViewOptions): Promise<{ ok: boolean; reason?: string; existing?: boolean }>;
   setBounds(id: string, bounds: BrowserViewBounds, visible: boolean): void;
   command(id: string, command: BrowserViewCommand): void;
   destroy(id: string): void;
@@ -66,6 +88,8 @@ export interface BrowserViewBridge {
   revealDownload(path: string): Promise<boolean>;
   /** Hand an http(s) address to the operator's real browser. */
   openExternal(url: string): Promise<boolean>;
+  /** Tell main which engine the right-click menu's "Search … for" means. */
+  setSearchEngine(engine: { name: string; query: string }): void;
 }
 
 export interface BrowserViewBounds {
@@ -148,4 +172,31 @@ export function reapClosedBrowserViews(store: {
 
 function browserPanelIds(panels: { id: string; kind: string }[]): string[] {
   return panels.filter((panel) => panel.kind === "browser").map((panel) => panel.id);
+}
+
+/**
+ * Keep main's right-click menu on the same search engine as the toolbar.
+ *
+ * The menu is built in the main process and cannot read a store, so the choice
+ * is pushed to it: once on start-up, because main boots with the default and
+ * has no way of knowing what was persisted, and again on every change.
+ *
+ * Armed once for the whole app, like the other subscriptions in this file — a
+ * component that owned it would stop publishing the moment its tab was
+ * switched away from, and the menu would silently drift back.
+ */
+export function announceSearchEngine(store: {
+  getState(): { engineId: string };
+  subscribe(listener: (state: { engineId: string }) => void): () => void;
+}, engineOf: (id: string) => { name: string; query: string }): () => void {
+  const bridge = browserViewBridge();
+  if (!bridge?.setSearchEngine) return () => {};
+  let last = "";
+  const publish = (id: string) => {
+    if (id === last) return;
+    last = id;
+    bridge.setSearchEngine(engineOf(id));
+  };
+  publish(store.getState().engineId);
+  return store.subscribe((state) => publish(state.engineId));
 }

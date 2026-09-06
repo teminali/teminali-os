@@ -29,6 +29,35 @@
 
 const { Menu, MenuItem, clipboard, shell } = require("electron");
 
+/*
+  Which engine "Search … for" means.
+
+  Module state, and set from one place: the renderer owns the preference and
+  publishes it to main (see browserView.cjs, `browser-view:search-engine`).
+  Held here rather than passed through every `attachContextMenu` call so that
+  the shell's own menu and the browser page's menu cannot disagree — they are
+  the same offer, and the operator picked once.
+
+  Google is the default because it is the default in `utils/searchEngines.ts`;
+  the two would only differ in the moment before the renderer has spoken.
+*/
+let searchEngine = { name: "Google", query: "https://www.google.com/search?q=" };
+
+/**
+ * Point the search item at another engine.
+ *
+ * Validated rather than trusted: this arrives over IPC, and a query prefix
+ * that is not an https URL would turn a menu item into a way to make main open
+ * an arbitrary scheme.
+ */
+function setSearchEngine(engine) {
+  const name = typeof engine?.name === "string" ? engine.name.trim() : "";
+  const query = typeof engine?.query === "string" ? engine.query : "";
+  if (!name || !/^https:\/\/[^\s]+$/.test(query)) return false;
+  searchEngine = { name, query };
+  return true;
+}
+
 /** Trim a phrase down to something that fits in a menu label. */
 function ellipsis(text, max = 32) {
   const clean = String(text ?? "").replace(/\s+/g, " ").trim();
@@ -121,7 +150,7 @@ function contextMenuTemplate(params, { canGoBack = false, canGoForward = false, 
 
   if (selection && !editable) {
     separate();
-    push({ label: `Search Google for “${ellipsis(selection)}”`, search: selection });
+    push({ label: `Search ${searchEngine.name} for “${ellipsis(selection)}”`, search: selection });
   }
 
   return template;
@@ -181,7 +210,7 @@ function attachContextMenu(contents, { isBrowserPage = false, openInPanel = null
         continue;
       }
       if (item.search) {
-        const url = `https://www.google.com/search?q=${encodeURIComponent(item.search)}`;
+        const url = `${searchEngine.query}${encodeURIComponent(item.search)}`;
         menu.append(new MenuItem({
           label: item.label,
           click: () => (openInPanel ? openInPanel(url) : void shell.openExternal(url)),
@@ -205,4 +234,4 @@ function attachContextMenu(contents, { isBrowserPage = false, openInPanel = null
   });
 }
 
-module.exports = { attachContextMenu, contextMenuTemplate };
+module.exports = { attachContextMenu, contextMenuTemplate, setSearchEngine };

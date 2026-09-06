@@ -316,10 +316,14 @@ contextBridge.exposeInMainWorld("teminali", {
    * perform it. See electron/browserView.cjs for why it is not an iframe.
    */
   browserView: {
-    /** Load an http(s) address into the view for this panel, creating it on first use. */
-    navigate: (id, url) => ipcRenderer.invoke("browser-view:navigate", id, url),
+    /**
+     * Load an http(s) address into the view for this panel, creating it on
+     * first use. `options.private` is read only when a view has to be made:
+     * which session a tab is on is settled when it opens, never later.
+     */
+    navigate: (id, url, options) => ipcRenderer.invoke("browser-view:navigate", id, url, options),
     /** The view for this panel, at `url` if it has to be made — an existing one is left where it is. */
-    ensure: (id, url) => ipcRenderer.invoke("browser-view:ensure", id, url),
+    ensure: (id, url, options) => ipcRenderer.invoke("browser-view:ensure", id, url, options),
     /** Where the viewport is, in CSS pixels of this document, and whether it may be drawn. */
     setBounds: (id, bounds, visible) => ipcRenderer.send("browser-view:bounds", id, bounds, visible),
     /** "back" | "forward" | "reload" | "stop" — the page's own history, not one we keep. */
@@ -356,6 +360,13 @@ contextBridge.exposeInMainWorld("teminali", {
     revealDownload: (filePath) => ipcRenderer.invoke("browser-view:reveal-download", filePath),
     /** Hand an http(s) address to the operator's real browser. */
     openExternal: (url) => ipcRenderer.invoke("browser-view:open-external", url),
+    /**
+     * Which engine "Search … for" means in the right-click menu.
+     *
+     * The preference lives in the renderer and the menu is built in main, so
+     * it is published rather than read. Main validates it.
+     */
+    setSearchEngine: (engine) => ipcRenderer.send("browser-view:search-engine", engine),
   },
   /**
    * The screen assistant.

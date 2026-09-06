@@ -443,6 +443,103 @@ describe the same span of time differently. Tested in
 `tests/site-mark.test.mjs` (5), including that short hostnames a naive
 character sum would collide — "npm" and "mdn" — are spread apart.
 
+#### The shape is a new-tab page (2026-09-06, later)
+
+The top of it is deliberately Chrome's: a mark, one search field, and a row of
+round shortcuts under it. Not for the resemblance — that arrangement is one a
+person opening a browser already knows how to use, and a home page whose layout
+has to be learned is one that gets skipped in favour of typing in the bar. The
+tokens, type scale, hover states and focus ring are this document's; only the
+arrangement is borrowed.
+
+Three consequences worth writing down:
+
+- **The shortcut grid is always drawn**, even with nothing kept, because its
+  last cell is "Add shortcut" and that is how the first one gets made. The old
+  `EmptyState` branch is gone: an empty grid with one `+` in it explains itself
+  better than a paragraph saying the page is empty.
+- **A shortcut wears the site's own favicon**, asked of the site itself at
+  `/favicon.ico` and falling back to the derived mark when there is none. This
+  is a deliberate narrowing of the rule above, not a reversal of it: the site
+  the operator bookmarked already knows they visit it, while the favicon
+  service that was refused is a third party told the whole list at once. A page
+  that points elsewhere with `<link rel="icon">` keeps its letter, because
+  finding that out means loading the page.
+- **The field's icon is the search engine, and it is a button.** A magnifying
+  glass says a search is coming; the engine's mark says where it is going,
+  which is the part an operator might want to change. Google, Bing,
+  DuckDuckGo, Brave and Perplexity (`utils/searchEngines.ts`), persisted in
+  `store/searchStore.ts`, and read by all three surfaces that search: this
+  field, the omnibox's first suggestion, and the right-click menu — which is
+  built in main and is told the choice over `browser-view:search-engine`,
+  because it cannot read a store. Main refuses anything that is not an https
+  prefix. Switching engines does not rename the tabs already open:
+  `addressLabel` recognises a search URL from any engine in the list.
+
+The field carries its focus on the pill's own edge (`lit-focus`), not on the
+input inside it — the rule in §0 that a text field's ring belongs to its
+container, which this page was breaking by drawing a box inside a box.
+
+Tested in `tests/browser-search.test.mjs` (8): every engine is an https `q=`
+prefix, an unknown persisted id falls back rather than blanking the field, the
+menu in main names the chosen engine, an engine arriving over IPC that is not
+https is refused without clearing the choice, and a favicon is only ever asked
+of the site itself.
+
+#### Private tabs (`utils/privateBrowsing.ts`, 2026-09-06)
+
+A private tab is a tab on another Electron session — `teminali-browser-private`,
+unprefixed and therefore in memory — and that is the whole mechanism; the rest
+follows from it. Opened from the panel's More menu as a *new* tab rather than
+as a switch, because a view cannot change session and "make this one private"
+would mean discarding the page the operator is looking at without being asked.
+
+Four promises, each one rule in one file:
+
+| Promise | Where it is kept |
+| --- | --- |
+| Cookies and site data live in memory, cleared when the last private tab closes | `electron/browserView.cjs` — `PRIVATE_PARTITION`, `clearPrivateSession` |
+| Pages are not added to history | `utils/browserRecording.ts` — `visitOf` returns null for a private state |
+| Downloads are not added to the list | `utils/browserRecording.ts` — `downloadAction` drops a private `done` |
+| The tab is not reopened after a reload | `utils/privateBrowsing.ts` — `persistablePanels` filters it out of `partialize` |
+
+The privacy flag is read from **main's** state rather than from `panel.private`:
+main owns the session and the tab is only what asked for it. The tab strip
+draws `EyeOff` instead of the globe, because on a strip where inactive tabs are
+unlabelled icons a private tab that looked like every other tab is the one
+place a page must not be opened by accident. The home page for a private tab
+shows the search field and a plain list of what the mode does and does not do —
+including that the downloaded file is still on disk and that the network can
+still see the traffic — and *not* the shared bookmarks, history and downloads,
+which under the word "private" would be the opposite of what it says.
+`openBrowserAt` never reuses a private tab: whatever asked for that page — an
+artifact preview, the agent — did not ask for it to be private.
+
+Tested in `tests/browser-private.test.mjs` (11).
+
+#### Passkeys, and the silence that read as a bug (2026-09-06)
+
+Signing in to Google with a passkey did nothing: no fingerprint dialog, no
+error. Measured in this app rather than guessed — `PublicKeyCredential` is
+defined, `navigator.credentials.get` is a function, and
+`isUserVerifyingPlatformAuthenticatorAvailable()` answers **false**. macOS gates
+the platform authenticator behind
+`com.apple.developer.web-browser.public-key-credential`, an entitlement Apple
+grants to registered web browsers and to nothing an Electron app can claim. The
+limit is not fixable here. **The silence was.**
+
+`PASSKEY_PROBE` is injected on `dom-ready`, wraps `credentials.get`/`.create`
+in the page's own world, calls through untouched, and prints a sentinel only
+when the platform authenticator really is absent. Main reads that line off
+`console-message` — the view has no preload precisely so someone else's page
+has no bridge to find, and a string main happens to recognise is not one — and
+publishes `passkey: true`, cleared on the next navigation. The toolbar then
+says one line with the two routes that do work: another sign-in method on the
+page, or Open in browser. Tested in `tests/browser-private.test.mjs`: the probe
+stays silent when an authenticator exists, never changes what the page asked
+for, ignores a password request, and installs once however many times it is
+injected.
+
 ### One microphone, and no reserved emptiness between turns (2026-09-06)
 
 **The panel chats no longer offer the microphone.** Every surface that mounts a
@@ -515,11 +612,22 @@ and Copy: it is the one thing the operator right-clicked *at* rather than near.
 Back, Forward and Reload appear only on a browser page — the shell's own window
 has one document, so offering them there would be a control that does nothing
 (§2). A search from a selection opens in the operator's own browser panel, not
-in Safari. Inspect Element exists only when `!app.isPackaged`: in a shipped app
-it is a door into a window that was never meant to have one.
+in Safari, and it names the engine the operator chose — the preference lives in
+the renderer and is published to main over `browser-view:search-engine`, which
+refuses anything that is not an https query prefix.
+
+**Inspect Element belongs to the browser panel and to nothing else.** It used to
+be offered on any surface in an unpackaged build (`allowInspect:
+!app.isPackaged`), which meant a right-click on a chat message offered to open
+the renderer's devtools — a developer's affordance shown to a person using the
+app. It is now `allowInspect: true` on browser pages, where the document really
+is someone else's and inspecting it is an ordinary browser feature that reaches
+nothing of the app's own, and `false` on the shell window, whose devtools are
+still one ⌥⌘I away in the View menu.
 
 `contextMenuTemplate` is pure and takes plain `params`, so the shape of the
-menu is checkable — `tests/context-menu.test.mjs` (9) pins the editing roles,
+menu is checkable — `tests/context-menu.test.mjs` (9) and
+`tests/browser-search.test.mjs` pin the editing roles,
 the suggestions-first ordering, that a read-only pane offers no `paste`, that a
 right-click on nothing still offers something true (an empty menu is the bug
 this replaced), and that no two separators ever sit together.
@@ -1950,7 +2058,24 @@ button anywhere. **`launch` is the step that starts an application**, and it is
 the only one that names no element, because the entire reason for it is that
 what the operator wants is not on the screen.
 
-`{ "kind": "launch", "app": "safari", "url": "https://youtube.com" }`
+`{ "kind": "launch", "app": "teminali", "url": "https://youtube.com" }`
+
+**An unqualified "browser" is this application's own** (2026-09-06). The plain
+words — `browser`, `the browser`, `web browser`, `browser panel` — resolve to
+`BUILT_IN_BROWSER` rather than to Safari, because an operator looking at a
+window that contains a browser and saying "open it in the browser" is not
+asking for another application to appear over the top of it. Named browsers are
+untouched: `safari` is still Safari.
+
+It is deliberately **not** in `LAUNCHABLE_APPS`. That list is mirrored field for
+field by the gateway's copy and is a list of things `/usr/bin/open` can start; a
+panel is not one of those. So `useAssistant` answers the step itself — it calls
+`openBrowserAt` and never crosses the boundary — the gateway is never told a
+pseudo-application exists, and the step does not set `relocated`, because unlike
+a real launch it does not replace the screen the next step was planned against.
+`launchableIds` always contains it (the machine cannot fail to have the
+application it is running) and `launchableInventory` puts it first and never
+truncates it away. Pinned in `tests/assistant-launch.test.mjs`.
 
 **`app` is an id, never a path and never a command.** An id the model invented
 resolves to nothing and starts nothing, which is the same guarantee `PlanStep`

@@ -129,10 +129,29 @@ the workspace media scheme — none of which was true of a frame inside the
 shell's own renderer. The omnibox still takes a bare port (`5173`), a host, or
 a full URL, and still refuses `file:`, `javascript:`, `data:` and `blob:`, now
 in both the renderer and the main process; anything that is only words becomes
-a Google search. Because the page is a layer above the window rather than part
+a search with the chosen engine. Because the page is a layer above the window rather than part
 of it, the panel hides it while a menu or a dialog is open and while another
 tab is in front. `⇧⌘B` and the add-menu open another browser tab each time.
 A browser build keeps the sandboxed iframe.
+
+**Private tabs.** `More → New private tab` opens a tab on a separate in-memory
+session: cookies and site data are cleared when the last private tab closes,
+pages are not written to history, downloads are not added to the list, and the
+tab is not reopened after a reload. The tab strip draws it with a masked-eye
+glyph and the toolbar carries a `Private` pill. The file you download is still
+saved where you put it, and the network still sees the traffic — the panel's own
+home page says both. A page opened by the agent or by an artifact preview never
+lands in a private tab.
+
+**Passkeys do not work in the panel, and it now says so.** macOS grants the
+platform authenticator — Touch ID — only to registered web browsers, so
+`isUserVerifyingPlatformAuthenticatorAvailable()` is false here and a passkey
+prompt silently does nothing. When a page asks for one, the toolbar says so and
+offers the two routes that work: another sign-in method on the page, or Open in
+default browser.
+
+**Inspect Element** is offered on a browser page only. The shell's own window
+has none — its devtools are in the View menu (`⌥⌘I`).
 
 What the browser remembers — bookmarks, history and downloads — is a gateway
 store (`browser-data.json`, `TEMINALI_BROWSER_STORE`), not renderer state, so
@@ -141,9 +160,14 @@ the assistant can read it: the `teminali-workspace` MCP server gives an agent CL
 `downloads` pre-approved, and `bookmark`, which writes, behind the permission
 prompt.
 
-The panel's own side of that store is the **home page**: a Google search box,
-the bookmarks, the last 20 pages, and the downloads with a "Show in Finder"
-on each finished one. Home is a state rather than an address — the page behind
+The panel's own side of that store is the **home page**, shaped like a new-tab
+page: a search field, a row of round shortcuts built from the bookmarks — each
+wearing the site's own favicon where it has one, and ending in **Add shortcut**
+— then the last 20 pages and the downloads with a "Show in Finder" on each
+finished one. The field's icon is the **search engine**, and it is a button:
+Google, Bing, DuckDuckGo, Brave Search or Perplexity, remembered across
+restarts and used by the omnibox and the right-click menu's "Search … for" as
+well. Home is a state rather than an address — the page behind
 it stays loaded at its scroll and its history, and the `Home` button only hides
 the view. The **star** in the toolbar bookmarks the page it is on. Visits are
 recorded by one subscriber armed for the whole app, not by the pane, because a
@@ -263,7 +287,11 @@ your screen and either explains it or acts on it.
   machine**: the curated entries in `src/services/assistant/apps.ts` first, for
   their spoken aliases and their `browser` flag, then every other `.app` under
   `/Applications`, `~/Applications` and `/System/Applications`, one vendor
-  folder deep. No terminal is in it, and no Script Editor or Automator either —
+  folder deep. **"The browser" means this application's own panel**: `browser`,
+  `the browser` and `web browser` resolve to it rather than to Safari, and a
+  web address goes there unless another browser is named. That step never
+  reaches the gateway — the renderer opens the panel itself — so the panel is
+  not in the launch allowlist and cannot be started as an application. No terminal is in it, and no Script Editor or Automator either —
   a shell prompt plus the `type` step is arbitrary code execution wearing an
   allowlist. A launch is always the last step of a plan, because what it opens
   has no window to plan against yet.
@@ -723,7 +751,7 @@ ollama serve              # local models on 127.0.0.1:11434
 
 ```bash
 npm run typecheck   # tsc --noEmit
-npm test            # 1339 tests, 0 failures
+npm test            # 1408 tests, 0 failures
 npm run build       # tsc && vite build
 npm run verify:core # all three
 ```

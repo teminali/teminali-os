@@ -14,7 +14,13 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { LAUNCHABLE_APPS, parseLaunchUrl, resolveLaunchApp } from "../src/services/assistant/apps.ts";
+import {
+  LAUNCHABLE_APPS,
+  launchableIds,
+  launchableInventory,
+  parseLaunchUrl,
+  resolveLaunchApp,
+} from "../src/services/assistant/apps.ts";
 import { describeStep, validatePlan } from "../src/services/assistant/plan.ts";
 import { observationBlock } from "../src/services/assistant/prompt.ts";
 import {
@@ -69,9 +75,43 @@ test("the catalogue has no terminal in it", () => {
 test("an application resolves by id, by display name and by what an operator would say", () => {
   assert.equal(resolveLaunchApp("safari")?.id, "safari");
   assert.equal(resolveLaunchApp("Google Chrome")?.id, "chrome");
-  assert.equal(resolveLaunchApp("  BROWSER ")?.id, "safari");
   assert.equal(resolveLaunchApp("Safari.app")?.id, "safari");
   assert.equal(resolveLaunchApp("Notion")?.id, "notion");
+});
+
+/**
+ * "Open it in the browser", said inside an application that has one.
+ *
+ * The plain words belong to this app's own panel, not to Safari: the operator
+ * is looking at a window with a browser in it, and being answered by another
+ * application appearing over the top of it is not what they asked for. Naming
+ * a browser still gets that browser.
+ */
+test("an unqualified browser is this application's own", () => {
+  for (const said of ["browser", "  BROWSER ", "the browser", "web browser", "browser panel"]) {
+    assert.equal(resolveLaunchApp(said)?.id, "teminali", said);
+  }
+  assert.equal(resolveLaunchApp("teminali")?.browser, true);
+  // Named browsers are untouched by that.
+  assert.equal(resolveLaunchApp("safari")?.id, "safari");
+  assert.equal(resolveLaunchApp("brave browser")?.id, "brave");
+});
+
+test("the built-in browser is always launchable and never on the gateway's list", () => {
+  // The gateway launches with `/usr/bin/open`; a panel is not something it can
+  // open, so the pseudo-application must not appear in the mirrored allowlist.
+  assert.equal(SERVER_APPS.some((app) => app.id === "teminali"), false);
+  assert.equal(LAUNCHABLE_APPS.some((app) => app.id === "teminali"), false);
+  // But it is always a member: this machine cannot fail to have it.
+  assert.equal(launchableIds(["safari"]).has("teminali"), true);
+  assert.equal(launchableIds([]).has("teminali"), true);
+});
+
+test("the model is told the browser panel is where an address goes", () => {
+  const inventory = launchableInventory([{ id: "safari", name: "Safari", browser: true }]);
+  const first = inventory.split("\n")[0];
+  assert.ok(first.includes("teminali"), first);
+  assert.ok(first.includes("may be given a url"), first);
 });
 
 test("anything that is not in the catalogue resolves to nothing", () => {

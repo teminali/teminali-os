@@ -351,7 +351,12 @@ function createWindow() {
     read as the editor being unfinished rather than as the whole application
     missing something. See electron/contextMenu.cjs.
   */
-  attachContextMenu(mainWindow.webContents, { allowInspect: !app.isPackaged });
+  /* No Inspect Element on the shell's own menu. The app is not a page the
+     operator inspects — a right-click on a chat message offering to open the
+     renderer's devtools is a developer's affordance shown to a user, and the
+     View menu's ⌥⌘I is still there for the times it is wanted. Inspect belongs
+     to the browser panel, where the page really is someone else's. */
+  attachContextMenu(mainWindow.webContents, { allowInspect: false });
 
   // A reload replaces the document but not the views layered over it, and the
   // fresh page has no idea they are there — it would draw under pages it never

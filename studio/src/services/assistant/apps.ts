@@ -80,8 +80,39 @@ export interface LaunchableEntry {
  *
  * Browsers first because "open a browser" is the request this step exists for.
  */
+/**
+ * The browser this application already has.
+ *
+ * Deliberately *not* in `LAUNCHABLE_APPS`, which is mirrored field for field by
+ * the gateway's copy and is a list of things `/usr/bin/open` can start. This is
+ * not one of those: it is a panel in a window that is already open, so the
+ * renderer intercepts it before the step ever reaches the gateway (see
+ * hooks/useAssistant.ts) and the gateway is never told a pseudo-application
+ * exists.
+ *
+ * It takes the plain words — "the browser", "open it in a browser" — because
+ * when the operator says that inside this app, this is what they mean. Safari
+ * kept its own name and is still one sentence away.
+ */
+export const BUILT_IN_BROWSER: LaunchableApp = Object.freeze({
+  id: "teminali",
+  name: "the browser panel",
+  browser: true,
+  aliases: [
+    "browser",
+    "web browser",
+    "web",
+    "the browser",
+    "our browser",
+    "built-in browser",
+    "browser panel",
+    "teminali browser",
+    "teminali code",
+  ],
+});
+
 export const LAUNCHABLE_APPS: readonly LaunchableApp[] = Object.freeze([
-  { id: "safari", name: "Safari", bundleId: "com.apple.Safari", browser: true, aliases: ["browser", "web browser", "web"] },
+  { id: "safari", name: "Safari", bundleId: "com.apple.Safari", browser: true },
   { id: "chrome", name: "Google Chrome", bundleId: "com.google.Chrome", browser: true, aliases: ["google chrome"] },
   { id: "edge", name: "Microsoft Edge", bundleId: "com.microsoft.edgemac", browser: true, aliases: ["microsoft edge"] },
   { id: "firefox", name: "Firefox", bundleId: "org.mozilla.firefox", browser: true },
@@ -109,7 +140,7 @@ export const LAUNCHABLE_APPS: readonly LaunchableApp[] = Object.freeze([
 ]);
 
 const BY_KEY: ReadonlyMap<string, LaunchableApp> = new Map(
-  LAUNCHABLE_APPS.flatMap((app) => {
+  [BUILT_IN_BROWSER, ...LAUNCHABLE_APPS].flatMap((app) => {
     const keys = [app.id, app.name.toLowerCase(), ...(app.aliases ?? [])];
     return keys.map((key) => [key, app] as const);
   }),
@@ -131,7 +162,9 @@ function entries(available?: readonly (string | LaunchableEntry)[] | null): Laun
 
 /** The ids in an observation's list, for a membership check. */
 export function launchableIds(available?: readonly (string | LaunchableEntry)[] | null): Set<string> {
-  return new Set(entries(available).map((entry) => entry.id));
+  // Always a member: the machine cannot fail to have the application it is
+  // running, and the gateway's scan of /Applications has no reason to list it.
+  return new Set([BUILT_IN_BROWSER.id, ...entries(available).map((entry) => entry.id)]);
 }
 
 /**
@@ -211,7 +244,10 @@ export const MAX_INVENTORY_APPS = 120;
 
 /** What this machine can open, one line per application, for the prompt. */
 export function launchableInventory(available?: readonly (string | LaunchableEntry)[] | null): string {
-  const apps = available && available.length > 0 ? entries(available) : LAUNCHABLE_APPS;
+  const found = available && available.length > 0 ? entries(available) : LAUNCHABLE_APPS;
+  // First, and never truncated away: it is the one the operator means when they
+  // say "a browser" without naming one, and it is always there to be named.
+  const apps = [BUILT_IN_BROWSER, ...found.filter((app) => app.id !== BUILT_IN_BROWSER.id)];
   const shown = apps.slice(0, MAX_INVENTORY_APPS);
   const lines = shown.map(
     (app) => `  ${app.id} — ${app.name}${app.browser ? " (a browser; may be given a url)" : ""}`,

@@ -1,18 +1,25 @@
 import React from "react";
-import { Activity, ChartColumn, Clapperboard, FileText, MessageSquare, PenLine, Rocket, Scale, SquareTerminal, Globe } from "lucide-react";
+import { Activity, ChartColumn, Clapperboard, EyeOff, FileText, MessageSquare, PenLine, Rocket, Scale, SquareTerminal, Globe } from "lucide-react";
 import { BrandGlyph } from "../ui";
 import type { PanelKind } from "../../store/panelStore";
 
 /**
  * One glyph per panel kind, so a tab, a menu row and an empty state never
  * disagree about what a terminal or a canvas looks like.
+ *
+ * `private` is the one exception to one-glyph-per-kind, and it earns it: on a
+ * strip where the inactive tabs are icons with no label, a private browser tab
+ * that drew the same globe as every other would be indistinguishable from the
+ * one place a page must not be opened by accident.
  */
-export const PanelGlyph: React.FC<{ kind: PanelKind; size?: number; className?: string }> = ({
-  kind,
-  size = 14,
-  className = "",
-}) => {
+export const PanelGlyph: React.FC<{
+  kind: PanelKind;
+  size?: number;
+  className?: string;
+  private?: boolean;
+}> = ({ kind, size = 14, className = "", private: isPrivate = false }) => {
   const props = { size, className, strokeWidth: 2 } as const;
+  if (isPrivate && kind === "browser") return <EyeOff {...props} />;
   switch (kind) {
     case "terminal":
       return <SquareTerminal {...props} />;
