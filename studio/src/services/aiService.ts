@@ -14,6 +14,7 @@ import { FrontierEngine, type EngineCapabilities, type StreamCallbacks, type Vid
 import { executeTool, getToolManifest } from "../video/mcp/toolRegistry";
 import { dispatchPlayerCommand, type PlayerCommand, type PlayerSnapshot } from "./playerControl";
 import { describeLivePlayer, LOCAL_PLAYER_ACTIONS, PLAYER_READ_ACTION } from "./playerToolCalls";
+import type { AskExecutor } from "./askToolCalls";
 import { usePlayerStore } from "../store/playerStore";
 import type { AgentCommandRequest } from "./agentCommands";
 import type { TurnOrigin } from "./voice/types";
@@ -49,6 +50,12 @@ export interface StreamRequestOptions {
   skill?: { id: string; name: string; description?: string } | null;
   /** Approval gate for state-changing commands the agent asks to run. */
   approveCommand?: (request: AgentCommandRequest) => Promise<boolean>;
+  /**
+   * Local lane only: puts the agent's question to the operator and resolves
+   * with what they chose. Absent, the lane is never told the fence exists —
+   * a host with no picker on screen must not advertise one.
+   */
+  askOperator?: AskExecutor;
   /** Claude Code / Codex only: the CLI session to resume, so a tab is a thread. */
   agentSessionId?: string | null;
   /** Claude Code / Codex only: how much the CLI may do without asking. */
@@ -102,8 +109,11 @@ export interface StreamRequestOptions {
  * it: the arena runs the same engine in a sandbox, and a module-level singleton
  * could only ever point at one place.
  */
-function studioCapabilities(workingDirectory?: string): EngineCapabilities {
+function studioCapabilities(workingDirectory?: string, askOperator?: AskExecutor): EngineCapabilities {
   return {
+    // Only present when the host mounted a picker; the engine gates the prompt
+    // block on it, so a headless caller never learns the fence exists.
+    ...(askOperator ? { askOperator } : {}),
     // The engine's executor contract carries no cwd of its own, so the host
     // supplies one. Absent, commands run at the workspace root as before.
     runCommand: (command, options) =>
@@ -229,7 +239,7 @@ export class AIService {
           options.signal,
           options.skill,
           options.approveCommand,
-          studioCapabilities(options.workingDirectory),
+          studioCapabilities(options.workingDirectory, options.askOperator),
           options.origin ?? "text",
         );
         return;

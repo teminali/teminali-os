@@ -1362,6 +1362,64 @@ where the wiring is: a folder opening as a gallery and saying whether it is a
 series, a snapshot published and read back, a command with nothing playing
 failing as a sentence.
 
+### The lane can ask a question (`services/askToolCalls.ts`, `components/chat/AskOperatorPrompt.tsx`, 2026-09-07)
+
+*"popup with a tree of options and stepped tabs."*
+
+The fourth fence, and the first one that suspends a turn on a person rather
+than a machine. `frontier-run`, `video-tool` and `player-tool` all act on
+something and hand back a result; `ask` stops and waits for the operator.
+
+**Measured before it existed: 0/3.** Asked in so many words for options to pick
+from, the lane replied *"Here are a few common approaches: 1. Monolithic…"* and
+ended the turn. The options were fine. There was nothing to click, and an
+answer typed into the next turn arrives having lost the question that produced
+it. After the prompt block: **3/3**, and the whole eval went 36/36 (12 cases)
+to **42/42** (14 cases) — measured on `frontier-qwen2.5-coder-14b-8k`, three
+runs a case.
+
+This is `AskUserQuestion` parity for a lane that cannot be given the real
+thing. Measured in an earlier session, Claude Code driven headlessly is offered
+40 tools with `AskUserQuestion` and `ExitPlanMode` both **absent** — so the CLI
+lanes cannot get this by wiring, only the local lane can, and the local lane is
+also the one `evals/local-lane.mjs` can grade. That is why it went first.
+
+Four things are deliberate:
+
+- **The second paragraph of the prompt block is the one that earns it.** A
+  model handed a way to ask will ask for what it could have measured. So
+  `ask-not-for-knowable` pins *"what branch am I on?"* to a `git` call and not
+  a question; it was written before the tool, scored 3/3 before and 3/3 after,
+  and exists to fail if the block ever tempts the model into a modal.
+- **A dismissed picker still produces an observation.** Returning nothing would
+  end the exchange in silence — the one outcome worse than a wrong guess, since
+  the operator clicked away and the work simply stopped. `buildAskEvidence`
+  tells the model to pick a default and say which one.
+- **The gate never remembers.** `createAskGate` is a deliberate copy of
+  `createApprovalGate`'s contract rather than a generalisation of it: that gate
+  remembers an executable, and an answer to *"which database?"* in one exchange
+  says nothing about the next. What they share is the guarantee both exist for
+  — the promise always settles, so a pending question cannot stall a turn.
+  `stop()` cancels this gate as well as the approval one, which is the bug the
+  approval gate shipped with and does not get to repeat.
+- **The picker is one click when the model asked one thing.** A single-select
+  answer advances to the next unanswered tab, and the last one submits. Tabs
+  appear only for more than one question, because a single tab is a label
+  pretending to be navigation. "Other" is always there, because the options
+  came from the model's guess at the problem and the operator is the one who
+  knows it guessed wrong.
+
+**A measured limit, stated because it is not visible from the code.** The block
+is ranked below the player's, so on an 8k window **with a file open in the
+player, `ask` is dropped from the prompt entirely** — four eval cases show it
+in their `dropped` list. That is the budget working as designed (§ the context
+budget: whole sections, in priority order), and the ranking is the right way
+round: knowing what is playing beats being able to ask about it. On a larger
+window both fit. `completeness` and `multi-agent` now drop on every turn and
+the eval did not move, which is its own small verdict on their length.
+
+Tested in `tests/ask-tool-calls.test.mjs` (16).
+
 ### The browser panel is a view, not a frame (`electron/browserView.cjs`, `services/browserView.ts`, `panels/BrowserPane.tsx`)
 
 The panel used to be an `<iframe>` in the shell's own renderer, and that
@@ -1633,9 +1691,10 @@ number they can be asked for rather than a knife. Pinned in
 
 **The local-lane eval** (`evals/local-lane.mjs`, `npm run eval:local`). "Better
 results" has no completion date without a fixed set and a number, so the lane
-has one: twelve turns — play, pause, louder, what's playing, what's on the
+has one: fourteen turns — play, pause, louder, what's playing, what's on the
 timeline, disk space, git branch, a live price with and without a file open in
-the player, hello, your name, write a file — each graded by the code's own
+the player, hello, your name, write a file, ask for a choice, and *don't* ask
+for something measurable — each graded by the code's own
 parsers, so a fence the harness accepts is one the engine would have run. The
 prompt is `composeSystemPrompt` (`services/systemPrompt.ts`), the function the
 engine calls, pulled out of the engine for exactly this reason: a copy would
@@ -1661,7 +1720,8 @@ and ended the turn with no fence. The sentence had become the action. It is
 now `[SAY, THEN DO — IN THE SAME REPLY]`, with the whole shape shown and the
 rule that a reply with no fence has done nothing. **36/36** after that — twelve
 cases, three runs each — at ~2,130 prompt tokens, 26% of the window, with both
-surfaces mounted.
+surfaces mounted. (Two cases have since been added with the ask contract; the
+current figure is **42/42** over fourteen.)
 
 The strip is **open while the turn is live and closes when it settles**. During
 the turn it is the only thing to look at; afterwards it is a footnote under the

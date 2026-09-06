@@ -24,6 +24,7 @@ import { LOCAL_PLAYER_ACTIONS, describeLivePlayer, parsePlayerToolCalls } from "
 import { parseVideoToolCalls } from "../src/services/videoToolCalls.ts";
 import { parseAgentCommands } from "../src/services/agentCommands.ts";
 import { parseWorkspaceEdits } from "../src/services/liveEditProtocol.ts";
+import { askQuestionsFrom, parseAskToolCalls } from "../src/services/askToolCalls.ts";
 
 const { videoToolSummaries } = await import("./.build/tool-manifest.mjs");
 
@@ -71,7 +72,10 @@ const playerChat = [
 ];
 
 const noFence = (text) =>
-  parsePlayerToolCalls(text).length === 0 && parseVideoToolCalls(text).length === 0 && parseAgentCommands(text).length === 0;
+  parsePlayerToolCalls(text).length === 0 && parseVideoToolCalls(text).length === 0 && parseAgentCommands(text).length === 0
+  && asked(text).length === 0;
+/** The questions a reply actually put to the operator, as the engine would read them. */
+const asked = (text) => askQuestionsFrom(parseAskToolCalls(text));
 const playerActions = (text) =>
   parsePlayerToolCalls(text).filter((r) => "command" in r).map((r) => r.command.action);
 const commands = (text) => parseAgentCommands(text).map((r) => r.command);
@@ -191,6 +195,36 @@ const CASES = [
     },
   },
   {
+    // The ask contract. The operator asked for a choice in so many words, so
+    // a reply that picks one for them has ignored the request, and a reply
+    // that lists three in prose has ended the turn with nothing to click.
+    name: "ask-explicit-choice",
+    history: [],
+    prompt: "I can't decide how to structure this project. Give me a few options and let me pick one.",
+    expect: (text) => {
+      const questions = asked(text);
+      if (questions.length === 0) return `no ask fence; said: ${text.replace(/\s+/g, " ").slice(0, 90)}`;
+      const first = questions[0];
+      if (first.options.length < 2) return `only ${first.options.length} option(s)`;
+      if (commands(text).length) return `ran a command instead of asking: ${commands(text)[0]}`;
+      return null;
+    },
+  },
+  {
+    // The other half of the contract, and the one that decides whether it is
+    // worth having: a tool for asking makes a model ask for what it could
+    // have measured. The branch is one `git` call away and must never be a
+    // question.
+    name: "ask-not-for-knowable",
+    history: [],
+    prompt: "what branch am I on?",
+    expect: (text) => {
+      const questions = asked(text);
+      if (questions.length) return `asked instead of measuring: "${questions[0].question}"`;
+      return commands(text).some((c) => /\bgit\b/.test(c)) ? null : `commands=${commands(text).join(" | ") || "none"}`;
+    },
+  },
+  {
     name: "file-write",
     history: [],
     prompt: "create hello.py that prints hi",
@@ -216,6 +250,8 @@ function systemFor(c) {
     player: c.player ? { actions: LOCAL_PLAYER_ACTIONS, showing: describeLivePlayer(c.player) } : null,
     origin: "text",
     freshConversation: c.history.length === 0,
+    // The host the eval stands in for has a picker on screen; a case opts out.
+    canAsk: c.canAsk !== false,
     budgetChars: UNBUDGETED ? Number.MAX_SAFE_INTEGER : budget.systemPromptChars,
   });
 }

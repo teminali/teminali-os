@@ -24,6 +24,12 @@ export interface SystemPromptInput {
   player?: { actions: readonly string[]; showing: string } | null;
   origin: TurnOrigin;
   freshConversation: boolean;
+  /**
+   * Whether the host can actually put a question to a person. False for a
+   * headless caller and the benchmark arena, which get the prompt they had
+   * before this existed — the same contract the editor and player blocks keep.
+   */
+  canAsk?: boolean;
   /** The lane's system-prompt allowance from contextBudget.ts. */
   budgetChars: number;
 }
@@ -121,6 +127,31 @@ I'm checking which branch this is.
 git branch --show-current
 \`\`\``;
 
+  /*
+    The ask contract.
+
+    Measured before this existed: asked in so many words for options to pick
+    from, the lane replied "Here are a few common approaches: 1. Monolithic..."
+    and ended the turn — 0/3. The options were fine; there was nothing to
+    click, and the operator's answer would have landed in a fresh turn that had
+    lost the question. So the block spends most of its length on the shape,
+    for the reason [SAY, THEN DO] does: a rule the model is told but not shown
+    turns into narration about the rule.
+
+    The second paragraph is the one that decides whether this tool is worth
+    having. A model handed a way to ask will ask for what it could have
+    measured — the eval pins `what branch am I on?` at a `git` call, not a
+    question, and that case was written before the tool for exactly this.
+  */
+  const askInstruction = !input.canAsk ? "" : `\n\n[ASK THE OPERATOR]
+When a choice is genuinely the operator's — a preference, a trade-off, a direction you cannot measure — put it to them in an \`\`\`ask fence instead of guessing, and instead of listing options in prose. One JSON object, or an array of up to 4 of them for a stepped set: {"question":"...","header":"Short chip","options":[{"label":"...","description":"..."}],"multiSelect":false}. Two to four options, each a real alternative; their answer is returned to you before you answer again, and it is then settled — never ask it twice.
+NEVER ask for anything you can find out. A branch, a file's contents, a version, a price: run the command. A question you could have answered yourself spends the operator's attention and tells them you did not look.
+Ask instead of acting — emit the fence and stop there, do not also guess an answer and start work. Shape:
+Two sensible ways to go here, and it is your call.
+\`\`\`ask
+{"question":"How should I structure this project?","header":"Structure","options":[{"label":"Single package","description":"Simplest to start, fine until it is not"},{"label":"Workspaces","description":"Separate packages, more setup, scales"}]}
+\`\`\``;
+
   const toolExecutionMandate = `\n\n[FULL COMPUTER ACCESS & AUTONOMOUS ACTION MANDATE]
 1. FULL SYSTEM & TERMINAL CAPABILITY: You have FULL, UNRESTRICTED ACCESS to this computer, the terminal, the filesystem, and the network. You can run ANY terminal command (\`curl\`, \`wget\`, \`python\`, \`node\`, \`git\`, \`npm\`, \`cat\`, \`grep\`, \`find\`, \`ls\`, etc.), make network requests, query live APIs, inspect processes, edit files, and build projects. All commands execute automatically and seamlessly.
 2. ZERO CAPABILITY DENIAL: NEVER say "I cannot execute commands", "I cannot run commands directly", "I don't have direct access", "I cannot fetch real-time data", "as an AI I cannot", or tell the user to "check a website yourself". You HAVE full live access: whenever you need information, real-time data (crypto prices, weather, stocks, package info), or need to inspect/modify files, emit a \`\`\`frontier-run fence immediately!
@@ -169,6 +200,7 @@ git branch --show-current
       { name: "doctrine", text: DiligenceEngine.doctrine() },
       { name: "live-data", text: liveDataInstruction },
       { name: "step-explanation", text: stepExplanationInstruction },
+      { name: "ask", text: askInstruction },
       { name: "conversational", text: conversationalInstruction },
       { name: "tool-execution-mandate", text: toolExecutionMandate },
       { name: "completeness", text: CompletenessEngine.mandate() },

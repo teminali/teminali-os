@@ -45,6 +45,14 @@ import {
   parsePlayerToolCalls,
   type PlayerExecutor,
 } from "./playerToolCalls";
+import {
+  buildAskEvidence,
+  executeAskRequests,
+  hasAskToolCalls,
+  parseAskToolCalls,
+  parseFallbackAskToolCalls,
+  type AskExecutor,
+} from "./askToolCalls";
 import type { TurnOrigin } from "./voice/types";
 import type { ChatMessage, InferenceTelemetry, ModelModeId, ToolCall } from "../types";
 
@@ -80,6 +88,15 @@ export interface EngineCapabilities {
    * operator which file they meant.
    */
   playerState?: () => string;
+  /**
+   * Puts a question to the operator and waits for their answer.
+   *
+   * The only capability here that suspends the turn on a person rather than a
+   * machine. Absent, the prompt never advertises the fence and the lane
+   * behaves as it did before — the same contract the editor and player blocks
+   * keep, because a headless caller has nobody to ask.
+   */
+  askOperator?: AskExecutor;
 }
 
 /** One line of the editor tool catalogue, already flattened by the host. */
@@ -147,8 +164,17 @@ const MAX_EDITOR_TOOL_TURNS = 6;
 // covers the longest honest chain (episode -> play -> subtitles -> rate) with
 // room for the model to check its work.
 const MAX_PLAYER_TURNS = 6;
+/**
+ * Three questions an exchange, and that is generous.
+ *
+ * The other budgets bound a machine that might need another look; this one
+ * bounds how many times a person is interrupted. A model on its fourth
+ * question has stopped working and started interviewing, and the operator's
+ * patience is the scarcest thing the lane spends.
+ */
+const MAX_ASK_TURNS = 3;
 // Belt and braces: no combination of the budgets below may loop forever.
-const MAX_TOTAL_TURNS = MAX_AGENT_COMMAND_TURNS + MAX_INVESTIGATION_TURNS + MAX_EDITOR_TOOL_TURNS + MAX_PLAYER_TURNS + 2;
+const MAX_TOTAL_TURNS = MAX_AGENT_COMMAND_TURNS + MAX_INVESTIGATION_TURNS + MAX_EDITOR_TOOL_TURNS + MAX_PLAYER_TURNS + MAX_ASK_TURNS + 2;
 // One self-correction pass by default: on a 9 t/s local model each pass
 // re-emits whole files, so a second costs more wall-clock than it returns.
 const MAX_QUALITY_CORRECTIONS = 1;
@@ -233,6 +259,7 @@ async function streamFromOllama(
   if (capabilities.runCommand) stopTags.push("frontier-run", "frontier-command");
   if (capabilities.runVideoTool) stopTags.push("video-tool");
   if (capabilities.runPlayer) stopTags.push("player-tool");
+  if (capabilities.askOperator) stopTags.push("ask");
   let groundedPrompt = userPrompt;
   if (attachedImages.length > 0) {
     const visionToolId = `tool-vision-${id}`;
@@ -344,6 +371,7 @@ CRITICAL VISUAL DESIGN RULES:
         : null,
     origin,
     freshConversation: isFreshConversation,
+    canAsk: Boolean(capabilities.askOperator),
     budgetChars: budget.systemPromptChars,
   });
 
@@ -477,6 +505,8 @@ CRITICAL VISUAL DESIGN RULES:
       that did both with no edits left.
     */
     let playerTurns = 0;
+    /** Questions put to the operator this exchange. */
+    let askTurns = 0;
     let correctionTurns = 0;
     let deniedFeedback = 0;
     /** Times this exchange has been told it is retrying its way around a wall. */
@@ -594,6 +624,43 @@ CRITICAL VISUAL DESIGN RULES:
             const evidence = buildPlayerToolEvidence(executions);
             observation = observation ? `${observation}\n\n${evidence}` : evidence;
             playerTurns += 1;
+            investigated = true;
+          }
+        }
+      }
+
+      /*
+        The question to the operator.
+
+        Unlike its three siblings this one suspends the turn on a person, so
+        it is last: a reply that both ran a command and asked something gets
+        the command's real output *and* the answer, and the model reads them
+        together. `askTurns` is deliberately tight — a lane that asks three
+        times in one exchange is interviewing the operator, not working.
+
+        A dismissed picker still produces an observation. Returning nothing
+        would end the exchange in silence, which is the one outcome worse than
+        a wrong guess: the operator clicked away and the work stopped without
+        a word. `buildAskEvidence` tells the model to pick a default and say
+        which, so the turn still lands somewhere.
+      */
+      if (capabilities.askOperator && askTurns < MAX_ASK_TURNS) {
+        const requests = hasAskToolCalls(turnText)
+          ? parseAskToolCalls(turnText)
+          : parseFallbackAskToolCalls(turnText);
+        if (requests.length > 0) {
+          const execution = await executeAskRequests(requests, {
+            execute: capabilities.askOperator,
+            signal: controller.signal,
+            onToolCall: callbacks.onToolCall,
+          });
+          if (execution) {
+            const evidence = buildAskEvidence(execution);
+            observation = observation ? `${observation}\n\n${evidence}` : evidence;
+            askTurns += 1;
+            // An answer is evidence the model did not have and could not have
+            // measured, so it buys an investigation turn rather than a
+            // correction one — the same as a command's output.
             investigated = true;
           }
         }

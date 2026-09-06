@@ -167,6 +167,22 @@ player is not the Teminali Cut timeline: without that, a model asked to play an
 open file reached for `video-tool`, read the timeline instead, and reported
 that the file did not exist.
 
+**The lane can put a question to you.** When a choice is genuinely yours — a
+preference or a trade-off it cannot measure — the model emits an ```` ```ask ````
+fence and `services/askToolCalls.ts` opens a picker above the composer:
+stepped tabs for up to four questions, two to four options each, "Other" for
+when it guessed the problem wrong. A single-select answer is one click. Your
+answer goes back into the same turn, so the work continues rather than
+restarting; dismissing it tells the model to pick a sensible default and say
+which. It will not ask for anything it could look up — that is pinned by an
+eval case, because a model handed a way to ask will otherwise ask for the
+branch name instead of running `git`. This is `AskUserQuestion` parity for the
+local lane; the Claude Code and Codex lanes are not offered that tool at all
+when driven headlessly, so they cannot have it. Measured on
+`frontier-qwen2.5-coder-14b-8k`: 0/3 before, 3/3 after. With a file open in the
+player on an 8k window the block does not fit and the lane cannot ask — the
+player's live state outranks it.
+
 **A folder opens as a gallery.** Click any folder — in the tree, or through
 the agent's `open_file` — and the **Gallery** panel shows what is in it as
 cards: a video shows a frame of itself, an image shows itself, and everything
@@ -363,8 +379,8 @@ prompt: 1,848 tokens, 23% — and the turn that exposed it, "play a beyonce
 song" with the player showing a Beyoncé file, went from no `player-tool` fence
 in two runs to a correct one in both, with prompt evaluation down from
 13.7–25.1 s to 3.3–4.0 s. The lane now has a fixed eval — `npm run eval:local`,
-twelve turns graded by the engine's own parsers against the real model — and
-scores 36/36 on it (three runs a case) at ~2,130 prompt tokens with the editor and player both
+fourteen turns graded by the engine's own parsers against the real model — and
+scores 42/42 on it (three runs a case) at ~2,130 prompt tokens with the editor and player both
 mounted; `studio/DESIGN.md` §3 records what its first day found. Claude Code
 and Codex are not truncated by this —
 they compact their own context — and receive the same budget shape from their
@@ -911,7 +927,7 @@ ollama serve              # local models on 127.0.0.1:11434
 
 ```bash
 npm run typecheck   # tsc --noEmit
-npm test            # 1643 tests, 0 failures
+npm test            # 1659 tests, 0 failures
 npm run eval:local  # the local lane against the real model — a score, not a pass/fail; needs Ollama
 npm run build       # tsc && vite build
 npm run verify:core # all three

@@ -10,10 +10,12 @@ import { useVoice, type UseVoiceResult } from "../../hooks/useVoice";
 import { useAttachments } from "../../hooks/useAttachments";
 import { composePrompt } from "../../services/fileService";
 import { useCommandApproval } from "../../hooks/useCommandApproval";
+import { useAskOperator } from "../../hooks/useAskOperator";
 import { useSpokenApproval } from "../../hooks/useSpokenApproval";
 import { useApprovalStore } from "../../store/approvalStore";
 import { commandHead } from "../../services/agentCommands";
 import { CommandApprovalPrompt } from "./CommandApprovalPrompt";
+import { AskOperatorPrompt } from "./AskOperatorPrompt";
 import { Composer } from "./Composer";
 import { MessageBlock } from "./MessageBlock";
 import { ChangeReviewDock } from "./ChangeReviewDock";
@@ -112,6 +114,7 @@ export const StudioChat: React.FC<{
   const scrollRef = useRef<HTMLDivElement>(null);
   const columnRef = useRef<HTMLElement>(null);
   const commandApproval = useCommandApproval();
+  const askOperator = useAskOperator();
   const attachments = useAttachments();
 
   const profile = useMemo(
@@ -249,6 +252,9 @@ export const StudioChat: React.FC<{
   // Read off once so `stop` has a stable identity: `useCommandApproval`
   // returns a fresh object every render, but this callback is the gate's.
   const cancelApproval = commandApproval.cancel;
+  // Same reason, same shape: the ask gate hands back a fresh object each
+  // render, and `stop` needs the gate's own callback, not this render's.
+  const cancelAsk = askOperator.cancel;
 
   /**
    * Stop the run. The only way a turn is interrupted, from anywhere.
@@ -277,10 +283,15 @@ export const StudioChat: React.FC<{
     // A command waiting on a decision is part of the run. Left pending it is
     // both a dialog nobody can answer and an agent loop nobody can finish.
     cancelApproval();
+    // And a question waiting on an answer, for the identical reason: the
+    // picker would outlive the run that raised it, and its promise would never
+    // settle. This is the bug the approval gate shipped with; it does not get
+    // to happen twice.
+    cancelAsk();
     setStreaming(false);
     updateLastMessageInEngine("frontier", interruptTurn);
     voiceRef.current?.silence();
-  }, [cancelApproval, setStreaming, updateLastMessageInEngine]);
+  }, [cancelApproval, cancelAsk, setStreaming, updateLastMessageInEngine]);
 
   const send = useCallback(
     async (text: string, options?: SubmitOptions) => {
@@ -509,6 +520,7 @@ export const StudioChat: React.FC<{
               }
             : null,
           approveCommand: commandApproval.approveCommand,
+          askOperator: askOperator.askOperator,
           /*
             The agent driving the workspace from the chat, not only from a
             panel tab.
@@ -876,6 +888,13 @@ export const StudioChat: React.FC<{
                   onStop={stop}
                 />
               ))}
+              {askOperator.pending && (
+                <AskOperatorPrompt
+                  questions={askOperator.pending}
+                  onAnswer={askOperator.answer}
+                  onDismiss={askOperator.dismiss}
+                />
+              )}
               {commandApproval.pending && (
                 <CommandApprovalPrompt
                   request={commandApproval.pending}
