@@ -140,6 +140,13 @@ Import from here rather than writing ad-hoc markup:
 * **`Menu`** — the one floating popover (add-panel menu, browser omnibox)
 * **`Primitives`** — `Kbd`, `InlineCode`, `Chip`, `IconButton`, `TrafficLights`,
   `EmptyState`, `StatusDot`, `SectionLabel`, **`SidebarRow`**
+* **`BrandGlyph`** — the third-party and own app marks, used unmodified. Its
+  `blend` prop drops the mark's own tile: these are *app icons*, and the
+  Teminali one is a green figure on a pure black rounded tile (measured — `#000`
+  at full alpha, only the corners transparent). Right in a Dock, wrong where the
+  mark sits on the page rather than on a badge. `screen` is exact for that
+  rather than approximate — screening pure black leaves the backdrop untouched —
+  and it is for dark surfaces only.
 
 `SidebarRow` is every clickable line in the sidebar — nav item, repository,
 conversation. Its measurements are not approximate: a 30px row on a 31px pitch,

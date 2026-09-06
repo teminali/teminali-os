@@ -29,7 +29,20 @@ export const BrandGlyph: React.FC<{
   brand: Brand;
   size?: number;
   className?: string;
-}> = ({ brand, size = 14, className = "" }) => {
+  /**
+   * Drop the mark's own black tile and keep only the glyph.
+   *
+   * These are app icons: the Teminali mark is a green figure on a **pure
+   * black** rounded tile (measured — the fill is `#000` at full alpha, only
+   * the corners are transparent), which is right in a Dock and wrong where the
+   * mark is meant to sit on the page rather than on a badge. `screen` is exact
+   * for that rather than approximate: screening pure black leaves the backdrop
+   * untouched, so the tile disappears and the figure stays.
+   *
+   * Only for a dark surface. On a light one, screen would wash the glyph out.
+   */
+  blend?: boolean;
+}> = ({ brand, size = 14, className = "", blend = false }) => {
   const { src, label } = SOURCES[brand];
   return (
     <img
@@ -40,7 +53,7 @@ export const BrandGlyph: React.FC<{
       // The marks are square with their own breathing room baked in, so they sit
       // on the same optical baseline as the 14-16px lucide icons beside them.
       className={`flex-shrink-0 object-contain select-none ${className}`}
-      style={{ width: size, height: size }}
+      style={{ width: size, height: size, mixBlendMode: blend ? "screen" : undefined }}
       draggable={false}
     />
   );

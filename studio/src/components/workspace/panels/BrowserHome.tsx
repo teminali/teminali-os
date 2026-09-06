@@ -150,7 +150,10 @@ export const BrowserHome: React.FC<{ onOpen: (url: string) => void; private?: bo
               <EyeOff size={22} strokeWidth={1.5} className="text-ink-muted" />
             </span>
           ) : (
-            <BrandGlyph brand="teminali" size={36} className="opacity-90" />
+            // The mark, not the app icon: `blend` drops the black tile it
+            // wears in the Dock, which on a home page reads as a badge sitting
+            // on the page rather than as the page's own mark.
+            <BrandGlyph brand="teminali" size={40} blend />
           )}
           <div className="relative w-full max-w-md">
             {/* `lit-focus`, so focus lands on the pill's own edge. Without it
