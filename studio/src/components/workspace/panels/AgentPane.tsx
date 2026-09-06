@@ -529,6 +529,8 @@ export const AgentPane: React.FC<{ panel: PanelTab & { kind: AgentEngine } }> = 
           placeholder={probing ? "Checking for the CLI…" : `Ask ${label}`}
           modelName={label}
           voice={voice}
+          // One microphone, and it belongs to the conversation surface.
+          showVoice={false}
           attachments={attachments}
           width="fill"
         />

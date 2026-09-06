@@ -33,6 +33,17 @@ export interface ComposerProps {
   onPickModel?: () => void;
   onAttach?: () => void;
   voice: UseVoiceResult;
+  /**
+   * Whether this composer offers the microphone.
+   *
+   * Off in the panel chats. Not only because a second microphone button is
+   * clutter: every surface that mounts a `Composer` builds its own
+   * `VoiceEngine`, and there is one microphone — only one engine can hold it.
+   * A button on a panel offered a second door to a device that was already
+   * answered elsewhere, and pressing it stopped the conversation the operator
+   * was having. The voice belongs to the conversation surface.
+   */
+  showVoice?: boolean;
   /** Attachment intake. Omit to disable file sharing on this surface. */
   attachments?: UseAttachmentsResult;
   /** Taller field with the placeholder floated to the top, as in the design. */
@@ -90,6 +101,7 @@ export const Composer: React.FC<ComposerProps> = ({
   onPickModel,
   onAttach,
   voice,
+  showVoice = true,
   attachments,
   tall = false,
   width = "column",
@@ -232,7 +244,10 @@ export const Composer: React.FC<ComposerProps> = ({
         </p>
       )}
 
-      {conversation && !tall && (() => {
+      {/* The orb belongs to whichever surface holds the microphone, and that
+          is the one showing the button — see `showVoice`. A panel drawing a
+          second live orb would be narrating a conversation it is not in. */}
+      {showVoice && conversation && !tall && (() => {
         const caption = voiceCaption(voice, streaming);
         return (
           <div className="w-full flex flex-col items-center gap-1 pb-3.5 overflow-visible">
@@ -513,12 +528,16 @@ export const Composer: React.FC<ComposerProps> = ({
               >
                 <span className="text-sm leading-none">↑</span>
               </button>
-            ) : (
+            ) : showVoice ? (
               /* One assistant, two entry points: this and the global shortcut.
                  Both call `beginListening`, which opens the session, starts the
                  look at the screen and then opens this same microphone — so the
                  slow half of a turn is already running while the sentence is
-                 still being said. */
+                 still being said.
+
+                 `showVoice` is off in the panel chats: there is one microphone,
+                 and a second button offering it is a second door to a device
+                 that is already answered somewhere else. */
               <VoiceButton
                 state={voice.state}
                 level={voice.level}
@@ -531,7 +550,7 @@ export const Composer: React.FC<ComposerProps> = ({
                 }}
                 size={24}
               />
-            )}
+            ) : null}
           </div>
         </div>
       )}

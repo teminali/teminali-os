@@ -89,7 +89,17 @@ export const MessageBlock: React.FC<{
   const settled = !message.isStreaming;
 
   return (
-    <div className={`group/turn flex flex-col ${compact ? "gap-1.5 pb-2" : "gap-2 pb-3"}`}>
+    /*
+      `relative`, because the telemetry row below is taken out of flow.
+
+      It was in it, `opacity-0` until hover — which hides a row without
+      un-reserving its height, so every settled reply carried a strip of empty
+      space under it that nothing ever drew in. Stacked with the block's own
+      bottom padding that was most of the gap between one message and the next.
+      Overlaying it into the padding costs no layout height, and nothing moves
+      when it fades in.
+    */
+    <div className={`group/turn relative flex flex-col ${compact ? "gap-1.5 pb-6" : "gap-1.5 pb-7"}`}>
       {(calls.length > 0 || message.isStreaming) && (
         <ProcessWatcher
           engine={message.engineUsed}
@@ -141,7 +151,7 @@ export const MessageBlock: React.FC<{
           all already reads "Interrupted." as its content and needs no second
           line saying the same thing. */}
       {settled && keptPartialReply(message) && (
-        <div className="h-5 flex items-center gap-1.5 text-2xs text-ink-disabled select-none">
+        <div className="h-4 flex items-center gap-1.5 text-2xs text-ink-disabled select-none">
           <span className="w-1 h-1 rounded-full bg-danger/70" />
           Stopped — this reply is incomplete.
         </div>
@@ -160,7 +170,7 @@ export const MessageBlock: React.FC<{
         whole, and the `title` carries what the ellipsis took.
       */}
       {settled && message.content && (
-        <div className="h-6 flex items-center gap-2 text-2xs text-ink-disabled select-none opacity-0 group-hover/turn:opacity-100 focus-within:opacity-100 transition-opacity duration-ds ease-ds">
+        <div className="absolute left-0 right-0 bottom-0 h-6 flex items-center gap-2 text-2xs text-ink-disabled select-none opacity-0 group-hover/turn:opacity-100 focus-within:opacity-100 transition-opacity duration-ds ease-ds">
           <span
             className="min-w-0 truncate font-mono tabular-nums tracking-tight"
             title={telemetry(message).join(" · ")}

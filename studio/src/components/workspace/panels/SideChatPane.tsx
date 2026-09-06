@@ -194,6 +194,8 @@ export const SideChatPane: React.FC<{ panel: PanelTab }> = ({ panel }) => {
           placeholder="Ask in side chat"
           modelName={profile.name}
           voice={voice}
+          // One microphone, and it belongs to the conversation surface.
+          showVoice={false}
           attachments={attachments}
           width="fill"
         />

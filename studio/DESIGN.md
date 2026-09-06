@@ -410,6 +410,26 @@ forwarding the callbacks and the chat supplying them — because either alone is
 still silence. `ArenaPane` remains deliberately unsubscribed: its contestants
 work in sandboxes and must not move the operator's tree.
 
+### One microphone, and no reserved emptiness between turns (2026-09-06)
+
+**The panel chats no longer offer the microphone.** Every surface that mounts a
+`Composer` builds its own `VoiceEngine`, and there is one microphone — only one
+engine can hold it (§6.18 relies on exactly that when it decides which engine
+speaks a permission prompt). A mic button on an agent panel was therefore not
+only a second copy of a control: it was a second door to a device that was
+already answered elsewhere, and pressing it stopped the conversation the
+operator was having. `showVoice` is `false` in `AgentPane` and `SideChatPane`,
+and it gates the live orb as well as the button — a panel drawing an orb would
+be narrating a conversation it is not in.
+
+**A hidden row still reserves its height.** The telemetry line under a settled
+reply was in flow at `opacity-0` until hover, so every finished message carried
+a strip of empty space that nothing ever drew in; stacked with the block's own
+bottom padding, that was most of the gap between one message and the next. It
+is absolutely positioned into the padding now, so it costs no layout height and
+nothing moves when it fades in — the padding it overlays is the same space it
+used to consume, and the block's `gap` came down with it.
+
 ### The title bar's two editors, and the line under a reply (2026-09-06)
 
 **`Editor`, with the glyph on the right.** The control read "Video Editor" with
