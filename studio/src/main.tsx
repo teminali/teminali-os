@@ -9,6 +9,8 @@ import { registerVideoToolBridge } from "./services/videoToolBridge";
 import { installWindowDropGuard } from "./services/dropGuard";
 import { syncWorkspaceMediaRoot } from "./services/workspaceMedia";
 import { browserViewBridge, reapClosedBrowserViews } from "./services/browserView";
+import { watchBrowserHistory } from "./services/browserHistory";
+import { watchBrowserDownloads } from "./services/browserDownloads";
 import { selfAudio, watchBrowserAudio, watchMediaElements } from "./services/voice/selfAudio";
 import { usePanelStore } from "./store/panelStore";
 
@@ -72,6 +74,24 @@ syncWorkspaceMediaRoot(useStudioStore);
   store knows, so the reaping is a subscription. See services/browserView.ts.
 */
 reapClosedBrowserViews(usePanelStore);
+
+/*
+  Where the browser has been, recorded once for the whole app.
+
+  Same reason the reaping is here: a view outlives its pane, so a tab loading
+  in the background is unmounted and still navigating. The gateway owns the
+  list because the assistant has to be able to read it.
+  See services/browserHistory.ts.
+*/
+watchBrowserHistory(browserViewBridge());
+
+/*
+  Files the browser is fetching, watched for the same reason: a download
+  outlives the tab that started it. Progress stops in the renderer's cache;
+  only the end of one is written to the gateway.
+  See services/browserDownloads.ts.
+*/
+watchBrowserDownloads(browserViewBridge());
 
 /*
   The app has to know when it is the one making noise.

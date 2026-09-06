@@ -652,15 +652,56 @@ so the agent can read it: the `workspace` MCP server offers `browse`,
 `bookmarks`, `browsing_history` and `downloads` pre-approved and `bookmark`
 behind the prompt (it writes). `browse` is a `workspace` event on the run
 stream (`action: "browse"`) handled in both `AgentPane` and `StudioChat`.
-`services/browserDataService.ts` is the renderer's client. **Not yet true:**
-the pane does not yet show a home page, fill its bookmark star, record visits
-or downloads — the store and the agent's side landed first; the pane's side
-is the open lane.
+`services/browserDataService.ts` is the renderer's client and
+`store/browserStore.ts` the renderer's *cache* of it — never a source of truth:
+every mutation goes to the gateway first and adopts the list it answers with.
+
+**Home is a state, not an address.** `BrowserPane` keeps a `home` flag that
+overrides `shown`; while it is set, `visible` is false, so the view — an OS
+layer nothing can be drawn over — hides and `BrowserHome` is drawn in the box
+it would have covered. The page behind stays loaded, at its scroll, with its
+history; navigating to a blank page instead would have thrown that away every
+time the operator glanced at their bookmarks. `go()` and an externally
+delivered `panel.url` both clear the flag. The home page's search box always
+searches (the omnibox is the one that guesses); the omnibox's first suggestion
+says so out loud when what is typed is words.
+
+**History is recorded once for the whole app**, by `watchBrowserHistory`
+(`services/browserHistory.ts`) armed in `main.tsx` beside
+`reapClosedBrowserViews` and `watchBrowserAudio`. Never by the pane: the pane
+unmounts on a tab switch while the view goes on navigating, so a tab loading in
+the background would record nothing. It dedupes per view on `(url, title)`,
+because one navigation reports itself at start, at stop and again when the
+title arrives.
+
+**Downloads: main chooses nothing.** `session.fromPartition(PARTITION)` gets a
+single `will-download` listener inside `initBrowserViews` — one, not one per
+tab, since every tab shares that session. Nothing calls `setSavePath`, so
+Electron shows its own save dialog and the operator makes the only decision
+that matters. Progress is IPC (`browser-view:download`) and stops in
+`browserStore.active`; only a `done` event reaches the gateway, via
+`watchBrowserDownloads` (`services/browserDownloads.ts`). `done` is a separate
+field from `state` because an `interrupted` mid-flight can still resume, and
+`cancelled` — what dismissing the save dialog reports — is dropped rather than
+recorded. **Reveal, never open:** `browser-view:reveal-download` answers false
+for any path main did not itself watch that dialog write, so the renderer has
+no directory-listing oracle over the disk; the set is persisted to
+`browser-downloads.json` under `userData/gateway` so a Reveal that worked
+yesterday still works today. `browser-view:open-external` is the one way out of
+the panel, behind the same http(s) line every other entry point draws.
+
+The rules that decide what gets written down — `visitOf`, `visitKey`,
+`foldVisit`, `downloadAction` — live in `utils/browserRecording.ts`, pure and
+dependency-free, because a rule that can only be exercised by driving Electron
+is a rule nobody exercises. The subscriptions are the wiring around them.
 
 Tested in `tests/browser-view.test.mjs` (6): the scheme refusals on both sides,
-the zoom scaling, the malformed-rectangle refusal, and the clamping; and in
+the zoom scaling, the malformed-rectangle refusal, and the clamping; in
 `tests/browser-data.test.mjs` (10): the store's refusals, the visit folding,
-the caps, the history search, and which browser tools are pre-approved.
+the caps, the history search, and which browser tools are pre-approved; and in
+`tests/browser-panel.test.mjs` (8): what counts as a visit, the title in the
+dedupe key, the cache's fold and cap, in-flight versus finished downloads, the
+dropped `cancelled`, and the two halves of the reveal guard.
 
 ### What the workspace will open (`server/workspace.js`, `panels/FilePane.tsx`)
 

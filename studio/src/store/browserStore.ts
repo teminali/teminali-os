@@ -19,6 +19,7 @@
  */
 
 import { create } from "zustand";
+import { foldVisit } from "../utils/browserRecording";
 import {
   BrowserDataService,
   type Bookmark,
@@ -46,9 +47,13 @@ interface BrowserState {
   loaded: boolean;
 
   load: () => Promise<void>;
+  /** A page was shown. Written by the global subscriber, never by a pane. */
+  visit: (url: string, title: string) => Promise<void>;
   bookmark: (url: string, title: string) => Promise<void>;
   unbookmark: (url: string) => Promise<void>;
   clearHistory: () => Promise<void>;
+  /** A download that has ended. Only ever called on `done`. */
+  record: (entry: Omit<DownloadEntry, "savedAt">) => Promise<void>;
   /** A download is in flight, or has moved. */
   setActive: (id: string, download: ActiveDownload) => void;
   clearActive: (id: string) => void;
@@ -72,6 +77,16 @@ export const useBrowserStore = create<BrowserState>((set, get) => ({
     }
   },
 
+  visit: async (url, title) => {
+    try {
+      const visit = await BrowserDataService.visit(url, title);
+      set({ history: foldVisit(get().history, visit) });
+    } catch {
+      // A navigation must not fail because the gateway is restarting; the
+      // next one, or the next `load`, brings the list back into agreement.
+    }
+  },
+
   bookmark: async (url, title) => {
     const bookmarks = await BrowserDataService.bookmark(url, title);
     set({ bookmarks });
@@ -85,6 +100,11 @@ export const useBrowserStore = create<BrowserState>((set, get) => ({
   clearHistory: async () => {
     await BrowserDataService.clearHistory();
     set({ history: [] });
+  },
+
+  record: async (entry) => {
+    const downloads = await BrowserDataService.recordDownload(entry);
+    set({ downloads });
   },
 
   setActive: (id, download) => set({ active: { ...get().active, [id]: download } }),

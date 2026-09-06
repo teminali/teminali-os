@@ -31,6 +31,27 @@ export interface BrowserViewState {
 
 export type BrowserViewCommand = "back" | "forward" | "reload" | "stop";
 
+/**
+ * A file the panel is fetching, as main reports it.
+ *
+ * `done` is separate from `state` because an `interrupted` mid-flight can still
+ * resume: only a `done` event is an outcome worth writing down.
+ */
+export interface BrowserDownload {
+  downloadId: string;
+  /** The panel whose page started it, or null if that view has since gone. */
+  panelId: string | null;
+  url: string;
+  filename: string;
+  state: "progressing" | "paused" | "interrupted" | "completed" | "cancelled";
+  done: boolean;
+  received: number;
+  /** 0 when the server did not say how big the file is. */
+  total: number;
+  /** Where it was saved. Empty unless the download finished. */
+  path: string;
+}
+
 export interface BrowserViewBridge {
   navigate(id: string, url: string): Promise<{ ok: boolean; reason?: string }>;
   /** The view for this panel, created at `url` only if it does not exist yet. */
@@ -40,6 +61,11 @@ export interface BrowserViewBridge {
   destroy(id: string): void;
   destroyAll(): void;
   onState(handler: (state: BrowserViewState) => void): () => void;
+  onDownload(handler: (download: BrowserDownload) => void): () => void;
+  /** False when main did not itself save that path — see electron/browserView.cjs. */
+  revealDownload(path: string): Promise<boolean>;
+  /** Hand an http(s) address to the operator's real browser. */
+  openExternal(url: string): Promise<boolean>;
 }
 
 export interface BrowserViewBounds {

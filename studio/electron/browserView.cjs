@@ -23,10 +23,15 @@
   the whole of the contract below: bounds, visibility, navigation, and a state
   event back for the toolbar.
 */
-const { WebContentsView, ipcMain, session, shell } = require("electron");
+const { app, WebContentsView, ipcMain, session, shell } = require("electron");
+const fs = require("node:fs");
+const path = require("node:path");
 
 const PARTITION = "persist:teminali-browser";
 const STATE_CHANNEL = "browser-view:state";
+const DOWNLOAD_CHANNEL = "browser-view:download";
+/** How many saved paths stay revealable. Old enough is off the operator's Home anyway. */
+const MAX_KNOWN_DOWNLOADS = 200;
 
 /** A page the panel may load. Anything else is a way out of the panel. */
 function isAllowedUrl(url) {
@@ -42,6 +47,32 @@ function scaleBounds(bounds, zoomFactor) {
     width: Math.max(0, Math.round(bounds.width * factor)),
     height: Math.max(0, Math.round(bounds.height * factor)),
   };
+}
+
+/*
+  Which files this process is allowed to point the Finder at.
+
+  `shell.showItemInFolder` takes any absolute path, so a renderer that could
+  hand it one at will would have a directory-listing oracle over the whole
+  disk — a page's own name for its download is attacker-controlled text. So
+  main keeps the list: a path is revealable only because main itself watched
+  Electron's save dialog write that exact file. The list is persisted because
+  the operator's Home page still shows last week's downloads after a restart,
+  and a Reveal that worked yesterday and not today reads as a broken button.
+*/
+function parseKnownDownloads(raw) {
+  try {
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+    return parsed.filter((entry) => typeof entry === "string" && path.isAbsolute(entry)).slice(0, MAX_KNOWN_DOWNLOADS);
+  } catch {
+    return [];
+  }
+}
+
+/** The one question the reveal handler asks. Kept apart so it can be tested. */
+function isRevealable(known, filePath) {
+  return typeof filePath === "string" && filePath.length > 0 && known.has(filePath);
 }
 
 function isBounds(value) {
@@ -215,6 +246,124 @@ function initBrowserViews({ getMainWindow, log }) {
     destroy(id);
   });
 
+  /* ── Downloads ──────────────────────────────────────────────────────────
+     Armed once on the shared session rather than per view, because every tab
+     is on `persist:teminali-browser` (see `create`) — a per-tab listener would
+     fire once per open tab for a single file.
+
+     The save path is deliberately not chosen here. Electron shows its own save
+     dialog when nothing calls `setSavePath`, which puts the operator in front
+     of the one decision that matters and keeps this process out of the
+     business of inventing paths inside the user's home. What main does is
+     watch what came back, so the file can be revealed later.
+
+     Progress is IPC and never reaches the gateway: a 4 GB file would otherwise
+     be several thousand POSTs. Only the end of a download is recorded, by the
+     renderer. See src/services/browserDownloads.ts.
+  */
+  const knownFile = path.join(app.getPath("userData"), "gateway", "browser-downloads.json");
+  /** @type {Set<string>} */
+  let known = new Set();
+  try {
+    known = new Set(parseKnownDownloads(fs.readFileSync(knownFile, "utf8")));
+  } catch {
+    // No file yet, which is what a first run looks like.
+  }
+
+  const remember = (filePath) => {
+    if (!filePath || known.has(filePath)) return;
+    known.add(filePath);
+    const kept = [...known].slice(-MAX_KNOWN_DOWNLOADS);
+    known = new Set(kept);
+    try {
+      fs.mkdirSync(path.dirname(knownFile), { recursive: true });
+      fs.writeFileSync(knownFile, JSON.stringify(kept, null, 2));
+    } catch (error) {
+      log("Could not record a download for reveal:", error?.message ?? error);
+    }
+  };
+
+  let downloadSeq = 0;
+  const panelIdOf = (contents) => {
+    for (const [id, entry] of views) {
+      if (!entry.view.webContents.isDestroyed() && entry.view.webContents === contents) return id;
+    }
+    return null;
+  };
+
+  const sendDownload = (payload) => {
+    const window = getMainWindow();
+    if (!window || window.isDestroyed()) return;
+    try {
+      window.webContents.send(DOWNLOAD_CHANNEL, payload);
+    } catch {}
+  };
+
+  try {
+    session.fromPartition(PARTITION).on("will-download", (_event, item, contents) => {
+      const downloadId = `dl-${Date.now()}-${++downloadSeq}`;
+      const panelId = panelIdOf(contents);
+      const url = item.getURL();
+      const filename = item.getFilename();
+      // `done` rather than a state the renderer has to interpret: an
+      // `interrupted` mid-flight can still resume, and only the final one is a
+      // row worth writing. Inferring that from the word alone would record a
+      // failed download every time the network hiccuped.
+      const report = (state, done) =>
+        sendDownload({
+          downloadId,
+          panelId,
+          url,
+          filename,
+          state,
+          done,
+          received: item.getReceivedBytes(),
+          total: item.getTotalBytes(),
+          path: done && state === "completed" ? item.getSavePath() : "",
+        });
+
+      report("progressing", false);
+      item.on("updated", (__event, state) => {
+        if (state === "interrupted") report("interrupted", false);
+        else report(item.isPaused() ? "paused" : "progressing", false);
+      });
+      item.once("done", (__event, state) => {
+        // `cancelled` is also what dismissing the save dialog reports, so the
+        // renderer drops those rather than writing a row for a file that was
+        // never asked for.
+        if (state === "completed") remember(item.getSavePath());
+        report(state, true);
+      });
+    });
+  } catch (error) {
+    log("Browser downloads could not be armed:", error?.stack || error?.message || error);
+  }
+
+  ipcMain.handle("browser-view:reveal-download", (event, filePath) => {
+    if (!mainWindowOf(event.sender)) return false;
+    if (!isRevealable(known, filePath)) return false;
+    // Reveal, never open: showing a file in the Finder is inspection, and
+    // launching one is execution of something the operator downloaded from a
+    // page. The second is not this button's to offer.
+    shell.showItemInFolder(filePath);
+    return true;
+  });
+
+  /*
+    A page in the operator's real browser.
+
+    The only way out of the panel, and it is one-directional: main hands the
+    address to the OS and nothing comes back. Guarded by the same http(s) line
+    every other entry point here draws, because `openExternal` will happily
+    launch a `file:` or a custom scheme registered by some other application.
+  */
+  ipcMain.handle("browser-view:open-external", (event, url) => {
+    if (!mainWindowOf(event.sender)) return false;
+    if (!isAllowedUrl(url)) return false;
+    shell.openExternal(url).catch((error) => log("Could not open externally:", error?.message ?? error));
+    return true;
+  });
+
   /** The window is going away, or the renderer is reloading into a fresh page. */
   function destroyAllBrowserViews() {
     for (const id of [...views.keys()]) destroy(id);
@@ -228,4 +377,12 @@ function initBrowserViews({ getMainWindow, log }) {
   return { destroyAllBrowserViews };
 }
 
-module.exports = { initBrowserViews, isAllowedUrl, scaleBounds, isBounds, BROWSER_VIEW_PARTITION: PARTITION };
+module.exports = {
+  initBrowserViews,
+  isAllowedUrl,
+  scaleBounds,
+  isBounds,
+  parseKnownDownloads,
+  isRevealable,
+  BROWSER_VIEW_PARTITION: PARTITION,
+};

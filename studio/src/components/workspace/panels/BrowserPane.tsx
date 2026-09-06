@@ -1,8 +1,22 @@
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { ArrowLeft, ArrowRight, Globe, MoreHorizontal, RotateCw, Search, Star, X } from "lucide-react";
-import { IconButton, Menu, EmptyState } from "../../ui";
+import {
+  ArrowLeft,
+  ArrowRight,
+  ExternalLink,
+  Globe,
+  House,
+  MoreHorizontal,
+  RotateCw,
+  Search,
+  Star,
+  Trash2,
+  X,
+} from "lucide-react";
+import { IconButton, Menu } from "../../ui";
+import { BrowserHome } from "./BrowserHome";
 import { usePanelStore, type PanelTab } from "../../../store/panelStore";
-import { normaliseAddress } from "../../../utils/address";
+import { addressLabel, normaliseAddress } from "../../../utils/address";
+import { isBookmarked, useBrowserStore } from "../../../store/browserStore";
 import {
   boundsEqual,
   browserViewBridge,
@@ -31,6 +45,13 @@ import {
  * reported to main, and the view is hidden whenever a menu or a modal opens.
  * A browser build has no such view and keeps the iframe.
  * See services/browserView.ts and electron/browserView.cjs.
+ *
+ * Home is a state rather than an address. Because the view is an OS layer that
+ * nothing can be drawn over, showing a home page means hiding the view — and
+ * hiding it is all it means: the page behind stays loaded, at its scroll, with
+ * its history, and leaving home does not reload it. Navigating to a blank page
+ * instead would have thrown all of that away every time the operator glanced
+ * at their bookmarks.
  */
 
 const SUGGESTIONS = [
@@ -44,6 +65,9 @@ export const BrowserPane: React.FC<{ panel: PanelTab }> = ({ panel }) => {
   const bridge = useMemo(() => browserViewBridge(), []);
   const [draft, setDraft] = useState(panel.url ?? "");
   const [omniOpen, setOmniOpen] = useState(false);
+  const [moreOpen, setMoreOpen] = useState(false);
+  // A tab opened without an address opens onto home; one opened at a page does not.
+  const [home, setHome] = useState(!panel.url);
   const [error, setError] = useState<string | null>(null);
   const [reloadKey, setReloadKey] = useState(0);
 
@@ -62,6 +86,21 @@ export const BrowserPane: React.FC<{ panel: PanelTab }> = ({ panel }) => {
   const inputRef = useRef<HTMLInputElement>(null);
   const viewportRef = useRef<HTMLDivElement>(null);
 
+  // The gateway owns what the browser remembers; this is the renderer's copy of
+  // it, shared by every pane and by home. See store/browserStore.ts.
+  const bookmarks = useBrowserStore((state) => state.bookmarks);
+  const loaded = useBrowserStore((state) => state.loaded);
+  const loadBrowserData = useBrowserStore((state) => state.load);
+  const addBookmark = useBrowserStore((state) => state.bookmark);
+  const removeBookmark = useBrowserStore((state) => state.unbookmark);
+  const clearHistory = useBrowserStore((state) => state.clearHistory);
+
+  useEffect(() => {
+    // The star has to know before it is first drawn, and a pane opened straight
+    // onto a page never renders home, which is the other thing that would read.
+    if (!loaded) void loadBrowserData();
+  }, [loaded, loadBrowserData]);
+
   const current = cursor >= 0 ? history[cursor] : null;
   const canGoBack = bridge ? Boolean(viewState?.canGoBack) : cursor > 0;
   const canGoForward = bridge ? Boolean(viewState?.canGoForward) : cursor < history.length - 1;
@@ -74,6 +113,9 @@ export const BrowserPane: React.FC<{ panel: PanelTab }> = ({ panel }) => {
       setHistory((previous) => [...previous.slice(0, cursor + 1), panel.url as string]);
       setCursor((previous) => previous + 1);
       setDraft(panel.url);
+      // Something outside asked for a page — an artifact preview, the agent.
+      // Leaving home showing would hide the page it just opened.
+      setHome(false);
     }
     // Intentionally keyed on the incoming url only.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -92,7 +134,7 @@ export const BrowserPane: React.FC<{ panel: PanelTab }> = ({ panel }) => {
       setViewState(state);
       if (state.url) {
         setDraft((previous) => (previous === state.url ? previous : (state.url as string)));
-        update(panel.id, { url: state.url, label: labelFor(state.url) });
+        update(panel.id, { url: state.url, label: addressLabel(state.url) });
       }
     });
     // `update` is a stable store action.
@@ -127,8 +169,9 @@ export const BrowserPane: React.FC<{ panel: PanelTab }> = ({ panel }) => {
   );
 
   // The omnibox suggestions drop over the viewport, so the page has to get out
-  // of their way as much as any modal does.
-  const visible = Boolean(shown) && !omniOpen;
+  // of their way as much as any modal does — and so does home, which is drawn
+  // in the box the view would otherwise cover.
+  const visible = Boolean(shown) && !omniOpen && !home;
   const visibleRef = useRef(visible);
   visibleRef.current = visible;
   const show = useCallback(() => report(visibleRef.current && !isOverlayOpen()), [report]);
@@ -169,10 +212,11 @@ export const BrowserPane: React.FC<{ panel: PanelTab }> = ({ panel }) => {
     }
     setError(null);
     setOmniOpen(false);
+    setHome(false);
     setHistory((previous) => [...previous.slice(0, cursor + 1), url]);
     setCursor((previous) => previous + 1);
     setDraft(url);
-    update(panel.id, { url, label: labelFor(url) });
+    update(panel.id, { url, label: addressLabel(url) });
     if (bridge) {
       void bridge.navigate(panel.id, url).then((result) => {
         if (!result?.ok) setError("Only http and https addresses can be opened in a panel.");
@@ -206,7 +250,7 @@ export const BrowserPane: React.FC<{ panel: PanelTab }> = ({ panel }) => {
     if (next < 0 || next >= history.length) return;
     setCursor(next);
     setDraft(history[next]);
-    update(panel.id, { url: history[next], label: labelFor(history[next]) });
+    update(panel.id, { url: history[next], label: addressLabel(history[next]) });
   };
 
   const reload = () => {
@@ -215,6 +259,36 @@ export const BrowserPane: React.FC<{ panel: PanelTab }> = ({ panel }) => {
   };
 
   const display = useMemo(() => shown ?? "Open any file, URL, …", [shown]);
+  const starred = isBookmarked(bookmarks, shown);
+
+  /*
+    What the omnibox offers.
+
+    `normaliseAddress` already treats words as a search, so the first row is
+    not a second behaviour — it is that behaviour, said out loud before the
+    operator presses Enter. Without it a typed sentence looks like an address
+    the panel is about to fail to load.
+  */
+  const suggestions = useMemo(() => {
+    const rows = SUGGESTIONS.map((suggestion) => ({
+      id: suggestion.id,
+      label: suggestion.label,
+      icon: suggestion.icon,
+      onSelect: () => go(suggestion.value),
+    }));
+    const typed = draft.trim();
+    if (typed && normaliseAddress(typed).search) {
+      rows.unshift({
+        id: "search",
+        label: `Search Google for “${typed}”`,
+        icon: <Search size={13} />,
+        onSelect: () => go(typed),
+      });
+    }
+    return rows;
+    // `go` closes over the cursor, which is what the next navigation appends to.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [draft, cursor, history]);
 
   return (
     <div className="flex-1 min-h-0 flex flex-col">
@@ -235,8 +309,23 @@ export const BrowserPane: React.FC<{ panel: PanelTab }> = ({ panel }) => {
             <RotateCw size={14} />
           </IconButton>
         )}
-        <IconButton title="Bookmark" size={24} disabled={!shown}>
-          <Star size={14} />
+        <IconButton
+          title={starred ? "Remove bookmark" : "Bookmark"}
+          size={24}
+          disabled={!shown}
+          active={starred}
+          onClick={() => {
+            if (!shown) return;
+            // The title is what the page calls itself; the address is the
+            // fallback, because a page that has not finished loading has none.
+            if (starred) void removeBookmark(shown);
+            else void addBookmark(shown, viewState?.title || addressLabel(shown));
+          }}
+        >
+          <Star size={14} fill={starred ? "currentColor" : "none"} />
+        </IconButton>
+        <IconButton title="Home" size={24} disabled={home} onClick={() => setHome(true)}>
+          <House size={14} />
         </IconButton>
 
         <div className="relative flex-1 min-w-0">
@@ -279,60 +368,69 @@ export const BrowserPane: React.FC<{ panel: PanelTab }> = ({ panel }) => {
             title="Suggestions"
             anchor="top-9 left-0"
             width="100%"
-            items={SUGGESTIONS.map((suggestion) => ({
-              id: suggestion.id,
-              label: suggestion.label,
-              icon: suggestion.icon,
-              onSelect: () => go(suggestion.value),
-            }))}
+            items={suggestions}
           />
         </div>
 
-        <IconButton title="More" size={24}>
-          <MoreHorizontal size={15} />
-        </IconButton>
+        <div className="relative flex-shrink-0">
+          <IconButton title="More" size={24} active={moreOpen} onClick={() => setMoreOpen((open) => !open)}>
+            <MoreHorizontal size={15} />
+          </IconButton>
+          <Menu
+            open={moreOpen}
+            onClose={() => setMoreOpen(false)}
+            anchor="top-8 right-0"
+            width={210}
+            items={[
+              { id: "home", label: "Home", icon: <House size={13} />, onSelect: () => setHome(true), disabled: home },
+              {
+                id: "external",
+                label: "Open in default browser",
+                icon: <ExternalLink size={13} />,
+                disabled: !shown || !bridge,
+                // Main draws the same http(s) line it draws for the view, so a
+                // page that could not be opened here cannot be handed out either.
+                onSelect: () => {
+                  if (shown && bridge) void bridge.openExternal(shown);
+                },
+              },
+              {
+                id: "clear",
+                label: "Clear history",
+                icon: <Trash2 size={13} />,
+                onSelect: () => void clearHistory(),
+              },
+            ]}
+          />
+        </div>
       </div>
 
       {error && <div className="px-3 py-2 text-2xs text-danger border-b border-edge-chrome">{error}</div>}
 
       {/* ── Viewport ───────────────────────────────────────────────────── */}
       <div ref={viewportRef} className="flex-1 min-h-0 relative flex flex-col bg-frame-bot">
-        {shown ? (
-          bridge ? (
-            // Deliberately empty: the page is a view above this box, and main
-            // is told where the box is. Anything drawn here would be hidden by
-            // it. See services/browserView.ts.
-            <div className="w-full h-full" aria-label={`Browser: ${shown}`} />
-          ) : (
-            <iframe
-              key={`${shown}-${reloadKey}`}
-              src={shown}
-              title={panel.label}
-              // The browser build's fallback. Scripts and same-origin are needed
-              // for local dev servers; top-level navigation is not, and letting a
-              // previewed page navigate the shell would be a way out of the sandbox.
-              sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-modals"
-              className="w-full h-full border-0 bg-white"
-            />
-          )
+        {home || !shown ? (
+          // Drawn in the box the view would cover — which is exactly why the
+          // view is hidden while this is up. See `visible` above.
+          <BrowserHome onOpen={go} />
+        ) : bridge ? (
+          // Deliberately empty: the page is a view above this box, and main is
+          // told where the box is. Anything drawn here would be hidden by it.
+          // See services/browserView.ts.
+          <div className="w-full h-full" aria-label={`Browser: ${shown}`} />
         ) : (
-          <EmptyState
-            icon={<Globe size={30} strokeWidth={1.6} />}
-            title="Nothing loaded yet"
-            detail="Type a port like 5173, a host, or a full URL."
-            action={{ label: "Open localhost:5173", onClick: () => go("5173") }}
+          <iframe
+            key={`${shown}-${reloadKey}`}
+            src={shown}
+            title={panel.label}
+            // The browser build's fallback. Scripts and same-origin are needed
+            // for local dev servers; top-level navigation is not, and letting a
+            // previewed page navigate the shell would be a way out of the sandbox.
+            sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-modals"
+            className="w-full h-full border-0 bg-white"
           />
         )}
       </div>
     </div>
   );
 };
-
-function labelFor(url: string): string {
-  try {
-    const parsed = new URL(url);
-    return parsed.port ? `${parsed.hostname}:${parsed.port}` : parsed.hostname;
-  } catch {
-    return "Browser";
-  }
-}

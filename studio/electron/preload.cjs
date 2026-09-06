@@ -334,6 +334,28 @@ contextBridge.exposeInMainWorld("teminali", {
       ipcRenderer.on("browser-view:state", listener);
       return () => ipcRenderer.removeListener("browser-view:state", listener);
     },
+    /**
+     * A file arriving, byte by byte.
+     *
+     * Progress is IPC and stops here: only the end of a download is written to
+     * the gateway, because a large file updates several thousand times and a
+     * POST per tick would be a store that spent its life being rewritten.
+     */
+    onDownload: (handler) => {
+      const listener = (_event, download) => handler(download);
+      ipcRenderer.on("browser-view:download", listener);
+      return () => ipcRenderer.removeListener("browser-view:download", listener);
+    },
+    /**
+     * Show a finished download in the Finder.
+     *
+     * Reveal, never open — the file came from a page. Main answers false for
+     * any path it did not itself watch the save dialog write, so this is not a
+     * way to ask whether an arbitrary path exists.
+     */
+    revealDownload: (filePath) => ipcRenderer.invoke("browser-view:reveal-download", filePath),
+    /** Hand an http(s) address to the operator's real browser. */
+    openExternal: (url) => ipcRenderer.invoke("browser-view:open-external", url),
   },
   /**
    * The screen assistant.

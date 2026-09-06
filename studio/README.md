@@ -139,9 +139,19 @@ store (`browser-data.json`, `TEMINALI_BROWSER_STORE`), not renderer state, so
 the assistant can read it: the `workspace` MCP server gives an agent CLI
 `browse` (show a page in the panel), `bookmarks`, `browsing_history` and
 `downloads` pre-approved, and `bookmark`, which writes, behind the permission
-prompt. The panel's own home page, bookmark star, history and download
-recording are not yet wired to that store — the store and the agent's side of
-it landed first.
+prompt.
+
+The panel's own side of that store is the **home page**: a Google search box,
+the bookmarks, the last 20 pages, and the downloads with a "Show in Finder"
+on each finished one. Home is a state rather than an address — the page behind
+it stays loaded at its scroll and its history, and the `Home` button only hides
+the view. The **star** in the toolbar bookmarks the page it is on. Visits are
+recorded by one subscriber armed for the whole app, not by the pane, because a
+tab loading in the background has no pane. Downloads use **Electron's own save
+dialog** — the app never chooses a path — and "Show in Finder" reveals (never
+opens) only a path main itself watched that dialog write, remembered across
+restarts in `browser-downloads.json`. `More` also offers "Open in default
+browser" and "Clear history".
 
 It is also where you **drop** a file. Drag a row out of the Explorer, or a file
 out of Finder or Windows Explorer, and it opens in the panel. A file from
@@ -699,7 +709,7 @@ ollama serve              # local models on 127.0.0.1:11434
 
 ```bash
 npm run typecheck   # tsc --noEmit
-npm test            # 1331 tests, 0 failures
+npm test            # 1339 tests, 0 failures
 npm run build       # tsc && vite build
 npm run verify:core # all three
 ```
