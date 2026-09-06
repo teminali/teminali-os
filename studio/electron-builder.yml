@@ -23,6 +23,16 @@ files:
   # 30 files that import nothing but Node builtins and each other, so there is
   # no reason to enumerate them.
   - server/**/*
+  # server/speech-local.js needs voice-runtime/lexicon.js, and it CANNOT come
+  # from here. electron-builder drops any `files` entry whose source is also an
+  # extraResources `from:` — voice-runtime is one, so the pattern is silently
+  # ignored and the asar ships without it. That was verified by adding
+  # `voice-runtime/lexicon.js` here and finding zero voice-runtime entries in
+  # the built archive.
+  #
+  # server/sidecar-paths.js resolves it at runtime instead, the same way
+  # electron/main.cjs finds cli.js: the in-package path in a checkout, and
+  # <Resources>/voice-runtime when packaged.
   - package.json
   - "!**/*.map"
   - "!server/**/*.test.js"

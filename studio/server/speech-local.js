@@ -24,7 +24,7 @@ import os from "node:os";
 import path from "node:path";
 import { withBinPaths } from "./bin-paths.js";
 import { lookupCommand } from "./command-resolver.js";
-import { DOMAIN_TERMS, buildLexicon, repairVocabulary, vocabularyFromEnv } from "../voice-runtime/lexicon.js";
+import { voiceRuntimeUrl } from "./sidecar-paths.js";
 
 const run = promisify(execFile);
 
@@ -85,8 +85,33 @@ export function rankLocalModel(name) {
 }
 
 /** The domain vocabulary, once; the same list the sidecar repairs against. */
-const VOCABULARY = [...DOMAIN_TERMS, ...vocabularyFromEnv()];
-const LEXICON = buildLexicon(VOCABULARY);
+/*
+  The lexicon is loaded, not imported.
+
+  voice-runtime/ ships beside the asar, so the static specifier that resolved
+  in a checkout did not resolve in a packaged app — and because this module is
+  on server/gateway.js's import graph, that throw happened while the gateway
+  was still loading. createGateway never returned, nothing served /api, and
+  every packaged build reported "Failed to fetch" in every panel. v0.0.1
+  shipped exactly that.
+
+  Degrading matters as much as resolving. Vocabulary repair is a refinement of
+  a transcript; speech, and the entire rest of the gateway, are worth more than
+  it. If the file is missing the recogniser keeps working and returns text
+  unrepaired.
+*/
+const lexiconUrl = voiceRuntimeUrl("lexicon.js");
+const lexicon = lexiconUrl
+  ? await import(lexiconUrl).catch(() => null)
+  : null;
+if (!lexicon) {
+  console.warn("[speech] voice-runtime/lexicon.js was not found; transcripts will not be vocabulary-repaired.");
+}
+
+const VOCABULARY = lexicon ? [...lexicon.DOMAIN_TERMS, ...lexicon.vocabularyFromEnv()] : [];
+const LEXICON = lexicon ? lexicon.buildLexicon(VOCABULARY) : null;
+/** Repair against the lexicon, or hand the text back untouched without one. */
+const repairVocabulary = (text, lex) => (lexicon && lex ? lexicon.repairVocabulary(text, lex) : text);
 /** Whisper's initial prompt is capped at half its text context; stay well inside it. */
 const PROMPT_MAX_CHARS = 600;
 

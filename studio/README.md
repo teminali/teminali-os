@@ -783,7 +783,7 @@ ollama serve              # local models on 127.0.0.1:11434
 
 ```bash
 npm run typecheck   # tsc --noEmit
-npm test            # 1483 tests, 0 failures
+npm test            # 1494 tests, 0 failures
 npm run build       # tsc && vite build
 npm run verify:core # all three
 ```
@@ -802,6 +802,46 @@ npm run package:linux
 `build/afterAllArtifactBuild.cjs` renames the two macOS DMGs after the fact,
 because `artifactName` cannot branch on architecture. That is only safe because
 `dmg.publish: null` is set in `electron-builder.yml` — do not remove it.
+
+### What the asar can and cannot reach (`server/sidecar-paths.js`)
+
+**v0.0.1 shipped with no working backend.** `server/speech-local.js` imported
+`"../voice-runtime/lexicon.js"`. From `app.asar/server/` that is
+`app.asar/voice-runtime/lexicon.js`, and `voice-runtime/` ships *beside* the
+archive as an extra resource — onnxruntime's native binding cannot load from
+one. The import threw `ERR_MODULE_NOT_FOUND` while `server/gateway.js` was
+still loading, so `createGateway` never returned, nothing served `/api`, and
+every panel reported **"Failed to fetch"**: no repositories, no chat, no
+GitHub connect, and no update check either, since `/api/updates/check` is a
+gateway route. A checkout cannot reproduce it — there the same specifier
+resolves.
+
+The rule, and why the two cases differ:
+
+| Import | From `app.asar/server/` | Ships as |
+| --- | --- | --- |
+| `../../gateway/frontier-runner.js` | `<Resources>/gateway/…` | extra resource ✓ |
+| `../../licence/format.js` | `<Resources>/licence/…` | extra resource ✓ |
+| `../voice-runtime/lexicon.js` | `app.asar/voice-runtime/…` | **nothing ships there** |
+
+`gateway/` and `licence/` sit *above* `studio/`, so `../../` lands in
+`<Resources>` in a packaged build and in the repo root in a checkout. Both
+work by the same path. `voice-runtime/` sits *inside* `studio/`, so no single
+specifier can serve both layouts.
+
+It cannot be fixed with a `files:` entry either: electron-builder drops any
+`files` pattern whose source is also an `extraResources` `from:`, so
+`voice-runtime/lexicon.js` was silently ignored and the built asar contained
+no `voice-runtime` entries at all. `server/sidecar-paths.js` resolves it at
+runtime instead — the in-package path first, then
+`process.resourcesPath/voice-runtime` — which is the same rule
+`electron/main.cjs` already uses to find `cli.js`. A missing lexicon now
+returns null and the recogniser returns text unrepaired, rather than taking
+the gateway down.
+
+`tests/packaged-imports.test.mjs` models the packaged tree and fails if any
+static import under `server/` lands somewhere neither the asar nor the extra
+resources carry.
 
 ### The installer wizard
 
