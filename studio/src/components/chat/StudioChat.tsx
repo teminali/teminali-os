@@ -740,8 +740,17 @@ export const StudioChat: React.FC<{
                 level={voice.level}
                 caption={voice.narration ?? voice.transcript ?? undefined}
                 badge={
+                  /*
+                    Nothing listens while idle, so "Say Hey Temy" was a
+                    promise the app could not keep: the operator says it, the
+                    microphone is not open, and the orb sits there. The wake
+                    word remains one of the signals that decides whether live
+                    speech was addressed to Temy (services/voice/addressing.ts)
+                    — that is a different thing, and it works. What is gone is
+                    the claim that it starts a conversation.
+                  */
                   voice.state === "idle"
-                    ? 'Say "Hey Temy"'
+                    ? "Tap to talk"
                     : voice.state === "speaking"
                       ? "Temy is speaking"
                       : voice.state === "hearing"
@@ -755,7 +764,7 @@ export const StudioChat: React.FC<{
                     void voice.stop();
                   }
                 }}
-                title={voice.state === "idle" ? 'Tap or say "Hey Temy" to talk' : "Tap to end voice conversation"}
+                title={voice.state === "idle" ? "Tap to start a voice conversation" : "Tap to end voice conversation"}
               />
             </div>
           </div>

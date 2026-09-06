@@ -1787,17 +1787,24 @@ export class VoiceEngine {
   /**
    * Called when the session has been completely inactive for 1 minute.
    * Plays a natural, casual chill/sleep template line and transitions to idle.
+   *
+   * Every one of these used to end with "just say 'Hey Temy' when you need me",
+   * and the line below is `this.stop()` — the conversation ends and the
+   * microphone closes. So the last thing Temy said before going deaf was an
+   * invitation to talk to her, which is the shape of a bug the operator can
+   * only discover by trying it. Nothing listens while idle; the orb is what
+   * starts a conversation, so the orb is what these say.
    */
   private async goToSleep(): Promise<void> {
     if (this.isGoingToSleep || this.state !== "listening") return;
     this.isGoingToSleep = true;
     const templates = [
-      "I'm going to chill for now. Just say 'Hey Temy' when you need me.",
-      "Going into chill mode. Say 'Hey Temy' whenever you're ready.",
-      "I'll take a breather and let you focus. Just say 'Hey Temy' if you need a hand.",
-      "Heading to sleep for a bit. Say 'Hey Temy' to wake me up.",
-      "Stepping aside for now. Holler with 'Hey Temy' whenever you want to jump back in.",
-      "I'll hang out in the background. Just say 'Hey Temy' when you need me.",
+      "I'm going to chill for now. Tap the orb when you need me.",
+      "Going into chill mode. The orb is there whenever you're ready.",
+      "I'll take a breather and let you focus. Tap the orb if you need a hand.",
+      "Heading to sleep for a bit. Tap the orb to wake me up.",
+      "Stepping aside for now. Tap the orb whenever you want to jump back in.",
+      "I'll hang out in the background. Tap the orb when you need me.",
     ];
     const farewell = templates[Math.floor(Math.random() * templates.length)];
     try {

@@ -34,6 +34,7 @@ import {
   inScope,
   rankHits,
   scoreFields,
+  scoreKind,
   sectionsOf,
   type ResultKind,
   type SearchHit,
@@ -321,7 +322,10 @@ export const GlobalSearchView: React.FC = () => {
     if (!trimmed) return [];
     const found: SearchHit[] = [];
     const add = (hit: Omit<SearchHit, "score">, score: number) => {
-      if (score > 0) found.push({ ...hit, score });
+      // A group answers for its members: "skill" lists the skills even though
+      // no skill is called one. Never above a real name match — see scoreKind.
+      const total = Math.max(score, scoreKind(trimmed, hit.kind));
+      if (total > 0) found.push({ ...hit, score: total });
     };
 
     for (const kind of Object.keys(PANEL_DEFAULTS) as PanelKind[]) {
@@ -348,7 +352,9 @@ export const GlobalSearchView: React.FC = () => {
     for (const skill of SKILLS_LIST) {
       add(
         { id: `skill:${skill.id}`, kind: "skill", title: skill.name, detail: skill.tagline, open: () => setSkill(skill) },
-        scoreFields(trimmed, skill.name, skill.tagline, skill.description),
+        // The category too, so "video" finds the video skills — it is the word
+        // the catalogue itself groups them under.
+        scoreFields(trimmed, skill.name, skill.tagline, skill.description, skill.category),
       );
     }
 

@@ -12,19 +12,15 @@ import {
   Settings,
   Zap,
   Sparkle,
-  Layers,
   FileText,
   CornerDownLeft,
   X,
-  Check,
-  RotateCcw,
   Sliders,
-  Compass,
 } from "lucide-react";
 import { useStudioStore, ChatSession } from "../../store/studioStore";
 import { WorkspaceService } from "../../services/workspaceService";
 import { FileIcon } from "../sidebar/FileTree";
-import { Badge, MacCloseButton, SegmentedTabs } from "../ui";
+import { IconButton, Kbd, Modal, SectionLabel, SegmentedTabs } from "../ui";
 import type { FileItem } from "../../types";
 
 type FilterTab = "all" | "agents" | "files" | "actions" | "settings";
@@ -96,8 +92,10 @@ export const CommandPaletteModal: React.FC<{
         type: "agents",
         title: session.title,
         subtitle: session.workspace,
-        badge: `${session.workspace} · ${session.timestamp}`,
-        icon: <Bot className="w-4 h-4 text-accent" />,
+        // The workspace is already the subtitle beside the title. Only the age
+        // is genuinely a column, so only the age goes right.
+        badge: session.timestamp,
+        icon: <Bot className="w-4 h-4" />,
         action: () => {
           switchSession(session.id);
           onClose();
@@ -137,7 +135,7 @@ export const CommandPaletteModal: React.FC<{
         type: "actions",
         title: "New Agent",
         shortcut: "⌘ L",
-        icon: <Bot className="w-4 h-4 text-accent" />,
+        icon: <Bot className="w-4 h-4" />,
         action: () => {
           clearEngineSession("frontier");
           onClose();
@@ -170,7 +168,7 @@ export const CommandPaletteModal: React.FC<{
         type: "actions",
         title: "Open Live Browser Preview",
         shortcut: "⌘ J",
-        icon: <Globe className="w-4 h-4 text-accent" />,
+        icon: <Globe className="w-4 h-4" />,
         action: () => {
           openBrowserPreview();
           onClose();
@@ -211,7 +209,7 @@ export const CommandPaletteModal: React.FC<{
         title: "Agent Mode (Frontier Auto)",
         subtitle: "Autonomous local multi-file coding and tool execution",
         badge: currentProfile === "auto" ? "Active" : undefined,
-        icon: <Zap className="w-4 h-4 text-accent" />,
+        icon: <Zap className="w-4 h-4" />,
         action: () => {
           setProfile("auto");
           onClose();
@@ -412,121 +410,114 @@ export const CommandPaletteModal: React.FC<{
   let runningItemIndex = 0;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-start justify-center pt-16 sm:pt-24 bg-black/75 backdrop-blur-md p-3 select-none font-sans animate-in fade-in duration-100">
-      <div className="lit lit-inner relative w-full max-w-xl bg-surface-sunken rounded-2xl shadow-[0_30px_90px_rgba(0,0,0,0.9)] overflow-hidden flex flex-col">
-        <div className="absolute top-3 right-3 z-20">
-          <MacCloseButton onClose={onClose} size={14} />
-        </div>
-        {/* ── Top Search Input Header ─────────────────────────────────────── */}
-        <div className="flex items-center px-4 py-3 bg-surface-sunken border-b border-edge-chrome gap-3">
-          <Search className="w-4 h-4 text-accent flex-shrink-0" />
-          <input
-            ref={inputRef}
-            type="text"
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            placeholder="Search agents, Canvas, files, actions..."
-            className="w-full bg-transparent text-sm text-ink-bright placeholder:text-ink-placeholder outline-none font-sans"
-            spellCheck={false}
-          />
-          {query && (
-            <button
-              onClick={() => setQuery("")}
-              className="p-1 rounded text-ink-placeholder hover:text-ink-high"
-            >
-              <X size={13} />
-            </button>
-          )}
-        </div>
-
-        {/* ── Category Filter Pills Row ──────────────────────────────────── */}
-        <div className="flex items-center gap-1.5 px-4 py-2 bg-frame-mid border-b border-edge-chrome overflow-x-auto text-xs">
-          {filterTabs.map((tab) => (
-            <button
-              key={tab.id}
-              onClick={() => setActiveFilter(tab.id)}
-              className={`lit lit-inner px-3 py-1 rounded-lg font-medium transition-all ${ activeFilter === tab.id ? "bg-surface-hover text-ink-bright shadow-sm font-semibold " : "text-ink-muted hover:text-ink-high hover:bg-surface-chip" }`}
-            >
-              {tab.label}
-            </button>
-          ))}
-        </div>
-
-        {/* ── Results List with Grouped Categories ───────────────────────── */}
-        <div ref={listRef} className="max-h-96 overflow-y-auto p-2 space-y-3">
-          {filteredItems.length === 0 ? (
-            <div className="p-10 text-center text-ink-placeholder text-xs font-mono">
-              No matching agents, files, or commands found.
-            </div>
-          ) : (
-            Array.from(groupedItems.entries()).map(([category, items]) => (
-              <div key={category} className="space-y-0.5">
-                {/* Category Header */}
-                <div className="px-3 py-1 text-3xs font-semibold text-ink-placeholder uppercase tracking-wider">
-                  {category}
-                </div>
-
-                {/* Items in Category */}
-                {items.map((item) => {
-                  const currentIndex = runningItemIndex++;
-                  const isSelected = currentIndex === selectedIndex;
-
-                  return (
-                    <div
-                      key={item.id}
-                      onClick={() => void item.action()}
-                      onMouseEnter={() => setSelectedIndex(currentIndex)}
-                      className={`lit lit-inner flex items-center justify-between px-3 py-2 rounded-xl cursor-pointer transition-all ${ isSelected ? "bg-surface-hover text-ink-bright shadow-sm" : "text-ink-prose hover:bg-surface-chip border border-transparent" }`}
-                    >
-                      {/* Left: Icon & Title */}
-                      <div className="flex items-center gap-3 truncate">
-                        <div className="flex-shrink-0">{item.icon}</div>
-                        <div className="flex flex-col truncate">
-                          <span className="font-medium text-xs truncate text-ink-high">
-                            {item.title}
-                          </span>
-                          {item.subtitle && (
-                            <span className="text-3xs text-ink-placeholder font-mono truncate">
-                              {item.subtitle}
-                            </span>
-                          )}
-                        </div>
-                      </div>
-
-                      {/* Right: Badge / Keyboard Shortcut */}
-                      <div className="flex items-center gap-2 flex-shrink-0">
-                        {item.badge && (
-                          <span className="text-3xs font-mono text-ink-placeholder bg-surface-chip px-2 py-0.5 rounded border border-edge-chrome">
-                            {item.badge}
-                          </span>
-                        )}
-                        {item.shortcut && (
-                          <span className="text-3xs font-mono text-ink-muted bg-surface-chip px-2 py-0.5 rounded border border-edge">
-                            {item.shortcut}
-                          </span>
-                        )}
-                        {isSelected && !item.shortcut && !item.badge && (
-                          <CornerDownLeft className="w-3.5 h-3.5 text-accent" />
-                        )}
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            ))
-          )}
-        </div>
-
-        {/* ── Footer Navigation Helper ──────────────────────────────────── */}
-        <footer className="px-4 py-2 bg-frame-bot border-t border-edge-chrome flex items-center justify-between text-3xs text-ink-placeholder font-mono">
+    <Modal
+      isOpen={isOpen}
+      onClose={onClose}
+      size="md"
+      // No header: the field *is* the header, and a modal that closes on Esc,
+      // on the backdrop and on picking something does not also need a button —
+      // one red dot floating over a search field is decorative colour (§1.3).
+      showCloseButton={false}
+      bodyClassName="flex flex-col min-h-0"
+      footer={
+        <div className="flex items-center justify-between w-full text-2xs text-ink-faint">
           <div className="flex items-center gap-3">
-            <span><strong className="text-ink-muted">↑↓</strong> Select</span>
-            <span><strong className="text-ink-muted">↵</strong> Open</span>
-            <span><strong className="text-ink-muted">Tab</strong> Change Filter</span>
+            <span className="flex items-center gap-1.5"><Kbd>↑↓</Kbd> Select</span>
+            <span className="flex items-center gap-1.5"><Kbd>↵</Kbd> Open</span>
+            <span className="flex items-center gap-1.5"><Kbd>Tab</Kbd> Change filter</span>
           </div>
-          <span>Esc to Close</span>
-        </footer>
+          <span className="flex items-center gap-1.5"><Kbd>Esc</Kbd> Close</span>
+        </div>
+      }
+    >
+      {/* ── The field is the header ──────────────────────────────────────── */}
+      <div className="lit-focus flex items-center gap-2.5 px-4 h-12 border-b border-edge flex-shrink-0">
+        <Search className="w-4 h-4 text-ink-faint flex-shrink-0" />
+        <input
+          ref={inputRef}
+          type="text"
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          placeholder="Search agents, files, actions…"
+          className="w-full bg-transparent text-sm text-ink-bright placeholder:text-ink-placeholder outline-none"
+          spellCheck={false}
+        />
+        {query && (
+          <IconButton size={22} title="Clear" onClick={() => setQuery("")}>
+            <X size={12} />
+          </IconButton>
+        )}
       </div>
-    </div>
+
+      {/* One tab switcher, the shared one — never a row of hand-rolled pills (§2). */}
+      <div className="px-3 py-2 border-b border-edge flex-shrink-0">
+        <SegmentedTabs
+          variant="underline"
+          activeTab={activeFilter}
+          onChange={setActiveFilter}
+          tabs={filterTabs}
+        />
+      </div>
+
+      {/* ── Results ──────────────────────────────────────────────────────── */}
+      <div ref={listRef} className="flex-1 min-h-0 overflow-y-auto py-1.5 max-h-[min(58vh,480px)]">
+        {filteredItems.length === 0 ? (
+          <p className="py-12 text-center text-xs text-ink-placeholder">
+            Nothing here matches {query ? `“${query}”` : "that"}.
+          </p>
+        ) : (
+          Array.from(groupedItems.entries()).map(([category, items]) => (
+            <section key={category}>
+              <SectionLabel>{category}</SectionLabel>
+              {items.map((item) => {
+                const currentIndex = runningItemIndex++;
+                const isSelected = currentIndex === selectedIndex;
+
+                return (
+                  /*
+                    A row, not a card. Every one of these used to be a `lit`
+                    hairline box with a shadow — twenty bordered rectangles
+                    stacked in a column, which is a form rather than a list.
+                    The selection is a flat wash; the border does no work here
+                    because there is nothing to enclose.
+
+                    One line, because the second one was the workspace and the
+                    workspace is right there beside the title. What goes right
+                    is only what is genuinely a column: the age, the shortcut,
+                    or the return arrow that says this is the one Enter opens.
+                  */
+                  <button
+                    type="button"
+                    key={item.id}
+                    onClick={() => void item.action()}
+                    onMouseEnter={() => setSelectedIndex(currentIndex)}
+                    className={`w-full h-8 flex items-center gap-2.5 px-3.5 text-left transition-colors duration-ds ease-ds ${
+                      isSelected ? "bg-surface-hover" : "hover:bg-surface-chip"
+                    }`}
+                  >
+                    <span className={`w-4 flex-shrink-0 flex items-center justify-center ${isSelected ? "text-ink-high" : "text-ink-faint"}`}>
+                      {item.icon}
+                    </span>
+                    <span className="text-xs text-ink-high truncate">{item.title}</span>
+                    {item.subtitle && (
+                      <span className="text-2xs text-ink-faint truncate">{item.subtitle}</span>
+                    )}
+                    <span className="ml-auto flex items-center gap-2 flex-shrink-0">
+                      {item.badge && (
+                        <span className="text-2xs text-ink-disabled tabular-nums">{item.badge}</span>
+                      )}
+                      {item.shortcut && <Kbd>{item.shortcut}</Kbd>}
+                      {isSelected && !item.shortcut && (
+                        <CornerDownLeft className="w-3 h-3 text-accent" />
+                      )}
+                    </span>
+                  </button>
+                );
+              })}
+            </section>
+          ))
+        )}
+      </div>
+    </Modal>
   );
 };

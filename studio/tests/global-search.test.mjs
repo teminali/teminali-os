@@ -2,8 +2,11 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  KIND_BY_NAME,
+  KIND_NAME_SCORE,
   SECTIONS,
   inScope,
+  scoreKind,
   rankHits,
   scoreFields,
   scoreText,
@@ -93,4 +96,43 @@ test("sections are drawn in one fixed order, actions before answers", () => {
   assert.ok(order.indexOf("file") < order.indexOf("code"));
   // The way out to the web is always last.
   assert.equal(order[order.length - 1], "web");
+});
+
+/* ── Asking for a group by its name ───────────────────────────────────────── */
+
+/**
+ * "skill" found nothing, because no skill is *called* skill: the word is in
+ * none of their names, taglines or descriptions. A search that fails the most
+ * obvious question asked of it is a search nobody trusts with a harder one.
+ */
+test("naming a group finds its members", () => {
+  assert.equal(scoreKind("skill", "skill"), KIND_NAME_SCORE);
+  assert.equal(scoreKind("skills", "skill"), KIND_NAME_SCORE);
+  assert.equal(scoreKind("Panel", "panel"), KIND_NAME_SCORE);
+  assert.equal(scoreKind("bookmarks", "bookmark"), KIND_NAME_SCORE);
+  assert.equal(scoreKind("project", "project"), KIND_NAME_SCORE);
+});
+
+test("only the small enumerable groups answer for their members", () => {
+  // Six arbitrary files out of a thousand is noise wearing the shape of an
+  // answer, and so is a page out of five hundred visited.
+  for (const kind of ["file", "code", "machine", "history", "chat", "web"]) {
+    assert.equal(KIND_BY_NAME.has(kind), false, kind);
+    assert.equal(scoreKind("files", kind), 0, kind);
+  }
+});
+
+test("a group name never outranks the thing that is actually called that", () => {
+  // A file named skill.ts is what someone typing "skill" most likely wants;
+  // the skills are the fallback under it, not over it.
+  const named = scoreText("skill", "skill.ts");
+  assert.ok(named > KIND_NAME_SCORE, `${named} > ${KIND_NAME_SCORE}`);
+  // Even the weakest text tier wins.
+  assert.ok(scoreText("skill", "myskillfile") > KIND_NAME_SCORE);
+});
+
+test("a fragment too short to mean a group does not summon one", () => {
+  assert.equal(scoreKind("sk", "skill"), 0);
+  assert.equal(scoreKind("", "skill"), 0);
+  assert.equal(scoreKind("  ", "panel"), 0);
 });

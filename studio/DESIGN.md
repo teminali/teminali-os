@@ -461,7 +461,15 @@ Three consequences worth writing down:
 - **A shortcut wears the site's own favicon**, asked of the site itself at
   `/favicon.ico` and falling back to the derived mark when there is none. So do
   the rows of the recent list — a trail of coloured letters is a list you read,
-  a trail of favicons is one you recognise. This
+  a trail of favicons is one you recognise.
+- **One disc for every site mark**, in the grid and in the lists alike. The
+  grid holds sites and it holds "Add shortcut", and that cell has no hostname
+  to hash a colour from — so while each tile wore its own hue, the odd one out
+  was the button that is always there. The disc is the neutral chip
+  (`surface-chip` on `border-chrome`) everywhere, and the hue survives where it
+  still does work: the letter, for a site whose icon did not load. The rows are
+  `items-center`, not `items-baseline`: an image has no baseline, so a row
+  whose mark is a favicon sat a pixel off from every word beside it. This
   is a deliberate narrowing of the rule above, not a reversal of it: the site
   the operator bookmarked already knows they visit it, while the favicon
   service that was refused is a third party told the whole list at once. A page
@@ -493,6 +501,16 @@ https is refused without clearing the choice, and a favicon is only ever asked
 of the site itself.
 
 #### The recent list folds, and says when (2026-09-06, later)
+
+The fold is **two passes, because one page has more than one address.** By URL
+first, which collapses one navigation's title storm and keeps the title it
+ended with; then by that title *and host*, which collapses the same video
+listed four times, once per `&list=` and `&t=` the site appended while it
+played. The host is in the key because a title is not unique — two sites both
+have a "Home" and a "Sign in" — and an untitled page has only its address to be
+identified by. The newest address wins, so opening the row goes where the
+operator last was.
+
 
 Six identical rows — same title, same host, six ages — because a session spent
 watching four videos leaves the same sign-in page interleaved between them, and
@@ -627,6 +645,32 @@ cannot drift into offering different panels. They do **not** share
 the overflow button keeps its own open state. ⌘K and ⌘P still open the palette,
 and so does the chat's own workspace affordance.
 
+### The command palette is a list, not twenty cards (`modals/CommandPaletteModal.tsx`, 2026-09-06)
+
+The operator: *"this dialog has the worst design."* It was, and every fault in
+it is a rule in §1 or §2 being broken rather than a matter of taste:
+
+| It did | The rule |
+| --- | --- |
+| Every row a `lit` hairline box with `shadow-sm` | §1.2 — depth is a flat border, and a row is not a card to enclose |
+| A hand-rolled row of filter pills | §2 governance — `SegmentedTabs` exists |
+| Hand-rolled badge and shortcut chips | §2 — `Chip` and `Kbd` exist |
+| Uppercase mono category headers | §1.5 — a section label is sentence case, body size |
+| Four green glyphs per screen | §1.3 — the accent is a role, not a decoration |
+| A red `MacCloseButton` floating over the search field | §1.3 — red means destructive |
+| Its own fixed-position backdrop | §2 — `Modal` is the primitive, and it is what makes `role="dialog"` true |
+
+That last one was a bug, not only a duplication: the browser panel hides its
+view while a `[role="dialog"]` is open (`isOverlayOpen`), and a palette that
+was a bare `div` would have been painted over by any browser page behind it.
+
+The rows are 32px, flat, one line. The subtitle sits **beside** the title
+rather than under it, and the right-hand column carries only what is genuinely
+a column — the age, the shortcut, or the return arrow marking the row Enter
+opens. Agent rows used to put `workspace · timestamp` in a chip at the far
+right while the workspace was already the subtitle: the same fact twice, the
+second copy a hand's width from what it described.
+
 ### Right-click (`electron/contextMenu.cjs`, 2026-09-06)
 
 The operator: *"the editor does not have context menus, for copy and other
@@ -697,6 +741,15 @@ the scope tabs instant — they narrow what is *drawn* rather than searching
 again, so their counts are true rather than a promise about a search that has
 not run. Content search (the gateway walks the workspace) and the machine lane
 (a spawned process) keep their debounce and their abort.
+
+**A group answers for its members.** Typing "skill" found nothing, because no
+skill is *called* skill — the word is in none of their names, taglines or
+descriptions, and a search that fails the most obvious question asked of it is
+one nobody trusts with a harder one. `scoreKind` lets the section name match:
+"skill" lists the skills, "panel" the panels, "bookmark" the bookmarks. Only
+the small enumerable kinds — "file" would return six arbitrary files out of a
+thousand, which is noise wearing the shape of an answer — and it scores below
+the weakest text tier, so a file actually named `skill.ts` still wins.
 
 **The ranking is predictable, not fuzzy** (`utils/globalSearch.ts`). Four tiers
 — equal, prefix, word start, contains — and a length term small enough that it
@@ -1211,6 +1264,24 @@ toward it slightly when hovered. The earlier version also dodged, hopped and
 jumped away from a pointer that came close — charming once, and a control that
 runs from the click it exists to receive breaks the first rule of controls
 (§2, *no dead affordances*). Gone; `hoverMode` and `jumpOffset` with it.
+
+#### Nothing listens while idle, so the orb stopped saying it did (2026-09-06)
+
+The orb's badge read *Say "Hey Temy"* while the voice conversation was idle,
+and the operator reported it did not work. It could not: nothing holds the
+microphone open before a conversation starts, so the phrase reached no
+recogniser. Worse, `goToSleep` — the one-minute inactivity exit — said "just
+say 'Hey Temy' when you need me" and then called `stop()`, so the last thing
+Temy said before going deaf was an invitation to talk to her.
+
+Every idle-state promise is gone: the badge is "Tap to talk", the orb's title
+says what clicking does, and the sleep lines point at the orb. **The wake word
+itself stays**, because it is a different thing that does work — one of the
+signals in `services/voice/addressing.ts` that decides whether live speech was
+addressed to Temy rather than to someone else in the room or to a video the app
+is playing. Removing that would reopen the loopback problem; removing the
+badge only stops the app claiming a capability it does not have (§2, no dead
+affordances).
 
 ### Stopping a turn (`services/interruption.ts`, 2026-09-06)
 

@@ -84,7 +84,7 @@ export const AstraVoiceHud: React.FC<AstraVoiceHudProps> = ({
               )}
             </div>
             <div className="text-2xs text-ink-muted truncate max-w-[280px]">
-              {transcript || verdict?.reason || "Say \"Hey Temy\" or speak your instruction"}
+              {transcript || verdict?.reason || "Speak your instruction"}
             </div>
           </div>
         </div>

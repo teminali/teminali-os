@@ -352,7 +352,17 @@ const Mark: React.FC<{
    * round logo draws a ring around a ring.
    */
   plain?: boolean;
-}> = ({ url, size, round = false, icon = false, iconScale = 0.62, plain = false }) => {
+  /**
+   * One container for every tile, rather than one per site.
+   *
+   * The grid holds sites and it holds "Add shortcut", and that last cell has no
+   * hostname to hash a colour from. While each tile wore its own hue the odd
+   * one out was the *button* — the one cell that is always there. So the disc
+   * is the neutral chip everywhere and the hue survives where it is still
+   * doing work: the letter, for a site whose icon did not load.
+   */
+  neutral?: boolean;
+}> = ({ url, size, round = false, icon = false, iconScale = 0.62, plain = false, neutral = false }) => {
   const hue = siteHue(url);
   const favicon = icon ? faviconUrl(url) : null;
   // Keyed on the address: a tile whose bookmark is replaced must try again
@@ -371,8 +381,8 @@ const Mark: React.FC<{
         color: `hsl(${hue} 70% 72%)`,
         // Bare: no disc, no hairline. The letter keeps its hue, so a site
         // whose icon fails is still the same colour it is everywhere else.
-        background: plain ? "transparent" : `hsl(${hue} 45% 22%)`,
-        border: plain ? "none" : `1px solid hsl(${hue} 45% 32%)`,
+        background: plain ? "transparent" : neutral ? "var(--surface-chip)" : `hsl(${hue} 45% 22%)`,
+        border: plain ? "none" : neutral ? "1px solid var(--border-chrome)" : `1px solid hsl(${hue} 45% 32%)`,
       }}
     >
       {favicon && !failed ? (
@@ -415,7 +425,8 @@ const Tile: React.FC<{ url: string; title: string; onOpen: () => void; onRemove:
       title={`${title} — ${url}`}
       className="w-[104px] h-[104px] px-2 flex flex-col items-center justify-center gap-2.5 rounded-xl hover:bg-surface-hover transition-colors duration-ds ease-ds"
     >
-      <Mark url={url} size={44} round icon />
+      {/* The same disc the Add shortcut cell wears — see `neutral`. */}
+      <Mark url={url} size={44} round icon neutral iconScale={0.55} />
       <span className="w-full text-2xs text-ink-dim truncate text-center">{title}</span>
     </button>
     <IconButton
@@ -559,9 +570,9 @@ const Row: React.FC<{
 }> = ({ url, icon, title, meta, tone, onOpen, trailing }) => {
   const body = (
     <>
-      {/* The site's own icon here too. A trail of coloured letters is a list
-          you read; a trail of favicons is one you recognise. */}
-      {url ? <Mark url={url} size={20} icon /> : <span className="w-5 flex justify-center flex-shrink-0">{icon}</span>}
+      {/* The same disc the shortcuts wear, at row size: one container for
+          every site mark in the panel, whichever list it is in. */}
+      {url ? <Mark url={url} size={20} round icon neutral iconScale={0.6} /> : <span className="w-5 flex justify-center flex-shrink-0">{icon}</span>}
       <span className="text-xs text-ink-high truncate">{title}</span>
       <span className={`text-2xs truncate ${tone === "danger" ? "text-danger" : "text-ink-faint"}`}>{meta}</span>
     </>
@@ -573,12 +584,15 @@ const Row: React.FC<{
           type="button"
           onClick={onOpen}
           title={url}
-          className="flex-1 min-w-0 h-8 flex items-baseline gap-2.5 px-2 rounded-lg text-left hover:bg-surface-hover transition-colors duration-ds ease-ds"
+          // Centred, not baseline-aligned: an image has no baseline, so a row
+          // whose mark is a favicon and whose neighbours are text sat a pixel
+          // or two off from everything beside it.
+          className="flex-1 min-w-0 h-8 flex items-center gap-2.5 px-2 rounded-lg text-left hover:bg-surface-hover transition-colors duration-ds ease-ds"
         >
           {body}
         </button>
       ) : (
-        <div className="flex-1 min-w-0 h-8 flex items-baseline gap-2.5 px-2">{body}</div>
+        <div className="flex-1 min-w-0 h-8 flex items-center gap-2.5 px-2">{body}</div>
       )}
       <span className="flex-shrink-0 pr-1">{trailing}</span>
     </div>
@@ -590,7 +604,7 @@ const Progress: React.FC<{ download: { filename: string; received: number; total
   const fraction = download.total > 0 ? Math.min(1, download.received / download.total) : 0;
   return (
     <div className="px-2 py-1.5 flex flex-col gap-1.5">
-      <div className="flex items-baseline gap-2.5 min-w-0">
+      <div className="flex items-center gap-2.5 min-w-0">
         <Download size={13} className="text-ink-faint flex-shrink-0" />
         <span className="text-xs text-ink-high truncate">{download.filename}</span>
         <span className="text-2xs text-ink-faint truncate ml-auto tabular-nums">

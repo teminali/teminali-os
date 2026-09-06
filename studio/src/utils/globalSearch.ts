@@ -147,6 +147,37 @@ export const SECTIONS: readonly { kind: ResultKind; label: string }[] = [
 ];
 
 /**
+ * The kinds you can ask for by name, and what a match on the name is worth.
+ *
+ * Typing "skill" found nothing, because no skill is *called* skill — the word
+ * appears in none of their names, taglines or descriptions. That is a search
+ * failing at the most obvious question a person asks it, and the fix is to let
+ * the group answer for its members: "skill" lists the skills, "panel" lists
+ * the panels, "bookmark" lists the bookmarks.
+ *
+ * Only the small enumerable kinds. "File" would otherwise return six arbitrary
+ * files out of a thousand, which is noise wearing the shape of an answer, and
+ * the same goes for history and for anything the machine turned up.
+ *
+ * Worth less than the lowest text tier (`contains`, 400), so a real match on a
+ * name always wins: a file actually called `skill.ts` outranks the skills.
+ */
+export const KIND_BY_NAME = new Set<ResultKind>(["panel", "skill", "project", "bookmark", "download"]);
+export const KIND_NAME_SCORE = 300;
+
+/** What a query scores by naming the group rather than the thing. */
+export function scoreKind(query: string, kind: ResultKind): number {
+  if (!KIND_BY_NAME.has(kind)) return 0;
+  const label = SECTIONS.find((section) => section.kind === kind)?.label ?? "";
+  // The label is plural ("Panels"); the singular is what gets typed. A prefix
+  // in either direction is the same intention.
+  const needle = query.trim().toLowerCase();
+  if (needle.length < 3) return 0;
+  const name = label.toLowerCase();
+  return name.startsWith(needle) || needle.startsWith(name) || kind.startsWith(needle) ? KIND_NAME_SCORE : 0;
+}
+
+/**
  * Cut the ranked list into the sections that have anything in them.
  *
  * A section with no hits is not drawn at all rather than drawn empty: a

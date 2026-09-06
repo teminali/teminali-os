@@ -75,9 +75,17 @@ export interface RecentVisit {
  * list nobody reads, and it pushed the pages the operator actually wanted off
  * the bottom.
  *
- * So the display folds by address and keeps the newest, with the count beside
- * it. The stored history is untouched — this is a view of it, and the assistant
- * still reads every row.
+ * So the display folds and keeps the newest, with the count beside it. The
+ * stored history is untouched — this is a view of it, and the assistant still
+ * reads every row.
+ *
+ * **Two passes, because one page has more than one address.** Folding by URL
+ * alone leaves a video listed four times, once per `&list=`, `&t=` and
+ * whatever else the site appended while it played; folding by title alone
+ * would put two different sites' "Home" together. So: by address first, which
+ * collapses one navigation's title storm and keeps the title it ended with,
+ * then by that title and host, which collapses the same page reached by
+ * several addresses.
  */
 export function foldRecent(history: HistoryEntry[], limit: number): RecentVisit[] {
   const byUrl = new Map<string, RecentVisit>();
@@ -95,9 +103,45 @@ export function foldRecent(history: HistoryEntry[], limit: number): RecentVisit[
       seen.title = entry.title;
     }
   }
-  return [...byUrl.values()]
+
+  const byPage = new Map<string, RecentVisit>();
+  for (const visit of byUrl.values()) {
+    const key = pageKey(visit);
+    const seen = byPage.get(key);
+    if (!seen) {
+      byPage.set(key, visit);
+      continue;
+    }
+    seen.visits += visit.visits;
+    // The newest address wins, so opening the row goes where the operator last
+    // was rather than to the first form of the link they happened to follow.
+    if (visit.visitedAt > seen.visitedAt) {
+      seen.visitedAt = visit.visitedAt;
+      seen.url = visit.url;
+      seen.title = visit.title;
+    }
+  }
+
+  return [...byPage.values()]
     .sort((a, b) => (a.visitedAt < b.visitedAt ? 1 : a.visitedAt > b.visitedAt ? -1 : 0))
     .slice(0, limit);
+}
+
+/**
+ * What makes two rows the same page: its title, on its host.
+ *
+ * The host is part of it because a title is not unique — two sites both have a
+ * "Home" and a "Sign in", and folding those together would claim the operator
+ * had been somewhere they had not. An untitled page has only its address to be
+ * identified by.
+ */
+function pageKey(visit: RecentVisit): string {
+  if (!visit.title.trim()) return visit.url;
+  try {
+    return `${visit.title}\n${new URL(visit.url).host}`;
+  } catch {
+    return visit.url;
+  }
 }
 
 /**

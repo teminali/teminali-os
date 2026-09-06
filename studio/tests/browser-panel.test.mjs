@@ -188,3 +188,34 @@ test("a visit falls under today, yesterday, or earlier", () => {
   // A row whose stamp is unreadable is old, not a crash.
   assert.equal(visitDay("not a date", now), "Earlier");
 });
+
+test("one page reached by several addresses is one row", () => {
+  // A video collects `&list=` and `&t=` while it plays; every one of those is
+  // a different address for the page the operator would call one thing.
+  const history = [
+    { url: "https://www.youtube.com/watch?v=1&list=RD1", title: "Chubina - YouTube", visitedAt: "2026-09-06T12:00:00.000Z" },
+    { url: "https://www.youtube.com/watch?v=1", title: "Chubina - YouTube", visitedAt: "2026-09-06T11:00:00.000Z" },
+    { url: "https://www.youtube.com/watch?v=1&t=42", title: "Chubina - YouTube", visitedAt: "2026-09-06T10:00:00.000Z" },
+  ];
+  const folded = foldRecent(history, 10);
+  assert.equal(folded.length, 1);
+  assert.equal(folded[0].visits, 3);
+  // Opening it goes where they last were, not to the first form of the link.
+  assert.equal(folded[0].url, "https://www.youtube.com/watch?v=1&list=RD1");
+});
+
+test("the same title on two hosts is two pages", () => {
+  const history = [
+    { url: "https://a.example/", title: "Sign in", visitedAt: "2026-09-06T12:00:00.000Z" },
+    { url: "https://b.example/", title: "Sign in", visitedAt: "2026-09-06T11:00:00.000Z" },
+  ];
+  assert.equal(foldRecent(history, 10).length, 2);
+});
+
+test("an untitled page is identified by its address alone", () => {
+  const history = [
+    { url: "https://a.example/one", title: "", visitedAt: "2026-09-06T12:00:00.000Z" },
+    { url: "https://a.example/two", title: "", visitedAt: "2026-09-06T11:00:00.000Z" },
+  ];
+  assert.equal(foldRecent(history, 10).length, 2);
+});

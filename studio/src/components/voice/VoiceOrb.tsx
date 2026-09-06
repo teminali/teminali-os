@@ -543,9 +543,11 @@ export const VoiceOrb: React.FC<VoiceOrbProps> = ({
       : isHearing
         ? "Temy is hearing you"
         : isListening
-          ? 'Temy is listening — say "Hey Temy"'
+          ? "Temy is listening"
           : "Temy is working on your request…"
-    : 'Say "Hey Temy" or click to start voice conversation';
+    // Not "say Hey Temy": nothing is listening yet, and an orb that invites a
+    // phrase no microphone can hear is a control that does nothing.
+    : "Click to start a voice conversation";
 
   // The thinking arc sits just outside the body
   const ringInset = -Math.round(size * 0.09);
