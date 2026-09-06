@@ -46,6 +46,11 @@ export const AGENT_LIMITS = Object.freeze({
   maxOutputBytes: 32 * 1024 * 1024,
   timeoutMs: 30 * 60_000,
   killGraceMs: 3_000,
+  /**
+   * How long after the agent process EXITS the turn waits for its pipes to
+   * close before ending anyway. See the `exit` handler in `runAgentTurn`.
+   */
+  exitGraceMs: 1_500,
 });
 
 export const AGENTS = Object.freeze({
@@ -692,7 +697,32 @@ export function runAgentTurn(options) {
       finish(missing ? "AGENT_NOT_INSTALLED" : "AGENT_SPAWN_FAILED");
     });
 
+    /*
+      `close` fires when the process has exited AND every pipe has drained
+      and shut — and a pipe outlives the process when a grandchild inherited
+      it. An MCP server the agent spawned and did not take down holds the
+      agent's stderr open for as long as it lives; the agent is gone, the
+      transcript has its answer, and the panel says "Working" until that
+      orphan dies. Operators reported exactly that on 0.0.2: a spinner that
+      never resolved with no `claude` process left to point at.
+
+      So `exit` starts a short clock. Whatever the pipes still hold arrives
+      inside it or is not coming; then the streams are destroyed, which is
+      what makes `close` fire, and the handler below ends the turn the way
+      it always has.
+    */
+    let exitGrace = null;
+    child.on("exit", () => {
+      if (settled) return;
+      exitGrace = setTimeout(() => {
+        if (settled) return;
+        child.stdout?.destroy();
+        child.stderr?.destroy();
+      }, AGENT_LIMITS.exitGraceMs);
+    });
+
     child.on("close", (code) => {
+      if (exitGrace) clearTimeout(exitGrace);
       if (buffer.trim()) consumeLine(buffer);
       signal?.removeEventListener("abort", onAbort);
       // A non-zero exit with no result event of its own still has to reach the

@@ -453,3 +453,41 @@ test("a turn with no workspace root watches nothing rather than guessing a path"
   });
   assert.equal(events.some((event) => event.type === "edit"), false);
 });
+
+/* ── The turn ends with the process, not with its pipes ─────────────────── */
+
+test("a turn ends when the agent exits, even while a grandchild holds its pipes open", async () => {
+  /*
+    The fake agent answers, spawns a detached child that INHERITS its stdio —
+    an MCP server it never took down — and exits. `close` on the agent cannot
+    fire until that child lets go of the pipes, six seconds later; the turn
+    has to end well before that, on `exit` plus the grace period.
+  */
+  const file = join(root, `fake-${randomUUID()}.mjs`);
+  const answer = JSON.stringify({
+    type: "result", subtype: "success", is_error: false, duration_ms: 3, total_cost_usd: 0,
+    session_id: "sess-orphan", usage: { output_tokens: 1 }, result: "done", permission_denials: [],
+  });
+  writeFileSync(
+    file,
+    `#!${process.execPath}
+import { spawn } from "node:child_process";
+process.stdout.write(${JSON.stringify(`${answer}\n`)});
+const orphan = spawn(process.execPath, ["-e", "setTimeout(() => {}, 6000)"], { stdio: "inherit", detached: true });
+orphan.unref();
+process.exit(0);
+`,
+    { mode: 0o755 },
+  );
+
+  const started = Date.now();
+  const events = [];
+  const outcome = await runAgentTurn({
+    engine: "claude", prompt: "test", root, bin: file, onEvent: (event) => events.push(event),
+  });
+  const elapsed = Date.now() - started;
+
+  assert.ok(elapsed < 4_000, `the turn waited ${elapsed} ms for an orphan's pipes`);
+  assert.equal(outcome.reason, null);
+  assert.equal(events.find((e) => e.type === "result")?.ok, true);
+});

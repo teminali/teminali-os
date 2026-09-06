@@ -245,6 +245,10 @@ export class AgentCliService {
     const reader = response.body.getReader();
     const decoder = new TextDecoder();
     let buffer = "";
+    // `done` is the gateway's last word on a turn. The loop below stops on it
+    // rather than on the socket closing, so a response the gateway holds open
+    // past that point — or never gets to end — cannot leave the turn spinning.
+    let finished = false;
 
     const consume = (line: string) => {
       const trimmed = line.trim();
@@ -321,6 +325,7 @@ export class AgentCliService {
           }
           durationMs = durationMs || event.durationMs;
           sessionId = event.sessionId ?? sessionId;
+          finished = true;
           break;
         default:
           break;
@@ -329,6 +334,10 @@ export class AgentCliService {
 
     try {
       for (;;) {
+        if (finished) {
+          void reader.cancel().catch(() => {});
+          break;
+        }
         const { done, value } = await reader.read();
         if (done) break;
         buffer += decoder.decode(value, { stream: true });
@@ -339,7 +348,7 @@ export class AgentCliService {
           index = buffer.indexOf("\n");
         }
       }
-      if (buffer.trim()) consume(buffer);
+      if (!finished && buffer.trim()) consume(buffer);
     } finally {
       reader.releaseLock();
     }
