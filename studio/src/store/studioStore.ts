@@ -1,9 +1,30 @@
 import { create } from "zustand";
 import { persist, createJSONStorage } from "zustand/middleware";
+import { applySessionSwitch } from "../utils/chatSessions";
 import { ModelProfileId, ModelProfile, SpecialistSkill, EditorTab, FileItem, ChatMessage, ToolCall } from "../types";
 import { purgeOllamaMemory } from "../services/aiService";
 import { findTabByFileIdentity } from "./tabIdentity";
 import { DEFAULT_EXPANDED_PATHS, expandForReveal, toggleExpansion } from "./treeExpansion";
+
+/**
+ * The two halves of a chat switch, in the shape `set` wants them.
+ *
+ * `applySessionSwitch` holds the rule and `tests/chat-sessions.test.mjs` pins
+ * it; this only adapts it to the store's field names, so the three places that
+ * navigate between chats cannot drift apart.
+ */
+function swap(
+  state: { chatSessions: ChatSession[]; activeSessionId: string; frontierMessages: ChatMessage[] },
+  toId: string,
+): { chatSessions: ChatSession[]; frontierMessages: ChatMessage[] } {
+  const { sessions, messages } = applySessionSwitch(
+    state.chatSessions,
+    state.activeSessionId,
+    toId,
+    state.frontierMessages,
+  );
+  return { chatSessions: sessions, frontierMessages: messages };
+}
 
 export interface ChatSession {
   id: string;
@@ -243,6 +264,8 @@ interface StudioState {
   chatSessions: ChatSession[];
   activeSessionId: string;
   switchSession: (sessionId: string) => void;
+  /** Start a new conversation in the current workspace and switch to it. */
+  newChatSession: () => void;
   /**
    * Where you have been, so the title bar's arrows can take you back.
    *
@@ -571,28 +594,25 @@ export const useStudioStore = create<StudioState>()(
         });
       },
       
+      /*
+        One real conversation, not three invented ones.
+
+        This used to boot with "Project analysis & Landing page", "Coffee shop
+        website build" and "General architecture & UI exploration" — titles of
+        work nobody in this app had done, each with an empty `messages` array.
+        They were the same fiction the fourteen seeded editor tabs were, and
+        they were worse than decorative: clicking one moved the highlight and
+        left the transcript alone, so the sidebar taught the operator that its
+        rows do nothing. `newChatSession` is how the list grows now.
+      */
       chatSessions: [
         {
           id: "session-1",
-          title: "Project analysis & Landing page",
-          workspace: "teminali",
-          timestamp: "Just now",
+          title: "New chat",
+          workspace: "No Repo",
+          timestamp: new Date().toISOString(),
           messages: [],
         },
-        {
-          id: "session-2",
-          title: "Coffee shop website build",
-          workspace: "teminali",
-          timestamp: "2h ago",
-          messages: [],
-        },
-        {
-          id: "session-3",
-          title: "General architecture & UI exploration",
-          workspace: "Home",
-          timestamp: "1d ago",
-          messages: [],
-        }
       ],
       activeSessionId: "session-1",
       sessionHistory: [],
@@ -616,12 +636,55 @@ export const useStudioStore = create<StudioState>()(
         const truncated = seeded.slice(0, state.sessionHistory.length === 0 ? seeded.length : state.sessionHistoryIndex + 1);
         const history = [...truncated, sessionId].slice(-50);
 
-        const session = state.chatSessions.find((entry) => entry.id === sessionId);
         set({
           activeSessionId: sessionId,
           sessionHistory: history,
           sessionHistoryIndex: history.length - 1,
-          ...(session?.messages?.length ? { frontierMessages: session.messages } : {}),
+          /*
+            Both halves, and the second one unconditionally.
+
+            This used to load the incoming session's messages only when it had
+            some — so switching to a chat you had not written in yet left the
+            previous conversation on screen, and the only thing that changed
+            was which row was highlighted. Reported as clicking a chat and
+            nothing happening, which is exactly what it looked like. An empty
+            session is a real answer: it is a conversation you have not started.
+
+            And nothing wrote the outgoing conversation back, so a switch away
+            discarded it. Saving on the way out is what makes these rows a
+            history rather than three labels over one transcript.
+          */
+          ...swap(state, sessionId),
+        });
+      },
+
+      /**
+       * A new conversation, in the repository the operator is standing in.
+       *
+       * The sidebar groups chats by `workspace`, so a new one has to be
+       * stamped with the current root's folder name or it lands under
+       * "No Repo" — the group for chats whose repository is gone.
+       */
+      newChatSession: () => {
+        const state = get();
+        const workspace = state.workspacePath.split("/").filter(Boolean).pop() || "No Repo";
+        const session: ChatSession = {
+          id: `session-${Date.now().toString(36)}`,
+          title: "New chat",
+          workspace,
+          timestamp: new Date().toISOString(),
+          messages: [],
+        };
+        set({
+          chatSessions: [
+            session,
+            // The one being left keeps what was said in it.
+            ...state.chatSessions.map((entry) =>
+              entry.id === state.activeSessionId ? { ...entry, messages: state.frontierMessages } : entry,
+            ),
+          ],
+          activeSessionId: session.id,
+          frontierMessages: [],
         });
       },
 
@@ -631,11 +694,12 @@ export const useStudioStore = create<StudioState>()(
         const target = state.sessionHistoryIndex - 1;
         const sessionId = state.sessionHistory[target];
         if (target < 0 || !sessionId) return;
-        const session = state.chatSessions.find((entry) => entry.id === sessionId);
         set({
           activeSessionId: sessionId,
           sessionHistoryIndex: target,
-          ...(session?.messages?.length ? { frontierMessages: session.messages } : {}),
+          // Same rule as `switchSession`: save the one being left, load the
+          // one being entered even when it is empty.
+          ...swap(state, sessionId),
         });
       },
 
@@ -644,11 +708,12 @@ export const useStudioStore = create<StudioState>()(
         const target = state.sessionHistoryIndex + 1;
         const sessionId = state.sessionHistory[target];
         if (!sessionId) return;
-        const session = state.chatSessions.find((entry) => entry.id === sessionId);
         set({
           activeSessionId: sessionId,
           sessionHistoryIndex: target,
-          ...(session?.messages?.length ? { frontierMessages: session.messages } : {}),
+          // Same rule as `switchSession`: save the one being left, load the
+          // one being entered even when it is empty.
+          ...swap(state, sessionId),
         });
       },
       frontierMessages: [

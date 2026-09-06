@@ -69,7 +69,7 @@ export const FileTreeItem: React.FC<{
   onError?: (message: string) => void;
 }> = ({ item, depth = 0, filter = "", onError }) => {
   const [isLoading, setIsLoading] = useState(false);
-  const { openFile, tabs, activeTabId, expandedPaths, toggleExpanded, revealTarget, clearRevealTarget } = useStudioStore();
+  const { showFile, tabs, activeTabId, expandedPaths, toggleExpanded, revealTarget, clearRevealTarget } = useStudioStore();
   const isOpen = expandedPaths.has(item.path);
   const rowRef = useRef<HTMLButtonElement>(null);
   const activeTab = tabs.find((tab) => tab.id === activeTabId);
@@ -121,8 +121,17 @@ export const FileTreeItem: React.FC<{
     setIsLoading(true);
     onError?.("");
     try {
-      const file = await WorkspaceService.readFile(item.path);
-      openFile({ ...file, language: languageFor(file.name) });
+      /*
+        `showFile` rather than `openFile`, which is what this used to call.
+        `openFile` adds an editor tab and nothing else, so clicking a file
+        while the video editor or the browser held the right-hand side put the
+        file in a panel that was not on screen: the row highlighted, a tab
+        appeared somewhere invisible, and to the operator the click did
+        nothing. `showFile` brings the file panel forward first and then opens
+        the tab — the same route the agent's `open_file` takes, which is the
+        point: a clicked file and an agent-opened one are the same file.
+      */
+      await showFile(item.path);
     } catch (error) {
       onError?.(error instanceof Error ? error.message : "The file could not be opened.");
     } finally {

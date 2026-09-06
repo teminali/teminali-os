@@ -410,6 +410,51 @@ forwarding the callbacks and the chat supplying them — because either alone is
 still silence. `ArenaPane` remains deliberately unsubscribed: its contestants
 work in sandboxes and must not move the operator's tree.
 
+### Every row in the sidebar does something (`sidebar/StudioSidebar.tsx`, `sidebar/FileTree.tsx`, 2026-09-06)
+
+The operator, with the whole repository list circled: *"I do not know if these
+on the sidebar are chats or what, but all I know when I click on them nothing
+happens. Also clicking on the files has to open them on the right file pane."*
+Four separate dead clicks, one cause each.
+
+**A repository row had no `onClick`.** It could not have had one: `repositories`
+was reduced to a list of *names*, so the row had no path to open. It carries the
+`ProjectEntry` now, from the same `useProjectLibrary` the composer's recents row
+and My Projects read, and opens the project the way `ProjectsPanel` does —
+video projects bring the editor up first, because the load reports through the
+video pane's own toasts. A group with no project behind it (chats stamped with a
+repository that is no longer in the list) stays a heading and is not pressable,
+which is the honest shape rather than a fifth dead row.
+
+**The Filter and Open-a-project buttons had no handlers.** Filter is real now;
+it matches a repository on its own name *or* on any chat filed under it, because
+filtering a tree by the branch alone hides the thing being looked for. The
+second is a **New chat** button, which is what the panel actually lacked.
+
+**A chat row moved the highlight and left the transcript alone.**
+`switchSession` loaded the incoming session's messages only when it had some, so
+opening an empty chat kept the previous conversation on screen; and nothing
+wrote the outgoing one back, so leaving a chat discarded it. Both rules are
+`utils/chatSessions.ts#applySessionSwitch` now — pure, shared by `switchSession`
+and both history arrows so they cannot drift, and pinned by
+`tests/chat-sessions.test.mjs` (3). An empty session is a real answer: it is a
+conversation nobody has started.
+
+**And the three chats were invented.** "Project analysis & Landing page",
+"Coffee shop website build", "General architecture & UI exploration" — titles of
+work nobody in this app had done, each with an empty `messages` array. The same
+fiction the fourteen seeded editor tabs were, and worse than decorative: they
+taught the operator that the panel's rows do nothing. The seed is one real
+"New chat" now and `newChatSession` is how the list grows, stamping each new
+conversation with the current root's folder name so it lands under its
+repository rather than under "No Repo".
+
+**A clicked file is the same file the agent opens.** `FileTree` called
+`openFile`, which adds an editor tab and nothing else — so clicking a file while
+the video editor or the browser held the right-hand side put it in a panel that
+was not on screen. It calls `showFile` now, the same route `mcp__teminali-workspace__open_file`
+takes: the panel first and unconditionally, then the tab.
+
 ### Showing a file is its own action (`store/studioStore.ts` — `showFile`)
 
 `reveal` scrolls the tree and `openFile` records which file is current. Neither
