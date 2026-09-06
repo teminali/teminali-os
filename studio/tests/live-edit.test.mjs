@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { parseWorkspaceEdits } from "../src/services/liveEditProtocol.ts";
+import { isTruncatingRewrite, parseWorkspaceEdits } from "../src/services/liveEditProtocol.ts";
 
 test("live edit parses explicit streamed and complete workspace file blocks", () => {
   const streamed = parseWorkspaceEdits('Working…\n```frontier-file path="src/App.tsx"\nexport const ready = tr');
@@ -84,4 +84,27 @@ test("an explicit path always wins over scaffold inference", () => {
     parseWorkspaceEdits('```html path="public/landing.html"\n<main></main>\n```', { userPrompt: "build the landing page" }),
     [{ path: "public/landing.html", content: "<main></main>\n", complete: true }],
   );
+});
+
+test("live edit refuses a path block that holds a fragment of a long file", () => {
+  // The shape the local lane actually produces: asked to change one default in
+  // an 812-line file it has seen one line of, it answers with a two-line path
+  // block. Committing that deletes 810 lines, so the applier must not.
+  const long = Array.from({ length: 812 }, (_, i) => `const line${i} = ${i};`).join("\n");
+  assert.equal(isTruncatingRewrite(long, "  port: Number(process.env.PORT ?? 4310),\n"), true);
+
+  // The same file rewritten in full is an edit, not a truncation.
+  assert.equal(isTruncatingRewrite(long, long.replace("line3 = 3", "line3 = 4310")), false);
+});
+
+test("live edit lets a short file be rewritten, and a long one be halved", () => {
+  // Below the floor "rewrite the whole thing" is an ordinary request, and the
+  // model can hold the file in its window, so nothing is refused.
+  const short = Array.from({ length: 24 }, (_, i) => `line ${i}`).join("\n");
+  assert.equal(isTruncatingRewrite(short, "line 0"), false);
+
+  // At the cut itself: keeping half of a long file is allowed, one line less is not.
+  const long = Array.from({ length: 100 }, (_, i) => `line ${i}`).join("\n");
+  assert.equal(isTruncatingRewrite(long, Array.from({ length: 50 }, (_, i) => `line ${i}`).join("\n")), false);
+  assert.equal(isTruncatingRewrite(long, Array.from({ length: 49 }, (_, i) => `line ${i}`).join("\n")), true);
 });

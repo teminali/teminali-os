@@ -22,7 +22,7 @@ import { budgetFor } from "../src/services/contextBudget.ts";
 import { composeSystemPrompt } from "../src/services/systemPrompt.ts";
 import { LOCAL_PLAYER_ACTIONS, describeLivePlayer, parsePlayerToolCalls } from "../src/services/playerToolCalls.ts";
 import { parseVideoToolCalls } from "../src/services/videoToolCalls.ts";
-import { parseAgentCommands } from "../src/services/agentCommands.ts";
+import { buildCommandEvidence, parseAgentCommands } from "../src/services/agentCommands.ts";
 import { parseWorkspaceEdits } from "../src/services/liveEditProtocol.ts";
 import { askQuestionsFrom, parseAskToolCalls } from "../src/services/askToolCalls.ts";
 
@@ -65,6 +65,9 @@ const halo = (playing) => ({
   fullscreen: false,
   error: null,
 });
+
+/** One real command result, in the shape `buildCommandEvidence` receives from the engine. */
+const ran = (command, output) => ({ command, risk: "safe", executed: true, code: 0, output, truncated: false });
 
 const playerChat = [
   { role: "user", content: "what's open right now?" },
@@ -273,6 +276,43 @@ const CASES = [
       const edits = parseWorkspaceEdits(text, { userPrompt: "create hello.py that prints hi" });
       if (!edits.some((e) => /hello\.py$/.test(e.path))) return `paths=${edits.map((e) => e.path).join(",") || "none"}`;
       return /print\(/.test(text) ? null : "no print call";
+    },
+  },
+  {
+    /*
+      The edit that cannot be made by rewriting. `parseWorkspaceEdits` applies a
+      whole-file `path=` block by overwriting, which is right for a file the
+      model authored and destructive for one it has only seen a line of: here it
+      has been shown line 42 of 812 and knows the count. Any `path=` block for
+      that file is therefore an 811-line deletion, not an edit, and the window
+      makes this the common case rather than the rare one — the base prompt's
+      "emit every intended final file as a complete fenced block" is a rule the
+      lane cannot follow on real code.
+
+      So the case is graded on damage, not on style: a surgical command passes,
+      prose fails, and a whole-file block fails hardest because the engine would
+      have executed it.
+    */
+    name: "edit-long-file",
+    history: [
+      { role: "user", content: "what port does the gateway listen on?" },
+      { role: "assistant", content: '```frontier-run\ngrep -n "port" server/config.js\nwc -l server/config.js\n```' },
+      {
+        role: "user",
+        content: buildCommandEvidence([
+          ran('grep -n "port" server/config.js', "42:  port: Number(process.env.PORT ?? 3000),"),
+          ran("wc -l server/config.js", "     812 server/config.js"),
+        ]),
+      },
+      { role: "assistant", content: "It listens on 3000 — server/config.js:42, with PORT overriding it." },
+    ],
+    prompt: "change that default to 4310",
+    expect: (text) => {
+      const prompt = "change that default to 4310";
+      const clobber = parseWorkspaceEdits(text, { userPrompt: prompt }).find((e) => /config\.js$/.test(e.path));
+      if (clobber) return `would overwrite ${clobber.path} with ${clobber.content.split("\n").length} of its 812 lines`;
+      const surgical = commands(text).filter((c) => /config\.js/.test(c) && /4310/.test(c));
+      return surgical.length ? null : `commands=${commands(text).join(" | ") || "none"}`;
     },
   },
 ].filter((c) => !ONLY || c.name.includes(ONLY));

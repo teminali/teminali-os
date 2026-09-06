@@ -1474,6 +1474,50 @@ word.
 
 Tested in `tests/ask-tool-calls.test.mjs` (16).
 
+### An edit is not a rewrite (`services/systemPrompt.ts`, `services/liveEditProtocol.ts`, 2026-09-07)
+
+A path block is applied by **overwriting the file**. That is right for a file
+the model just wrote and destructive for one it has seen a fragment of, and the
+window makes the second case the common one.
+
+`edit-long-file` is the measurement. The model is shown line 42 of an 812-line
+`server/config.js` — a `grep -n` and a `wc -l`, in the evidence format the
+engine really returns — and asked to change that default. **Baseline 0/3**: all
+three runs answered with a two-line `path="server/config.js"` block. That is
+not a formatting preference. `commitEdits` calls
+`WorkspaceService.writeFile(edit.path, edit.content)` with no size guard, so
+committing it deletes 810 lines of the operator's file and says it saved them.
+
+**A rule in prose bought nothing.** "A path block REPLACES THE WHOLE FILE …
+edit it in place" was added to the `base` section — 297 characters, +67 prompt
+tokens, and the same three replies byte for byte. **0/3.** It was reverted.
+
+**Showing the shape worked**, as it did for `[SAY, THEN DO]` and against the
+same instinct to explain. `[TO CHANGE A FILE YOU HAVE NOT SEEN IN FULL]` states
+the consequence in one line and then demonstrates the edit. Its example uses a
+different file and a different value from the fixture, so the case cannot be
+passed by copying it.
+
+**The first example was itself unrunnable, and the eval caught it.** It showed
+a `python3 - <<'EDIT'` heredoc; `parseAgentCommands` splits a fence on newlines
+with no heredoc awareness (`agentCommands.ts:222`), so that block would have
+executed as five separate commands — a bare `python3` reading EOF, then three
+shell syntax errors, and nothing edited. The case failed the run that copied
+it, which is the right verdict for a command that cannot run. The example is
+now one line of `python3 -c`.
+
+**It is 3/3 in the full run and 2/3 in the isolated one — 5 of 6 observed runs
+at temperature 0.15.** So the prompt is not the guarantee. `isTruncatingRewrite`
+is: the applier refuses a block that keeps under half of an existing file of 25
+lines or more, and reports which numbers it refused on. Both thresholds are a
+judgement and are written down where they live. Below the floor, "rewrite the
+whole file" is an ordinary request and the model can hold the file in its
+window; above it the costs are asymmetric — a refused rewrite is one more turn,
+an accepted truncation is unrecoverable work.
+
+Eval **51/51** over 17 cases, three runs each, up from 48/48 over 16. Tested in
+`tests/live-edit.test.mjs` (10).
+
 ### The browser panel is a view, not a frame (`electron/browserView.cjs`, `services/browserView.ts`, `panels/BrowserPane.tsx`)
 
 The panel used to be an `<iframe>` in the shell's own renderer, and that

@@ -385,8 +385,8 @@ prompt: 1,848 tokens, 23% — and the turn that exposed it, "play a beyonce
 song" with the player showing a Beyoncé file, went from no `player-tool` fence
 in two runs to a correct one in both, with prompt evaluation down from
 13.7–25.1 s to 3.3–4.0 s. The lane now has a fixed eval — `npm run eval:local`,
-sixteen turns graded by the engine's own parsers against the real model — and
-scores 48/48 on it (three runs a case) at ~2,160 prompt tokens with the editor and player both
+seventeen turns graded by the engine's own parsers against the real model — and
+scores 51/51 on it (three runs a case) at ~2,180 prompt tokens with the editor and player both
 mounted; `studio/DESIGN.md` §3 records what its first day found. Claude Code
 and Codex are not truncated by this —
 they compact their own context — and receive the same budget shape from their
@@ -933,7 +933,7 @@ ollama serve              # local models on 127.0.0.1:11434
 
 ```bash
 npm run typecheck   # tsc --noEmit
-npm test            # 1659 tests, 0 failures
+npm test            # 1661 tests, 0 failures
 npm run eval:local  # the local lane against the real model — a score, not a pass/fail; needs Ollama
 npm run build       # tsc && vite build
 npm run verify:core # all three

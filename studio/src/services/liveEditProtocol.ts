@@ -72,3 +72,26 @@ export function parseWorkspaceEdits(text: string, options: { activePath?: string
   }
   return [];
 }
+
+/**
+ * Whether committing `next` over `base` would be a truncation rather than an edit.
+ *
+ * A path block is applied by overwriting the whole file, and on the local lane
+ * the model routinely emits one holding the single line it means to change: the
+ * eval case `edit-long-file` measured a two-line block aimed at an 812-line file
+ * in three runs of three, and still one in three after the prompt was taught to
+ * edit in place. A prompt cannot carry a guarantee this expensive to lose, so
+ * the applier refuses the write instead.
+ *
+ * The two numbers are a judgement and are therefore written down. Twenty-five
+ * lines is the floor because below it "rewrite this whole file" is a normal
+ * request and the model can hold the file in its window. Half is the cut
+ * because a genuine rewrite that keeps under half of a file this size is rarer
+ * on this lane than a truncation, and the cost is asymmetric: a refused rewrite
+ * is one more turn, an accepted truncation is unrecoverable work.
+ */
+export function isTruncatingRewrite(base: string, next: string): boolean {
+  const baseLines = base.split("\n").length;
+  const nextLines = next.split("\n").length;
+  return baseLines >= 25 && nextLines * 2 < baseLines;
+}

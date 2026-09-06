@@ -1,6 +1,6 @@
 import { GatewayError } from "./gatewayClient";
 import { WorkspaceService, type WorkspaceFileResponse } from "./workspaceService";
-import { parseWorkspaceEdits, type ParsedWorkspaceEdit } from "./liveEditProtocol";
+import { isTruncatingRewrite, parseWorkspaceEdits, type ParsedWorkspaceEdit } from "./liveEditProtocol";
 export { parseWorkspaceEdits } from "./liveEditProtocol";
 
 export type LiveEditPhase = "idle" | "streaming" | "committing" | "complete" | "stopped" | "error";
@@ -188,6 +188,20 @@ class CopilotLiveEditService {
       }
       try {
         const base = await this.readBase(edit.path);
+        // A path block overwrites, so a fragment in one is a deletion of every
+        // line it left out. Refusing costs a turn; committing costs the file.
+        if (base && isTruncatingRewrite(base.content, edit.content)) {
+          const kept = edit.content.split("\n").length;
+          const had = base.content.split("\n").length;
+          this.fail(
+            requestId,
+            edit.path,
+            new Error(
+              `Refused to overwrite ${edit.path}: that block holds ${kept} of its ${had} lines, so committing it would delete the rest. Edit the file in place instead.`,
+            ),
+          );
+          continue;
+        }
         const following = !this.stoppedRequests.has(requestId);
         this.clearTimer();
         this.targetContent = edit.content;

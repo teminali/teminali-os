@@ -120,6 +120,27 @@ You have live network access through \`\`\`frontier-run. Real-time data — pric
     action. So the example now shows the whole shape, sentence and fence in
     one reply, and the rule says outright which of the two is the work.
   */
+  /*
+    Prose did not move this. "A path block replaces the whole file, use
+    frontier-run instead" was added to `base` and measured at 0/3 — the same
+    three replies, byte for byte. What the `ask` block learned applies here:
+    show the shape. The example is deliberately a different file and a
+    different value from the eval's fixture, so `edit-long-file` cannot be
+    passed by copying it.
+
+    It is one line because `parseAgentCommands` splits a fence on newlines with
+    no heredoc awareness (agentCommands.ts:222), so the `python3 - <<'EDIT'`
+    form this block first showed would have been executed as five separate
+    commands: a bare `python3` reading EOF, then three shell syntax errors, and
+    nothing edited. The eval caught it — `edit-long-file` failed the run that
+    used a heredoc, which is the right verdict for a command that cannot run.
+  */
+  const editInPlaceInstruction = `\n\n[TO CHANGE A FILE YOU HAVE NOT SEEN IN FULL]
+A path block replaces the file entirely, so one holding a fragment deletes every line you left out. Creating the file, or hold all of it? Path block. Otherwise edit in place, one command on one line:
+\`\`\`frontier-run
+python3 -c "import pathlib; p = pathlib.Path('app/settings.py'); p.write_text(p.read_text().replace('timeout = 30', 'timeout = 90'))"
+\`\`\``;
+
   const stepExplanationInstruction = `\n\n[SAY, THEN DO — IN THE SAME REPLY]
 Before a \`\`\`frontier-run, \`\`\`video-tool or \`\`\`player-tool fence, or a file block, say what you are doing in one short plain sentence, then emit the fence immediately after it in the same reply. The sentence is narration; the fence is the action. A reply that says "I'm pausing it" or "I'll fetch the price" and contains no fence has done nothing. Shape:
 I'm checking which branch this is.
@@ -218,6 +239,7 @@ Two sensible ways to go here, and it is your call.
       { name: "transcript", required: true, text: transcriptInstruction },
       { name: "skill", text: input.skillInstruction },
       { name: "player", required: true, text: playerInstruction },
+      { name: "edit-in-place", text: editInPlaceInstruction },
       { name: "editor", text: editorInstruction },
       { name: "doctrine", text: DiligenceEngine.doctrine() },
       { name: "live-data", text: liveDataInstruction },
