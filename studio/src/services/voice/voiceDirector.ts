@@ -33,6 +33,8 @@ export class VoiceDirector {
   private streamedChunkCount = 0;
   private isAborted = false;
   private isFinished = false;
+  /** Tool calls whose completion has already opened a fresh step. */
+  private readonly stepsOpened = new Set<string>();
 
   constructor(options: VoiceDirectorOptions) {
     this.options = options;
@@ -112,7 +114,34 @@ export class VoiceDirector {
    */
   public onToolCall(call: NarratableToolCall): string | null {
     if (this.isAborted) return null;
+    if (call.status !== "running") this.beginStep(call.id);
     return describeToolCall(call);
+  }
+
+  /**
+   * A step finished, so the tokens that follow are the model's account of what
+   * it just found — the most useful thing it will say, and the thing the
+   * operator was waiting through the silence for.
+   *
+   * `maxStreamedChunks` is a policy for *one reply*: speak the opening
+   * sentences, hold the rest, sum it up at the end (`spokenDigest.ts`). An
+   * agentic run is not one reply, it is a sequence of them, and spending the
+   * whole budget on the first step left the operator with three sentences and
+   * then a minute of silence while six tool calls came and went — *"it started
+   * to talk when all the attempts were done. that['s] wrong design — it has to
+   * walk the user through the steps."* So each step gets the budget afresh.
+   *
+   * Whatever is still unspoken from the previous step is dropped rather than
+   * queued: it was superseded by the result that just came back, and reading
+   * it now would narrate the run several steps behind where it actually is.
+   * Lag is worse than brevity — the point of speaking during a run is to say
+   * what is happening *now*.
+   */
+  private beginStep(id: string): void {
+    if (this.isFinished || this.stepsOpened.has(id)) return;
+    this.stepsOpened.add(id);
+    this.spokenLength = this.rawAccumulated.length;
+    this.streamedChunkCount = 0;
   }
 
   /**

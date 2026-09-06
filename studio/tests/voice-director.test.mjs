@@ -133,3 +133,91 @@ test("VoiceDirector abort suppresses all subsequent output", () => {
   assert.equal(chunks.length, 1);
   assert.ok(chunks[0].includes("First thought"));
 });
+
+test("a run's later steps are spoken as they happen, not saved for the end", () => {
+  const chunks = [];
+  const director = new VoiceDirector({
+    isFreshConversation: false,
+    // The real budget: three opening sentences, then hold. See spokenDigest.ts.
+    maxStreamedChunks: 3,
+    onSpeechChunk: (chunk) => {
+      if (chunk) chunks.push(chunk);
+    },
+  });
+
+  const say = (text) => {
+    for (const token of text.split(/(?<=\s)/)) director.pushToken(token);
+  };
+
+  // Step one spends the whole opening budget, the way a real preamble does.
+  say("Okay. Let me look at the player. I will check what it is showing. ");
+  say('```player-tool\n{"action":"status"}\n```\n');
+  director.onToolCall({ id: "1", name: "player.status", arguments: {}, status: "running" });
+  director.onToolCall({ id: "1", name: "player.status", arguments: {}, status: "completed", result: "paused" });
+
+  const afterOpening = chunks.length;
+  assert.equal(afterOpening, 3, "the opening budget is three sentences");
+
+  // Two more steps. Before the per-step budget these were silent, and the
+  // operator heard the whole run only once it was over.
+  for (const step of [2, 3]) {
+    say(`The player is paused, so now I will start step ${step}. `);
+    say('```player-tool\n{"action":"play"}\n```\n');
+    director.onToolCall({ id: `${step}`, name: "player.play", arguments: {}, status: "running" });
+    director.onToolCall({ id: `${step}`, name: "player.play", arguments: {}, status: "completed", result: "playing" });
+  }
+
+  assert.equal(chunks.length, afterOpening + 2, "each later step is spoken while it runs");
+  assert.ok(chunks[3].includes("step 2"), "step two is announced during step two");
+  assert.ok(chunks[4].includes("step 3"), "step three is announced during step three");
+  assert.ok(!chunks.some((chunk) => chunk.includes("action")), "the fence body is never spoken");
+});
+
+test("a step drops the previous step's unspoken tail rather than narrating behind the run", () => {
+  const chunks = [];
+  const director = new VoiceDirector({
+    isFreshConversation: false,
+    maxStreamedChunks: 1,
+    onSpeechChunk: (chunk) => {
+      if (chunk) chunks.push(chunk);
+    },
+  });
+
+  const say = (text) => {
+    for (const token of text.split(/(?<=\s)/)) director.pushToken(token);
+  };
+
+  say("Checking the player. This trailing thought is stale by the time it could be read. ");
+  director.onToolCall({ id: "1", name: "player.status", arguments: {}, status: "completed" });
+  say("It is paused, so I am resuming it. ");
+
+  assert.ok(chunks.some((chunk) => chunk.includes("Checking the player")), "the step's first sentence is spoken");
+  assert.ok(chunks.some((chunk) => chunk.includes("resuming it")), "the next step is spoken");
+  assert.ok(!chunks.some((chunk) => chunk.includes("stale")), "the superseded tail is dropped, not queued");
+});
+
+test("a step is opened once, however many times a tool call is reported", () => {
+  const chunks = [];
+  const director = new VoiceDirector({
+    isFreshConversation: false,
+    maxStreamedChunks: 1,
+    onSpeechChunk: (chunk) => {
+      if (chunk) chunks.push(chunk);
+    },
+  });
+
+  const say = (text) => {
+    for (const token of text.split(/(?<=\s)/)) director.pushToken(token);
+  };
+
+  say("First sentence. Second sentence. ");
+  assert.equal(chunks.length, 1, "the budget of one is spent");
+
+  // The same call arriving twice — a re-render, or an error after a result —
+  // must not hand the run a second budget for the same step.
+  director.onToolCall({ id: "1", name: "player.play", arguments: {}, status: "completed" });
+  director.onToolCall({ id: "1", name: "player.play", arguments: {}, status: "error" });
+  say("Third sentence. Fourth sentence. ");
+
+  assert.equal(chunks.length, 2, "one completed step buys exactly one fresh budget");
+});

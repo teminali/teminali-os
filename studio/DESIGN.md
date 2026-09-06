@@ -4348,9 +4348,25 @@ written down.
 emits only on a sentence boundary — `.`, `!` or `?` followed by whitespace, or
 a blank line — and never from inside an open code fence, so a half-arrived
 fence is held rather than read out. It speaks at most `maxStreamedChunks`
-sentences and then falls silent for the rest of the stream; the app passes
-`STREAMED_SENTENCE_LIMIT` (3), the default is 4. `finish` flushes whatever was
-never spoken as the final chunk. `curateSpeech` closes an unfinished fence and
+sentences and then falls silent; the app passes `STREAMED_SENTENCE_LIMIT` (3),
+the default is 4. `finish` flushes whatever was never spoken as the final chunk.
+
+That budget is a policy for **one reply**, and a run with tool calls in it is
+not one reply — it is a sequence of them. Spent once for a whole run, it bought
+three sentences in the first two seconds and then silence while six player
+calls came and went, with the entire run arriving at the end as one digest:
+*"it started to talk when all the attempts were done. that['s] wrong design —
+it has to walk the user through the steps."* So `onToolCall` opens a **step**
+when a call reports anything but `running`, and a step gets the budget afresh —
+the tokens after a result are the model's account of what it just found, which
+is the thing the operator sat through the silence for. A step id is only
+honoured once, so a call re-reported (a re-render, an error after a result)
+does not buy a second budget. Whatever the previous step left unspoken is
+**dropped**, not queued: it was superseded by the result that just came back,
+and reading it now would narrate the run several steps behind where it is.
+Lag is worse than brevity. This is a separate channel from the per-step lines
+`describeToolCall` produces (§6.1) — those say *what* is being done, this
+says *what was found*. `curateSpeech` closes an unfinished fence and
 hands the rest to `speakableText` (§6.9). `isFreshConversation: false` routes
 the text through `sanitizeOngoingAssist`, so a later turn does not open by
 greeting the operator again. `abort` silences everything after it: a barge-in
@@ -4371,7 +4387,7 @@ Its wake words come from `DEFAULT_VOICE_SETTINGS.wakeWords`. This file,
 `turnIntent.ts` and the settings each carried their own copy, so a wake word
 added in settings reached one of the three.
 
-Tests: `tests/voice-director.test.mjs` (8), `tests/voice-ack.test.mjs` (7).
+Tests: `tests/voice-director.test.mjs` (11), `tests/voice-ack.test.mjs` (7).
 
 ### 6.12 The confidence whisper.cpp was already returning (2026-09-05)
 
