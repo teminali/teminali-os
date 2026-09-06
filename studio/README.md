@@ -333,6 +333,22 @@ and it refuses anything estimated below 10 tok/s, because a stronger answer
 nobody waits for is not the stronger answer. If nothing clears that bar the
 heavy lane collapses onto the light one rather than pretending.
 
+The light lane insists on a model that can actually write code and drive a tool
+fence; it falls back to a general chat model only when nothing installed can.
+That distinction is catalogue data, and it was wrong: `llama3.2:3b` was declared
+code-capable, so at 2.0 GB it was the lightest coder on this machine and won the
+Flash lane — where it answered tool-driving prompts in prose and emitted no
+fence at all. Matching was the second half of the same fault: an installed tag
+carries decoration the catalogue does not, so `qwen2.5-coder:14b-instruct` and
+every `frontier-*` build fell into the unknown-model branch and lost the
+capability data that puts them in a lane. `buildLibrary` now resolves a tag
+through its `-instruct`/quantisation suffix and the `frontier-<base>-<size>-<ctx>`
+shape, prefers a purpose-built `frontier-*` model over a stock pull of the same
+weights, and takes the window from the `-8k`/`-32k` the Modelfile pinned rather
+than the stock model's. Measured on this M4 Pro: Flash went from `llama3.2:3b`
+to `frontier-qwen2.5-coder-14b-8k` (15 tok/s), the heavy lane from `gpt-oss:20b`
+to `frontier-gpt-oss-20b-32k`.
+
 Mixture-of-experts models are budgeted separately: memory against the whole
 file, speed against the `activeBytes` a single token actually reads. GPT-OSS 20B
 is the first such entry — measured on an M4 Pro at **29.4 tok/s against
@@ -874,7 +890,7 @@ ollama serve              # local models on 127.0.0.1:11434
 
 ```bash
 npm run typecheck   # tsc --noEmit
-npm test            # 1622 tests, 0 failures
+npm test            # 1628 tests, 0 failures
 npm run build       # tsc && vite build
 npm run verify:core # all three
 ```

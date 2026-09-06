@@ -153,7 +153,7 @@ export const CATALOG = Object.freeze([
 
   /* ── Llama ──────────────────────────────────────────────────────────── */
   { tag: "llama3.2:1b", name: "Llama 3.2 1B", family: "Llama", params: 1.2e9, bytes: 1.3 * GB, kvPerToken: 32 * 1024, context: 131072, capabilities: ["general"], useCase: "Smallest usable assistant; summarising and routing.", tier: "tiny" },
-  { tag: "llama3.2:3b", name: "Llama 3.2 3B", family: "Llama", params: 3.2e9, bytes: 2.0 * GB, kvPerToken: 56 * 1024, context: 131072, capabilities: ["general", "code"], useCase: "Snappy everyday helper with a tiny footprint.", tier: "small" },
+  { tag: "llama3.2:3b", name: "Llama 3.2 3B", family: "Llama", params: 3.2e9, bytes: 2.0 * GB, kvPerToken: 56 * 1024, context: 131072, capabilities: ["general"], useCase: "Snappy everyday helper with a tiny footprint; chats well, but does not write code or drive tools reliably.", tier: "small" },
   { tag: "llama3.1:8b", name: "Llama 3.1 8B", family: "Llama", params: 8e9, bytes: 4.9 * GB, kvPerToken: 128 * 1024, context: 131072, capabilities: ["general", "code"], useCase: "Well-rounded general model with long context.", tier: "small" },
   { tag: "llama3.3:70b", name: "Llama 3.3 70B", family: "Llama", params: 70.6e9, bytes: 43 * GB, kvPerToken: 320 * 1024, context: 131072, capabilities: ["general", "reasoning", "code"], useCase: "Workstation-class quality; needs 64GB or more.", tier: "xlarge" },
 
@@ -288,19 +288,29 @@ export function speedBand(tokensPerSecond) {
  */
 export function buildLibrary(device, installed = [], { contextTokens } = {}) {
   const byTag = new Map();
-  const normalise = (tag) => String(tag).replace(/:latest$/, "");
 
   for (const entry of CATALOG) {
     byTag.set(normalise(entry.tag), { ...entry, installed: false, installedBytes: null, installedTag: null });
   }
 
+  const canonicalToKey = new Map(CATALOG.map((entry) => [canonicalise(entry.tag), normalise(entry.tag)]));
+
   for (const local of installed) {
-    const key = normalise(local.name ?? local.model ?? "");
+    const name = local.name ?? local.model ?? "";
+    const key = catalogKeyFor(name, canonicalToKey);
     const existing = byTag.get(key);
     if (existing) {
+      // Two installed tags can resolve to one catalogue row — a stock pull and a
+      // purpose-built `frontier-*` Modelfile of the same weights. The custom build
+      // wins: it is the one whose context window we chose.
+      const pinned = pinnedContext(name);
+      if (existing.installed && !isCustomBuild(name)) continue;
       existing.installed = true;
       existing.installedBytes = local.size ?? null;
       existing.installedTag = local.name;
+      // A `frontier-*` build pins its window in the Modelfile; the catalogue's
+      // figure is the stock model's and would overstate it.
+      if (pinned) existing.context = pinned;
       // Trust the real file over the published figure.
       if (local.size) existing.bytes = local.size;
       continue;
@@ -314,7 +324,7 @@ export function buildLibrary(device, installed = [], { contextTokens } = {}) {
       params,
       bytes: local.size ?? 0,
       kvPerToken: estimateKvPerToken(params),
-      context: 8192,
+      context: pinnedContext(name) ?? 8192,
       capabilities: inferCapabilities(local),
       useCase: "Installed locally; not part of the shipped catalogue.",
       tier: tierFor(params),
@@ -329,6 +339,62 @@ export function buildLibrary(device, installed = [], { contextTokens } = {}) {
     ...model,
     fit: fitFor(model, device, { contextTokens }),
   }));
+}
+
+/** Ollama's implicit `:latest` carries no meaning; drop it. */
+function normalise(tag) {
+  return String(tag).replace(/:latest$/, "");
+}
+
+/**
+ * A tag reduced to letters and digits, so that the three ways the same model is
+ * written — `qwen2.5-coder:14b`, `qwen2.5-coder:14b-instruct` and the custom
+ * build `frontier-qwen2.5-coder-14b-8k` — all land on one key.
+ */
+function canonicalise(tag) {
+  return String(tag).toLowerCase().replace(/[^a-z0-9]/g, "");
+}
+
+/** A Modelfile we built ourselves, named `frontier-<base>-<size>-<context>`. */
+function isCustomBuild(tag) {
+  return /^frontier-/i.test(normalise(tag));
+}
+
+/**
+ * The context window a `frontier-*` build pins in its Modelfile, read off the
+ * `-8k` / `-32k` suffix that names it. Null for anything else.
+ */
+function pinnedContext(tag) {
+  if (!isCustomBuild(tag)) return null;
+  const match = /-(\d+)k$/i.exec(normalise(tag));
+  return match ? Number(match[1]) * 1024 : null;
+}
+
+/**
+ * Which catalogue row an installed tag belongs to.
+ *
+ * Ollama tags carry decoration the catalogue does not: an `-instruct` or
+ * quantisation suffix on a stock pull, and the `frontier-<base>-<size>-<ctx>`
+ * shape of our own builds. Matching only on the exact string dropped every one
+ * of those into the unknown-model branch, which cost them their real capability
+ * data and so their place in the routing lanes. Anything that still matches
+ * nothing keeps its own name as the key and is described from Ollama's metadata.
+ */
+function catalogKeyFor(tag, canonicalToKey) {
+  const plain = normalise(tag);
+  if (canonicalToKey.has(canonicalise(plain))) return canonicalToKey.get(canonicalise(plain));
+
+  // `qwen2.5-coder:14b-instruct` and `…:24b-instruct-2512-q4_K_M` → `…:14b`.
+  const trimmed = plain.replace(/(:\d+(?:\.\d+)?b)[-_.].*$/i, "$1");
+  if (canonicalToKey.has(canonicalise(trimmed))) return canonicalToKey.get(canonicalise(trimmed));
+
+  // `frontier-qwen2.5-coder-14b-8k` → the `qwen2.5-coder:14b` row.
+  if (isCustomBuild(plain)) {
+    const base = plain.replace(/^frontier-/i, "").replace(/-\d+k$/i, "");
+    if (canonicalToKey.has(canonicalise(base))) return canonicalToKey.get(canonicalise(base));
+  }
+
+  return plain;
 }
 
 function parseParams(value) {

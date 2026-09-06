@@ -153,6 +153,44 @@ test("a `:latest` tag matches its catalogue entry", () => {
   assert.equal(matches.length, 1);
 });
 
+test("an `-instruct` tag matches its catalogue entry rather than becoming an unknown", () => {
+  const library = buildLibrary(M4_PRO_24, [installed("qwen2.5-coder:14b-instruct", 8_988_112_040)]);
+  const entry = library.find((model) => model.installed);
+  assert.equal(entry.tag, "qwen2.5-coder:14b");
+  assert.equal(entry.installedTag, "qwen2.5-coder:14b-instruct");
+  assert.ok(!entry.custom, "it is a catalogue model, not a hand-pulled one");
+  assert.deepEqual(entry.capabilities, ["code", "reasoning"]);
+});
+
+test("a `frontier-*` build matches its base model and keeps the window it pins", () => {
+  const library = buildLibrary(M4_PRO_24, [installed("frontier-qwen2.5-coder-14b-8k:latest", 8_988_112_040)]);
+  const entry = library.find((model) => model.installed);
+  assert.equal(entry.tag, "qwen2.5-coder:14b");
+  assert.equal(entry.installedTag, "frontier-qwen2.5-coder-14b-8k:latest");
+  // The Modelfile pins 8k; the catalogue's 32768 is the stock model's window.
+  assert.equal(entry.context, 8192);
+});
+
+test("a purpose-built model wins the row over a stock pull of the same weights", () => {
+  const both = [
+    installed("qwen2.5-coder:14b-instruct", 8_988_112_040),
+    installed("frontier-qwen2.5-coder-14b-8k:latest", 8_988_112_040),
+  ];
+  for (const order of [both, [...both].reverse()]) {
+    const entry = buildLibrary(M4_PRO_24, order).find((model) => model.installed);
+    assert.equal(entry.installedTag, "frontier-qwen2.5-coder-14b-8k:latest");
+  }
+});
+
+test("a `frontier-*` build of a model outside the catalogue still reports its pinned window", () => {
+  const library = buildLibrary(M4_PRO_24, [
+    installed("frontier-qwen3.8-27b-iq3m-32k:latest", 13_000_000_000, { parameter_size: "27B" }),
+  ]);
+  const entry = library.find((model) => model.installed);
+  assert.equal(entry.custom, true);
+  assert.equal(entry.context, 32768);
+});
+
 /* ── Lane selection ───────────────────────────────────────────────────────── */
 
 const REALISTIC_INSTALL = [
@@ -165,7 +203,20 @@ const REALISTIC_INSTALL = [
 
 test("the light lane picks the smallest model that can write code", () => {
   const plan = planRouting(buildLibrary(M4_PRO_24, REALISTIC_INSTALL));
-  // Moondream and qwen3-vl are smaller, but both are vision specialists.
+  // Moondream and qwen3-vl are smaller, but both are vision specialists, and
+  // llama3.2:3b is smaller still but is a general chat model — it cannot write
+  // code or drive a tool fence, which is the whole job of this lane.
+  assert.equal(plan.light.tag, "qwen2.5-coder:14b-instruct");
+});
+
+test("a general chat model never wins the light lane over a real coder", () => {
+  const plan = planRouting(buildLibrary(M4_PRO_24, REALISTIC_INSTALL));
+  assert.notEqual(plan.light.tag, "llama3.2:3b");
+  assert.ok(plan.light.capabilities.includes("code"));
+});
+
+test("only when nothing installed can code does the light lane fall back to chat", () => {
+  const plan = planRouting(buildLibrary(M4_PRO_24, [installed("llama3.2:3b", 2_019_393_189)]));
   assert.equal(plan.light.tag, "llama3.2:3b");
 });
 
@@ -220,7 +271,7 @@ test("explicit modes override the complexity signal", () => {
 
 test("resolve returns the concrete model for the lane", () => {
   const library = buildLibrary(M4_PRO_24, REALISTIC_INSTALL);
-  assert.equal(resolveModel(library, "fix a typo", "auto").model.tag, "llama3.2:3b");
+  assert.equal(resolveModel(library, "fix a typo", "auto").model.tag, "qwen2.5-coder:14b-instruct");
   assert.equal(
     resolveModel(library, "refactor the architecture and debug the concurrency race", "auto").model.tag,
     "qwen2.5-coder:14b-instruct",
