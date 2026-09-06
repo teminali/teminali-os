@@ -202,7 +202,7 @@ test("Universal Voice: addressing gate rejects coughs, clicks, and unrelated amb
    ──────────────────────────────────────────────────────────────────────── */
 
 const interruption = await import("../src/services/interruption.ts");
-const { INTERRUPTED_NOTE, INTERRUPTED_TOOL_RESULT, interruptTurn, interruptsRun, keptPartialReply, settleRunningCalls } =
+const { INTERRUPTED_NOTE, INTERRUPTED_TOOL_RESULT, interruptTurn, interruptsRun, keptPartialReply, settleRestoredTurns, settleRunningCalls } =
   interruption;
 
 test("a stopped turn keeps what arrived and is marked as cut short", () => {
@@ -375,4 +375,55 @@ test("an agent tab and a side chat settle a stopped turn like the main chat", as
     assert.doesNotMatch(source, /const stop = \(\) => \{[\s\S]*?patchLast\(\{ isStreaming: false \}\)/, path);
     assert.match(source, /const stop = \(\) => \{[\s\S]*?abortRef\.current = null;/, `${path} releases the controller`);
   }
+});
+
+/* ── A restart is an interruption ─────────────────────────────────────────── */
+
+/**
+ * `isStreaming` is persisted with the message, so a turn in flight when the app
+ * quit comes back marked live — a spinner saying "Working", a clock frozen at
+ * the second the process died, and a stop button pointing at a run nobody
+ * holds. The operator reads that as the agent being stuck. It is not: the app
+ * was closed underneath it.
+ */
+test("a turn still marked live after a restart is recorded as stopped", () => {
+  const restored = settleRestoredTurns([
+    { id: "1", role: "user", content: "hello", isStreaming: false },
+    { id: "2", role: "assistant", content: "The gateway binds to", isStreaming: true },
+  ]);
+  assert.equal(restored[1].isStreaming, false);
+  assert.equal(restored[1].cancelled, true);
+  // What arrived is kept: it is real work the operator asked for.
+  assert.equal(restored[1].content, "The gateway binds to");
+  assert.equal(keptPartialReply(restored[1]), true);
+  // And the operator's own prompt is untouched.
+  assert.deepEqual(restored[0], { id: "1", role: "user", content: "hello", isStreaming: false });
+});
+
+test("a turn that produced nothing says so rather than showing an empty reply", () => {
+  const restored = settleRestoredTurns([{ id: "1", role: "assistant", content: "", isStreaming: true }]);
+  assert.equal(restored[0].content, INTERRUPTED_NOTE);
+  // The note is the whole content, so there is no second line repeating it.
+  assert.equal(keptPartialReply(restored[0]), false);
+});
+
+test("a transcript with nothing live is returned untouched", () => {
+  const messages = [{ id: "1", role: "assistant", content: "done", isStreaming: false }];
+  // The same array, not a copy: this runs on every rehydrate.
+  assert.equal(settleRestoredTurns(messages), messages);
+  assert.equal(settleRestoredTurns(undefined), undefined);
+  assert.deepEqual(settleRestoredTurns([]), []);
+});
+
+test("a tool call that was still running when the app died is settled too", () => {
+  const restored = settleRestoredTurns([
+    {
+      id: "1",
+      role: "assistant",
+      content: "",
+      isStreaming: true,
+      toolCalls: [{ id: "t1", name: "read", status: "running" }],
+    },
+  ]);
+  assert.notEqual(restored[0].toolCalls[0].status, "running");
 });

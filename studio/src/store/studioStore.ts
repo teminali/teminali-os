@@ -1,6 +1,7 @@
 import { create } from "zustand";
 import { persist, createJSONStorage } from "zustand/middleware";
 import { applySessionSwitch } from "../utils/chatSessions";
+import { settleRestoredTurns } from "../services/interruption";
 import { ModelProfileId, ModelProfile, SpecialistSkill, EditorTab, FileItem, ChatMessage, ToolCall } from "../types";
 import { purgeOllamaMemory } from "../services/aiService";
 import { findTabByFileIdentity } from "./tabIdentity";
@@ -852,6 +853,30 @@ export const useStudioStore = create<StudioState>()(
     {
       name: "teminali-studio-sessions-cache-v3",
       storage: createJSONStorage(() => localStorage),
+      /*
+        A turn that was live when the app stopped is not live now.
+
+        `isStreaming` rides along with the message, so a restart brings back a
+        spinner saying "Working", a frozen clock, and a stop button pointing at
+        a run that died with the process. A restart is an interruption; it is
+        recorded as one here, on the way out of storage, because there is no
+        moment at which the restored state was true. Every engine's list and
+        every stored session, since switching to an old one would find the same
+        thing waiting. See services/interruption.ts.
+      */
+      onRehydrateStorage: () => (state) => {
+        if (!state) return;
+        state.frontierMessages = settleRestoredTurns(state.frontierMessages) ?? [];
+        state.antigravityMessages = settleRestoredTurns(state.antigravityMessages) ?? [];
+        state.claudeMessages = settleRestoredTurns(state.claudeMessages) ?? [];
+        state.codexMessages = settleRestoredTurns(state.codexMessages) ?? [];
+        state.chatSessions = (state.chatSessions ?? []).map((session) => {
+          const messages = settleRestoredTurns(session.messages) ?? [];
+          return messages === session.messages ? session : { ...session, messages };
+        });
+        // Nothing is running in this process yet, whatever the last one was doing.
+        state.isStreaming = false;
+      },
       partialize: (state) => ({
         chatSessions: state.chatSessions,
         activeSessionId: state.activeSessionId,

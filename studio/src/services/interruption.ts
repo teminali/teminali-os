@@ -74,6 +74,32 @@ export function interruptTurn(
   };
 }
 
+/**
+ * Every turn that was still live when the application stopped.
+ *
+ * A message carries `isStreaming` and the message list is persisted, so a turn
+ * in flight when the app quit — or crashed, or was restarted for a `.cjs`
+ * change — comes back marked live. Nothing will ever finish it: the process
+ * that owned the run died with the app, and the stop button on that row points
+ * at a run id nobody holds. The operator sees a spinner that says "Working", a
+ * frozen elapsed time, and a stop that does nothing, which reads as the agent
+ * having got stuck rather than as the app having been closed underneath it.
+ *
+ * A restart *is* an interruption, so it is recorded as one — the same patch the
+ * Escape key applies, with the same partial answer kept and the same "Stopped —
+ * this reply is incomplete" under it. Applied on rehydrate, before any of it is
+ * drawn, because there is no moment at which the restored state was true.
+ *
+ * Returns the same array when there was nothing live, so a rehydrate that
+ * changes nothing allocates nothing.
+ */
+export function settleRestoredTurns<T extends ChatMessage>(messages: T[] | undefined): T[] | undefined {
+  if (!messages?.some((message) => message.isStreaming)) return messages;
+  return messages.map((message) =>
+    message.isStreaming ? { ...message, ...interruptTurn(message) } : message,
+  );
+}
+
 /** True when the stopped turn left a partial answer, and not only the note. */
 export function keptPartialReply(message: Pick<ChatMessage, "content" | "cancelled">): boolean {
   return Boolean(message.cancelled) && message.content.trim() !== INTERRUPTED_NOTE && message.content.trim().length > 0;

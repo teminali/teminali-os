@@ -577,6 +577,18 @@ the platform authenticator behind
 grants to registered web browsers and to nothing an Electron app can claim. The
 limit is not fixable here. **The silence was.**
 
+**The request never ends on its own.** Measured again in an Electron harness
+against a real https page, with the probe installed: `credentials.get({publicKey})`
+stays **pending** — eight seconds in, no resolve, no reject, no dialog. That is
+the whole of what the operator experiences: the page spins for ever, because it
+is correctly waiting for an authenticator that is never going to answer. So the
+probe ends it. Where no platform authenticator exists and the caller supplied
+no `signal` of its own, it attaches one and aborts after `PASSKEY_ABORT_MS`
+(25s) — long enough to find a USB security key and touch it, since that path
+can still work, and short enough that the page recovers by itself. Re-measured
+after the change: `rejected:AbortError`, which is a rejection every sign-in
+page already knows how to handle.
+
 `PASSKEY_PROBE` is injected on `dom-ready`, wraps `credentials.get`/`.create`
 in the page's own world, calls through untouched, and prints a sentinel only
 when the platform authenticator really is absent. Main reads that line off

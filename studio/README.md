@@ -151,9 +151,12 @@ lands in a private tab.
 **Passkeys do not work in the panel, and it now says so.** macOS grants the
 platform authenticator — Touch ID — only to registered web browsers, so
 `isUserVerifyingPlatformAuthenticatorAvailable()` is false here and a passkey
-prompt silently does nothing. When a page asks for one, the toolbar says so and
-offers the two routes that work: another sign-in method on the page, or Open in
-default browser.
+prompt silently does nothing — measured: the request stays pending for ever,
+which is why the page just spins. When a page asks for one, the toolbar says so
+and offers the two routes that work: another sign-in method on the page, or Open
+in default browser. The request itself is ended after 25 seconds, so the page
+falls back on its own; the wait is that long because a USB security key can
+still answer and a person needs time to reach one.
 
 **Inspect Element** is offered on a browser page only. The shell's own window
 has none — its devtools are in the View menu (`⌥⌘I`).
@@ -757,7 +760,7 @@ ollama serve              # local models on 127.0.0.1:11434
 
 ```bash
 npm run typecheck   # tsc --noEmit
-npm test            # 1433 tests, 0 failures
+npm test            # 1437 tests, 0 failures
 npm run build       # tsc && vite build
 npm run verify:core # all three
 ```

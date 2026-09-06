@@ -63,13 +63,39 @@ const MAX_KNOWN_DOWNLOADS = 200;
   says so on the console. `console.info` is the channel deliberately: this view
   has no preload precisely so that someone else's page has no bridge to find,
   and a sentinel string main happens to read is not one.
+
+  ## The request never ends on its own
+
+  Measured in an Electron harness against a real https page, with the probe
+  installed: `isUserVerifyingPlatformAuthenticatorAvailable()` answers false and
+  `credentials.get({publicKey})` then stays **pending** — eight seconds in, no
+  resolve, no reject, no dialog. That is the whole of the operator's
+  experience: they press the button and the page spins for ever, because the
+  page is correctly waiting for an authenticator that is never going to answer.
+
+  So the probe also ends it. When no platform authenticator exists and the
+  caller supplied no `signal` of its own, it attaches one and aborts after
+  `PASSKEY_ABORT_MS`. The page then gets a rejection it already knows how to
+  handle — which on Google's sign-in is what puts "Try another way" on screen.
+  The wait is long on purpose: a *cross-platform* authenticator, a USB security
+  key, is still possible here, and a person needs time to find one and touch it.
 */
 const PASSKEY_SENTINEL = "teminali:passkey-unavailable:";
+
+/**
+ * How long a passkey request is left hanging before it is ended.
+ *
+ * Long enough to plug in a security key and touch it — that path can still
+ * work and must not be cut short — and short enough that a page waiting for a
+ * Touch ID that cannot come recovers by itself.
+ */
+const PASSKEY_ABORT_MS = 25_000;
 const PASSKEY_PROBE = `(() => {
   const creds = navigator.credentials;
   if (!creds || creds.__teminaliPasskeyWatch) return;
   Object.defineProperty(creds, "__teminaliPasskeyWatch", { value: true });
   const sentinel = ${JSON.stringify(PASSKEY_SENTINEL)};
+  const ABORT_MS = ${PASSKEY_ABORT_MS};
   for (const name of ["get", "create"]) {
     const original = creds[name];
     if (typeof original !== "function") continue;
@@ -77,18 +103,36 @@ const PASSKEY_PROBE = `(() => {
       configurable: true,
       writable: true,
       value: function (options) {
-        if (options && options.publicKey) {
-          try {
-            const api = window.PublicKeyCredential;
-            const ask = api && api.isUserVerifyingPlatformAuthenticatorAvailable;
-            Promise.resolve(ask ? ask.call(api) : false)
-              .then((available) => { if (!available) console.info(sentinel + name); })
-              .catch(() => {});
-          } catch (error) {
-            /* A page is free to have replaced the API; that is not an argument to have. */
-          }
+        if (!options || !options.publicKey) return original.call(creds, options);
+
+        // The caller's own signal always wins: a page that manages its own
+        // cancellation is not one to take the decision away from.
+        var controller = null;
+        var request = options;
+        if (typeof AbortController === "function" && !options.signal) {
+          controller = new AbortController();
+          request = Object.assign({}, options, { signal: controller.signal });
         }
-        return original.call(creds, options);
+
+        var promise = original.call(creds, request);
+        var settled = false;
+        promise.then(function () { settled = true; }, function () { settled = true; });
+
+        try {
+          var api = window.PublicKeyCredential;
+          var ask = api && api.isUserVerifyingPlatformAuthenticatorAvailable;
+          Promise.resolve(ask ? ask.call(api) : false)
+            .then(function (available) {
+              if (available) return;
+              console.info(sentinel + name);
+              if (!controller) return;
+              setTimeout(function () { if (!settled) controller.abort(); }, ABORT_MS);
+            })
+            .catch(function () {});
+        } catch (error) {
+          /* A page is free to have replaced the API; that is not an argument to have. */
+        }
+        return promise;
       },
     });
   }
