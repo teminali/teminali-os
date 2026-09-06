@@ -1612,6 +1612,16 @@ when authoring UI and was costing every "play that song" turn 1,858
 characters. Measured after, same model, same prompt: **1,848 tokens, 23%** at
 8k with five sections dropped; at 32k everything fits at 11%.
 
+And the turn itself, re-measured the way the failure was found — the same
+model, a two-message history, the player showing *Beyoncé — Halo.mp4*, and the
+prompt "play a beyonce song", twice each. **Before: no `player-tool` fence in
+either run** — one narrated "I'm playing Halo.mp4" with nothing sent to the
+player, the other ran `ls /path/to/media/pool/Beyoncé/*.mp4`, a path it
+invented. **After: a `player-tool` fence in both**, the second the ideal
+`episode 1` then `play`. Prompt evaluation fell from 13.7–25.1 s to 3.3–4.0 s,
+because there was half as much prompt to evaluate; that is the speed cost the
+old prompt was charging every local turn.
+
 **The CLI lanes are deliberately not governed.** Claude Code and Codex compact
 their own context against their own windows; a cap sized for an 8k local model
 would starve a 200k one and discard detail the agent's own compactor kept. So

@@ -359,7 +359,10 @@ now assembled from named sections in priority order under 22% of the window,
 history gets 30% newest-first with each message capped at 12%, and a tool
 result 10%; what the window could not afford is reported in the turn's
 telemetry rather than silently lost. Measured after on the same model and
-prompt: 1,848 tokens, 23%. Claude Code and Codex are not truncated by this —
+prompt: 1,848 tokens, 23% — and the turn that exposed it, "play a beyonce
+song" with the player showing a Beyoncé file, went from no `player-tool` fence
+in two runs to a correct one in both, with prompt evaluation down from
+13.7–25.1 s to 3.3–4.0 s. Claude Code and Codex are not truncated by this —
 they compact their own context — and receive the same budget shape from their
 real window only so the ceilings provably never bind.
 
