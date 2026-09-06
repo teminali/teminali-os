@@ -23,3 +23,6 @@ studio/native/macos/bin/
 # the repository rather than part of it.
 .claude/
 .agent/
+
+# The eval harness bundles the editor tool manifest here before it runs.
+studio/evals/.build/

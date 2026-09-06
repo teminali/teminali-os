@@ -55,8 +55,11 @@ test("the engine degrades to no-editor rather than assuming one exists", async (
   // A headless caller supplies no capabilities, so the tool branch must be
   // guarded by the injected executor before anything else.
   assert.match(engine, /if \(capabilities\.runVideoTool && hasVideoToolCalls\(turnText\)/);
-  // And the prompt must not advertise tools the host did not hand over.
-  assert.match(engine, /if \(capabilities\.videoTools && capabilities\.videoTools\.length > 0\)/);
+  // And the prompt must not advertise tools the host did not hand over: the
+  // engine passes exactly what it was given, and the composition gates on it.
+  assert.match(engine, /videoTools: capabilities\.videoTools,/);
+  const prompt = await read("systemPrompt.ts");
+  assert.match(prompt, /if \(input\.videoTools && input\.videoTools\.length > 0\)/);
 });
 
 test("the host adapter supplies capabilities and owns host integrations", async () => {

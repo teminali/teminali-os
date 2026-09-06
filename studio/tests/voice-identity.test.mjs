@@ -51,7 +51,7 @@ test("the Claude lane carries the identity into its own system prompt", () => {
 });
 
 test("the local lane states the name and the greeting rule", () => {
-  const source = read("../src/services/frontierEngine.ts");
+  const source = read("../src/services/systemPrompt.ts");
   assert.match(source, /\[WHO YOU ARE\]/);
   assert.match(source, /Your name is Temy/);
   assert.match(source, /Greet a greeting/);

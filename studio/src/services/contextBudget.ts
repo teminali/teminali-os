@@ -72,8 +72,15 @@ const SELF_MANAGED: ReadonlySet<EngineId> = new Set<EngineId>(["claude", "codex"
  * failure this module exists to prevent.
  */
 export const SHARES = Object.freeze({
-  /** Everything Teminali tells the model about itself and its tools. */
-  systemPrompt: 0.22,
+  /**
+   * Everything Teminali tells the model about itself and its tools.
+   *
+   * 25%, not less: with the editor and the player both mounted, the contract
+   * sections alone are ~7,900 characters on an 8k window, and the eval showed
+   * the next section in rank — the live-data rule — is the one that stops a
+   * model refusing "what's the bitcoin price?" At 22% it was dropped.
+   */
+  systemPrompt: 0.25,
   /** All prior turns kept for this request, together. */
   history: 0.3,
   /** Any single prior message, so one long paste cannot evict the rest. */

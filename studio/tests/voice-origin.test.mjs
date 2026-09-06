@@ -77,10 +77,12 @@ test("the service layer defaults to a typed turn", async () => {
 test("the engine splices the notice into the system prompt it already builds", async () => {
   const engine = await read("services/frontierEngine.ts");
   assert.match(engine, /origin: TurnOrigin = "text",/);
-  assert.match(engine, /const transcriptInstruction = transcriptNotice\(origin\);/);
-  // One system message, not a second mechanism: the fragment is a section of
-  // the same budgeted assembly as the skill, editor and multi-agent blocks —
-  // and a required one, because a spoken turn read as typed is answered wrong.
-  assert.match(engine, /\{ name: "transcript", required: true, text: transcriptInstruction \}/);
-  assert.equal(engine.split("transcriptInstruction").length - 1, 2);
+  // The engine hands the origin to the one composition function; the notice
+  // is a section of that assembly, not a second mechanism bolted on after.
+  assert.match(engine, /composeSystemPrompt\(\{[\s\S]*?\borigin,[\s\S]*?\}\)/);
+  const prompt = await read("services/systemPrompt.ts");
+  assert.match(prompt, /const transcriptInstruction = transcriptNotice\(input\.origin\);/);
+  // A required section, because a spoken turn read as typed is answered wrong.
+  assert.match(prompt, /\{ name: "transcript", required: true, text: transcriptInstruction \}/);
+  assert.equal(prompt.split("transcriptInstruction").length - 1, 2);
 });

@@ -355,14 +355,18 @@ to `frontier-gpt-oss-20b-32k`.
 3,127 tokens — 38% of the 8,192-token window `frontier-qwen2.5-coder-14b-8k`
 pins — before any history or the operator's own sentence, which is why a model
 asked to drive the player answered in prose and emitted no fence. The prompt is
-now assembled from named sections in priority order under 22% of the window,
+now assembled from named sections in priority order under 25% of the window,
 history gets 30% newest-first with each message capped at 12%, and a tool
 result 10%; what the window could not afford is reported in the turn's
 telemetry rather than silently lost. Measured after on the same model and
 prompt: 1,848 tokens, 23% — and the turn that exposed it, "play a beyonce
 song" with the player showing a Beyoncé file, went from no `player-tool` fence
 in two runs to a correct one in both, with prompt evaluation down from
-13.7–25.1 s to 3.3–4.0 s. Claude Code and Codex are not truncated by this —
+13.7–25.1 s to 3.3–4.0 s. The lane now has a fixed eval — `npm run eval:local`,
+twelve turns graded by the engine's own parsers against the real model — and
+scores 36/36 on it (three runs a case) at ~2,130 prompt tokens with the editor and player both
+mounted; `studio/DESIGN.md` §3 records what its first day found. Claude Code
+and Codex are not truncated by this —
 they compact their own context — and receive the same budget shape from their
 real window only so the ceilings provably never bind.
 
@@ -907,7 +911,8 @@ ollama serve              # local models on 127.0.0.1:11434
 
 ```bash
 npm run typecheck   # tsc --noEmit
-npm test            # 1641 tests, 0 failures
+npm test            # 1643 tests, 0 failures
+npm run eval:local  # the local lane against the real model — a score, not a pass/fail; needs Ollama
 npm run build       # tsc && vite build
 npm run verify:core # all three
 ```

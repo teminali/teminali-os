@@ -196,6 +196,19 @@ test("what the player cannot play is said, not hidden behind paused", () => {
   assert.match(described, /cannot play \(unsupported codec\)/);
 });
 
+test("inside a series the title still leads, so 'what is playing' has an answer", () => {
+  const described = describeLivePlayer(snapshot({
+    title: "Halo",
+    series: { folder: "/m/Beyoncé", title: "Beyoncé", index: 1, count: 12, episodes: [] },
+  }));
+  assert.match(described, /"Halo", episode 1 of 12 in "Beyoncé"/);
+});
+
+test("the volume is always stated, because 'a bit louder' is relative to it", () => {
+  assert.match(describeLivePlayer(snapshot({ volume: 0.8 })), /volume 80%/);
+  assert.match(describeLivePlayer(snapshot({ volume: 1 })), /volume 100%/);
+});
+
 test("asking to read the player is an action, not a refusal and a retry", () => {
   // The loop the operator watched: six `{"action":"status"}` fences, six
   // refusals, six apologies, sixty-six seconds, and no answer.

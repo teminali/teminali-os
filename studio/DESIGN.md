@@ -1594,7 +1594,7 @@ appended. Asked to play a song with the player fence wired, the model answered
 in prose and emitted no fence: there was no room to think in.
 
 The mechanism is one module and per-lane calibration. `budgetFor(engine,
-windowTokens)` derives four limits from the window — system prompt 22%,
+windowTokens)` derives four limits from the window — system prompt 25%,
 history 30%, any single message 12%, one tool result 10%, the rest left for the
 answer — at a chars-per-token rate that was measured, not assumed (4.63 on the
 real prompt; tool output is planned at a pessimistic 3.2). The local lane's
@@ -1630,6 +1630,38 @@ every ceiling more than four times the largest local window's — and nothing in
 `agentCliService` truncates. One mechanism, not two, and on those lanes it is a
 number they can be asked for rather than a knife. Pinned in
 `tests/context-budget.test.mjs`.
+
+**The local-lane eval** (`evals/local-lane.mjs`, `npm run eval:local`). "Better
+results" has no completion date without a fixed set and a number, so the lane
+has one: twelve turns — play, pause, louder, what's playing, what's on the
+timeline, disk space, git branch, a live price with and without a file open in
+the player, hello, your name, write a file — each graded by the code's own
+parsers, so a fence the harness accepts is one the engine would have run. The
+prompt is `composeSystemPrompt` (`services/systemPrompt.ts`), the function the
+engine calls, pulled out of the engine for exactly this reason: a copy would
+drift. The editor tool list is the real manifest, bundled by esbuild because
+`toolRegistry` drags in the ported editor. Two runs a case by default, the
+engine's own sampling, and the model's actual reply printed beside every
+failure. It is a measurement, not a test — it never fails the build unless
+asked to with `--gate`.
+
+Its first day paid for it three times. At 77% it showed the player's
+"RIGHT NOW" line never named the **title** inside a series (so "what's
+playing?" had no answer) nor the **volume** (so "turn it up a bit" from 80%
+got a guess of 75%); `describeLivePlayer` now states both. At 91% the one
+failure was a refusal of "what's the bitcoin price right now?" with *"I don't
+have real-time data access"* — the sentence the 3,138-character mandate
+forbids, which no longer fits an 8k window once the editor and player are both
+mounted — so a `[LIVE DATA]` section carries that one rule at a tenth of the
+length, ranked where it fits. And then the surprise: giving the prompt 25% of
+the window instead of 22% made the score *fall* to 71%, because the section
+that newly fitted was the step-explanation mandate, and the model obeyed it
+literally — *"I'm pausing the playback"*, *"I'll use a real-time API call"* —
+and ended the turn with no fence. The sentence had become the action. It is
+now `[SAY, THEN DO — IN THE SAME REPLY]`, with the whole shape shown and the
+rule that a reply with no fence has done nothing. **36/36** after that — twelve
+cases, three runs each — at ~2,130 prompt tokens, 26% of the window, with both
+surfaces mounted.
 
 The strip is **open while the turn is live and closes when it settles**. During
 the turn it is the only thing to look at; afterwards it is a footnote under the

@@ -221,13 +221,20 @@ export function describeLivePlayer(snapshot: PlayerSnapshot | null): string {
     return `The gallery for "${snapshot.series.title}" is showing — ${snapshot.series.count} items, nothing playing yet. `
       + `Use action "episode" with a number to start one.`;
   }
+  // The title leads even inside a series. "Episode 3 of 12" is the position;
+  // "Halo" is the answer to "what's playing?", and the eval caught a model
+  // that could not give it because this line never said.
+  const title = snapshot.title ?? snapshot.path ?? "a file";
   const what = snapshot.series && snapshot.series.index
-    ? `episode ${snapshot.series.index} of ${snapshot.series.count} in "${snapshot.series.title}"`
-    : `"${snapshot.title ?? snapshot.path ?? "a file"}"`;
+    ? `"${title}", episode ${snapshot.series.index} of ${snapshot.series.count} in "${snapshot.series.title}"`
+    : `"${title}"`;
   const state = snapshot.error
     ? `cannot play (${snapshot.error})`
     : snapshot.ended ? "finished" : snapshot.playing ? "playing" : "paused";
   const bits = [
+    // Always stated: "turn it up a bit" is a delta, and a model that does not
+    // know the level guesses one — measured as 0.75 in reply to "up" from 0.8.
+    `volume ${Math.round(snapshot.volume * 100)}%`,
     snapshot.subtitles.active ? `subtitles ${snapshot.subtitles.active}` : "",
     snapshot.muted ? "muted" : "",
     snapshot.rate !== 1 ? `${snapshot.rate}×` : "",

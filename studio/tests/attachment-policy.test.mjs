@@ -44,5 +44,7 @@ test("image attachments use a bounded dedicated local vision route", async () =>
   assert.match(serviceSource, /payload\.response\?\.trim\(\)/);
   assert.match(serviceSource, /await unloadOllamaModel\(VISION_MODEL\)/);
   assert.match(serviceSource, /Local vision evidence:/);
-  assert.match(serviceSource, /path="workspace\/relative\/path\.ext"/);
+  // The file contract the vision evidence feeds into lives in the prompt module.
+  const promptSource = await readFile(new URL("../src/services/systemPrompt.ts", import.meta.url), "utf8");
+  assert.match(promptSource, /path="workspace\/relative\/path\.ext"/);
 });

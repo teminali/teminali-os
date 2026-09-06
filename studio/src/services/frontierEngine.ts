@@ -10,7 +10,8 @@
  * its own, and keeps editor faults from being scored against the model.
  */
 import { ASTPrunerService } from "./astPrunerService";
-import { assemblePrompt, budgetFor, fitHistory } from "./contextBudget";
+import { budgetFor, fitHistory } from "./contextBudget";
+import { composeSystemPrompt } from "./systemPrompt";
 import { CompletenessEngine } from "./completenessEngine";
 import { DiligenceEngine } from "./diligenceEngine";
 import { parseWorkspaceEdits } from "./liveEditProtocol";
@@ -44,7 +45,7 @@ import {
   parsePlayerToolCalls,
   type PlayerExecutor,
 } from "./playerToolCalls";
-import { transcriptNotice, type TurnOrigin } from "./voice/types";
+import type { TurnOrigin } from "./voice/types";
 import type { ChatMessage, InferenceTelemetry, ModelModeId, ToolCall } from "../types";
 
 /** What the host lets the engine do. Absent capabilities simply stay unused. */
@@ -332,129 +333,19 @@ CRITICAL VISUAL DESIGN RULES:
     }
   }
 
-  /*
-    What the model is told about the video panel.
-    Empty when the host exposes no editor tools, so a headless caller and the
-    benchmark arena get the prompt they got before this existed.
-  */
-  let editorInstruction = "";
-  if (capabilities.videoTools && capabilities.videoTools.length > 0) {
-    const toolList = capabilities.videoTools
-      .map((tool) => `- ${tool.name}(${tool.parameters.join(", ")}), ${tool.description}`)
-      .join("\n");
-    editorInstruction = `\n\n[TEMINALI CUT PANEL]\nThe video editor is part of this workspace and you can edit the user's timeline directly. To call an editor tool, emit a \`\`\`video-tool fence holding one JSON object, or an array of them, shaped {"tool":"name","arguments":{...}}; its real result is returned to you before you answer again. A \`\`\`json block is documentation and is never executed. Call describe_timeline before any edit and address clips by the ids it returns, never by an id you invented, and never report an edit whose result is not in the conversation. Times are milliseconds. Every call lands on the timeline the user is watching, and each one is a single undo.\nEDITOR TOOLS:\n${toolList}`;
-  }
-
-  /*
-    The built-in player.
-
-    Empty unless the host mounted one, so the benchmark arena and any headless
-    caller get the prompt they had before this existed — the same contract the
-    editor block keeps.
-
-    Two things earn their length here. The live state goes in the prompt, so
-    the model answers "play it" from what is actually open instead of asking
-    which file. And the last line names the mistake this block exists to
-    prevent: the timeline and the viewer are different surfaces, and a model
-    that confuses them tells the operator their own open file does not exist.
-  */
-  let playerInstruction = "";
-  if (capabilities.runPlayer && capabilities.playerActions && capabilities.playerActions.length > 0) {
-    const showing = capabilities.playerState?.() ?? "";
-    playerInstruction = `\n\n[BUILT-IN PLAYER]\nThis workspace has a media player and you control it directly. To use it, emit a \`\`\`player-tool fence holding one JSON object, or an array of them, shaped {"action":"name","value":...}; the player's real state is returned to you before you answer again. A \`\`\`json block is documentation and is never executed.\nACTIONS: ${capabilities.playerActions.join(", ")}. \`status\` reads what is showing and changes nothing — use it to check your work, never a made-up action name. \`seek\` and \`seek_by\` take seconds, \`volume\` takes 0–1, \`rate\` takes a multiplier, \`episode\` takes a 1-based number, \`subtitles\` takes a label or "off", \`fullscreen\` takes a boolean; the rest take no value.\n${showing ? `RIGHT NOW: ${showing}\n` : ""}The player is NOT the Teminali Cut timeline. A file the operator opened in the viewer will never appear in \`describe_timeline\`, and its absence there says nothing about whether it exists — use \`\`\`player-tool for anything the operator is watching or listening to, and never tell them a file they have open is missing.`;
-  }
-
-  const multiAgentPrompt = `\n\n[MULTI-AGENT COGNITIVE FRAMEWORK]
-You operate as a synchronized multi-agent engineering team:
-1. RECONNAISSANCE: If the task requires understanding existing code, inspect the exact files using \`\`\`frontier-run with read-only commands (e.g. \`cat path/to/file\`, \`git status\`, \`find\`, \`grep\`) before modifying code.
-2. IMPLEMENTATION: Emit production-grade, complete files with explicit path="..." attributes. Never truncate, never use placeholder comments (e.g. '// ... rest of code'), and preserve all existing unaffected methods.
-3. VERIFICATION: Verify your work by running project tests or type-checks with \`\`\`frontier-run (e.g. \`npm test\`, \`npx tsc --noEmit\`) to confirm zero regressions.`;
-
-  /*
-    What the model is told when the turn was spoken rather than typed.
-    Empty for a typed turn, so a keyboard prompt gets the prompt it always got.
-  */
-  const transcriptInstruction = transcriptNotice(origin);
   const isFreshConversation = history.length === 0 || history.every((m) => !m.content || m.role === "system");
-  /*
-    Who the assistant is, whatever is answering underneath.
-
-    The operator asked for this by name: "when I ask for the name it has to say
-    Temy, even if I run on another code assistant like Claude Code or Codex".
-    Temy is already a wake word in DEFAULT_VOICE_SETTINGS, so the name exists in
-    the product; this makes the assistant answer to it.
-
-    The greeting rule is here rather than in acknowledgment.ts because the
-    phrase the operator complained about — "I'm on it" in reply to "hello" — is
-    not in that file's canned lists. It came from the model, so the correction
-    belongs in the model's instructions.
-  */
-  const identityInstruction = `\n\n[WHO YOU ARE]
-Your name is Temy. Asked who or what you are, you are Temy, the assistant inside Teminali Code — never the name of the model or engine answering underneath, and never "Claude", "Codex" or "GPT".
-Greet a greeting. "Hello" is not a task: answer it like a person would and wait. Never reply to a greeting with a work acknowledgement — no "I'm on it", "On it", "Working on it", "Right away" — those belong only where you have actually started doing something.`;
-
-  const conversationalInstruction = isFreshConversation
-    ? `\n\n[CONVERSATIONAL TONE]\nSpeak naturally, concisely, and dynamically like a real engineering colleague. Avoid robotic boilerplate. If offering assistance in a greeting for this fresh new conversation, you may ask "How can I assist you today?".`
-    : `\n\n[CONVERSATIONAL TONE]\nSpeak naturally, concisely, and dynamically like a real engineering colleague. Avoid robotic boilerplate. This is an ongoing conversation: NEVER say "How can I assist you today?"; if offering assistance or asking what to do next, say "How can I assist you now?" or answer directly without canned greetings.`;
-
-  const stepExplanationInstruction = `\n\n[STEP-BY-STEP EXPLANATION MANDATE]
-Whenever you are about to run a tool or command (\`\`\`frontier-run, \`\`\`video-tool) or write/modify a file (\`\`\`path=...), ALWAYS state what you are doing in 1 short, plain, natural sentence directly before emitting the fence (for example: "I'm checking the git status to see what files were modified.", "Now running tests to verify the changes.", "Updating the component to handle the event."). Never work silently or emit bare command blocks without explaining your step first.`;
-
-  const toolExecutionMandate = `\n\n[FULL COMPUTER ACCESS & AUTONOMOUS ACTION MANDATE]
-1. FULL SYSTEM & TERMINAL CAPABILITY: You have FULL, UNRESTRICTED ACCESS to this computer, the terminal, the filesystem, and the network. You can run ANY terminal command (\`curl\`, \`wget\`, \`python\`, \`node\`, \`git\`, \`npm\`, \`cat\`, \`grep\`, \`find\`, \`ls\`, etc.), make network requests, query live APIs, inspect processes, edit files, and build projects. All commands execute automatically and seamlessly.
-2. ZERO CAPABILITY DENIAL: NEVER say "I cannot execute commands", "I cannot run commands directly", "I don't have direct access", "I cannot fetch real-time data", "as an AI I cannot", or tell the user to "check a website yourself". You HAVE full live access: whenever you need information, real-time data (crypto prices, weather, stocks, package info), or need to inspect/modify files, emit a \`\`\`frontier-run fence immediately!
-3. PERSISTENCE & AUTONOMOUS PROBLEM SOLVING:
-   - When solving any task, be relentless and persistent.
-   - If a command, script, or API endpoint fails, returns an error, times out, or produces unexpected output (e.g. 404, rate limit, parse error, missing dependency), NEVER give up or tell the user "I recommend trying later" or "check your internet connection".
-   - Instead, ACTIVELY SELF-THINK and TRY ALTERNATIVE SOLUTIONS based on what is available:
-     * If an API endpoint fails (e.g., CoinDesk is down or deprecated), immediately try alternative public APIs in the next step (e.g., for Bitcoin: CoinGecko, Binance, Coinbase, Kraken, or Yahoo Finance).
-     * If a shell tool is missing or fails, write and execute a quick inline Python or Node script to fetch or compute what you need.
-     * If parsing fails, inspect the raw output and adapt your extraction logic.
-   - Iterate autonomously until you successfully obtain the answer or complete the task.
-4. DIAGNOSE BEFORE YOU RETRY (no thrashing):
-   - Before re-running anything that failed, say in one sentence WHY it failed. A 401, 403, "invalid API key" or "missing key" is a statement about your request, NOT an outage: retrying it, or switching to a different vendor that also needs a key, cannot change the answer.
-   - NEVER invent, guess, or placeholder a credential (\`key=dummy\`, \`YOUR_KEY\`, \`appid=xxx\`, \`token=test\`). A fake key is a guaranteed refusal.
-   - Never alternate between two key-gated commercial providers. If the first one refuses for an auth reason, every other one will too.
-   - For public data, prefer endpoints that need NO credential: weather -> \`wttr.in\`, \`api.open-meteo.com\`; crypto/FX -> \`api.coingecko.com\`, \`api.binance.com\`, \`api.frankfurter.app\`; IP/geo -> \`ipapi.co\`, \`ip-api.com\`. Failing that, compute the answer locally with \`python3\` or \`node\`.
-   - If a credential genuinely is required and not configured, say so plainly and ask the user for it instead of looping.
-5. FILE WRITING: When creating or updating files, always emit complete fenced blocks with \`\`\`<lang> path="workspace/path.ext"\`\`\`.
-6. COMMAND EXECUTION: When executing terminal actions, emit \`\`\`frontier-run\n<command>\n\`\`\`. The real output will be returned to you in the next observation.`;
-
-  /*
-    The system prompt, assembled in priority order under the window's budget.
-
-    Earlier is more important: a section that does not fit is dropped whole,
-    and everything after it goes too. The ranking is a judgement, so it is
-    written down. The contract the operator sees — who the assistant is, how a
-    file is written, how a command is run — and the live state of any surface
-    the host mounted come first, because a turn without them is wrong. The
-    doctrine is the concise statement of "act, measure, do not refuse"; the
-    long mandate that says the same thing at five times the length comes after
-    it. The visual contract is last: it matters only when the model is about to
-    author UI, and it was costing every "play that song" turn 1,858 characters.
-  */
-  const system = assemblePrompt(
-    [
-      {
-        name: "base",
-        required: true,
-        text: `You are Teminali ${selection.label}. Be precise, disclose uncertainty, and never claim a tool or test ran unless its result is present in the conversation. When the user asks you to edit workspace files, emit every intended final file as a complete fenced block with path="workspace/relative/path.ext" directly on the code fence tag (e.g. \`\`\`html path="outputs/live-edit-vision-canary.html" or \`\`\`ts path="src/example.ts"). Use one explicit path block per file, never an ambiguous patch fragment, so Teminali can apply, display, and verify the edits safely. To actually run a workspace command, emit it in a \`\`\`frontier-run fence (one command per line); its real output is returned to you before you answer again. A \`\`\`bash or \`\`\`sh block is documentation and is never executed. All workspace and system terminal commands run automatically and seamlessly with full computer access.`,
-      },
-      { name: "identity", required: true, text: identityInstruction },
-      { name: "transcript", required: true, text: transcriptInstruction },
-      { name: "skill", text: skillInstruction },
-      { name: "player", required: true, text: playerInstruction },
-      { name: "editor", text: editorInstruction },
-      { name: "doctrine", text: DiligenceEngine.doctrine() },
-      { name: "step-explanation", text: stepExplanationInstruction },
-      { name: "conversational", text: conversationalInstruction },
-      { name: "tool-execution-mandate", text: toolExecutionMandate },
-      { name: "completeness", text: CompletenessEngine.mandate() },
-      { name: "multi-agent", text: multiAgentPrompt },
-      { name: "house-style", text: CompletenessEngine.houseStyle() },
-    ].map((section) => ({ ...section, text: section.text.replace(/^\n+/, "") })),
-    budget.systemPromptChars,
-  );
+  const system = composeSystemPrompt({
+    label: selection.label,
+    skillInstruction,
+    videoTools: capabilities.videoTools,
+    player:
+      capabilities.runPlayer && capabilities.playerActions && capabilities.playerActions.length > 0
+        ? { actions: capabilities.playerActions, showing: capabilities.playerState?.() ?? "" }
+        : null,
+    origin,
+    freshConversation: isFreshConversation,
+    budgetChars: budget.systemPromptChars,
+  });
 
   /*
     History is fitted newest-first to its own share of the window, and each
