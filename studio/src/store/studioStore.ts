@@ -175,6 +175,18 @@ interface StudioState {
   setBudget: (budget: number) => void;
   
   workspacePath: string;
+  /**
+   * Whether `workspacePath` is a root the gateway has confirmed, or still the
+   * boot-time guess.
+   *
+   * The initial `workspacePath` is a hardcoded path, not knowledge: the real
+   * root arrives with `/api/workspace/projects`, a fetch later. Most readers
+   * can live with a guess for that moment, but anything that resolves a
+   * workspace-relative path against the root cannot — under the wrong root the
+   * same relative path is a different file, or no file at all. Deliberately
+   * not persisted: a root is confirmed for a session, by that session.
+   */
+  workspaceRootConfirmed: boolean;
   activeWorkspaceId: "teminali" | "teminali-code-tests" | "argus-vpn";
   setWorkspace: (ws: "teminali" | "teminali-code-tests" | "argus-vpn") => void;
   /**
@@ -300,6 +312,7 @@ export const useStudioStore = create<StudioState>()(
       
       activeWorkspaceId: "teminali",
       workspacePath: "/Users/teminali/Documents/my_projects/teminali/teminaliCode",
+      workspaceRootConfirmed: false,
       // Switching workspace moves the root, and nothing else. It used to also
       // select that workspace's canned demo tab; those tabs are gone, so a
       // per-workspace activeTabId would only ever name a tab that does not
@@ -325,6 +338,10 @@ export const useStudioStore = create<StudioState>()(
 
       setWorkspacePath: (workspacePath) => set({
         workspacePath,
+        // Every caller of this setter has the root from the gateway — a
+        // projects response, an `openProject`, or an agent event. Reaching
+        // here is what makes the root a fact rather than the boot guess.
+        workspaceRootConfirmed: true,
         // A new root means a new tree: paths from the old one open nothing.
         expandedPaths: new Set<string>(DEFAULT_EXPANDED_PATHS),
         revealTarget: null,

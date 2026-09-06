@@ -535,6 +535,23 @@ in a URL: it asks `window.teminali.workspaceMedia.url(encodedPath)` and points
 an element at the result, or — in a browser build, where the bridge is absent —
 says playback needs the desktop app, the same shape as the drop bridge.
 
+**Only a root the gateway has named is repeated, and the element waits for it.**
+The store opens on a hardcoded `workspacePath`; the gateway, meanwhile,
+remembers the last project across restarts, so at boot the tree is one
+project's and the shell's idea of the root is another's. Panels are persisted
+and media panes are restored, so the first thing a cold start did was ask for a
+file under a root the operator had not opened — a 404 no element retries, and
+under a root that happened to hold a file of that name, the wrong file played.
+Three things close it: `App.tsx` adopts `projects.current.path` at mount, which
+is the only place the shell learns which project the gateway is actually bound
+to; `setWorkspacePath` raises `workspaceRootConfirmed`, and
+`syncWorkspaceMediaRoot` announces nothing until it is raised, so main answers
+`WORKSPACE_ROOT_UNKNOWN` rather than serving from a guess; and `FilePane` keeps
+a media pane loading while the root is unconfirmed instead of pointing an
+element at a root that is about to change. `announceRoot` is `sendSync`: a
+media request travels Chromium's loader, not the IPC pipe, so an asynchronous
+`send` is not ordered against the element that follows it.
+
 **Admitting the formats is the gate.** `MEDIA_EXTENSIONS` in
 `server/workspace.js` (`.mp4 .webm .m4v .mov .mp3 .m4a .wav .ogg .flac`) joins
 `isViewableWorkspaceFile`, so the tree lists them and the agent's `open_file`

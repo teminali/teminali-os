@@ -55,7 +55,12 @@ function initWorkspaceMedia({ getGatewayRoot, isMainWindow, log }) {
     event.returnValue = { scheme: WORKSPACE_MEDIA_SCHEME, nonce };
   });
 
+  // Answered synchronously: the renderer waits for this before it points a
+  // media element at the protocol, so that the element cannot arrive first and
+  // be served from the previous root — or from none. Every path must set
+  // `returnValue`; a `sendSync` with no answer hangs the renderer for good.
   ipcMain.on("workspace-media:root", (event, root) => {
+    event.returnValue = false;
     if (!isMainWindow(event.sender)) return;
     if (typeof root !== "string" || !path.isAbsolute(root)) return;
     let stats;
@@ -66,6 +71,7 @@ function initWorkspaceMedia({ getGatewayRoot, isMainWindow, log }) {
     }
     if (!stats.isDirectory()) return;
     announcedRoot = root;
+    event.returnValue = true;
   });
 
   protocol.handle(WORKSPACE_MEDIA_SCHEME, async (request) => {

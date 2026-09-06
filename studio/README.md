@@ -115,7 +115,9 @@ Chromium's player and nothing more — H.264 and VP9 video, AAC, MP3, Opus, FLAC
 and WAV audio; a `.mov` holding ProRes or an `.mp4` holding HEVC will not play,
 and the pane says which codec and the ffmpeg line that converts it. No MKV, no
 subtitle tracks, no transcoding. A browser build says playback needs the
-desktop app.
+desktop app. A media pane waits for the gateway to name the open project before
+it streams: the shell adopts that root at startup, and until it has one a
+relative path would be resolved against a stale project.
 
 The **Browser** panel is a real browser in the desktop app, not a frame in the
 page. Each tab is an Electron `WebContentsView` with its own session, process
@@ -678,7 +680,7 @@ ollama serve              # local models on 127.0.0.1:11434
 
 ```bash
 npm run typecheck   # tsc --noEmit
-npm test            # 1304 tests, 0 failures
+npm test            # 1308 tests, 0 failures
 npm run build       # tsc && vite build
 npm run verify:core # all three
 ```

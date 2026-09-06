@@ -40,8 +40,13 @@ export interface WorkspaceMedia {
 export interface WorkspaceMediaBridge {
   /** A playable URL for an already percent-encoded workspace-relative path. */
   url(encodedPath: string): string | null;
-  /** Tells main which root a relative path is under. Ignored by a packaged app, which reads it off its own gateway. */
-  announceRoot(root: string): void;
+  /**
+   * Tells main which root a relative path is under, and returns only once main
+   * has it — so a media element cannot reach the protocol before the root it
+   * needs. Answers whether main accepted it. Ignored by a packaged app, which
+   * reads the root off its own gateway.
+   */
+  announceRoot(root: string): boolean;
 }
 
 function extensionOf(path: string): string {
@@ -117,6 +122,12 @@ export function formatDuration(seconds: number): string {
   return hours > 0 ? `${hours}:${two(minutes)}:${two(rest)}` : `${minutes}:${two(rest)}`;
 }
 
+/** The slice of the studio store the media root sync reads. */
+export interface WorkspaceRootState {
+  workspacePath: string;
+  workspaceRootConfirmed: boolean;
+}
+
 /**
  * Keeps main told which project is open, for a development build.
  *
@@ -125,15 +136,28 @@ export function formatDuration(seconds: number): string {
  * see, so the renderer — which learns the root from `/api/workspace/projects`
  * — repeats it. Main validates it as an existing directory and, when it has a
  * gateway of its own, ignores it.
+ *
+ * Only a root the gateway has confirmed is repeated. The store's opening
+ * `workspacePath` is a hardcoded guess that stands until the projects response
+ * lands, and announcing it told main something false: a restored media pane
+ * then asked for its file under a root the operator had not opened, and got a
+ * 404 it never retried.
  */
 export function syncWorkspaceMediaRoot(store: {
-  getState(): { workspacePath: string };
-  subscribe(listener: (state: { workspacePath: string }) => void): () => void;
+  getState(): WorkspaceRootState;
+  subscribe(listener: (state: WorkspaceRootState) => void): () => void;
 }): () => void {
   const bridge = workspaceMediaBridge();
   if (!bridge) return () => {};
   let last: string | null = null;
-  const announce = (state: { workspacePath: string }) => {
+  const announce = (state: WorkspaceRootState) => {
+    // An unconfirmed root is worse than none. Main resolves a
+    // workspace-relative path against whatever root it was last told, so the
+    // boot-time guess does not merely fail on a file that is not there — under
+    // a root the operator never opened, the same relative path can name a
+    // different file and stream it. Until the gateway has spoken, main
+    // answering WORKSPACE_ROOT_UNKNOWN is the honest answer.
+    if (!state.workspaceRootConfirmed) return;
     if (!state.workspacePath || state.workspacePath === last) return;
     last = state.workspacePath;
     bridge.announceRoot(state.workspacePath);

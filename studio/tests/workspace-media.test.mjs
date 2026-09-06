@@ -6,7 +6,7 @@ import { join } from "node:path";
 
 import { openWorkspaceMedia, parseByteRange } from "../server/workspace-media.js";
 import { MEDIA_EXTENSIONS } from "../server/workspace.js";
-import { WORKSPACE_MEDIA_TYPES, describeMediaError, formatDuration, workspaceMediaOf, workspaceMediaUrl } from "../src/services/workspaceMedia.ts";
+import { WORKSPACE_MEDIA_TYPES, describeMediaError, formatDuration, syncWorkspaceMediaRoot, workspaceMediaOf, workspaceMediaUrl } from "../src/services/workspaceMedia.ts";
 
 /**
  * The media route: what it streams, what it refuses, and how it answers a
@@ -172,4 +172,86 @@ test("a duration reads as a clock", () => {
   assert.equal(formatDuration(3725), "1:02:05");
   assert.equal(formatDuration(Number.NaN), "");
   assert.equal(formatDuration(Number.POSITIVE_INFINITY), "live");
+});
+
+/**
+ * Which root main is told, and when.
+ *
+ * The store opens on a hardcoded `workspacePath` that stands until the
+ * gateway's projects response lands. Repeating that guess is not a harmless
+ * head start: main resolves every relative media path against the last root it
+ * was given, so a restored pane asks for its file under a project the operator
+ * never opened — a 404 no element retries, or worse, a different file of the
+ * same name.
+ */
+function fakeStore(initial) {
+  let state = initial;
+  const listeners = new Set();
+  return {
+    getState: () => state,
+    subscribe(listener) {
+      listeners.add(listener);
+      return () => listeners.delete(listener);
+    },
+    set(next) {
+      state = { ...state, ...next };
+      for (const listener of listeners) listener(state);
+    },
+  };
+}
+
+function withBridge(run) {
+  const announced = [];
+  const previous = globalThis.window;
+  globalThis.window = { teminali: { workspaceMedia: { url: (p) => p, announceRoot: (root) => { announced.push(root); return true; } } } };
+  try {
+    run(announced);
+  } finally {
+    if (previous === undefined) delete globalThis.window;
+    else globalThis.window = previous;
+  }
+}
+
+test("the boot-time guess is never announced; main is better off knowing nothing", () => {
+  withBridge((announced) => {
+    const store = fakeStore({ workspacePath: "/guessed/root", workspaceRootConfirmed: false });
+    const stop = syncWorkspaceMediaRoot(store);
+    assert.deepEqual(announced, []);
+    stop();
+  });
+});
+
+test("the root reaches main the moment the gateway confirms it, even when it equals the guess", () => {
+  withBridge((announced) => {
+    const store = fakeStore({ workspacePath: "/guessed/root", workspaceRootConfirmed: false });
+    const stop = syncWorkspaceMediaRoot(store);
+    store.set({ workspaceRootConfirmed: true });
+    assert.deepEqual(announced, ["/guessed/root"]);
+    stop();
+  });
+});
+
+test("a confirmed root is announced once, and again only when the project changes", () => {
+  withBridge((announced) => {
+    const store = fakeStore({ workspacePath: "/one", workspaceRootConfirmed: true });
+    const stop = syncWorkspaceMediaRoot(store);
+    store.set({ workspacePath: "/one" });
+    store.set({ workspacePath: "/two" });
+    assert.deepEqual(announced, ["/one", "/two"]);
+    stop();
+    store.set({ workspacePath: "/three" });
+    assert.deepEqual(announced, ["/one", "/two"]);
+  });
+});
+
+test("a browser build has no bridge to announce to, and does not throw looking for one", () => {
+  const previous = globalThis.window;
+  globalThis.window = {};
+  try {
+    const store = fakeStore({ workspacePath: "/one", workspaceRootConfirmed: true });
+    assert.doesNotThrow(() => syncWorkspaceMediaRoot(store)());
+  } finally {
+    if (previous === undefined) delete globalThis.window;
+    else globalThis.window = previous;
+  }
 });

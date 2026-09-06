@@ -292,8 +292,20 @@ contextBridge.exposeInMainWorld("teminali", {
     /** A playable URL for a workspace-relative path whose segments are already percent-encoded. */
     url: (encodedPath) =>
       workspaceMediaOrigin ? `${workspaceMediaOrigin.scheme}://${workspaceMediaOrigin.nonce}/${encodedPath}` : null,
-    /** Which project is open. A packaged app ignores this and reads its own gateway's root. */
-    announceRoot: (root) => ipcRenderer.send("workspace-media:root", root),
+    /**
+     * Tells main which project is open, and does not return until it knows.
+     *
+     * Synchronous on purpose: the very next thing the pane does is point a
+     * `<video>` at the protocol, and a media request does not travel the IPC
+     * pipe — it goes through Chromium's loader, so an asynchronous `send` is
+     * not ordered against it and the element can reach main first, before the
+     * root it needs. Blocking the renderer for one hop is cheaper than a video
+     * that is dead until the file is reopened. A packaged app ignores the root
+     * and reads its own gateway's, but still answers.
+     *
+     * @returns whether main accepted it as an existing directory.
+     */
+    announceRoot: (root) => ipcRenderer.sendSync("workspace-media:root", root) === true,
   },
   /**
    * The browser panel's page, which is not in this document at all.

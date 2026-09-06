@@ -293,6 +293,33 @@ export default function App() {
     };
   }, [focusOrOpen]);
 
+  /*
+    Which project the gateway is bound to, adopted at boot.
+
+    The store opens on a hardcoded `workspacePath`, but the gateway remembers
+    the last project across restarts — so the tree, the file panes and the
+    media protocol are all relative to a root the shell has never been told.
+    Nothing else adopts it: `useProjectLibrary` reads the same endpoint but
+    keeps the answer in local state, and every other `setWorkspacePath` is
+    behind a click. Until this lands the root is a guess, and a restored media
+    pane asking for its file under the guess got a 404 it never retried.
+  */
+  useEffect(() => {
+    const controller = new AbortController();
+    WorkspaceService.listProjects(controller.signal)
+      .then((response) => {
+        const root = response.current?.path;
+        if (root) useStudioStore.getState().setWorkspacePath(root);
+      })
+      .catch(() => {
+        // A gateway that is down leaves the root unconfirmed rather than
+        // wrong. A media pane then waits instead of streaming from a guess —
+        // and every other pane is already erroring, since nothing can be read
+        // without the gateway either.
+      });
+    return () => controller.abort();
+  }, []);
+
   // "Open Folder…" (⌘O) from native menu bar.
   // Rebinds workspace root, updates store, expands explorer, and focuses editor.
   useEffect(() => {

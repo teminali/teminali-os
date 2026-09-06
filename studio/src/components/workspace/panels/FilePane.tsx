@@ -85,6 +85,7 @@ export const FilePane: React.FC<{ panel: PanelTab }> = ({ panel }) => {
   const [preview, setPreview] = useState<Preview | null>(null);
 
   const workspacePath = useStudioStore((state) => state.workspacePath);
+  const rootConfirmed = useStudioStore((state) => state.workspaceRootConfirmed);
   const showFile = useStudioStore((state) => state.showFile);
   const setWorkspacePath = useStudioStore((state) => state.setWorkspacePath);
   const [dragging, setDragging] = useState(false);
@@ -185,7 +186,19 @@ export const FilePane: React.FC<{ panel: PanelTab }> = ({ panel }) => {
     if (media) {
       update(panel.id, { label: panel.path.split("/").pop() ?? panel.path });
       setContent(null);
-      const url = workspaceMediaUrl(workspaceMediaBridge(), panel.path);
+      const bridge = workspaceMediaBridge();
+      if (!bridge) {
+        setError(NEEDS_DESKTOP_APP);
+        setLoading(false);
+        return;
+      }
+      // A media path is relative to the open project, and at boot the store's
+      // root is still a guess — panels are restored from the last session, the
+      // real root arrives a fetch later. Asking now streams from the wrong root
+      // or from none, and the element does not retry, so the pane stays loading
+      // until the gateway has named the root. The effect re-runs when it does.
+      if (!rootConfirmed) return;
+      const url = workspaceMediaUrl(bridge, panel.path);
       if (url) setPreview({ url, mimeType: media.mimeType, size: null });
       else setError(NEEDS_DESKTOP_APP);
       setLoading(false);
@@ -214,7 +227,7 @@ export const FilePane: React.FC<{ panel: PanelTab }> = ({ panel }) => {
 
     return () => controller.abort();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [panel.path, panel.id]);
+  }, [panel.path, panel.id, rootConfirmed]);
 
   // One object URL is alive at a time; the browser holds the bytes until it is
   // revoked, so this runs on every replacement and not only on unmount.
