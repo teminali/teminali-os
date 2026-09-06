@@ -138,10 +138,27 @@ git branch --show-current
     for the reason [SAY, THEN DO] does: a rule the model is told but not shown
     turns into narration about the rule.
 
-    The second paragraph is the one that decides whether this tool is worth
-    having. A model handed a way to ask will ask for what it could have
-    measured — the eval pins `what branch am I on?` at a `git` call, not a
-    question, and that case was written before the tool for exactly this.
+    The rule about not asking for what you could look up is the one that
+    decides whether this tool is worth having. A model handed a way to ask will
+    ask for what it could have measured — the eval pins `what branch am I on?`
+    at a `git` call, not a question, and that case was written before the tool
+    for exactly this.
+
+    Its length was measured against the budget and then measured again against
+    the model, and the second measurement is the one that decided it. At 1,185
+    characters this block does not fit beside the player on an 8k window —
+    `assemblePrompt` skips a section that does not fit and carries on, so it
+    was skipped on every turn with a file open. Rewritten to 389 it fit, and
+    scored **0/3**: the model had the instruction in front of it and listed the
+    options in prose anyway. What the short version dropped was the clause
+    binding the rule to the failure ("instead of listing options in prose"),
+    the promise that the answer comes back mid-turn, and the worked example
+    with real descriptions.
+
+    So the length stays, and the gap is recorded instead of papered over:
+    `ask-with-player` sits at 0/3 in the eval and is the regression test for
+    whoever trims the editor catalogue, which is 4,062 characters — 43% of this
+    budget — and is the section actually crowding this one out.
   */
   const askInstruction = !input.canAsk ? "" : `\n\n[ASK THE OPERATOR]
 When a choice is genuinely the operator's — a preference, a trade-off, a direction you cannot measure — put it to them in an \`\`\`ask fence instead of guessing, and instead of listing options in prose. One JSON object, or an array of up to 4 of them for a stepped set: {"question":"...","header":"Short chip","options":[{"label":"...","description":"..."}],"multiSelect":false}. Two to four options, each a real alternative; their answer is returned to you before you answer again, and it is then settled — never ask it twice.
@@ -175,9 +192,14 @@ Two sensible ways to go here, and it is your call.
   /*
     The system prompt, assembled in priority order under the window's budget.
 
-    Earlier is more important: a section that does not fit is dropped whole,
-    and everything after it goes too. The ranking is a judgement, so it is
-    written down. The contract the operator sees — who the assistant is, how a
+    Earlier is more important: a section that does not fit is dropped whole and
+    `assemblePrompt` carries on with the rest, so a later section that is small
+    enough still ships — the drop is a skip, not a truncation, and a big block
+    ranked high can therefore evict only itself. (Said the other way round here
+    for a while, and in a handover after that: "everything after it goes too".
+    It does not; `contextBudget.ts` skips and continues, which is why
+    `conversational` survives on the turns `ask` is dropped.) The ranking is a
+    judgement, so it is written down. The contract the operator sees — who the assistant is, how a
     file is written, how a command is run — and the live state of any surface
     the host mounted come first, because a turn without them is wrong. The
     doctrine is the concise statement of "act, measure, do not refuse"; the

@@ -211,6 +211,24 @@ const CASES = [
     },
   },
   {
+    // KNOWN GAP, deliberately left red. With a file open in the player on an
+    // 8k window the ask block does not fit and `assemblePrompt` skips it, so
+    // the lane cannot ask. Shortening the block to 389 chars made it fit and
+    // scored 0/3 anyway — the model listed options in prose with the rule in
+    // front of it — so the block kept its length and this case keeps its
+    // failure. It is the regression test for trimming the editor catalogue,
+    // which is 4,062 chars and is what actually crowds this out.
+    name: "ask-with-player",
+    player: halo(true),
+    history: playerChat,
+    prompt: "I can't decide how to structure this project. Give me a few options and let me pick one.",
+    expect: (text) => {
+      const questions = asked(text);
+      if (questions.length === 0) return `no ask fence; said: ${text.replace(/\s+/g, " ").slice(0, 90)}`;
+      return questions[0].options.length >= 2 ? null : `only ${questions[0].options.length} option(s)`;
+    },
+  },
+  {
     // The other half of the contract, and the one that decides whether it is
     // worth having: a tool for asking makes a model ask for what it could
     // have measured. The branch is one `git` call away and must never be a

@@ -1375,8 +1375,8 @@ from, the lane replied *"Here are a few common approaches: 1. Monolithic…"* an
 ended the turn. The options were fine. There was nothing to click, and an
 answer typed into the next turn arrives having lost the question that produced
 it. After the prompt block: **3/3**, and the whole eval went 36/36 (12 cases)
-to **42/42** (14 cases) — measured on `frontier-qwen2.5-coder-14b-8k`, three
-runs a case.
+to **42/45** (15 cases) — measured on `frontier-qwen2.5-coder-14b-8k`, three
+runs a case. The three that fail are one case, and it is below.
 
 This is `AskUserQuestion` parity for a lane that cannot be given the real
 thing. Measured in an earlier session, Claude Code driven headlessly is offered
@@ -1409,14 +1409,34 @@ Four things are deliberate:
   came from the model's guess at the problem and the operator is the one who
   knows it guessed wrong.
 
-**A measured limit, stated because it is not visible from the code.** The block
-is ranked below the player's, so on an 8k window **with a file open in the
-player, `ask` is dropped from the prompt entirely** — four eval cases show it
-in their `dropped` list. That is the budget working as designed (§ the context
-budget: whole sections, in priority order), and the ranking is the right way
-round: knowing what is playing beats being able to ask about it. On a larger
-window both fit. `completeness` and `multi-agent` now drop on every turn and
-the eval did not move, which is its own small verdict on their length.
+**The known gap, left red on purpose.** On an 8k window **with a file open in
+the player, `ask` is dropped from the prompt entirely** — the block is 1,174
+characters and only 411 were left when it was reached. `ask-with-player` pins
+that at **0/3** and stays in the eval as a failing case, because a gap that is
+measured is worth more than a gap that is described.
+
+The obvious fix was tried and rejected by measurement. Rewritten to 389
+characters the block fits beside the player — and scores **0/3 anyway**: the
+model has the rule in front of it and lists the options in prose regardless.
+What the short version had dropped was the clause binding the rule to the
+failure it prevents ("instead of listing options in prose"), the promise that
+the answer returns mid-turn, and the worked example with real descriptions.
+Shortening it also cost `ask-explicit-choice`, which went 3/3 → 0/3 with no
+player involved at all. **Length is not fungible with content in a prompt
+block**, which is the same lesson `[SAY, THEN DO]` taught from the other
+direction, and the second time this eval has caught reasoning that was sound
+and wrong.
+
+**What actually crowds it out is the editor catalogue: 4,062 characters, 43% of
+the system budget**, ranked above `ask` and shipped on every turn whether or not
+the operator has a timeline open. That is the section to attack, and
+`ask-with-player` is the regression test that will say whether attacking it
+worked. Also worth noting: the drop rule is a **skip, not a truncation** —
+`assemblePrompt` passes over a section that does not fit and keeps going, so
+`conversational` survives on the very turns `ask` is dropped. A comment in
+`systemPrompt.ts` claimed otherwise until 2026-09-07, and reasoning from it
+produced a plan to trim `completeness` and `multi-agent` that would have freed
+nothing, since both rank *below* `ask` and were already being skipped.
 
 Tested in `tests/ask-tool-calls.test.mjs` (16).
 
@@ -1691,10 +1711,10 @@ number they can be asked for rather than a knife. Pinned in
 
 **The local-lane eval** (`evals/local-lane.mjs`, `npm run eval:local`). "Better
 results" has no completion date without a fixed set and a number, so the lane
-has one: fourteen turns — play, pause, louder, what's playing, what's on the
+has one: fifteen turns — play, pause, louder, what's playing, what's on the
 timeline, disk space, git branch, a live price with and without a file open in
-the player, hello, your name, write a file, ask for a choice, and *don't* ask
-for something measurable — each graded by the code's own
+the player, hello, your name, write a file, ask for a choice with and without
+the player, and *don't* ask for something measurable — each graded by the code's own
 parsers, so a fence the harness accepts is one the engine would have run. The
 prompt is `composeSystemPrompt` (`services/systemPrompt.ts`), the function the
 engine calls, pulled out of the engine for exactly this reason: a copy would
@@ -1720,8 +1740,9 @@ and ended the turn with no fence. The sentence had become the action. It is
 now `[SAY, THEN DO — IN THE SAME REPLY]`, with the whole shape shown and the
 rule that a reply with no fence has done nothing. **36/36** after that — twelve
 cases, three runs each — at ~2,130 prompt tokens, 26% of the window, with both
-surfaces mounted. (Two cases have since been added with the ask contract; the
-current figure is **42/42** over fourteen.)
+surfaces mounted. (Three cases have since been added with the ask contract; the
+current figure is **42/45** over fifteen, the three failures being the one
+case deliberately left red — see "The lane can ask a question".)
 
 The strip is **open while the turn is live and closes when it settles**. During
 the turn it is the only thing to look at; afterwards it is a footnote under the

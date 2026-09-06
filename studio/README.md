@@ -179,9 +179,13 @@ eval case, because a model handed a way to ask will otherwise ask for the
 branch name instead of running `git`. This is `AskUserQuestion` parity for the
 local lane; the Claude Code and Codex lanes are not offered that tool at all
 when driven headlessly, so they cannot have it. Measured on
-`frontier-qwen2.5-coder-14b-8k`: 0/3 before, 3/3 after. With a file open in the
-player on an 8k window the block does not fit and the lane cannot ask — the
-player's live state outranks it.
+`frontier-qwen2.5-coder-14b-8k`: 0/3 before, 3/3 after.
+
+**One known gap.** With a file open in the player on an 8k window, the
+instruction block does not fit in the system prompt and the lane cannot ask.
+Making it short enough to fit was tried and made it stop working entirely, so
+the block kept its length and the eval keeps a failing case (`ask-with-player`)
+rather than a footnote. A larger window has room for both.
 
 **A folder opens as a gallery.** Click any folder — in the tree, or through
 the agent's `open_file` — and the **Gallery** panel shows what is in it as
@@ -379,9 +383,9 @@ prompt: 1,848 tokens, 23% — and the turn that exposed it, "play a beyonce
 song" with the player showing a Beyoncé file, went from no `player-tool` fence
 in two runs to a correct one in both, with prompt evaluation down from
 13.7–25.1 s to 3.3–4.0 s. The lane now has a fixed eval — `npm run eval:local`,
-fourteen turns graded by the engine's own parsers against the real model — and
-scores 42/42 on it (three runs a case) at ~2,130 prompt tokens with the editor and player both
-mounted; `studio/DESIGN.md` §3 records what its first day found. Claude Code
+fifteen turns graded by the engine's own parsers against the real model — and
+scores 42/45 on it (three runs a case) at ~2,130 prompt tokens with the editor and player both
+mounted, the three failures being one case left deliberately red; `studio/DESIGN.md` §3 records what its first day found. Claude Code
 and Codex are not truncated by this —
 they compact their own context — and receive the same budget shape from their
 real window only so the ceilings provably never bind.
