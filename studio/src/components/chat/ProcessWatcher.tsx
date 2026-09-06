@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { AlertCircle, Check, ChevronRight, FileDiff, Globe, Loader2, Search, Square, Terminal, Waypoints, Wrench } from "lucide-react";
-import { groupActivity, describeCall, type ActivityGroup, type ActivityKind } from "../../services/activityGroups";
+import { classifyCall, describeCall, type ActivityKind } from "../../services/activityGroups";
 import type { ToolCall } from "../../types";
 
 /**
@@ -8,11 +8,17 @@ import type { ToolCall } from "../../types";
  *
  * Three rules, and they are what separate this from a log:
  *
- * 1. **One line per thing that happened, not per event.** Consecutive calls of
- *    a kind collapse — "Ran 6 commands" — and open when asked. A turn that
- *    touched twelve files is three lines tall, not twelve.
- * 2. **A single call never gets a group row.** "Ran ls -la" followed by an
- *    indented "ls -la" is the same sentence twice.
+ * 1. **One row per call, in the order they happened.** Consecutive calls of a
+ *    kind used to collapse — "Ran 6 commands" — which reads as tidy and costs
+ *    two clicks to answer "what is it actually doing?". The operator, holding
+ *    this strip next to the same run in an editor's agent panel: *"it is
+ *    always like this on vscode, antigravity, but not here."* A step folded
+ *    away while it runs is a step they cannot follow, and following the run is
+ *    the whole job of this strip. A wall of rows is the honest shape of a turn
+ *    that did twelve things.
+ * 2. **A row opens onto what went in and what came back.** `IN` is the
+ *    arguments, `OUT` is the result, labelled — two unlabelled grey blocks
+ *    make the reader work out which is which every time.
  * 3. **Everything is one weight of grey.** Status is carried by a 10px glyph
  *    and by tense; nothing in here is allowed to compete with the reply itself,
  *    which is the thing the operator is actually reading.
@@ -64,10 +70,13 @@ export const ProcessWatcher: React.FC<ProcessWatcherProps> = ({
     wasStreaming.current = isStreaming;
   }, [isStreaming]);
 
-  const groups = useMemo(() => groupActivity(toolCalls), [toolCalls]);
+  // Classification is per call and only decides which glyph the row wears;
+  // nothing is merged, so the order the assistant read, ran and edited in
+  // survives exactly as it happened.
+  const rows = useMemo(() => toolCalls.map((call) => ({ call, kind: classifyCall(call) })), [toolCalls]);
   const elapsed = useElapsed(isStreaming);
 
-  if (!isStreaming && groups.length === 0) return null;
+  if (!isStreaming && rows.length === 0) return null;
 
   const steps = toolCalls.length;
   const failed = toolCalls.some((call) => call.status === "error");
@@ -122,10 +131,10 @@ export const ProcessWatcher: React.FC<ProcessWatcherProps> = ({
         )}
       </div>
 
-      {expanded && groups.length > 0 && (
+      {expanded && rows.length > 0 && (
         <ol className="ml-[5px] pl-3 border-l border-edge/70 flex flex-col animate-reveal" role="list">
-          {groups.map((group) => (
-            <GroupRow key={group.id} group={group} onJumpToFile={onJumpToFile} />
+          {rows.map(({ call, kind }, index) => (
+            <CallRow key={call.id ?? index} call={call} kind={kind} onJumpToFile={onJumpToFile} />
           ))}
         </ol>
       )}
@@ -133,49 +142,12 @@ export const ProcessWatcher: React.FC<ProcessWatcherProps> = ({
   );
 };
 
-/** A run of same-kind calls. One call collapses to its own row — rule 2. */
-const GroupRow: React.FC<{ group: ActivityGroup; onJumpToFile?: (path: string, code: string) => void }> = ({
-  group,
-  onJumpToFile,
-}) => {
-  const [open, setOpen] = useState(false);
-  if (group.calls.length === 1) return <CallRow call={group.calls[0]} kind={group.kind} onJumpToFile={onJumpToFile} />;
-
-  return (
-    <li>
-      <button
-        type="button"
-        onClick={() => setOpen((previous) => !previous)}
-        aria-expanded={open}
-        className="group w-full h-6 flex items-center gap-1.5 text-left rounded-[5px] px-1 -mx-1 hover:bg-surface-hover/70 transition-colors duration-ds ease-ds"
-      >
-        <StatusGlyph status={group.status} kind={group.kind} />
-        <span className="text-xs text-ink-muted truncate">{group.label}</span>
-        {(group.additions > 0 || group.deletions > 0) && <DiffStat additions={group.additions} deletions={group.deletions} />}
-        <span className="flex-1" />
-        <ChevronRight
-          size={10}
-          className={`text-ink-disabled opacity-0 group-hover:opacity-100 transition-all duration-ds ease-ds ${open ? "rotate-90 opacity-100" : ""}`}
-        />
-      </button>
-      {open && (
-        <ol className="ml-[5px] pl-3 border-l border-edge/50 flex flex-col animate-reveal" role="list">
-          {group.calls.map((call, index) => (
-            <CallRow key={call.id ?? index} call={call} kind={group.kind} onJumpToFile={onJumpToFile} nested />
-          ))}
-        </ol>
-      )}
-    </li>
-  );
-};
-
-/** One call. Opens to its arguments, its output and its diff — nothing else. */
+/** One call: what it did, and — when opened — what went in and what came back. */
 const CallRow: React.FC<{
   call: ToolCall;
   kind: ActivityKind;
-  nested?: boolean;
   onJumpToFile?: (path: string, code: string) => void;
-}> = ({ call, kind, nested = false, onJumpToFile }) => {
+}> = ({ call, kind, onJumpToFile }) => {
   const [open, setOpen] = useState(false);
   const failed = call.status === "error";
   const detail = describeCall(call);
@@ -211,18 +183,24 @@ const CallRow: React.FC<{
         <div className="my-1 rounded-md bg-frame-bot border border-edge-code px-2.5 py-2 animate-reveal">
           <div className="font-mono text-3xs text-ink-disabled mb-1">{call.name}</div>
           {Object.keys(call.arguments ?? {}).length > 0 && (
-            <pre className="font-mono text-3xs text-ink-code/80 whitespace-pre-wrap break-words max-h-36 overflow-y-auto">
-              {JSON.stringify(call.arguments, null, 2)}
-            </pre>
+            <>
+              <FoldLabel>in</FoldLabel>
+              <pre className="font-mono text-3xs text-ink-code/80 whitespace-pre-wrap break-words max-h-36 overflow-y-auto">
+                {JSON.stringify(call.arguments, null, 2)}
+              </pre>
+            </>
           )}
           {call.result && (
-            <pre
-              className={`font-mono text-3xs whitespace-pre-wrap break-words max-h-44 overflow-y-auto mt-1.5 pt-1.5 border-t border-edge/50 ${
-                failed ? "text-danger/90" : "text-ink-code/80"
-              }`}
-            >
-              {call.result}
-            </pre>
+            <div className="mt-1.5 pt-1.5 border-t border-edge/50">
+              <FoldLabel>{failed ? "error" : "out"}</FoldLabel>
+              <pre
+                className={`font-mono text-3xs whitespace-pre-wrap break-words max-h-44 overflow-y-auto ${
+                  failed ? "text-danger/90" : "text-ink-code/80"
+                }`}
+              >
+                {call.result}
+              </pre>
+            </div>
           )}
           {call.diff?.diffText && (
             <pre className="font-mono text-3xs whitespace-pre-wrap break-words max-h-52 overflow-y-auto mt-1.5 pt-1.5 border-t border-edge/50">
@@ -256,6 +234,11 @@ const CallRow: React.FC<{
     </li>
   );
 };
+
+/** Which half of an opened row this is. Lowercase: it is a caption, not a heading. */
+const FoldLabel: React.FC<{ children: React.ReactNode }> = ({ children }) => (
+  <div className="font-mono text-3xs uppercase tracking-wider text-ink-disabled/70 mb-0.5">{children}</div>
+);
 
 const StatusGlyph: React.FC<{ status: "running" | "error" | "done"; kind: ActivityKind }> = ({ status, kind }) =>
   status === "running" ? (

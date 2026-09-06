@@ -1,14 +1,13 @@
 /**
- * What a turn actually did, folded into the few lines a person reads.
+ * What a turn actually did, one call at a time.
  *
- * A turn that touches eight files emits eight tool calls, and eight rows is a
- * wall. Consecutive calls of the same kind therefore collapse into one row —
- * "Ran 6 commands", "Explored 3 files, 1 search", "Edited main.cjs +5 −2" —
- * which the operator opens when they want the individual steps.
- *
- * Consecutive, not global: the order in which the assistant read, ran and
- * edited is itself information, and a global regroup would destroy it. Two runs
- * of commands either side of an edit stay two rows.
+ * This module used to fold consecutive calls of a kind into one row — "Ran 6
+ * commands", "Explored 3 files, 1 search" — on the argument that eight rows is
+ * a wall. It is, and the wall was the point: folding cost two clicks to answer
+ * "what is it doing right now?", which is the only question this strip exists
+ * to answer. `ProcessWatcher` renders every call in the order it happened, so
+ * what is left here is per-call: which glyph a call wears (`classifyCall`),
+ * what its row says (`describeCall`), and which file it touched (`pathOf`).
  *
  * Pure so it can be tested without a renderer — see tests/change-review.test.mjs.
  */
@@ -16,17 +15,6 @@
 import type { ToolCall } from "../types";
 
 export type ActivityKind = "run" | "explore" | "edit" | "web" | "task" | "other";
-
-export interface ActivityGroup {
-  id: string;
-  kind: ActivityKind;
-  /** The headline: what this run of calls did, in a few words. */
-  label: string;
-  calls: ToolCall[];
-  status: "running" | "error" | "done";
-  additions: number;
-  deletions: number;
-}
 
 const PATTERNS: [ActivityKind, RegExp][] = [
   ["edit", /(edit|write|patch|apply|create_file|str_replace|multi_?edit|save|delete_file|mkdir)/],
@@ -46,14 +34,6 @@ export function classifyCall(call: ToolCall): ActivityKind {
   if (typeof args.query === "string" || typeof args.pattern === "string") return "explore";
   if (typeof args.path === "string" || typeof args.file === "string") return "explore";
   return "other";
-}
-
-/** Whether an exploring call was a search rather than a file read. */
-function isSearch(call: ToolCall): boolean {
-  const name = (call.name ?? "").toLowerCase();
-  if (/(grep|search|find|glob|ripgrep)/.test(name)) return true;
-  const args = call.arguments ?? {};
-  return typeof args.query === "string" || typeof args.pattern === "string";
 }
 
 /** A step's own headline: what it did, not its raw JSON. */
@@ -86,70 +66,4 @@ export function pathOf(call: ToolCall): string | null {
     if (typeof value === "string" && value.trim()) return value.trim();
   }
   return call.diff?.file ?? null;
-}
-
-function plural(count: number, one: string, many = `${one}s`): string {
-  return `${count} ${count === 1 ? one : many}`;
-}
-
-/** Past for what is done, present for what is happening. Both are one word. */
-const VERBS: Record<ActivityKind, [past: string, present: string]> = {
-  run: ["Ran", "Running"],
-  edit: ["Edited", "Editing"],
-  explore: ["Explored", "Exploring"],
-  web: ["Fetched", "Fetching"],
-  task: ["Delegated", "Delegating"],
-  other: ["", ""],
-};
-
-function labelFor(kind: ActivityKind, calls: ToolCall[], running: boolean): string {
-  const single = calls.length === 1;
-  const verb = VERBS[kind][running ? 1 : 0];
-  switch (kind) {
-    case "run":
-      return single ? `${verb} ${describeCall(calls[0])}` : `${verb} ${plural(calls.length, "command")}`;
-    case "edit": {
-      const paths = new Set(calls.map((call) => pathOf(call)).filter(Boolean) as string[]);
-      if (paths.size === 1) return `${verb} ${[...paths][0].split("/").pop()}`;
-      return `${verb} ${plural(paths.size || calls.length, "file")}`;
-    }
-    case "explore": {
-      const searches = calls.filter(isSearch).length;
-      const reads = calls.length - searches;
-      const parts: string[] = [];
-      if (reads > 0) parts.push(plural(reads, "file"));
-      if (searches > 0) parts.push(plural(searches, "search", "searches"));
-      return `${verb} ${parts.join(", ")}`;
-    }
-    case "web":
-      return single ? `${verb} ${describeCall(calls[0])}` : `${verb} ${plural(calls.length, "page")}`;
-    case "task":
-      return single ? `${verb} ${describeCall(calls[0])}` : `${verb} ${plural(calls.length, "task")}`;
-    default:
-      return single ? describeCall(calls[0]) : `${plural(calls.length, "step")}`;
-  }
-}
-
-export function groupActivity(calls: ToolCall[]): ActivityGroup[] {
-  const groups: ActivityGroup[] = [];
-
-  for (const call of calls ?? []) {
-    const kind = classifyCall(call);
-    const last = groups[groups.length - 1];
-    if (last && last.kind === kind) last.calls.push(call);
-    else groups.push({ id: call.id ?? `group-${groups.length}`, kind, label: "", calls: [call], status: "done", additions: 0, deletions: 0 });
-  }
-
-  for (const group of groups) {
-    group.status = group.calls.some((call) => call.status === "running")
-      ? "running"
-      : group.calls.some((call) => call.status === "error")
-        ? "error"
-        : "done";
-    group.label = labelFor(group.kind, group.calls, group.status === "running");
-    group.additions = group.calls.reduce((total, call) => total + (call.diff?.additions ?? 0), 0);
-    group.deletions = group.calls.reduce((total, call) => total + (call.diff?.deletions ?? 0), 0);
-  }
-
-  return groups;
 }

@@ -1535,7 +1535,7 @@ A turn is read in a fixed order, and the components are laid out to enforce it:
 | Piece | File | What it is |
 | --- | --- | --- |
 | Process inspector | `chat/ProcessWatcher.tsx` | The live activity strip above a reply, and the stop control. |
-| Activity grouping | `services/activityGroups.ts` | Pure: folds tool calls into the rows the strip shows. |
+| Activity naming | `services/activityGroups.ts` | Pure: a call's glyph, its row text, and the file it touched. |
 | Turn | `chat/MessageBlock.tsx` | Prompt, reply, code cards, hover telemetry. |
 | Code card | `chat/FileActionCard.tsx` | A 28px row that opens onto the code. |
 | Waiting line | `chat/ThinkingIndicator.tsx` | The gap before the first token. Carries no stop. |
@@ -1545,18 +1545,25 @@ A turn is read in a fixed order, and the components are laid out to enforce it:
 | Composer | `chat/Composer.tsx`, `chat/AttachmentStrip.tsx` | The prompt field and what is attached to it. |
 | Pending set | `store/changeStore.ts`, `services/changeSet.ts` | The changes, and the arithmetic behind them. |
 
-**One line per thing that happened, not per event.** `groupActivity` collapses
-consecutive tool calls of one kind into a single row — "Ran 6 commands",
-"Explored 3 files, 1 search", "Edited main.cjs +5 −2" — which opens on click.
-Consecutive, never global: the order in which the assistant read, ran and
-edited is itself information, so two runs of commands either side of an edit
-stay two rows. A group holding one call renders as that call's own row, because
-"Ran ls -la" above an indented "ls -la" is the same sentence twice.
+**One row per call, in the order they happened (2026-09-06).** This used to
+fold consecutive calls of one kind into a single row — "Ran 6 commands",
+"Explored 3 files, 1 search" — on the argument that twelve rows is a wall. It
+is, and the wall turned out to be the point: folding put two clicks between the
+operator and "what is it doing right now?", which is the only question this
+strip exists to answer. Holding it beside the same run in an editor's agent
+panel, the operator: *"it is always like this on vscode, antigravity, but not
+here."* So `groupActivity` is gone; `classifyCall` still decides which glyph a
+row wears and `describeCall` still writes its text, but nothing is merged and
+the order the assistant read, ran and edited in survives exactly.
+
+**A row opens onto `in` and `out`.** The arguments and the result, each under
+its own caption — an unlabelled pair of grey blocks makes the reader work out
+which is which every time. A failed call labels its second block `error` and
+tints it, so the outcome is legible without opening anything else.
 
 The strip is **open while the turn is live and closes when it settles**. During
 the turn it is the only thing to look at; afterwards it is a footnote under the
-answer. Verbs follow: "Running 5 commands" while it runs, "Ran 5 commands" when
-it is done — the tense is in `services/activityGroups.ts`, not in the renderer.
+answer.
 
 **Telemetry is hover-revealed.** Engine, tokens, duration and cost are all
 measured and all real; none of them is what anyone is reading, and six fields

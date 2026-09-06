@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { changeTotals, countChangedLines, MAX_PENDING_CHANGES, planReject, recordChange, splitPath, trimChanges } from "../src/services/changeSet.ts";
-import { classifyCall, groupActivity, pathOf } from "../src/services/activityGroups.ts";
+import { classifyCall, describeCall, pathOf } from "../src/services/activityGroups.ts";
 
 const call = (name, args = {}, status = "completed") => ({ id: `${name}-${Math.random()}`, name, arguments: args, status });
 
@@ -60,44 +60,22 @@ test("tool calls are classified by what they do, including when the name says no
   assert.equal(pathOf(call("Read", { file_path: "src/App.tsx" })), "src/App.tsx");
 });
 
-test("consecutive calls of a kind collapse into one row, and the order between kinds survives", () => {
-  const groups = groupActivity([
-    call("Bash", { command: "ls" }),
-    call("Bash", { command: "pwd" }),
-    call("Read", { path: "src/App.tsx" }),
-    call("Grep", { pattern: "useVoice" }),
-    call("Bash", { command: "npm test" }),
-  ]);
-
-  assert.deepEqual(groups.map((group) => group.label), [
-    "Ran 2 commands",
-    "Explored 1 file, 1 search",
-    "Ran npm test",
-  ]);
-  assert.deepEqual(groups.map((group) => group.kind), ["run", "explore", "run"]);
+test("a row says what the call did, not its raw JSON", () => {
+  assert.equal(describeCall(call("Bash", { command: "npm test" })), "npm test");
+  assert.equal(describeCall(call("Read", { path: "src/main.ts" })), "src/main.ts");
+  assert.equal(describeCall(call("Grep", { pattern: "onToolCall" })), "\u201conToolCall\u201d");
+  // Nothing recognisable to show: the tool's own name beats an empty row.
+  assert.equal(describeCall(call("mystery_tool", {})), "mystery_tool");
 });
 
-test("a group that is still working says so in the present tense", () => {
-  const [group] = groupActivity([call("Bash", { command: "ls" }, "running"), call("Bash", { command: "pwd" }, "running")]);
-  assert.equal(group.label, "Running 2 commands");
-  assert.equal(group.status, "running");
-
-  const [failed] = groupActivity([call("Bash", { command: "ls" }, "error")]);
-  assert.equal(failed.status, "error");
+test("a long command is cut to a row's width rather than wrapping the strip", () => {
+  const long = `git log ${"x".repeat(200)}`;
+  const shown = describeCall(call("Bash", { command: long }));
+  assert.ok(shown.length < long.length, "a 200-character command is trimmed");
+  assert.ok(shown.endsWith("\u2026"), "and says it was trimmed");
 });
 
-test("an edit group names the file when there is only one, and counts them when there are several", () => {
-  const single = groupActivity([call("Write", { path: "studio/electron/main.cjs", content: "x" })]);
-  assert.equal(single[0].label, "Edited main.cjs");
-
-  const many = groupActivity([
-    call("Write", { path: "a.ts", content: "x" }),
-    call("Write", { path: "b.ts", content: "x" }),
-  ]);
-  assert.equal(many[0].label, "Edited 2 files");
-});
-
-/* ── Ageing out: kept, never reverted ────────────────────────────────────── */
+/* ── Ageing out: kept, never reverted ──────────────────────── */
 
 const changeAt = (path, size = 1) => ({
   path, before: "b".repeat(size), after: "a".repeat(size), existedBefore: true,
