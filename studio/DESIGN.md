@@ -2075,6 +2075,35 @@ removed the review screen, and with it the discard button and the per-take
 assemble settings — a real loss to fix a problem that was only ever silence.
 teminaliCut keeps the same click for the same reason.
 
+#### The recorder says only what is true of the machine it is on (`src/video/engine/platformCopy.ts`, 2026-09-06)
+
+The recorder's capabilities differ per platform and its copy did not. Two
+strings asserted macOS facts everywhere:
+
+- Asking for system audio on Linux produced *"System audio loopback is
+  supported natively on Windows. On macOS, microphone narration is
+  recorded."* — a Linux operator told what macOS does, and promised narration
+  even with no microphone selected.
+- The "Draw the pointer" hint read *"A macOS screen capture does not contain
+  the cursor"* on Windows and Linux too, where nobody here has observed
+  whether the captured frames already carry one.
+
+`platformCopy.ts` holds both as pure functions taking the platform
+explicitly, so they are testable without a renderer
+(`tests/recorder-platform-copy.test.mjs`). `systemAudioWarning` names the real
+platform and returns null on Windows, which can serve the request; it promises
+the microphone only when `micDeviceId` is set. `cursorHint` keeps the measured
+macOS sentence for macOS and elsewhere warns about a doubled pointer rather
+than asserting an unmeasured fact.
+
+**What is still unmeasured:** whether a Windows or Linux desktop capture
+contains the cursor. `drawCursor` therefore still defaults to on from
+`TUTORIAL_ASSEMBLE` on every platform, which on those two may draw a second
+pointer over a real one. The default is left alone deliberately — changing it
+would trade a doubled cursor for a missing one on the strength of a guess. It
+needs one observation on each platform, not a reasoned answer (§2, no dead
+affordances; and the repo rule against writing what was not measured).
+
 ### Two menu bar items
 
 `electron/tray.cjs` (Guardian) and `electron/assistant-tray.cjs` are separate

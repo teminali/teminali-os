@@ -40,6 +40,8 @@
    it to within a frame or two.
    ═══════════════════════════════════════════════════════════════════ */
 
+import { systemAudioWarning } from './platformCopy';
+
 import type {
   CursorSample, InputEvent, InputCaptureStatus, RecorderConvertProgress,
   RecordingResult, SpeechCue,
@@ -363,9 +365,7 @@ async function acquireScreen(settings: CaptureSettings): Promise<{
     video: stream.getVideoTracks()[0],
     systemAudio: null,
     ...(settings.systemAudio && !canLoopback
-      ? {
-        warning: 'System audio loopback is supported natively on Windows. On macOS, microphone narration is recorded.',
-      }
+      ? { warning: systemAudioWarning(window.teminali?.platform, Boolean(settings.micDeviceId)) ?? undefined }
       : {}),
 
   };

@@ -35,6 +35,7 @@ import type { DeviceOption } from '../../engine/screenCapture';
 import type { StickySettings } from '../../store/recorderStore';
 import type { RecorderPermissions } from '../../../types/recorder';
 import { Camera, Mic, MicOff, VideoOff, Monitor, Film, AlertTriangle } from '../ui/icons';
+import { cursorHint } from '../../engine/platformCopy';
 
 interface Props {
   settings: StickySettings;
@@ -222,7 +223,7 @@ export const CaptureOptions: React.FC<Props> = ({
         label="Draw the pointer"
         checked={settings.drawCursor}
         onChange={(v) => onChange('drawCursor', v)}
-        hint="A macOS screen capture does not contain the cursor"
+        hint={cursorHint(permissions?.platform)}
       />
       <ToggleRow
         label="Blur the zoom moves"

@@ -84,7 +84,7 @@ export interface StickySettings {
 
   /** Push the picture in on what was clicked, scrolled or typed. */
   autoZoom: boolean;
-  /** Draw the pointer, which a macOS screen capture does not record. */
+  /** Draw a synthetic pointer. Only macOS is measured to omit the real one. */
   drawCursor: boolean;
   /** Smear the zoom moves. Costs render time on every frame of the take. */
   motionBlur: boolean;
