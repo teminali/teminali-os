@@ -281,7 +281,12 @@ heavy lane on a 24 GB machine despite the smaller file.
 they are the CLIs already installed on the machine, spawned as real processes in
 the real workspace with their own auth, tools and resumable sessions, driven
 headless and normalised to one event shape. Neither may default to its most
-permissive permission rung.
+permissive permission rung. A turn ends when the agent process exits: the
+gateway gives its pipes 1.5 s to drain and then closes them itself, because a
+grandchild that inherited them — an MCP server the agent spawned and left
+running — would otherwise keep the turn "Working" for as long as it lived. The
+studio, for its part, treats the gateway's `done` line as the end of the stream
+rather than waiting for the socket to close.
 
 Because they write to the working tree themselves, the studio recovers each
 edit from their tool stream rather than being handed it: the file the agent
@@ -469,9 +474,12 @@ and the same tools are served over MCP to the agent CLIs — Claude Code and Cod
 get a `cut` server wired into the tab that spawned them, so the CLI already
 running your repo can also cut your timeline.
 
-**The exposed surface is an allowlist**, not the Cut's whole registry. Six tools
+**The exposed surface is an allowlist**, not the Cut's whole registry. Nine tools
 of a fifteen-tool budget: `describe_timeline`, `patch_clip`, `set_effect_param`,
-`list_media_pool`, `import_media_from_path`, `ffmpeg_process`. The ceiling is
+`list_media_pool`, `import_media_from_path`, `ffmpeg_process`, `perfect_captions`,
+`generate_captions`, and `build_recording` — the recorder's auto edit, which builds
+the take waiting on the review screen onto the timeline (the Tutorial Builder skill
+in the Skills catalogue is this tool with a name and starter prompts). The ceiling is
 deliberate — the Cut's 115 tool descriptions are ~8.7k tokens on every request
 that advertises the panel, so a name gets added only when someone decides to pay
 for it. `ffmpeg_process`'s `custom` operation, which takes a raw filtergraph,
@@ -683,8 +691,19 @@ app ships no speech model — `Take.transcript` exists and nothing fills it. Tho
 are not options that would behave conservatively without one; the Cut's
 `alignToSpeech` returns null on an empty transcript, so `cameraOnPauses` would
 find nothing every time. They are absent from `AssembleOptions` rather than
-present and pinned to `false`, and Tutorial skill and Go live are absent from the
-capture rail rather than shown and inert.
+present and pinned to `false`, and Go live is absent from the capture rail rather
+than shown and inert. The tutorial skill is not on the rail either — it is the
+build itself, listed in the Skills catalogue as **Tutorial Builder** and reachable
+by an agent as the `cut` server's `build_recording` tool, which runs the same
+`assembleRecording` the review screen's button runs.
+
+**A screen clip ends where its frames did.** The take's duration comes from the
+clock, but the screen file is measured back after conversion, and when it falls
+more than 1.5 s short — the display stopped delivering frames while the take ran
+on, as one did at 3:57 of a 10:04 recording on 2026-09-06 — the screen clip is cut
+to the file and the build's notes say at what time. The camera and narration keep
+going. The recorder also notes the moment a display or camera track stopped
+delivering (`mute`), resumed, or ended before the take did.
 
 ### File ingestion
 
@@ -783,7 +802,7 @@ ollama serve              # local models on 127.0.0.1:11434
 
 ```bash
 npm run typecheck   # tsc --noEmit
-npm test            # 1500 tests, 0 failures
+npm test            # 1501 tests, 0 failures
 npm run build       # tsc && vite build
 npm run verify:core # all three
 ```
@@ -802,6 +821,34 @@ npm run package:linux
 `build/afterAllArtifactBuild.cjs` renames the two macOS DMGs after the fact,
 because `artifactName` cannot branch on architecture. That is only safe because
 `dmg.publish: null` is set in `electron-builder.yml` — do not remove it.
+
+### How a release gets to `teminali/releases`
+
+`.github/workflows/release.yml` runs on a `v*` tag: `verify` (the full suite,
+on macOS) → `prepare` → three `build` jobs, one per platform → `release-notes`.
+
+Two rules the workflow enforces, each learned from a release that broke:
+
+- **The release is created once, by `prepare`, before any platform builds.**
+  electron-builder creates the release itself when none exists for the tag, so
+  three jobs reaching that point together all tried, and the losers died with
+  `422 Published releases must have a valid tag`. On v0.0.1 and v0.0.2 that was
+  a red mark on a job whose assets were already up; on v0.0.3 it was the entire
+  macOS build. Now every build job only uploads. `prepare` is idempotent, so a
+  re-run finds the release it already has.
+- **Every `artifactName` spells `Teminali-OS`, never `${productName}`.** The
+  product name has a space, and GitHub stores an asset with a space under a
+  dotted name. electron-builder anticipates that for the artifact but not for
+  its `.blockmap`, which lands as `Teminali.OS-…zip.blockmap`. A re-run then
+  looks for the spaced name to overwrite, misses, uploads, and takes a
+  `422 already_exists` — which is how v0.0.3's macOS job died after its DMGs
+  were up. Uploaded names are unchanged by the fix; only the blockmaps lost
+  their dot.
+
+macOS in-app updates download the **`.zip`**, not the DMG (`server/updates.js`
+— a `.dmg` can only be installed by a person dragging), so the `zip` target is
+load-bearing. `latest-mac.yml` is not: nothing reads it. This app updates
+against the GitHub Releases API, not electron-updater.
 
 ### What the asar can and cannot reach (`server/sidecar-paths.js`)
 

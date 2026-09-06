@@ -2014,7 +2014,20 @@ taking the whole frame during a spoken pause, opening on a spoken introduction,
 and captions. All three read a TRANSCRIPT and this app ships no speech model, so
 they are absent from `AssembleOptions` rather than pinned to `false` — the Cut's
 `alignToSpeech` returns null on an empty transcript, so they would be inert, not
-conservative. Tutorial skill and Go live are likewise absent from the rail.
+conservative. Go live is likewise absent from the rail. The tutorial skill is not
+a rail control at all: it is the build, listed in the Skills catalogue as Tutorial
+Builder and exposed to agents as the `cut` server's `build_recording` tool
+(`src/video/mcp/toolRegistry.ts`), which calls the recorder store's
+`openOnTimeline` — the review screen's button, for a caller that is not a person.
+
+Review also cuts the screen clip to the FILE when the file is materially shorter
+than the clock (`SCREEN_SHORTFALL_TOLERANCE_MS`, 1.5 s, in
+`src/video/engine/recordingProject.ts`). The clock is authoritative for the take;
+the file is authoritative for where the frames stopped, and a display that stops
+delivering while the take runs on would otherwise hold its last frame to the end
+with the pointer still moving over it. The note names the time. `screenCapture.ts`
+watches both capture tracks for `mute`, `unmute` and `ended` and writes the time
+of each into the take's warnings, capped at six lines.
 
 **The panel switch is the pane's decision, not the recorder's.** Everything
 under `src/video/` knows about tracks and clips and nothing about which tabs the
