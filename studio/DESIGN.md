@@ -49,6 +49,19 @@ reachable as ordinary utilities:
 Motion is one curve — `--ease: cubic-bezier(.2,.7,.2,1)` — at three speeds
 (`duration-fast` `.1s`, `duration-ds` `.15s`, `duration-slow` `.2s`).
 
+**One surface is calibrated against something other than the app's greys, and
+it says so in the sheet.** `--player-*` is the media player's chrome, which
+sits over a frame of film — a snowfield in one shot and a night interior in the
+next. Every other token here is measured against a known ground, and a control
+bar tuned for `#181818` disappears over the first bright frame. So that block
+is defined against **black**: a flat scrim (`--player-scrim`), marks as white
+at fixed alphas (`--player-ink`, `--player-track`), and one hue — the brand
+green on the played span of the scrubber, because "this is ours and this is
+live" means there what it means everywhere else. It is still one flat fill, so
+§1's first rule holds on the one surface that most tempts a gradient. Reach for
+these only over picture; a component that used `--player-ink` on a panel would
+be putting pure white on grey, which is not in this system's range.
+
 ### Typography
 
 - UI **and** chat: the platform face (`font-sans`). Cursor ships no custom UI
@@ -1054,13 +1067,239 @@ before the size cap, so a two-gigabyte file is not reported as "too large".
 format admitted by one side and not the other is a tab that opens onto
 nothing.
 
-It is Chromium's player and nothing more: H.264 and VP9 video; AAC, MP3, Opus,
-FLAC and WAV audio. The container list promises nothing about the codec inside,
-and when the element fires `error` the pane names the codec — ProRes or HEVC in
-a `.mov`, HEVC or AC-3 in an `.mp4` — and the ffmpeg line that converts it,
-instead of leaving a control bar that never moves. Real-time transcoding is a
-separate project; ffmpeg is already a dependency (`server/speech-local.js`) but
-the pane does not pretend to it. No MKV, no subtitle tracks.
+It **was** Chromium's player and nothing more — H.264 and VP9 video; AAC, MP3,
+Opus, FLAC and WAV audio — with a `.mov` holding ProRes answered by a sentence
+naming the codec. That paragraph is now history: `MEDIA_EXTENSIONS` covers
+every container ffmpeg reads, the protocol has a second answer that transcodes
+live, and the pane draws its own controls with subtitle tracks in them. See
+"Every format ffmpeg reads" and "A folder of videos is a series" below. What
+still holds is everything above this line: one path guard, byte ranges by hand,
+the nonce, and no second reader for a file the JSON route already serves.
+
+### A folder is a gallery, and a folder of videos is a series (`panels/GalleryPane.tsx`, `panels/MediaPlayer.tsx`, `services/workspaceGallery.ts`, 2026-09-06)
+
+*"if i have selected folder with multiple video open it as if i'm looking at
+netflix tv series episodes gallery"* — and then, once it existed for films:
+*"implement the gallery view not just for videos but for all files, this will
+make it uniform since we use the same file pane for all of them."*
+
+**Every folder opens the same way, because the gesture is the same one.** The
+operator clicked a folder and expects to see what is in it. What differs is how
+a card is drawn and what opening one does, and that is a single classification
+— `entryKind`, eight values named after *the viewers this app has* rather than
+after mime types — not a second panel for pictures and a third for films. A
+video shows a frame of itself, an image shows itself, everything else wears the
+same glyph the file tree gives it, so the two surfaces never disagree about
+what a `.tsx` looks like. A click opens the thing: a folder navigates the
+panel, a video in a series plays in it, anything else goes to the File panel,
+which is the surface that renders a file. A card with no viewer behind it is
+dimmed and says so, which is the rule this grid shares with every other surface
+here.
+
+**One panel that navigates, not one per folder.** Panel identity for this kind
+is the kind alone (`store/panelStore.ts`), so clicking through six folders
+leaves one tab rather than six, and `focusOrOpen` moves it. A breadcrumb is the
+way back up, and an empty path is the project root — a real destination, drawn
+from `studioStore.files` directly rather than refused.
+
+**Two or more videos directly inside a folder additionally make it a series.**
+Not a heuristic about names, not a marker file: a count,
+`SERIES_MIN_EPISODES`, spelled in `services/workspaceGallery.ts` for the
+renderer and in `server/workspace.js` for the gateway, with a test asserting the
+two are equal. They have to agree because both sides answer the same gesture —
+a click in the tree, and the agent's `open_file` — and a folder one side calls
+a series and the other calls a folder is a tool describing something the
+operator is not looking at. The series is a *layer*: the same grid and the same
+cards, plus the resume header and numbers on the video cards. Subfolders are
+not descended: a season folder is its own series, and a project folder with two
+renders three levels down is not one.
+
+**The gallery is a pure function of the tree.** `studioStore.files` already
+holds what the sidebar drew, so `galleryOf` reads the folder out of it and
+nothing is fetched. The gallery therefore cannot disagree with the Explorer,
+and the whole of `workspaceGallery.ts` — classification, ordering, titles,
+episode numbers, sidecar matching, the resume rule, the SubRip conversion — is
+pure and pinned by `tests/workspace-gallery.test.mjs` (26). Ordering is
+numeric-aware, because the sort every other implementation of this gets wrong
+puts episode 10 before episode 2.
+
+**A preview is the real thing, or a glyph.** A folder of films has no artwork.
+Rather than draw a placeholder that pretends to be one, a video card mounts a
+`<video preload="metadata">` seeked a few seconds in and lets Chromium paint
+what it lands on; a container it cannot demux paints nothing and the card falls
+back to its episode number. An image card reads its own bytes through the
+reader every other picture in this app comes through, under
+`THUMBNAIL_MAX_BYTES` — a gallery of forty photographs should not read forty
+files before it can draw, and past the cap the card keeps the glyph it would
+have had anyway. Only the first twelve load eagerly; the rest wait for an
+`IntersectionObserver`.
+
+**Where the operator got to is the state that matters** — for the series half.
+`store/playerStore.ts`
+keeps `positions` keyed by path, written every five seconds while playing and
+on unmount, pruned to the 200 most recent. It drives three things at once: the
+bar under a started card, the tick on a finished one (`WATCHED_RATIO`, 0.9),
+and the single button in the header — the episode left in the middle, else the
+one after the last finished, else the first. Resuming something all but over
+would drop the operator on the credits, so that one starts again.
+
+**The player is ours because Chromium's is a closed shadow tree.** `controls`
+gave seeking, volume and fullscreen for free, and cost four things this pane
+owes: subtitles from a sidecar file, an embedded stream, or a file the operator
+hands it; a timeline that survives a live ffmpeg transcode; an agent that can
+press play; and chrome that gets out of the way of the picture. None can be
+done to a shadow root from outside. `runCommand` is one implementation of every
+control — the buttons, the keyboard and `player_control` all call it, so
+"pause" cannot mean three things.
+
+**The chrome is over the picture, and it leaves.** The first cut put a fixed
+grey strip under a letterboxed video, and the operator's verdict was the right
+one: *"the player design is not top tier… i need it 4x better, more cinematic
+and clean controls."* The video now fills the pane and the controls float on
+it, on one flat scrim — a fill, never a gradient, so §1's first rule holds on
+the one surface that most tempts one — drawn from the `--player-*` tokens §0
+describes. While a video plays and the pointer is still, the bar, the title and
+the cursor all go; movement, a menu or a pause brings them back. Audio keeps
+its chrome always: there is nothing to get out of the way of.
+
+The scrubber is a **real `<input type="range">` kept transparent over a track
+this pane draws**. A div with a drag handler would have looked the same and
+been unreachable by keyboard and by a screen reader; a bare range input cannot
+show a buffered span, a hover time or a track that thickens under the pointer.
+Layering keeps both. The same pattern gives the volume slider, which opens on
+hover rather than holding its width in the bar for a control most operators set
+once.
+
+**The window's bottom-right corner belongs to shared chrome.** `VersionControl`
+is `fixed bottom-2 right-3` at z-40, above anything a panel draws — the video
+editor's timeline has reserved that strip since it shipped, and the player,
+being the second pane to draw content that far down, put the version pill
+straight on top of its fullscreen button. `VERSION_BADGE_STRIP` reserves it the
+same way rather than moving shared chrome for one pane's sake, and only when
+windowed: a fullscreen element is rendered alone, so nothing of the app's is
+over it. A test pins the reservation against the badge's own position, because
+the two are one measurement in two files.
+
+**The timeline is virtual, and that is not an optimisation.** In `direct` mode
+the element holds the file and seeks by byte range. In a transcode ffmpeg is
+writing fragmented MP4 into the response: `duration` is `Infinity` and
+`currentTime` is how long *this stream* has been running, not where in the film
+we are. So the pane keeps `offset` — the second the current stream started at —
+every position it shows or publishes is `offset + currentTime`, and a seek
+rebuilds the element at a new offset rather than moving a playhead that means
+something else. The duration comes from ffprobe, which read the container's own
+header.
+
+**Subtitles come from three places and are labelled by which.** A sidecar is
+matched on the video's base name, optionally followed by a language
+(`Episode 1.en.srt`), whose tag becomes a language name through
+`Intl.DisplayNames`; `Episode 10.srt` must not attach to `Episode 1.mp4`, which
+is the test that matters. SubRip becomes WebVTT in the renderer — the header,
+the decimal comma, `<font>` tags, `{\an8}` positions and the `X1:` coordinate
+suffix some rippers write, all of which a VTT parser would otherwise show as
+literal text. Streams inside the file are written out by ffmpeg on demand.
+Bitmap subtitles (PGS, DVD) are pictures and are not offered. The chosen label
+is remembered in the store, so the next episode comes up in the same language.
+
+The third place is the one VLC has and this lacked, and the operator said so:
+*"i was not able to add subtitle file on the video like on vlc."* A `.srt` or
+`.vtt` **dropped on the picture**, or picked from **Add subtitle file…** in the
+menu, becomes a track immediately. It never touches the gateway: the OS hands
+the renderer the file's *bytes* with the gesture, so there is no path to
+resolve, no workspace boundary to argue about, and a subtitle sitting on the
+Desktop works exactly as one inside the project does. The drop handler stops
+propagation ahead of both the window guard and `FilePane`'s own drop target —
+a file dropped on a playing video means subtitles, not "open this instead".
+`isSubtitleFileName` admits only the two formats `subtitleToVtt` can genuinely
+convert, and `subtitleFileRefusal` names the rest: an `.ass` accepted and then
+shown as an empty track would leave the operator debugging their file.
+
+`.srt` and `.vtt` joined `TEXT_EXTENSIONS`, so a subtitle file is also
+editable, and appears in the gallery as the document it is — which is the point of a sidecar, and the reason the file version
+wins over an embedded stream of the same name.
+
+### Every format ffmpeg reads (`server/media-probe.js`, `electron/workspaceMedia.cjs`, 2026-09-06)
+
+*"can we have our player support mkv and all other video formats?"*
+
+The old answer for a `.mkv` was that the tree did not list it, and for a ProRes
+`.mov` a sentence naming the codec and an ffmpeg line to run by hand. Both were
+honest and both were the wrong answer to "play this file".
+
+**ffprobe decides, before an element is pointed anywhere.**
+`POST /api/workspace/media/probe` returns what the file holds and a `plan`:
+`direct` (Chromium plays it as it is), `remux` (the streams are fine, the
+container is not — rewrap into fragmented MP4), `transcode` (re-encode
+whichever stream Chromium cannot decode) or `unplayable` (no ffmpeg, and here
+is `brew install ffmpeg`). Getting this wrong in the cheap direction — always
+transcoding — would put an encoder in front of every MP4 in the workspace, so
+the native lists are explicit. 10-bit H.264 is the trap worth naming: its codec
+is on the native list and Chromium cannot decode it, so the pixel format is
+part of the decision.
+
+**The transcode is a second answer on the same protocol.** `?transcode=1` on a
+`teminali-media://` URL spawns ffmpeg and hands its stdout back as the response
+body — a 200 with no `Content-Length` and `Accept-Ranges: none`, because there
+is no file. `-ss` goes *before* `-i` so a seek is a demuxer seek rather than a
+decode of everything preceding it, and `frag_keyframe+empty_moov+default_base_moof`
+is what lets the element start before the stream ends; a plain MP4 writes its
+index last and cannot be streamed. Subtitle and data streams are dropped (`-sn
+-dn`): subtitles reach the player as text tracks, never burned into the
+picture.
+
+**Every child is owned.** The element hanging up — a seek, a closed pane, the
+next episode — kills the encoder through the request's `signal`, and
+`will-quit` kills whatever is left. A two-hour film would otherwise keep
+encoding for an operator who has moved on.
+
+`findBinary` looks in the `PATH` **and** in both Homebrew prefixes, because a
+Finder-launched app inherits launchd's `PATH`, which has neither — the same
+landmine `ELECTRON_RUN_AS_NODE` sets elsewhere in this document.
+
+`tests/media-probe.test.mjs` (14) pins the plans and the argument lists.
+
+### The player, as a tool (`server/player-state.js`, `services/playerControl.ts`, 2026-09-06)
+
+*"make sure all its controls are accessible by the ai agent."*
+
+Two one-way channels, and no handle on the element anywhere but in the pane.
+
+**Up:** the pane publishes a `PlayerSnapshot` — what is showing, playing or
+paused, position, duration, volume, speed, which subtitles exist and which is
+on, the whole episode list when a series is open. The store gets every one; the
+gateway gets one a second, and one *immediately* for anything discrete, so an
+agent that just asked for a pause does not read the frame before it. The
+gateway keeps exactly one, bounded and typed by `sanitisePlayerSnapshot`: a
+snapshot is data from the renderer, and an unbounded string in it would be an
+unbounded string in the gateway's memory.
+
+**Down:** `player_control` is checked by `parsePlayerCommand` and put on the
+run's own NDJSON stream — the same channel `reveal` and `open_file` use, alive
+exactly as long as the turn. `PLAYER_ACTIONS` is spelled on both sides and a
+test asserts the lists are identical, because an action the gateway accepts and
+the pane ignores is a tool call that reports success and does nothing. Every
+refusal is a sentence naming what was wanted (`\`seek\` wants \`value\` as a number
+of seconds`), because the reader is a model that will try again; a code is a
+dead end.
+
+**`player_control` is pre-approved, and it is the only tool on that list whose
+name is a verb.** The line has always been between showing and changing, not
+between quiet and loud: it acts on a file the operator opened, in a pane they
+are looking at, and writes nothing. A prompt in front of every pause would make
+it not worth calling, which is the behaviour it exists to replace — an agent
+asked to pause a video otherwise reaches for the pointer.
+
+**`open_file` on a folder is the gallery.** The gateway emits `open-folder`
+for any folder, counts the videos with the renderer's own threshold, and says
+in the result which of the two the operator is now looking at — "a series of 14
+episodes, `player_control` starts one" or "a gallery of its contents". Those
+are different next moves for a model, and a single flat "opened" would leave it
+guessing.
+
+Tested in `tests/player-state.test.mjs` (11) and in `server/gateway.test.js`,
+where the wiring is: a folder opening as a gallery and saying whether it is a
+series, a snapshot published and read back, a command with nothing playing
+failing as a sentence.
 
 ### The browser panel is a view, not a frame (`electron/browserView.cjs`, `services/browserView.ts`, `panels/BrowserPane.tsx`)
 
@@ -1315,8 +1554,190 @@ Each state therefore has its own tell, and they do not share body parts:
 | thinking | a thin arc orbits behind the face (`orbThink`, 2.4 s), the eyes go asymmetric the way a person's do looking for a word; the arc stops the instant there is an answer |
 | speaking | phonemic visemes from the caption, gated at `SPEECH_FLOOR` (0.035) and sized by Temy's own level; the aura pulses with it |
 
-Breath is a CSS animation on an outer layer and posture an inline transform on
-an inner one, so the two never fight over `transform`.
+Breath is a CSS animation on an outer layer, drift a CSS animation on the layer
+outside that, and posture an inline transform on the innermost, so the three
+never fight over `transform`. Drift (`orbFloat`, 5.6 s, a period that does not
+divide the breath's) runs only while `breathFor` returns `breathe` — a listener
+who keeps bobbing is not listening, and speaking and thinking have motion of
+their own.
+
+#### Nonsense never reaches the chat: three layers, one model call (2026-09-06)
+
+The operator said *"How are you?"* and the transcript read **"Bagaimana anda
+lakukan?"** — fluent Indonesian, a translation of what they had actually said.
+*"make sure it never sends nonsense to the chat… ignore any text that is purely
+nonsense or hallucinated language."*
+
+Every existing filter passed it, and each was right to: it does not repeat, it
+is not an artefact phrase, every word is pronounceable, and the recogniser was
+confident. It was wrong for exactly one reason, and that reason had been
+arriving with every result and being thrown away — whisper reports the language
+it decoded, and `onResult` named the parameter **`_language`**.
+
+The gate is now three layers, cheapest first, and only the last one costs
+anything:
+
+| layer | catches | cost |
+| --- | --- | --- |
+| `plausibility.ts` — repetition, dominance, artefact phrases, coherence, confidence | loops, subtitle credits, gibberish, empty rooms | free, synchronous |
+| `plausibility.ts` — **foreign language** | a fluent sentence in a language the operator does not speak | free, synchronous |
+| `addressing.ts` — the classifier's **NONSENSE** verdict | noise decoded into real words, *in the right language* | a round trip already being paid |
+
+**The foreign-language rule rejects outright, and is deliberately not softened
+by confidence.** The doctrine at the head of `plausibility.ts` applies here more
+than anywhere: the recogniser is not unsure when it hallucinates, it is
+confident — measured, a "tk tk tk" loop decoded at a mean token probability of
+0.893, better than the real sentence beside it. Language detection on a short
+utterance is the least reliable thing whisper does, and a sentence in a language
+the operator does not speak is not something they said, however sure the decoder
+was.
+
+The bias against false rejection lives in the *expectation* instead of in a
+threshold. `expectedLanguages()` returns the pinned language setting when there
+is one — an exact answer, and the setting under which the recogniser cannot
+disagree at all, since a recogniser that is told the language reports the
+language it was told. On `auto` (the default, and the only setting where this
+can happen) it returns `navigator.languages`: the operating system's own ordered
+list of what this person reads and speaks. That is why the rule can afford to
+reject outright — the list is the operator's, not a guess. An unknown language
+or an unknown expectation rejects nothing.
+
+**The model layer costs no extra latency.** The addressing classifier already
+ran on every utterance the cheap signals could not place, so `NONSENSE` joins
+`ASSISTANT` / `PERSON` / `UNCLEAR` on a round trip that was being paid for
+anyway — no second call, and no cost at all on the turns the deterministic
+layers have already settled. The word list is closed and the answers are single
+words on purpose: a small local model asked for one of four tokens is fast and
+hard to derail. `parseClassifier` checks `NONSENSE` first, so a model that leads
+with its verdict and then explains — *"NONSENSE — not addressed to the
+assistant"* — is not read as the word it happened to mention second.
+
+Pinned by `tests/voice-plausibility.test.mjs` (20) and `tests/voice.test.mjs`
+(54): a confident Indonesian decode is refused at every confidence from 0.2 to
+1.0; `en` passes against `en-US` and `sw-KE` against `sw-TZ`, so region tags
+never cause a false rejection; and an unknown language rejects nothing.
+
+**Still open.** The default language setting is `auto`, which is the only
+configuration where the recogniser can decode a language the operator did not
+speak. Pinning it is one click in voice settings and removes the failure at its
+source rather than filtering it afterwards.
+
+#### One pair of ears: the second recogniser that heard everything twice (2026-09-06)
+
+The operator, having said it once: *"How are you doing? How are you doing?"* —
+*"how did it hear me twice?"*
+
+`reopen()` awaits `asr.listen()`, and every caller tests `!this.session?.active`
+**before** that await. Two reopens racing the same gap therefore both pass the
+test, both open a recogniser, and the second assignment to `this.session`
+orphans the first. Nothing stops the orphan: it keeps running on the same
+microphone with its handler still pointing at `onResult`, so one utterance
+arrives as two finals — and `onResult` builds a turn by *appending* finals, so
+the sentence is written down twice. `finishSpeaking()` reopening while the
+`setState("listening")` subscriber reopens is one such pair; there are six call
+sites and no mutual exclusion between any of them.
+
+`webSpeech.ts` already guards this exact symptom, and its comment quotes the
+same doubled sentences — but `finalsDelivered` is per-session and cannot see a
+second session. **Two ways to hear double, two guards.** `reopen()` now refuses
+to re-enter while one is in flight, aborts whatever session it is about to
+replace so nothing outlives the assignment, and — since the state can change
+while a recogniser opens — abandons a session that arrives after voice mode was
+switched off, which used to bring the microphone back up with no reference held
+to close it.
+
+**No transcript-level de-duplication was added, deliberately.** Collapsing a
+final that repeats the one before it would also collapse an operator who
+genuinely said "no no", and the fix for two recognisers is one recogniser.
+`approvalIntent.ts` collapses a repetition only because a doubled "yes" gates a
+permission prompt, where the trade is worth making.
+
+Not covered by a test: the engine needs `window`, an `AudioContext` and live
+providers, and there is no harness that constructs one — every voice test
+imports pure modules. `stillWanted()` is a method rather than an inline
+`this.state !== "idle"` because the compiler narrows a `this` property from the
+guard at the top of `reopen` and never widens it across the `await`, so inline
+the post-open check compiles as dead code — precisely the case it exists for.
+
+#### The composer's engine trigger wore Max's padlock (2026-09-06)
+
+The operator, on the composer: *"why do we have a lock icon instead of a model
+icon on the prompt input field?"* `ModelPicker` keys a glyph per profile —
+`flash` a `Zap`, `auto` `Sparkles`, `max` a `Lock` — and the composer's trigger
+drew a hardcoded `Lock` next to whichever profile was actually selected. Max's
+padlock is real and earned (*"Locked until safety qualification"*); Flash and
+Auto were wearing it for nothing, and a padlock on the engine you are currently
+running reads as *unavailable*.
+
+The map is exported as `PROFILE_ICONS` and the trigger reads from it, so there
+is one place a profile's glyph is chosen rather than two that can disagree.
+
+#### Speaking begins when a clause is audible, not when we decide to speak (2026-09-06)
+
+The operator: *"on some occasions if not all, the chatbot starts talking before
+the voice is starting to get heard."* Structural, and on every turn that had an
+immediate acknowledgement. Each of the four speak paths — greeting, reply queue,
+its built-in fallback, and `speakAside` — called `setState("speaking")` and
+`setDucked(true)` *before* `await tts.speak(...)`, and `speak()` does not
+resolve until the sidecar has rendered and scheduled the first clause. The HUD
+announced speech, the orb wore its speaking face, and other audio ducked, for
+the whole of that request.
+
+`SpeakOptions.onStart` already existed and both providers already fired it on
+the first scheduled clause; nothing passed one. `beginAudibleSpeech()` is now
+that listener, and it is the only thing that sets `speaking`. **The state says
+what the operator can hear, not what we intend** — the render window is
+thinking, and is shown as thinking. `resumeSuspendedSpeech` follows the same
+rule.
+
+Two guards had to move with it, because the window is no longer `speaking`:
+the playback watchdog also accepts `speechPending`, or a synthesiser that never
+answers would never be given up on; and the greeting's failure path returns to
+`listening` from `thinking` as well.
+
+**A barge-in during that window used to be lost.** `dropSpeech()` cancels
+`this.synthesis`, which is null until `speak()` resolves — so a reply the
+operator had already talked over began playing the instant its render landed.
+`speechEpoch` is bumped by every drop, and a `speak()` whose epoch is stale by
+the time it resolves cancels its handle instead of speaking it.
+
+#### The body is a ball (2026-09-06)
+
+The body was a squircle: the app-icon tile, drawn a second time. A tile is a
+logo and sits still. A ball has a side facing you, so everything the face
+already did — leaning toward the pointer, widening at the operator, wandering
+off and coming back — now reads as a head turning rather than as a card being
+nudged. **The mark itself is untouched**: the same `> _ <` at the same
+coordinates, held at `scale(0.93)` and travelling 1.12× the gaze so it reads as
+painted on a curved front face rather than as a decal on a flat one.
+
+Sphericity is carried by light *on* the body, in four layers under the face —
+drop any one and the ball flattens back into a shaded circle:
+
+| layer | what it does |
+| --- | --- |
+| body | a key light fixed at the upper left, falling through `#43434a` to black |
+| bounce | a dim white return off the surface below, so the lower edge does not die into the page |
+| occlusion | darkness gathering from 60 % of the radius outward |
+| specular | a blurred hotspot plus its sheen, offset by `-tilt × 0.55` — the light stays in the room while the head turns, and that counter-motion is most of what separates a sphere from a disc |
+
+Gradient ids are namespaced per instance off `useId()`. Two orbs are on screen
+at once — the composer's and the HUD's — often in different states, and shared
+ids let whichever mounted last repaint the other in its emotion.
+
+**Nothing is drawn around the edge, and the glow is for sound.** The operator,
+in three passes: the green halo, then the white rim, then the black shadow —
+*"remove the borders from the orb completely, not just the green even the
+white… if you really want to keep the glow use a white glow, but not too
+light."* All three are gone. A stroke around a sphere is a circle drawn on top
+of it, and it flattens the ball it was meant to finish; a glow that is on in
+every state says nothing when it comes on. What remains is one dim white halo
+behind the body, fixed and stateless, which is the only thing keeping a black
+ball off a `#151515` page — and the coloured **aura**, which is now rendered
+only while `hearing` or `speaking`, so its arrival *is* the signal. Idle,
+listening and hover are the bare ball; thinking keeps its orbiting arc and
+nothing else. `auraFor` is unchanged — it still answers *how much glow for this
+level*, and the component answers *whether there is a voice to show at all*.
 
 **The pointer is an eye, not a hand.** The face tracks the cursor and leans
 toward it slightly when hovered. The earlier version also dodged, hopped and
@@ -4398,3 +4819,32 @@ Codex gets no bridge: it has its own `--sandbox` flag and no prompt-tool
 equivalent, so it keeps the mode selector alone rather than a broken dialog.
 
 Tests: `tests/agent-permissions.test.mjs` (14).
+
+### 6.8 One name, and a greeting that is not a task (2026-09-06)
+
+Two complaints from the same session. "When I ask for the name it has to say
+Temy, even if I run on another code assistant like Claude Code or Codex." And:
+"the 'on it' is so inhuman — I say hello, it says I'm on it."
+
+**The name.** `frontierEngine.ts` adds a `[WHO YOU ARE]` block to the system
+prompt it already assembles: the assistant is Temy, never the name of the model
+answering underneath. The Claude Code lane carries the same sentence through
+`--append-system-prompt` (`server/agent-cli.js#AGENT_IDENTITY`), where it sits
+beside that CLI's own instructions and never appears in the operator's
+transcript. **Codex is not covered:** `codex exec` takes a positional prompt and
+no system-prompt flag, so the only ways in are prefixing the operator's own text
+— which they would see — or putting persona instructions in a repo file that
+also governs developer sessions here. Neither was worth it; a Codex tab still
+answers with its own name.
+
+**The greeting.** The phrase the operator heard, "I'm on it", is in neither
+canned list in `acknowledgment.ts`, so it came from the model, and the
+correction is in the same `[WHO YOU ARE]` block: greet a greeting, and keep work
+acknowledgements for work actually started. `acknowledgment.ts` was also strict
+about where a greeting may sit — its tests are anchored at the start of the
+utterance, so "Temy, hello" and "um, hello" missed the greeting branch and fell
+through to a canned acknowledgement. A leading filler or wake word is now
+stripped before the test, which matters because speech is what feeds this and
+speech arrives with exactly that preamble. "What's your name" and "who am I
+talking to" join that branch. Tests: `tests/voice-identity.test.mjs`.
+

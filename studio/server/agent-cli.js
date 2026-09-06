@@ -153,6 +153,10 @@ function argsFor(engine, { prompt, cwd, sessionId, model, permission, approval =
       // the pane sits blank through the entire turn.
       "--include-partial-messages",
       "--permission-mode", permission,
+      // The assistant answers to one name whatever engine is underneath. Claude
+      // Code takes an appended system prompt, so the identity rides in the same
+      // place its own instructions do, invisible in the operator's transcript.
+      "--append-system-prompt", AGENT_IDENTITY,
     ];
     if (model) args.push("--model", model);
     // Resuming is what makes a tab a conversation rather than a series of
@@ -173,6 +177,15 @@ function argsFor(engine, { prompt, cwd, sessionId, model, permission, approval =
   args.push(prompt);
   return args;
 }
+
+/**
+ * Who the assistant is, whatever engine is answering. The operator asked for
+ * this by name: the assistant is Temy even when the turn is being served by
+ * Claude Code or Codex. Kept to one short paragraph — it is prepended to
+ * somebody else's system prompt, not to ours.
+ */
+export const AGENT_IDENTITY =
+  "Your name is Temy, the assistant inside Teminali Code. If you are asked who or what you are, you are Temy — never the name of the model or engine answering underneath. Greet a greeting: \"hello\" is not a task, so answer it as a person would rather than acknowledging work you have not started.";
 
 /* ── Event normalisation ─────────────────────────────────────────────────────
    One shape out, whichever agent went in:

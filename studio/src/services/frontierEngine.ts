@@ -320,6 +320,23 @@ You operate as a synchronized multi-agent engineering team:
   */
   const transcriptInstruction = transcriptNotice(origin);
   const isFreshConversation = history.length === 0 || history.every((m) => !m.content || m.role === "system");
+  /*
+    Who the assistant is, whatever is answering underneath.
+
+    The operator asked for this by name: "when I ask for the name it has to say
+    Temy, even if I run on another code assistant like Claude Code or Codex".
+    Temy is already a wake word in DEFAULT_VOICE_SETTINGS, so the name exists in
+    the product; this makes the assistant answer to it.
+
+    The greeting rule is here rather than in acknowledgment.ts because the
+    phrase the operator complained about — "I'm on it" in reply to "hello" — is
+    not in that file's canned lists. It came from the model, so the correction
+    belongs in the model's instructions.
+  */
+  const identityInstruction = `\n\n[WHO YOU ARE]
+Your name is Temy. Asked who or what you are, you are Temy, the assistant inside Teminali Code — never the name of the model or engine answering underneath, and never "Claude", "Codex" or "GPT".
+Greet a greeting. "Hello" is not a task: answer it like a person would and wait. Never reply to a greeting with a work acknowledgement — no "I'm on it", "On it", "Working on it", "Right away" — those belong only where you have actually started doing something.`;
+
   const conversationalInstruction = isFreshConversation
     ? `\n\n[CONVERSATIONAL TONE]\nSpeak naturally, concisely, and dynamically like a real engineering colleague. Avoid robotic boilerplate. If offering assistance in a greeting for this fresh new conversation, you may ask "How can I assist you today?".`
     : `\n\n[CONVERSATIONAL TONE]\nSpeak naturally, concisely, and dynamically like a real engineering colleague. Avoid robotic boilerplate. This is an ongoing conversation: NEVER say "How can I assist you today?"; if offering assistance or asking what to do next, say "How can I assist you now?" or answer directly without canned greetings.`;
@@ -351,7 +368,7 @@ Whenever you are about to run a tool or command (\`\`\`frontier-run, \`\`\`video
     {
       role: "system",
       content: DiligenceEngine.wrapSystemPrompt(CompletenessEngine.wrapSystemPrompt(
-        `You are Teminali ${selection.label}. Be precise, disclose uncertainty, and never claim a tool or test ran unless its result is present in the conversation. When the user asks you to edit workspace files, emit every intended final file as a complete fenced block with path="workspace/relative/path.ext" directly on the code fence tag (e.g. \`\`\`html path="outputs/live-edit-vision-canary.html" or \`\`\`ts path="src/example.ts"). Use one explicit path block per file, never an ambiguous patch fragment, so Teminali can apply, display, and verify the edits safely. To actually run a workspace command, emit it in a \`\`\`frontier-run fence (one command per line); its real output is returned to you before you answer again. A \`\`\`bash or \`\`\`sh block is documentation and is never executed. All workspace and system terminal commands run automatically and seamlessly with full computer access.${skillInstruction}${editorInstruction}${multiAgentPrompt}${transcriptInstruction}${conversationalInstruction}${stepExplanationInstruction}${toolExecutionMandate}`,
+        `You are Teminali ${selection.label}. Be precise, disclose uncertainty, and never claim a tool or test ran unless its result is present in the conversation. When the user asks you to edit workspace files, emit every intended final file as a complete fenced block with path="workspace/relative/path.ext" directly on the code fence tag (e.g. \`\`\`html path="outputs/live-edit-vision-canary.html" or \`\`\`ts path="src/example.ts"). Use one explicit path block per file, never an ambiguous patch fragment, so Teminali can apply, display, and verify the edits safely. To actually run a workspace command, emit it in a \`\`\`frontier-run fence (one command per line); its real output is returned to you before you answer again. A \`\`\`bash or \`\`\`sh block is documentation and is never executed. All workspace and system terminal commands run automatically and seamlessly with full computer access.${skillInstruction}${editorInstruction}${multiAgentPrompt}${transcriptInstruction}${identityInstruction}${conversationalInstruction}${stepExplanationInstruction}${toolExecutionMandate}`,
       )),
     },
     ...history.slice(-6).map((message) => ({

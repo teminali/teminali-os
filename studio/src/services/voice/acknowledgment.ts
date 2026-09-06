@@ -37,10 +37,22 @@ export function getImmediateAcknowledgment(text: string): string | null {
   const words = lower.split(/\s+/).filter(Boolean);
   if (words.length === 0) return null;
 
+  /*
+    A greeting is still a greeting behind a wake word or a filler. The tests
+    below are anchored at the start of the utterance, so "Temy, hello" and
+    "um, hello" used to miss this branch and fall through to a canned
+    acknowledgement — the operator heard a work reply to "hello". Speech is
+    what feeds this, and speech arrives with exactly that kind of preamble.
+  */
+  const opening = lower
+    .replace(/^(?:(?:um|uh|erm|er|ah|oh|well|so|hey|ok|okay)\b[\s,]*)+/i, "")
+    .replace(/^(?:(?:temy|teminali|frontier|studio)\b[\s,]*)+/i, "")
+    .trim() || lower;
+
   // 1. Direct greetings and presence checks — always answer naturally without canned filler
   const isGreeting =
-    /^(hi|hello|hey|greetings|howdy|good\s+(morning|afternoon|evening|day)|sup|yo|what'?s\s+up|habari)\b/i.test(lower) ||
-    /^(are\s+you\s+(there|ready|listening|awake)|can\s+you\s+(hear|help)\s+me|who\s+are\s+you|how\s+are\s+you|how'?s\s+it\s+going|what\s+can\s+you\s+do|nice\s+to\s+meet\s+you)\b/i.test(lower);
+    /^(hi|hello|hey|greetings|howdy|good\s+(morning|afternoon|evening|day)|sup|yo|what'?s\s+up|habari)\b/i.test(opening) ||
+    /^(are\s+you\s+(there|ready|listening|awake)|can\s+you\s+(hear|help)\s+me|who\s+are\s+you|how\s+are\s+you|how'?s\s+it\s+going|what\s+can\s+you\s+do|nice\s+to\s+meet\s+you|what'?s\s+your\s+name|who\s+am\s+i\s+talking\s+to)\b/i.test(opening);
   if (isGreeting) {
     return null;
   }
