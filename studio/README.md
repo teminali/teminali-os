@@ -7,7 +7,7 @@ understanding and agents all run locally by default. Hosted providers are
 available and never required. Everything the renderer can reach goes through one
 loopback gateway that never binds off `127.0.0.1`.
 
-- Package: `@teminali/os` · version **0.0.2** · app id `os.teminali.app`
+- Package: `@teminali/os` · version **0.0.3** · app id `os.teminali.app`
 - Ships as `Teminali-OS-<version>-macOS-Apple-Silicon.dmg` / `-Intel.dmg`,
   a Windows NSIS installer, and a Linux AppImage, from
   [`teminali/releases`](https://github.com/teminali/releases/releases).
