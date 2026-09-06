@@ -159,11 +159,17 @@ export const StudioTitleBar: React.FC<StudioTitleBarProps> = ({
         >
           {/*
             The editor sits beside the IDE because the two are the same kind of
-            verb — "take this conversation somewhere it can be worked on". The
-            IDE leaves for another application and says so with its arrow; this
-            one opens a panel here, so it wears the panel's own glyph and its
-            accelerator instead. `focusOrOpen` means a second press focuses the
-            editor already open rather than stacking a second one.
+            verb — "take this conversation somewhere it can be worked on" — and
+            it is built the same way: the word, then the glyph that says where
+            it goes. IDE's arrow means another application; the clapperboard
+            means a panel here, and it is the only thing distinguishing two
+            neighbours that would otherwise both just say "editor".
+
+            The glyph was on the left and the label read "Video Editor", which
+            put a three-word label and a leading icon next to a three-letter
+            one — two shapes in a strip that wants one. `focusOrOpen` means a
+            second press focuses the editor already open rather than stacking
+            a second one.
           */}
           <button
             type="button"
@@ -172,8 +178,8 @@ export const StudioTitleBar: React.FC<StudioTitleBarProps> = ({
             aria-label={PANEL_DEFAULTS.video.label}
             className="flex items-center gap-1.5 hover:text-ink-high transition-colors duration-ds ease-ds"
           >
-            <PanelGlyph kind="video" size={12} />
             {PANEL_DEFAULTS.video.label}
+            <PanelGlyph kind="video" size={11} />
           </button>
           {/* The two are neighbours, not a pair: one opens a panel here, the
               other leaves for another application. A hairline says so without

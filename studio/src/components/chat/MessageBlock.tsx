@@ -1,5 +1,6 @@
 import React, { useState } from "react";
 import { Check, Copy, RotateCcw } from "lucide-react";
+import { telemetry } from "../../utils/messageTelemetry";
 import { CursorMarkdownRenderer } from "./CursorMarkdownRenderer";
 import { FileActionCard } from "./FileActionCard";
 import { ThinkingIndicator } from "./ThinkingIndicator";
@@ -28,14 +29,6 @@ const SHELL_LANGUAGES = new Set(["bash", "sh", "zsh", "shell", "console"]);
  * hold an ISO date. Render whichever we were given rather than showing
  * "Invalid Date" for one of the two.
  */
-function clockOf(timestamp: string): string {
-  if (!timestamp) return "";
-  const parsed = new Date(timestamp);
-  if (!Number.isNaN(parsed.getTime()) && /\d{4}-\d{2}-\d{2}/.test(timestamp)) {
-    return parsed.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
-  }
-  return timestamp;
-}
 
 export const MessageBlock: React.FC<{
   message: ChatMessage;
@@ -154,48 +147,56 @@ export const MessageBlock: React.FC<{
         </div>
       )}
 
-      {/* Telemetry, on hover. Every field here is measured — none of it is
-          worth a permanent line under every reply. */}
+      {/*
+        Telemetry, on hover. Every field here is measured — none of it is worth
+        a permanent line under every reply.
+
+        One text run, not five flex children. It was the latter, with `gap-2`
+        between each value *and* each separator, so the middot floated eight
+        pixels clear on both sides and — in a column this narrow — every field
+        was its own wrappable box: "Claude / Code", "44,409 / tok", a two-line
+        row inside a `h-5`. Joining the fields into a single non-wrapping string
+        is what makes it a caption rather than a paragraph; it truncates as a
+        whole, and the `title` carries what the ellipsis took.
+      */}
       {settled && message.content && (
-        <div className="h-5 flex items-center gap-2 font-mono text-2xs text-ink-disabled select-none opacity-0 group-hover/turn:opacity-100 focus-within:opacity-100 transition-opacity duration-ds ease-ds">
-          <span>{clockOf(message.timestamp)}</span>
-          {message.engineUsed && <Meta>{message.engineUsed}</Meta>}
-          {typeof message.tokensCount === "number" && message.tokensCount > 0 && (
-            <Meta>{message.tokensCount.toLocaleString()} tok</Meta>
-          )}
-          {typeof message.durationSec === "number" && message.durationSec > 0 && <Meta>{message.durationSec.toFixed(1)}s</Meta>}
-          {message.costLabel && <Meta>{message.costLabel}</Meta>}
-
-          <span className="flex-1" />
-
-          <button
-            type="button"
-            onClick={copy}
-            title="Copy reply"
-            className="w-5 h-5 flex items-center justify-center rounded text-ink-faint hover:bg-surface-hover hover:text-ink-high transition-colors duration-ds ease-ds"
+        <div className="h-6 flex items-center gap-2 text-2xs text-ink-disabled select-none opacity-0 group-hover/turn:opacity-100 focus-within:opacity-100 transition-opacity duration-ds ease-ds">
+          <span
+            className="min-w-0 truncate font-mono tabular-nums tracking-tight"
+            title={telemetry(message).join(" · ")}
           >
-            {copied ? <Check size={11} className="text-success" /> : <Copy size={11} />}
-          </button>
-          {onRetry && (
+            {telemetry(message).join("  ·  ")}
+          </span>
+
+          {/* The actions stay beside the numbers rather than pinned to the far
+              edge: a control that drifts a whole column away from the thing it
+              acts on is one the eye has to hunt for. */}
+          <div className="flex items-center gap-px flex-shrink-0">
             <button
               type="button"
-              onClick={onRetry}
-              title="Ask again"
-              className="w-5 h-5 flex items-center justify-center rounded text-ink-faint hover:bg-surface-hover hover:text-ink-high transition-colors duration-ds ease-ds"
+              onClick={copy}
+              title="Copy reply"
+              aria-label="Copy reply"
+              className="w-6 h-6 flex items-center justify-center rounded-md text-ink-faint hover:bg-surface-hover hover:text-ink-high transition-colors duration-ds ease-ds"
             >
-              <RotateCcw size={11} />
+              {copied ? <Check size={12} className="text-success" /> : <Copy size={12} />}
             </button>
-          )}
+            {onRetry && (
+              <button
+                type="button"
+                onClick={onRetry}
+                title="Ask again"
+                aria-label="Ask again"
+                className="w-6 h-6 flex items-center justify-center rounded-md text-ink-faint hover:bg-surface-hover hover:text-ink-high transition-colors duration-ds ease-ds"
+              >
+                <RotateCcw size={12} />
+              </button>
+            )}
+          </div>
         </div>
       )}
     </div>
   );
 };
 
-/** A telemetry field, behind the separator that keeps the row scannable. */
-const Meta: React.FC<{ children: React.ReactNode }> = ({ children }) => (
-  <>
-    <span className="text-ink-disabled/60">·</span>
-    <span>{children}</span>
-  </>
-);
+

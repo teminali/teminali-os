@@ -410,6 +410,32 @@ forwarding the callbacks and the chat supplying them — because either alone is
 still silence. `ArenaPane` remains deliberately unsubscribed: its contestants
 work in sandboxes and must not move the operator's tree.
 
+### The title bar's two editors, and the line under a reply (2026-09-06)
+
+**`Editor`, with the glyph on the right.** The control read "Video Editor" with
+a leading clapperboard, next to `IDE ↗` — a three-word label with a left icon
+beside a three-letter one with a right icon, two shapes in a strip that wants
+one. It is `Editor` followed by the clapperboard now, built the same way as its
+neighbour: the word, then the glyph that says where it goes. IDE's arrow means
+another application; the clapperboard means a panel here, and it is the only
+thing distinguishing two neighbours that would otherwise both just say
+"editor". `PANEL_DEFAULTS.video.label` carries the rename, so the panel tab and
+the title bar cannot disagree.
+
+**The telemetry line is one string, not five boxes.** It was five flex children
+with `gap-2` between every value *and* every separator, so each middot floated
+eight pixels clear on both sides and — in a column this narrow — every field
+was its own wrappable box: "Claude / Code", "44,409 / tok", a two-line row
+inside an `h-5`. `utils/messageTelemetry.ts#telemetry` assembles the fields and
+the row renders them joined, so it truncates as a whole with the full text in
+its `title`. A field nobody measured is dropped there rather than rendered
+empty, which is what makes doubled and trailing separators impossible — zero is
+one of those, since a reply reporting `0 tok` is reporting a number nobody
+counted. The copy and retry buttons moved back beside the numbers instead of
+being pushed to the far edge by a spacer: a control a whole column away from
+the thing it acts on is one the eye has to hunt for. Pinned by
+`tests/message-telemetry.test.mjs` (4).
+
 ### Right-click (`electron/contextMenu.cjs`, 2026-09-06)
 
 The operator: *"the editor does not have context menus, for copy and other

@@ -54,7 +54,10 @@ export const PANEL_DEFAULTS: Record<PanelKind, { label: string; shortcut: string
   // The video editor, ported from Teminali Cut. One at a time: it owns a
   // timeline and a preview surface, and a second copy would be a second
   // project competing for the same playback clock.
-  video: { label: "Video Editor", shortcut: "⇧⌘V" },
+  // "Editor", not "Video Editor": the title-bar control sits beside IDE, and
+  // three words there crowded a strip whose other label is three letters. The
+  // clapperboard beside it is what says which editor.
+  video: { label: "Editor", shortcut: "⇧⌘V" },
 };
 
 interface PanelState {
