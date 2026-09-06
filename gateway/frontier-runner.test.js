@@ -351,17 +351,28 @@ test("local profile unloads its dedicated Ollama alias after a run", async () =>
   });
 });
 
-test("findOpenCodeBinary discovers opencode executable", () => {
-  const bin = findOpenCodeBinary();
-  assert.ok(typeof bin === "string" && bin.length > 0);
+/* A fake `opencode` in a temp directory, so these hold on a machine without
+   one — the release gate runs on a clean runner, and a test that asserts the
+   operator's own install is a test of the operator's machine. */
+function fakeOpenCode() {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "opencode-"));
+  const bin = path.join(dir, "opencode");
+  fs.writeFileSync(bin, "#!/bin/sh\n", { mode: 0o755 });
+  return { dir, bin };
+}
+
+test("findOpenCodeBinary discovers opencode on PATH", () => {
+  const { dir, bin } = fakeOpenCode();
+  const empty = path.join(dir, "empty");
+  fs.mkdirSync(empty);
+  assert.equal(findOpenCodeBinary(undefined, [empty, dir].join(path.delimiter)), bin);
 });
 
-test("findOpenCodeBinary honors PATH when HOME is isolated", () => {
-  const discovered = findOpenCodeBinary();
-  assert.equal(
-    findOpenCodeBinary(undefined, path.dirname(discovered)),
-    discovered,
-  );
+test("findOpenCodeBinary honors an explicit path over PATH", () => {
+  const { dir, bin } = fakeOpenCode();
+  const other = fakeOpenCode();
+  assert.equal(findOpenCodeBinary(bin, other.dir), bin);
+  assert.equal(findOpenCodeBinary(path.join(dir, "missing"), other.dir), other.bin);
 });
 
 test("runOpenCode terminates the streamed child when the session is cancelled", async () => {
