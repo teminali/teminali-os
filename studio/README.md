@@ -181,11 +181,13 @@ local lane; the Claude Code and Codex lanes are not offered that tool at all
 when driven headlessly, so they cannot have it. Measured on
 `frontier-qwen2.5-coder-14b-8k`: 0/3 before, 3/3 after.
 
-**One known gap.** With a file open in the player on an 8k window, the
-instruction block does not fit in the system prompt and the lane cannot ask.
-Making it short enough to fit was tried and made it stop working entirely, so
-the block kept its length and the eval keeps a failing case (`ask-with-player`)
-rather than a footnote. A larger window has room for both.
+It did not fit at first: with a file open in the player, the instruction block
+was skipped and the lane could not ask. Shortening the block made it fit and
+stop working. What was actually crowding it out was the editor tool catalogue —
+3,395 characters of descriptions written for an MCP client, shipped to an 8k
+window on every turn. Editor tools now carry a short form for the local lane
+and keep the long one for Claude Code and Codex, which have room for it; the
+catalogue is 2,238 characters and the lane can ask with a file open.
 
 **A folder opens as a gallery.** Click any folder — in the tree, or through
 the agent's `open_file` — and the **Gallery** panel shows what is in it as
@@ -383,9 +385,9 @@ prompt: 1,848 tokens, 23% — and the turn that exposed it, "play a beyonce
 song" with the player showing a Beyoncé file, went from no `player-tool` fence
 in two runs to a correct one in both, with prompt evaluation down from
 13.7–25.1 s to 3.3–4.0 s. The lane now has a fixed eval — `npm run eval:local`,
-fifteen turns graded by the engine's own parsers against the real model — and
-scores 42/45 on it (three runs a case) at ~2,130 prompt tokens with the editor and player both
-mounted, the three failures being one case left deliberately red; `studio/DESIGN.md` §3 records what its first day found. Claude Code
+sixteen turns graded by the engine's own parsers against the real model — and
+scores 48/48 on it (three runs a case) at ~2,160 prompt tokens with the editor and player both
+mounted; `studio/DESIGN.md` §3 records what its first day found. Claude Code
 and Codex are not truncated by this —
 they compact their own context — and receive the same budget shape from their
 real window only so the ceilings provably never bind.

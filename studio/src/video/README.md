@@ -156,6 +156,25 @@ until someone adds its name to `EXPOSED_TOOLS` and accepts the cost. The
 un-listed remainder stays callable in-process and is refused over MCP, which is
 where import and export will want an approval gate before they are listed.
 
+**A tool says itself twice.** Alongside `description` a tool may carry a
+`brief`: the same capability in one line, for the local lane's system prompt
+only. The long form is written for an MCP client with room for it — Claude Code
+and Codex read it and are deliberately ungoverned — while the local lane reads
+the whole catalogue into an 8k window, where the nine exposed descriptions came
+to **3,395 characters, 43% of its entire system-prompt budget**, and crowded
+out the block that lets the assistant ask the operator a question.
+
+Shortening `description` would have made the manifest worse for the lanes that
+can afford it, and truncating it mechanically would have deleted the parts that
+carry the weight — `patch_clip`'s dotted-path examples, `ffmpeg_process`'s "the
+operator is asked", the paragraph above about what `full` costs. So the short
+form is written by hand and lives in the same object as the long one, where the
+two cannot drift. `getToolManifest()` carries both and an MCP client reads only
+`description`; `videoToolSummaries()` in `services/aiService.ts` prefers
+`brief`. Catalogue: **2,238 characters**. The guard is `editor-patch-clip` in
+`evals/local-lane.mjs`, which asks for a rotation by clip id and therefore only
+passes if the dotted-path examples survived.
+
 `describe_timeline` answers in **summary** by default for the same reason: a
 tool result does not go away, it is re-sent on every later turn of the
 conversation. Summary on the seed project is 2,367 chars against 4,865 for

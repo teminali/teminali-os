@@ -94,6 +94,23 @@ export interface KerfTool<S extends z.ZodTypeAny = z.ZodTypeAny> {
    * the second try.
    */
   exposedSchema?: z.ZodTypeAny;
+
+  /**
+   * The one-line form, for the local lane's system prompt only.
+   *
+   * `description` is written for an MCP client with a large window — the CLI
+   * lanes read it and are deliberately ungoverned — and the nine of them come
+   * to 3,395 characters, 43% of the local lane's entire system-prompt budget
+   * on an 8k window. That crowded the ask block out of every turn with a file
+   * open in the player.
+   *
+   * Trimming `description` itself was the wrong fix: it would have made the
+   * manifest worse for the lanes that have room for it, to help the one that
+   * does not. So a tool states its own short form instead, and the two never
+   * drift because they sit together. Say what the tool does and the one thing
+   * a caller gets wrong without being told; leave the rest to `description`.
+   */
+  brief?: string;
 }
 
 const tools: KerfTool[] = [];
@@ -168,6 +185,8 @@ function requireUnlocked(clipId: string): void {
 
 defineTool({
   name: 'describe_timeline',
+  brief:
+    'Read tracks and clips with their ids. Call FIRST; ids come from here. detail:"full" adds effect ids and keyframes, includeProperties:true adds every property path — both are long.',
   category: 'discovery',
   description:
     'Read the project: tracks and clips with their ids and timing. Call this FIRST so later ' +
@@ -270,6 +289,8 @@ defineTool({
 
 defineTool({
   name: 'patch_clip',
+  brief:
+    'Set any number of clip properties in one call by dotted path — {"transform.rotation":45,"filters.saturation":30,"textStyle.color":"#ff0000","effects.glow.radius":60}. The primary editing tool; prefer it.',
   category: 'properties',
   description:
     'Set any number of properties on a clip in one call, addressed by dotted path. ' +
@@ -307,6 +328,8 @@ defineTool({
 
 defineTool({
   name: 'set_effect_param',
+  brief:
+    'Change one parameter of an effect already on a clip. Takes numbers, colours ("#ff0088") or booleans; it reports what it rejected.',
   category: 'effects',
   description:
     'Change one parameter of an effect already on a clip. Numbers, colour strings ' +
@@ -501,6 +524,8 @@ export async function importMediaFromPath(
 
 defineTool({
   name: 'list_media_pool',
+  brief:
+    'List imported media assets with ids usable by patch_clip.',
   category: 'media',
   description: 'List every media asset currently imported, with ids usable by patch_clip.',
   schema: z.object({}),
@@ -520,6 +545,8 @@ defineTool({
 
 defineTool({
   name: 'import_media_from_path',
+  brief:
+    'Import a file from an absolute path into the media pool and return its asset id. The operator is asked first for a path they have not granted.',
   category: 'media',
   description:
     'Import a media file from an absolute path on disk into the project media pool. ' +
@@ -589,6 +616,8 @@ const FFMPEG_DESCRIPTION =
 
 defineTool({
   name: 'ffmpeg_process',
+  brief:
+    'Pre-render a file through ffmpeg and import the result as a NEW asset, original untouched: stabilise, interpolate, denoise, reverse, apply a .cube LUT. Slower than real time — say so first. The operator is asked.',
   category: 'media',
   description: FFMPEG_DESCRIPTION,
   schema: z.object({
@@ -791,6 +820,8 @@ function captionContext() {
 
 defineTool({
   name: 'perfect_captions',
+  brief:
+    'Generate, verify and fix subtitles on the timeline. Parses SRT/VTT/ASS/JSON or plain text; checks overlaps and >42-char lines, balances, enforces minimum duration, shifts sync.',
   category: 'graphics',
   description:
     'Generate, verify, and perfect subtitles/captions on the video timeline. ' +
@@ -804,6 +835,8 @@ defineTool({
 
 defineTool({
   name: 'generate_captions',
+  brief:
+    'Generate timed, balanced subtitles from script text or subtitle files onto the video timeline.',
   category: 'graphics',
   description:
     'Generate timed, balanced subtitles from script text or subtitle files and place them on the video timeline.',
@@ -832,6 +865,8 @@ defineTool({
 
 defineTool({
   name: 'build_recording',
+  brief:
+    'Build the take waiting on the recorder review screen onto the timeline. Omit style for the operator settings; style:"tutorial" auto-edits (zooms, camera, narration track, cursor, sounds), style:"raw" lays it down untouched. Cannot record — fails if nothing was recorded.',
   category: 'project',
   description:
     'Build the take waiting on the recorder\'s review screen onto the timeline. Omit style ' +
@@ -1025,6 +1060,9 @@ export function getToolManifest(options: { all?: boolean } = {}) {
   return listed.map((t) => ({
     name: t.name,
     description: t.description,
+    // Carried alongside, never instead of: an MCP client reads `description`
+    // and must not notice this exists.
+    brief: t.brief,
     category: t.category,
     // The narrowed schema where a tool has one, so the manifest states
     // what the bridge will actually accept rather than what the chat can.

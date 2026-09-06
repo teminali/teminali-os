@@ -203,7 +203,10 @@ function videoToolSummaries(): VideoToolSummary[] {
     const required = new Set(schema.required ?? []);
     return {
       name: tool.name,
-      description: tool.description,
+      // `brief` where a tool states one: this list is the local lane's system
+      // prompt, and the full `description` is written for an MCP client with
+      // room for it. See `brief` in toolRegistry.ts.
+      description: tool.brief ?? tool.description,
       parameters: Object.keys(schema.properties ?? {}).map((key) => (required.has(key) ? key : `${key}?`)),
     };
   });

@@ -139,6 +139,29 @@ const CASES = [
     },
   },
   {
+    // The editor's second case, and the reason it exists: `patch_clip`'s
+    // description carries dotted-path *examples*, and those examples are
+    // exactly what a naive "keep the first sentence" trim would delete. The
+    // history already holds a `describe_timeline` result, so the honest move
+    // is a direct edit rather than another read.
+    name: "editor-patch-clip",
+    history: [
+      { role: "user", content: "what's on my timeline?" },
+      { role: "assistant", content: 'Reading the timeline.\n```video-tool\n{"tool":"describe_timeline","arguments":{}}\n```' },
+      { role: "user", content: '[tool result] Track V1 — clip id "c3", name "intro.mp4", start 0ms, duration 4000ms.' },
+    ],
+    prompt: "rotate c3 by 45 degrees",
+    expect: (text) => {
+      const calls = parseVideoToolCalls(text);
+      const patch = calls.find((r) => r.tool === "patch_clip");
+      if (!patch) return `tools=${calls.map((r) => r.tool).join(",") || "none"}`;
+      const args = JSON.stringify(patch.arguments ?? {});
+      if (!/rotation/i.test(args)) return `no rotation property: ${args.slice(0, 90)}`;
+      if (!/45/.test(args)) return `not 45 degrees: ${args.slice(0, 90)}`;
+      return null;
+    },
+  },
+  {
     name: "command-disk",
     history: [],
     prompt: "how much free disk space do I have?",
