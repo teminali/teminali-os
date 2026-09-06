@@ -34,6 +34,8 @@ import { useProjectStore } from '../store/projectStore';
 import type { ClipType, MediaAsset } from '../types/edl';
 import { describeClipProperties } from '../engine/propertyPath';
 import { runCaptionWorkflow } from '../engine/captionWorkflow';
+import { useRecorderStore, type StickySettings } from '../store/recorderStore';
+import { TUTORIAL_ASSEMBLE } from '../engine/recordingProject';
 
 /* ── Tool definition ────────────────────────────────────────────── */
 
@@ -811,6 +813,83 @@ defineTool({
   },
 });
 
+
+/* ── The recorder's build ───────────────────────────────────────────
+   The tutorial skill. `assembleRecording` is what turns a raw take into
+   a cut — zooms from the pointer track, the camera full-frame while the
+   operator explains, narration detached, ticks and whooshes — and until
+   now it ran only from the review screen's button. This is that button
+   for an agent: the same store action and the same sticky settings, so
+   the build an agent asks for is the build the operator would have got
+   by clicking. It builds; it does not record. A take has to be waiting
+   on the review screen, and the error says so when none is.
+
+   `style` is a switch, not a preset dump. Omitted, the sticky settings
+   stand as the operator left them; "tutorial" turns the auto edit ON
+   with the defaults `TUTORIAL_ASSEMBLE` names, "raw" turns it OFF. The
+   named overrides then win over either, and are remembered the way the
+   review screen remembers them. */
+
+defineTool({
+  name: 'build_recording',
+  category: 'project',
+  description:
+    'Build the take waiting on the recorder\'s review screen onto the timeline. Omit style ' +
+    'to build with the operator\'s current settings; style:"tutorial" switches the auto edit ' +
+    'on (zooms on the moments the pointer track found, camera full-frame while the operator ' +
+    'is explaining, narration on its own track, cursor drawn, ticks and whooshes); ' +
+    'style:"raw" lays screen and camera down untouched. The other flags override either and ' +
+    'are remembered. Fails when nothing has been recorded — this builds, it cannot record. ' +
+    'Returns the build report: clips, zooms, keyframes, notes.',
+  schema: z.object({
+    style: z.enum(['tutorial', 'raw']).optional().describe('"tutorial" or "raw"; omit to keep the operator\'s settings'),
+    autoZoom: z.boolean().optional().describe('Zoom in on the moments the pointer track found'),
+    drawCursor: z.boolean().optional().describe('Draw the pointer as its own layer'),
+    cinematic: z.boolean().optional().describe('Opening and closing moves, dip to black'),
+    sound: z.boolean().optional().describe('Ticks on clicks, whooshes on zooms'),
+    detachNarration: z.boolean().optional().describe('Put the microphone on its own audio track'),
+    includeCamera: z.boolean().optional().describe('Show the camera at all'),
+    cameraOnExplaining: z.boolean().optional().describe('Camera full-frame while the operator is explaining'),
+    markMoments: z.boolean().optional().describe('Drop a marker at every zoom moment'),
+  }),
+  handler: async (args) => {
+    const recorder = useRecorderStore.getState();
+    if (!recorder.take?.screen) {
+      throw new Error(
+        `No take is waiting to be built (the recorder is in "${recorder.phase}"). Record something ` +
+        'first; this tool builds a take, it does not record one.',
+      );
+    }
+    const preset = args.style === 'tutorial'
+      ? {
+        autoZoom: TUTORIAL_ASSEMBLE.autoZoom,
+        drawCursor: TUTORIAL_ASSEMBLE.drawCursor,
+        cinematic: TUTORIAL_ASSEMBLE.cinematic,
+        sound: TUTORIAL_ASSEMBLE.sound,
+        cameraOnExplaining: TUTORIAL_ASSEMBLE.cameraOnExplaining,
+        markMoments: TUTORIAL_ASSEMBLE.markMoments,
+      }
+      : args.style === 'raw'
+        ? { autoZoom: false, drawCursor: false, cinematic: false, sound: false, cameraOnExplaining: false, markMoments: false }
+        : {};
+    const apply = <K extends keyof StickySettings>(key: K, value: StickySettings[K] | undefined) => {
+      if (value !== undefined) recorder.set(key, value);
+    };
+    apply('autoZoom', args.autoZoom ?? preset.autoZoom);
+    apply('drawCursor', args.drawCursor ?? preset.drawCursor);
+    apply('cinematic', args.cinematic ?? preset.cinematic);
+    apply('sound', args.sound ?? preset.sound);
+    apply('cameraOnExplaining', args.cameraOnExplaining ?? preset.cameraOnExplaining);
+    apply('markMoments', args.markMoments ?? preset.markMoments);
+    apply('detachNarration', args.detachNarration);
+    apply('includeCamera', args.includeCamera);
+
+    const report = await recorder.openOnTimeline();
+    if (!report) throw new Error('The build did not land; the recorder has shown why.');
+    return report;
+  },
+});
+
 /* ═══════════════════════════════════════════════════════════════════
    EXECUTION
    ═══════════════════════════════════════════════════════════════════ */
@@ -857,6 +936,10 @@ export const EXPOSED_TOOLS: readonly string[] = [
   'ffmpeg_process',
   'perfect_captions',
   'generate_captions',
+  /* The tutorial skill, listed in the Skills catalogue as Tutorial
+     Builder. No consent: it reads no path a caller names — the take it
+     builds is the one the recorder already wrote. */
+  'build_recording',
 ];
 
 /**

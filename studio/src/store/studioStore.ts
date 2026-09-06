@@ -111,6 +111,20 @@ export const SKILLS_LIST: SpecialistSkill[] = [
     ],
   },
   {
+    id: "tutorial-builder",
+    category: "video",
+    name: "Tutorial Builder",
+    tagline: "Turns a raw take into a cut tutorial",
+    icon: "Clapperboard",
+    description: "The recorder's auto edit, as a skill. Builds the take waiting on the review screen onto the timeline: zooms on the moments the pointer track found, the camera full-frame while the operator is explaining, narration on its own track, the cursor drawn, ticks and whooshes. Runs through the cut server's build_recording tool — record first, then ask; it builds, it does not record.",
+    starterPrompts: [
+      "Build the take I just recorded as a tutorial",
+      "Lay the recording down raw, with no zooms or camera moves",
+      "Rebuild the take with the cursor hidden and no sound effects",
+      "Build the take, then describe the timeline it produced",
+    ],
+  },
+  {
     id: "qa-verifier",
     category: "code",
     name: "QA & Test Verifier",

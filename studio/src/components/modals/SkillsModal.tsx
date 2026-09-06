@@ -1,5 +1,5 @@
 import React from "react";
-import { Boxes, Camera, Check, Film, Layout, ScanEye, ShieldCheck } from "lucide-react";
+import { Boxes, Camera, Check, Clapperboard, Film, Layout, ScanEye, ShieldCheck } from "lucide-react";
 import { Modal } from "../ui";
 import { SKILLS_LIST, useStudioStore } from "../../store/studioStore";
 import type { SpecialistSkill } from "../../types";
@@ -23,6 +23,7 @@ const GLYPHS: Record<string, React.ElementType> = {
   "website-builder": Layout,
   "teminali-cut-copilot": Film,
   "frontiercut-copilot": Film,
+  "tutorial-builder": Clapperboard,
   "qa-verifier": ShieldCheck,
   "screenshot-to-code": Camera,
   "pixel-precision-cloner": Camera,
