@@ -1561,6 +1561,27 @@ its own caption — an unlabelled pair of grey blocks makes the reader work out
 which is which every time. A failed call labels its second block `error` and
 tints it, so the outcome is legible without opening anything else.
 
+**`result` means the same thing in all three lanes: what came back
+(2026-09-06).** The fold above and `describeToolCall` (§6) are the two readers
+of `ToolCall.result`, and they were being fed different substance depending on
+which lane ran the tool. Both agent CLIs put a tool's real output there —
+Codex's `aggregated_output`, Claude Code's `tool_result` content, converged by
+`emitCall` in `services/agentCliService.ts`. The local lane's shell runner sent
+only `exit 0 · 412 ms` and kept the output for the model's next turn, so in
+the lane the operator uses most the `out` fold showed a status line, and the
+narrator's failure check — which reads the output text precisely because an
+exit code is not the whole truth — had nothing to read. Measured on a run
+that exits 0 while printing `2 failed, 8 passed`: the fold showed
+`exit 0 · 900 ms` and the assistant said *“Tests passed.”*
+`runAgentCommands` (`services/agentCommands.ts`) now leads with the exit line
+and follows it with the output, capped at the same 4,000 characters the model's
+own observation is; the same run now shows the failure and says *“Tests
+failed — looking at that.”* The exit line is kept and leads because it
+is worth knowing and no lane carries it otherwise. `videoToolCalls.ts` and
+`playerToolCalls.ts` already put a real result in the field and are unchanged.
+Pinned end to end — emitter through narrator — in
+`tests/agent-commands.test.mjs`.
+
 The strip is **open while the turn is live and closes when it settles**. During
 the turn it is the only thing to look at; afterwards it is a footnote under the
 answer.

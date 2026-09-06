@@ -72,6 +72,7 @@ test("command evidence reports the real outcome for the next turn", () => {
 });
 
 import { buildCommandEvidence, hasExecutableCommands, runAgentCommands } from "../src/services/agentCommands.ts";
+import { describeToolCall } from "../src/services/voice/progressNarration.ts";
 
 /** Records what the runner tried to execute, so "did not run" is provable. */
 function spyExecutor(result = { code: 0, durationMs: 4, truncated: false }, output = "ok") {
@@ -387,4 +388,69 @@ test("a prompt knows whether it is asking about a tool or a command", () => {
     const scope = describeApprovalAction(command).scope;
     assert.ok(scope.length <= 32 && !/\s/.test(scope), `${command} -> "${scope}"`);
   }
+});
+
+test("a finished command carries its output, not just an exit line", async () => {
+  /*
+    The `result` field is the one contract the three lanes share. Both agent
+    CLIs put a tool's real output in it, and the two things built on top of it
+    — the step strip's `out` fold and the voice narrator — read it expecting
+    that. This lane once sent only `exit 0 · 4 ms` and kept the output for the
+    model alone, so the operator's fold showed a status line and nothing else.
+  */
+  const spy = spyExecutor({ code: 0, durationMs: 4, truncated: false }, "FAIL src/foo.test.ts\n  2 failed, 8 passed\n");
+  const toolCalls = [];
+  await runAgentCommands("```frontier-run\nnpm test\n```", {
+    execute: spy.execute,
+    onToolCall: (call) => toolCalls.push(call),
+  });
+
+  const finished = toolCalls.at(-1);
+  assert.equal(finished.status, "completed");
+  assert.match(finished.result, /^exit 0 · 4 ms\n/);
+  assert.match(finished.result, /2 failed, 8 passed/);
+});
+
+test("a command that prints nothing still reports how it ended", async () => {
+  // The exit line leads because no lane carries it otherwise; an empty output
+  // must not leave a trailing newline dangling in the fold.
+  const spy = spyExecutor({ code: 1, durationMs: 12, truncated: false }, "");
+  const toolCalls = [];
+  await runAgentCommands("```frontier-run\nnpm test\n```", {
+    execute: spy.execute,
+    onToolCall: (call) => toolCalls.push(call),
+  });
+
+  const finished = toolCalls.at(-1);
+  assert.equal(finished.status, "error");
+  assert.equal(finished.result, "exit 1 · 12 ms");
+});
+
+test("the shared narrator reads this lane's calls as truthfully as a CLI's", async () => {
+  /*
+    The contract, asserted end to end rather than by inspection.
+
+    `describeToolCall` checks a finished test run's text for failures because
+    an exit code is not the whole truth — a runner behind a wrapper, or a
+    pipeline whose last stage succeeds, exits 0 with failures on stdout. That
+    check is only as good as what the lane hands it. This asserts the honest
+    outcome for both shapes, so a future change that trims `result` back to a
+    status line fails here instead of quietly telling the operator the tests
+    passed.
+  */
+  const narrate = async (output, code) => {
+    const spy = spyExecutor({ code, durationMs: 4, truncated: false }, output);
+    const toolCalls = [];
+    await runAgentCommands("```frontier-run\nnpm test\n```", {
+      execute: spy.execute,
+      onToolCall: (call) => toolCalls.push(call),
+    });
+    return toolCalls.map((call) => describeToolCall(call));
+  };
+
+  assert.deepEqual(await narrate("ℹ pass 871\nℹ fail 0\n", 0), ["Running the tests.", "Tests passed."]);
+  assert.deepEqual(await narrate("FAIL src/foo.test.ts\n  2 failed, 8 passed\n", 0), [
+    "Running the tests.",
+    "Tests failed — looking at that.",
+  ]);
 });

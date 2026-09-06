@@ -336,7 +336,22 @@ export async function runAgentCommands(
         },
       });
       const trimmed = output.length > maxOutputChars ? `${output.slice(0, maxOutputChars)}\n…` : output;
-      emit(exit.code === 0 ? "completed" : "error", `exit ${exit.code} · ${exit.durationMs} ms`);
+      /*
+        `result` means the same thing in every lane: what came back.
+
+        The two agent CLIs put a tool's real output in this field — Codex's
+        `aggregated_output`, Claude Code's `tool_result` content — and both the
+        step strip's `out` fold and `describeToolCall` read it expecting that.
+        This lane used to send only `exit 0 · 412 ms` and keep the output for
+        the model's next turn, which cost the operator the substance twice
+        over: the fold showed a status line, and the narrator's failure regex —
+        the one that exists because an exit code is not the whole truth — had
+        no text to read. A run that exits 0 while printing `2 failed` was
+        spoken as "Tests passed." The exit line is kept and leads, because it
+        is worth knowing and no lane carries it otherwise.
+      */
+      const exitLine = `exit ${exit.code} · ${exit.durationMs} ms`;
+      emit(exit.code === 0 ? "completed" : "error", trimmed ? `${exitLine}\n${trimmed}` : exitLine);
       executions.push({
         command: request.command,
         risk: request.risk,
