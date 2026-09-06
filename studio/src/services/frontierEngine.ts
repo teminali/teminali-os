@@ -35,6 +35,14 @@ import {
   runVideoToolCalls,
   type VideoToolExecutor,
 } from "./videoToolCalls";
+import {
+  buildPlayerToolEvidence,
+  executePlayerRequests,
+  hasPlayerToolCalls,
+  parseFallbackPlayerToolCalls,
+  parsePlayerToolCalls,
+  type PlayerExecutor,
+} from "./playerToolCalls";
 import { transcriptNotice, type TurnOrigin } from "./voice/types";
 import type { ChatMessage, InferenceTelemetry, ModelModeId, ToolCall } from "../types";
 
@@ -52,6 +60,24 @@ export interface EngineCapabilities {
   videoTools?: VideoToolSummary[];
   /** Runs one editor tool and reports its real result. */
   runVideoTool?: VideoToolExecutor;
+  /**
+   * The built-in media player, if this host has one on screen.
+   *
+   * Injected exactly like the editor tools, and for a sharper reason: without
+   * it, a model asked to play the file in the viewer reaches for
+   * `video-tool` — the only video-shaped tool it has — and reports the
+   * timeline's contents as though they were the viewer's. See
+   * services/playerToolCalls.ts.
+   */
+  runPlayer?: PlayerExecutor;
+  /** The actions the host's player accepts, for the prompt to advertise. */
+  playerActions?: readonly string[];
+  /**
+   * What the player is showing, as a sentence, read fresh when the prompt is
+   * built. A model that can see "paused at 0:01 of 1:44" does not ask the
+   * operator which file they meant.
+   */
+  playerState?: () => string;
 }
 
 /** One line of the editor tool catalogue, already flattened by the host. */
@@ -114,8 +140,13 @@ const MAX_INVESTIGATION_TURNS = 8;
 // editing exchange is describe -> edit -> verify, and "make the title bigger
 // and warmer" is already two edits inside that.
 const MAX_EDITOR_TOOL_TURNS = 6;
+// Player turns are cheaper still — a dispatch to a mounted pane and the
+// snapshot it publishes back, with no process spawned and no file read. Six
+// covers the longest honest chain (episode -> play -> subtitles -> rate) with
+// room for the model to check its work.
+const MAX_PLAYER_TURNS = 6;
 // Belt and braces: no combination of the budgets below may loop forever.
-const MAX_TOTAL_TURNS = MAX_AGENT_COMMAND_TURNS + MAX_INVESTIGATION_TURNS + MAX_EDITOR_TOOL_TURNS + 2;
+const MAX_TOTAL_TURNS = MAX_AGENT_COMMAND_TURNS + MAX_INVESTIGATION_TURNS + MAX_EDITOR_TOOL_TURNS + MAX_PLAYER_TURNS + 2;
 // One self-correction pass by default: on a 9 t/s local model each pass
 // re-emits whole files, so a second costs more wall-clock than it returns.
 const MAX_QUALITY_CORRECTIONS = 1;
@@ -199,6 +230,7 @@ async function streamFromOllama(
   const stopTags: string[] = [];
   if (capabilities.runCommand) stopTags.push("frontier-run", "frontier-command");
   if (capabilities.runVideoTool) stopTags.push("video-tool");
+  if (capabilities.runPlayer) stopTags.push("player-tool");
   let groundedPrompt = userPrompt;
   if (attachedImages.length > 0) {
     const visionToolId = `tool-vision-${id}`;
@@ -308,6 +340,25 @@ CRITICAL VISUAL DESIGN RULES:
     editorInstruction = `\n\n[TEMINALI CUT PANEL]\nThe video editor is part of this workspace and you can edit the user's timeline directly. To call an editor tool, emit a \`\`\`video-tool fence holding one JSON object, or an array of them, shaped {"tool":"name","arguments":{...}}; its real result is returned to you before you answer again. A \`\`\`json block is documentation and is never executed. Call describe_timeline before any edit and address clips by the ids it returns, never by an id you invented, and never report an edit whose result is not in the conversation. Times are milliseconds. Every call lands on the timeline the user is watching, and each one is a single undo.\nEDITOR TOOLS:\n${toolList}`;
   }
 
+  /*
+    The built-in player.
+
+    Empty unless the host mounted one, so the benchmark arena and any headless
+    caller get the prompt they had before this existed — the same contract the
+    editor block keeps.
+
+    Two things earn their length here. The live state goes in the prompt, so
+    the model answers "play it" from what is actually open instead of asking
+    which file. And the last line names the mistake this block exists to
+    prevent: the timeline and the viewer are different surfaces, and a model
+    that confuses them tells the operator their own open file does not exist.
+  */
+  let playerInstruction = "";
+  if (capabilities.runPlayer && capabilities.playerActions && capabilities.playerActions.length > 0) {
+    const showing = capabilities.playerState?.() ?? "";
+    playerInstruction = `\n\n[BUILT-IN PLAYER]\nThis workspace has a media player and you control it directly. To use it, emit a \`\`\`player-tool fence holding one JSON object, or an array of them, shaped {"action":"name","value":...}; the player's real state is returned to you before you answer again. A \`\`\`json block is documentation and is never executed.\nACTIONS: ${capabilities.playerActions.join(", ")}. \`seek\` and \`seek_by\` take seconds, \`volume\` takes 0–1, \`rate\` takes a multiplier, \`episode\` takes a 1-based number, \`subtitles\` takes a label or "off", \`fullscreen\` takes a boolean; the rest take no value.\n${showing ? `RIGHT NOW: ${showing}\n` : ""}The player is NOT the Teminali Cut timeline. A file the operator opened in the viewer will never appear in \`describe_timeline\`, and its absence there says nothing about whether it exists — use \`\`\`player-tool for anything the operator is watching or listening to, and never tell them a file they have open is missing.`;
+  }
+
   const multiAgentPrompt = `\n\n[MULTI-AGENT COGNITIVE FRAMEWORK]
 You operate as a synchronized multi-agent engineering team:
 1. RECONNAISSANCE: If the task requires understanding existing code, inspect the exact files using \`\`\`frontier-run with read-only commands (e.g. \`cat path/to/file\`, \`git status\`, \`find\`, \`grep\`) before modifying code.
@@ -368,7 +419,7 @@ Whenever you are about to run a tool or command (\`\`\`frontier-run, \`\`\`video
     {
       role: "system",
       content: DiligenceEngine.wrapSystemPrompt(CompletenessEngine.wrapSystemPrompt(
-        `You are Teminali ${selection.label}. Be precise, disclose uncertainty, and never claim a tool or test ran unless its result is present in the conversation. When the user asks you to edit workspace files, emit every intended final file as a complete fenced block with path="workspace/relative/path.ext" directly on the code fence tag (e.g. \`\`\`html path="outputs/live-edit-vision-canary.html" or \`\`\`ts path="src/example.ts"). Use one explicit path block per file, never an ambiguous patch fragment, so Teminali can apply, display, and verify the edits safely. To actually run a workspace command, emit it in a \`\`\`frontier-run fence (one command per line); its real output is returned to you before you answer again. A \`\`\`bash or \`\`\`sh block is documentation and is never executed. All workspace and system terminal commands run automatically and seamlessly with full computer access.${skillInstruction}${editorInstruction}${multiAgentPrompt}${transcriptInstruction}${identityInstruction}${conversationalInstruction}${stepExplanationInstruction}${toolExecutionMandate}`,
+        `You are Teminali ${selection.label}. Be precise, disclose uncertainty, and never claim a tool or test ran unless its result is present in the conversation. When the user asks you to edit workspace files, emit every intended final file as a complete fenced block with path="workspace/relative/path.ext" directly on the code fence tag (e.g. \`\`\`html path="outputs/live-edit-vision-canary.html" or \`\`\`ts path="src/example.ts"). Use one explicit path block per file, never an ambiguous patch fragment, so Teminali can apply, display, and verify the edits safely. To actually run a workspace command, emit it in a \`\`\`frontier-run fence (one command per line); its real output is returned to you before you answer again. A \`\`\`bash or \`\`\`sh block is documentation and is never executed. All workspace and system terminal commands run automatically and seamlessly with full computer access.${skillInstruction}${editorInstruction}${playerInstruction}${multiAgentPrompt}${transcriptInstruction}${identityInstruction}${conversationalInstruction}${stepExplanationInstruction}${toolExecutionMandate}`,
       )),
     },
     ...history.slice(-6).map((message) => ({
@@ -484,6 +535,13 @@ Whenever you are about to run a tool or command (\`\`\`frontier-run, \`\`\`video
     let diligenceCorrections = 0;
     let investigationTurns = 0;
     let editorTurns = 0;
+    /*
+      Player commands get their own budget rather than sharing the editor's.
+      A playback exchange is genuinely a chain — episode, then play, then
+      subtitles — and spending the timeline's turns on it would leave a model
+      that did both with no edits left.
+    */
+    let playerTurns = 0;
     let correctionTurns = 0;
     let deniedFeedback = 0;
     /** Times this exchange has been told it is retrying its way around a wall. */
@@ -564,6 +622,40 @@ Whenever you are about to run a tool or command (\`\`\`frontier-run, \`\`\`video
             const evidence = buildVideoToolEvidence(executions);
             observation = observation ? `${observation}\n\n${evidence}` : evidence;
             editorTurns += 1;
+            investigated = true;
+          }
+        }
+      }
+
+      /*
+        The built-in player.
+
+        Cheaper than either sibling: no process is spawned and no file is read.
+        The command is handed to whichever pane holds the player and the
+        snapshot that comes back is the observation — which is the whole point,
+        because a model that is *shown* the player's state after acting stops
+        guessing at it. The fallback parse is here for the same reason the
+        editor runner has one: a local model that got the protocol right and
+        the tag wrong has earned its call.
+      */
+      if (capabilities.runPlayer && playerTurns < MAX_PLAYER_TURNS) {
+        const requests = hasPlayerToolCalls(turnText)
+          ? parsePlayerToolCalls(turnText)
+          : parseFallbackPlayerToolCalls(turnText);
+        if (requests.length > 0) {
+          const executions = await executePlayerRequests(requests, {
+            execute: capabilities.runPlayer,
+            signal: controller.signal,
+            onToolCall: callbacks.onToolCall,
+          });
+          if (executions.length > 0) {
+            // Appended, never substituted — the same rule the editor branch
+            // keeps. A turn may run a command and press play, and dropping
+            // either observation leaves the model repeating the half it was
+            // never told the result of.
+            const evidence = buildPlayerToolEvidence(executions);
+            observation = observation ? `${observation}\n\n${evidence}` : evidence;
+            playerTurns += 1;
             investigated = true;
           }
         }

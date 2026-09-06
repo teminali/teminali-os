@@ -12,6 +12,9 @@ import { AgentCliService, type AgentStreamCallbacks, type PermissionRequest } fr
 import { TerminalService } from "./terminalService";
 import { FrontierEngine, type EngineCapabilities, type StreamCallbacks, type VideoToolSummary } from "./frontierEngine";
 import { executeTool, getToolManifest } from "../video/mcp/toolRegistry";
+import { dispatchPlayerCommand, PLAYER_ACTIONS, type PlayerSnapshot } from "./playerControl";
+import { describeLivePlayer } from "./playerToolCalls";
+import { usePlayerStore } from "../store/playerStore";
 import type { AgentCommandRequest } from "./agentCommands";
 import type { TurnOrigin } from "./voice/types";
 import type { ChatMessage, ModelModeId } from "../types";
@@ -116,7 +119,57 @@ function studioCapabilities(workingDirectory?: string): EngineCapabilities {
       Zod schemas advertised above and never throws.
     */
     runVideoTool: (tool, args) => executeTool(tool, args, "Teminali OS chat"),
+    /*
+      The built-in player, on the same terms as the editor tools: no transport,
+      because the pane that owns the `<video>` is in this renderer and listening
+      on `subscribePlayerCommands`. The agent CLI lane reaches the same pane the
+      long way round — gateway route, run stream, `dispatchPlayerCommand` — and
+      lands on the identical listener, so both lanes drive one player.
+    */
+    playerActions: PLAYER_ACTIONS,
+    playerState: () => describeLivePlayer(usePlayerStore.getState().live),
+    runPlayer: async (command) => {
+      const delivered = dispatchPlayerCommand(command);
+      if (!delivered) {
+        return {
+          delivered: false,
+          snapshot: null,
+          error: "No player is mounted, so nothing took the command — the operator has no media open. "
+            + "Say so plainly; do not look for the file on the Teminali Cut timeline.",
+        };
+      }
+      return { delivered: true, snapshot: await settledPlayerState() };
+    },
   };
+}
+
+/**
+ * The player's state once it has actually moved.
+ *
+ * `play()` resolves before the element is playing and the pane republishes on
+ * the media event, not the call, so reading the store straight after a dispatch
+ * reports the state the command was meant to change. Waiting for the next
+ * publish — and giving up quickly if none comes, as `pause` on an already
+ * paused file produces none — is what makes the sentence the model reads next
+ * true rather than one tick stale.
+ */
+const PLAYER_SETTLE_MS = 600;
+
+function settledPlayerState(): Promise<PlayerSnapshot | null> {
+  return new Promise((resolve) => {
+    let done = false;
+    const finish = (): void => {
+      if (done) return;
+      done = true;
+      unsubscribe();
+      clearTimeout(timer);
+      resolve(usePlayerStore.getState().live);
+    };
+    const unsubscribe = usePlayerStore.subscribe((state, previous) => {
+      if (state.live !== previous.live) finish();
+    });
+    const timer = setTimeout(finish, PLAYER_SETTLE_MS);
+  });
 }
 
 /**

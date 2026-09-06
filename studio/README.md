@@ -155,6 +155,17 @@ pointer. `open_file` on a folder opens the gallery, so "show me what is in
 that folder" and "play me the next episode" are both tool calls rather than
 descriptions of which button to press.
 
+**The local lane has it too, by a shorter road.** A model running in the window
+emits a ```` ```player-tool ```` fence holding `{"action":…,"value":…}` and
+`services/playerToolCalls.ts` hands it straight to the mounted pane — no
+gateway, no run stream, because the pane is in the same renderer. It accepts
+the same seventeen actions the MCP tool does, and a test asserts the two lists
+are identical. Its prompt block carries what the player is showing *right now*,
+so "play it" needs no clarifying question, and says in as many words that the
+player is not the Teminali Cut timeline: without that, a model asked to play an
+open file reached for `video-tool`, read the timeline instead, and reported
+that the file did not exist.
+
 **A folder opens as a gallery.** Click any folder — in the tree, or through
 the agent's `open_file` — and the **Gallery** panel shows what is in it as
 cards: a video shows a frame of itself, an image shows itself, and everything
@@ -862,7 +873,7 @@ ollama serve              # local models on 127.0.0.1:11434
 
 ```bash
 npm run typecheck   # tsc --noEmit
-npm test            # 1599 tests, 0 failures
+npm test            # 1615 tests, 0 failures
 npm run build       # tsc && vite build
 npm run verify:core # all three
 ```

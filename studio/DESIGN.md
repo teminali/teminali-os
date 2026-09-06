@@ -1296,6 +1296,52 @@ episodes, `player_control` starts one" or "a gallery of its contents". Those
 are different next moves for a model, and a single flat "opened" would leave it
 guessing.
 
+### The other lane reaches the same player (`services/playerToolCalls.ts`, 2026-09-06)
+
+*"we have to make it able to control the built in player completely."*
+
+The section above is the agent CLI lane. The local lane had none of it, and the
+failure was not that it declined — it is that it did not.
+
+Asked to play a file open in the viewer, the local model had exactly three
+executors (`frontier-run`, `video-tool`, and `path=` fences), so it reached for
+the only video-shaped one it had, called `describe_timeline`, read back the
+Teminali Cut timeline, and told the operator there was no `Instagram.mp4` in
+their project — while the file sat paused in the next pane. **A model given no
+tool for a thing does not say it cannot; it grabs the nearest-sounding tool and
+reports the wrong answer with confidence.** That is the argument for wiring a
+capability rather than documenting its absence.
+
+`runPlayer`, `playerActions` and `playerState` join `EngineCapabilities` on the
+same terms as the editor tools: injected, so the engine still knows nothing
+about panes. The host's executor is one line — `dispatchPlayerCommand` reaches
+the mounted pane through the listener the CLI lane's events also land on, so
+both lanes drive one player and there is no second implementation to drift.
+
+Three things are deliberate:
+
+- **The prompt carries the live state.** `playerState()` is read when the
+  prompt is built, so the model sees *"paused at 0:01 of 1:44"* and answers
+  "play it" instead of asking which file. This is the same grounding argument
+  the transcript notice makes in §6.
+- **The prompt names the confusion it exists to prevent.** The block says the
+  player is not the timeline, and `buildPlayerToolEvidence` says it again on
+  the way back. Twice, because the wrong tool was *plausible*.
+- **The executor waits for the player to move.** `play()` resolves before the
+  element is playing and the pane republishes on the media event, so reading
+  the store straight after a dispatch reports the state the command was meant
+  to change. `settledPlayerState` waits for the next publish and gives up after
+  600 ms, since an already-paused file produces none.
+
+A malformed fence comes back as a sentence — `"seek" needs a numeric "value"`
+— for the reason the gateway's refusals do: the reader is a model that will
+try again, and a code is a dead end. A mistyped tag (```` ```player_tool ````,
+```` ```player ````) is executed anyway; a ```` ```json ```` block never is.
+
+Tested in `tests/player-tool-calls.test.mjs` (16), including a parity test that
+reads `server/player-state.js` and asserts the fence accepts exactly the
+actions the gateway does.
+
 Tested in `tests/player-state.test.mjs` (11) and in `server/gateway.test.js`,
 where the wiring is: a folder opening as a gallery and saying whether it is a
 series, a snapshot published and read back, a command with nothing playing
