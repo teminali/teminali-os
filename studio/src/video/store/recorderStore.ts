@@ -69,6 +69,8 @@ export interface StickySettings {
   mirrorCamera: boolean;
   micDeviceId: string | null;
   systemAudio: boolean;
+  /** Record the assistant's replies, taken from the voice engine's output. */
+  assistantVoice: boolean;
   countdownSec: 0 | 3 | 5;
   hideWindow: boolean;
   /** Split the microphone off the camera clip, onto its own audio track. */
@@ -139,6 +141,10 @@ const DEFAULT_STICKY: StickySettings = {
   micDeviceId: null,
   /* System audio loopback is supported natively on Windows; on macOS/Linux default to false so no false warnings appear */
   systemAudio: isWin32,
+  /* On, because a tutorial recorded with the assistant talking and no reply
+     in the file is the defect this setting exists to prevent. It costs a
+     silent audio track on a take where nothing ever speaks. */
+  assistantVoice: true,
   countdownSec: 3,
   hideWindow: true,
   detachNarration: true,
@@ -533,6 +539,7 @@ export const useRecorderStore = create<RecorderState>((set, get) => ({
       cameraHeight: state.settings.cameraHeight,
       micDeviceId: state.settings.micDeviceId,
       systemAudio: state.settings.systemAudio,
+      assistantVoice: state.settings.assistantVoice,
       hideWindow: state.settings.hideWindow,
     };
 

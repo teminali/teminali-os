@@ -10,9 +10,15 @@
  * offset each clause begins at, `onEnd` with how many characters were actually
  * heard. The offsets come from the sidecar, so a barge-in mid-reply reports the
  * clause it landed in rather than a proportion of the playback clock.
+ *
+ * Both paths are heard through the speech bus (`speechBus.ts`) rather than
+ * straight out of `destination`, so a screen recording can contain what the
+ * assistant said. This module is where the one output context lives, so it is
+ * where the bus is handed one.
  */
 
 import { VoiceError, type SpeakOptions, type SynthesisHandle } from "./types";
+import { openSpeechTap, routeElementToBus, speechBus } from "./speechBus";
 import {
   FrameReader,
   heardChars,
@@ -51,6 +57,37 @@ async function outputContext(): Promise<AudioContext> {
     } catch {}
   }
   return shared;
+}
+
+/**
+ * A live audio track carrying everything the assistant says, for a recorder
+ * that wants the assistant's half of a conversation in its take. Null when
+ * this build cannot provide one; see `speechBus.ts` for why, and for why the
+ * track handed back is safe to stop.
+ */
+export async function speechOutputTrack(): Promise<MediaStreamTrack | null> {
+  if (typeof window === "undefined") return null;
+  const Ctor = window.AudioContext
+    ?? (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+  if (!Ctor) return null;
+  try {
+    return openSpeechTap(await outputContext());
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Route a whole-file reply through the bus so the tap hears it. False means
+ * the element plays as it always did — audible, merely unrecorded.
+ */
+export async function routeThroughSpeechBus(element: HTMLMediaElement): Promise<boolean> {
+  if (typeof window === "undefined") return false;
+  try {
+    return routeElementToBus(await outputContext(), element);
+  } catch {
+    return false;
+  }
 }
 
 interface Scheduled {
@@ -95,7 +132,7 @@ export async function playSpeechStream(
   if (analyser) {
     analyser.fftSize = 256;
     analyser.smoothingTimeConstant = 0.25;
-    analyser.connect(context.destination);
+    analyser.connect(speechBus(context));
   }
 
   let levelInterval: number | null = null;
@@ -169,7 +206,7 @@ export async function playSpeechStream(
     if (analyser) {
       source.connect(analyser);
     } else {
-      source.connect(context.destination);
+      source.connect(speechBus(context));
     }
 
     const previous = schedule[schedule.length - 1];

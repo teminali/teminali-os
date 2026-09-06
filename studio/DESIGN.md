@@ -2538,6 +2538,51 @@ would trade a doubled cursor for a missing one on the strength of a guess. It
 needs one observation on each platform, not a reasoned answer (§2, no dead
 affordances; and the repo rule against writing what was not measured).
 
+#### A take now contains the assistant's half of the conversation (`src/services/voice/speechBus.ts`, `src/video/engine/capturePlan.ts`, 2026-09-06)
+
+A tutorial recorded while talking to the assistant had only one voice in it.
+This read as an audio bug and was not one: the replies are synthesised in the
+renderer and played at the speakers, so **no input device on the machine ever
+hears them.** On Windows the system-audio loopback happens to catch them; on
+macOS there is no loopback input at all, so there was no device an operator
+could have selected to fix it. Nothing was dropped — the signal was never
+offered to the recorder.
+
+So it is taken where it already exists. `speechBus.ts` puts one unity-gain node
+in front of `destination`, and every speaking path connects to that instead:
+the streaming clause player and the whole-file `<audio>` element both. A tap
+(`MediaStreamAudioDestinationNode`) becomes the bus's second consumer, and its
+track is what the recorder mixes in. A bus is needed because a tap cannot hang
+off `destination`, which has no output to read back from.
+
+Three rules, each of which fails silently and so is tested
+(`tests/recorder-assistant-voice.test.mjs`, 18 tests):
+
+- **The tap hands back a clone.** The recorder stops every track it opened when
+  a take ends; stopping the tap's own track would end the tap for the life of
+  the renderer, and the *second* take would record silence.
+- **System audio suppresses the tap.** That loopback already carries the
+  speakers, so taking both would put every reply in the file twice.
+- **The microphone and the assistant are one narration.** They are summed onto
+  the same track, so a volume, a cut or `detachNarration` lifting the voice off
+  the camera clip takes the reply it was answering with it. Which clip that is
+  follows the microphone: the camera when there is a face to stay in sync with,
+  the screen clip — the one clip a take always has — when there is not.
+
+`planSound` in `capturePlan.ts` holds all three as a pure function, so the
+rules are testable without a media stack; `startCapture` only executes the plan
+it returns. **Assistant's voice** is a `ToggleRow` under Sound in
+`CaptureOptions`, defaulting **on**: a tutorial with the assistant talking and
+no reply in the file is the defect the setting exists to prevent. The cost of
+that default is a silent audio track on a take where nothing ever speaks.
+
+**What is deliberately not done:** the assistant does not get its own recorder
+and its own file. The recorder factory requires a video track and knows only
+`'screen' | 'camera'`, and MediaRecorder writes one audio track per file, so a
+separate assistant track would mean a third recorder kind, a third file in the
+main process, and take-import changes. Mixing into the narration was chosen
+over that; independent volume for the assistant is what it costs.
+
 ### Two menu bar items
 
 `electron/tray.cjs` (Guardian) and `electron/assistant-tray.cjs` are separate

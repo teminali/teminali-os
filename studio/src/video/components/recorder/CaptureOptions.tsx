@@ -144,6 +144,19 @@ export const CaptureOptions: React.FC<Props> = ({
         hint={permissions?.platform === 'win32' ? 'What the machine is playing' : 'Natively supported on Windows'}
       />
 
+      {/* Not a device: the assistant's replies are made in this window and
+          never reach any input, so without this a take has only your half of
+          the conversation. Redundant where system audio is on, which already
+          carries the speakers — the capture drops it there by itself. */}
+      <ToggleRow
+        label="Assistant's voice"
+        checked={settings.assistantVoice}
+        onChange={(v) => onChange('assistantVoice', v)}
+        hint={settings.systemAudio && permissions?.platform === 'win32'
+          ? 'Already inside system audio'
+          : 'What the assistant says back'}
+      />
+
 
       {/* Narration sits under Sound rather than under the camera it is
           recorded with, because what this decides is where the voice

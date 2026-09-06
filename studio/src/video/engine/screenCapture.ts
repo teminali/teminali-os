@@ -41,6 +41,8 @@
    ═══════════════════════════════════════════════════════════════════ */
 
 import { systemAudioWarning } from './platformCopy';
+import { speechOutputTrack } from '../../services/voice/clausePlayer';
+import { planSound, type SoundSource } from './capturePlan';
 
 import type {
   CursorSample, InputEvent, InputCaptureStatus, RecorderConvertProgress,
@@ -64,6 +66,11 @@ export interface CaptureSettings {
   micDeviceId: string | null;
   /** Ask for the machine's own output as well. Only Windows reliably gives it. */
   systemAudio: boolean;
+  /**
+   * Record what the assistant says. Taken from the voice engine's own output
+   * rather than from a device, because nothing on this machine can hear it.
+   */
+  assistantVoice: boolean;
   hideWindow: boolean;
 }
 
@@ -468,7 +475,8 @@ interface Session {
     camera: MediaStreamTrack | null;
     audio: MediaStreamTrack | null;
   };
-  audioContext: AudioContext | null;
+  /** Every context a mix was built on. More than one is possible. */
+  audioContexts: AudioContext[];
   cursorTracked: boolean;
   input: InputCaptureStatus;
   warnings: string[];
@@ -570,7 +578,7 @@ export async function startCapture(
 
   const warnings: string[] = [];
   const openedTracks: MediaStreamTrack[] = [];
-  let audioContext: AudioContext | null = null;
+  const audioContexts: AudioContext[] = [];
   /*
     Set the moment `recorder:begin` succeeds, and read only by `bail`.
 
@@ -591,7 +599,7 @@ export async function startCapture(
   /** Release everything acquired so far. Called from every failure below. */
   const bail = () => {
     for (const track of openedTracks) track.stop();
-    void audioContext?.close();
+    for (const context of audioContexts) void context.close();
     if (mainSessionId) {
       const id = mainSessionId;
       mainSessionId = null;
@@ -677,22 +685,62 @@ export async function startCapture(
       }
     }
 
+    /* ── 3b. The assistant's own voice ──────────────────────────────
+       Its replies are synthesised in this renderer and played at the
+       speakers; no input device on this machine hears them, and macOS has
+       no loopback device to select instead. So a recorded conversation was
+       missing one side of itself. The tap in `clausePlayer` is that side. */
+    const plan = planSound({
+      assistantVoice: settings.assistantVoice,
+      systemAudio: Boolean(screen.systemAudio),
+      mic: Boolean(mic),
+      cameraVideo: Boolean(cameraVideo),
+    });
+
+    let assistant: MediaStreamTrack | null = null;
+    if (plan.tapAssistant) {
+      try {
+        assistant = await speechOutputTrack();
+      } catch {
+        assistant = null;
+      }
+      if (assistant) openedTracks.push(assistant);
+      else {
+        warnings.push(
+          "This build cannot record the assistant's own voice, so only your side of "
+          + 'any conversation is in this take.',
+        );
+      }
+    }
+
     /* ── 4. Pair each picture with the sound that must not drift from it ── */
     const screenTracks: MediaStreamTrack[] = [screen.video];
     const cameraTracks: MediaStreamTrack[] = cameraVideo ? [cameraVideo] : [];
 
-    if (cameraVideo && mic) {
-      cameraTracks.push(mic);
-      if (screen.systemAudio) screenTracks.push(screen.systemAudio);
-    } else if (mic && screen.systemAudio) {
-      const mixed = mixAudio([screen.systemAudio, mic]);
-      audioContext = mixed.context;
-      screenTracks.push(mixed.track);
-    } else if (mic) {
-      screenTracks.push(mic);
-    } else if (screen.systemAudio) {
-      screenTracks.push(screen.systemAudio);
-    }
+    const sources: Record<SoundSource, MediaStreamTrack | null> = {
+      mic,
+      assistant,
+      systemAudio: screen.systemAudio,
+    };
+
+    /* Sum where the plan named more than one, and remember every context so
+       it can be closed — a take can now build two mixes, one per clip. */
+    const attach = (target: MediaStreamTrack[], names: SoundSource[]) => {
+      const parts = names
+        .map((name) => sources[name])
+        .filter((track): track is MediaStreamTrack => track !== null);
+      if (parts.length === 0) return;
+      if (parts.length === 1) {
+        target.push(parts[0]);
+        return;
+      }
+      const mixed = mixAudio(parts);
+      audioContexts.push(mixed.context);
+      target.push(mixed.track);
+    };
+
+    attach(screenTracks, plan.screen);
+    attach(cameraTracks, plan.camera);
 
     /* ── 5. Open the files, or set up in-memory recording for the web ── */
     let sessionId = `web_take_${Date.now()}`;
@@ -921,7 +969,7 @@ export async function startCapture(
       recorders: built,
       tracks: openedTracks,
       live: { screen: screen.video, camera: cameraVideo, audio: mic },
-      audioContext,
+      audioContexts,
       cursorTracked,
       input: inputStatus,
       warnings,
@@ -1123,7 +1171,7 @@ export async function stopCapture(): Promise<
   }
 
   for (const track of current.tracks) track.stop();
-  void current.audioContext?.close();
+  for (const context of current.audioContexts) void context.close();
 
   if (current.isWeb) {
     releaseWebListeners(current);
@@ -1214,7 +1262,7 @@ export async function cancelCapture(discard: boolean): Promise<void> {
     }
   }
   for (const track of current.tracks) track.stop();
-  void current.audioContext?.close();
+  for (const context of current.audioContexts) void context.close();
 
   session = null;
   if (!current.isWeb) await bridge()?.cancel(current.id, discard);

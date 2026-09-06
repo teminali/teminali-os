@@ -20,7 +20,7 @@
  */
 
 import { GatewayClient } from "../../gatewayClient";
-import { playSpeechStream } from "../clausePlayer";
+import { playSpeechStream, routeThroughSpeechBus } from "../clausePlayer";
 import { isSpeechStream } from "../speechStream";
 import {
   VoiceError,
@@ -505,6 +505,13 @@ export class VibeVoiceProvider implements VoiceProvider {
       finish();
     };
     audio.onerror = finish;
+
+    // Through the speech bus, not straight out of the element, so a screen
+    // take can hear this path too. Awaited BEFORE `play`: routing an element
+    // that is already sounding moves the audio mid-word. A false answer means
+    // the graph was not running and the reply plays from the element as it
+    // always did — audible, merely unrecorded.
+    await routeThroughSpeechBus(audio);
 
     try {
       await audio.play();

@@ -654,6 +654,16 @@ These take the key away from every app on the machine for the length of the
 recording, which is why they are `⌥⇧` rather than anything a person presses by
 accident.
 
+A take records what the **assistant** says as well as what you say. Its replies
+are synthesised in the renderer and played at the speakers, so no microphone on
+the machine can hear them — macOS has no loopback input at all — and the signal
+is instead tapped from the voice engine's own output
+(`src/services/voice/speechBus.ts`). **Assistant's voice**, under Sound on the
+capture rail, is on by default; it is summed into the narration rather than
+given a track of its own, and it is skipped when **System audio** is on, since
+that loopback already carries the speakers.
+`src/video/engine/capturePlan.ts` holds those rules.
+
 The renderer half is `src/video/engine/screenCapture.ts` (the capture engine),
 `src/video/store/recorderStore.ts` (phases, sticky settings, the fault
 watchdog), `src/video/components/recorder/` (the recorder surface, source grid
@@ -802,7 +812,7 @@ ollama serve              # local models on 127.0.0.1:11434
 
 ```bash
 npm run typecheck   # tsc --noEmit
-npm test            # 1501 tests, 0 failures
+npm test            # 1599 tests, 0 failures
 npm run build       # tsc && vite build
 npm run verify:core # all three
 ```
