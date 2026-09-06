@@ -54,6 +54,69 @@ export function foldVisit(history: HistoryEntry[], visit: HistoryEntry): History
   return [visit, ...rest].slice(0, MAX_CACHED_HISTORY);
 }
 
+/** One page in the recent list, with how many times it was reached. */
+export interface RecentVisit {
+  url: string;
+  title: string;
+  /** The most recent visit — the one the age is measured from. */
+  visitedAt: string;
+  /** How many rows folded into this one. 1 when it was visited once. */
+  visits: number;
+}
+
+/**
+ * The recent list, folded.
+ *
+ * The gateway folds only a *repeat at the head* — the start/stop/title storm of
+ * one navigation — which is exactly the wrong shape for a page you go back to.
+ * A session of watching four videos leaves the same sign-in page interleaved
+ * between them, and the home page then showed six identical rows: the same
+ * title, the same host, six ages, and nothing distinguishing them. That is a
+ * list nobody reads, and it pushed the pages the operator actually wanted off
+ * the bottom.
+ *
+ * So the display folds by address and keeps the newest, with the count beside
+ * it. The stored history is untouched — this is a view of it, and the assistant
+ * still reads every row.
+ */
+export function foldRecent(history: HistoryEntry[], limit: number): RecentVisit[] {
+  const byUrl = new Map<string, RecentVisit>();
+  for (const entry of history) {
+    const seen = byUrl.get(entry.url);
+    if (!seen) {
+      byUrl.set(entry.url, { url: entry.url, title: entry.title, visitedAt: entry.visitedAt, visits: 1 });
+      continue;
+    }
+    seen.visits += 1;
+    // The list arrives newest-first, but a stored file is not a promise: keep
+    // the later stamp and the title that came with it either way.
+    if (entry.visitedAt > seen.visitedAt) {
+      seen.visitedAt = entry.visitedAt;
+      seen.title = entry.title;
+    }
+  }
+  return [...byUrl.values()]
+    .sort((a, b) => (a.visitedAt < b.visitedAt ? 1 : a.visitedAt > b.visitedAt ? -1 : 0))
+    .slice(0, limit);
+}
+
+/**
+ * Which heading a visit belongs under: Today, Yesterday, or Earlier.
+ *
+ * Three buckets, not a date per row. A list of twelve pages from one afternoon
+ * does not need twelve dates, and "26m" already answers "how long ago" for the
+ * only rows where the answer is interesting.
+ */
+export function visitDay(iso: string, now: number = Date.now()): "Today" | "Yesterday" | "Earlier" {
+  const then = new Date(iso).getTime();
+  if (!Number.isFinite(then)) return "Earlier";
+  const midnight = new Date(now);
+  midnight.setHours(0, 0, 0, 0);
+  if (then >= midnight.getTime()) return "Today";
+  if (then >= midnight.getTime() - 86_400_000) return "Yesterday";
+  return "Earlier";
+}
+
 /** A file that has ended, in the shape the gateway stores. */
 export interface DownloadRecord {
   url: string;

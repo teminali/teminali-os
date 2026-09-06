@@ -163,7 +163,8 @@ prompt.
 The panel's own side of that store is the **home page**, shaped like a new-tab
 page: a search field, a row of round shortcuts built from the bookmarks — each
 wearing the site's own favicon where it has one, and ending in **Add shortcut**
-— then the last 20 pages and the downloads with a "Show in Finder" on each
+— then the recent pages, folded by address with a visit count and cut into
+Today / Yesterday / Earlier, and the downloads with a "Show in Finder" on each
 finished one. The field's icon is the **search engine**, and it is a button:
 Google, Bing, DuckDuckGo, Brave Search or Perplexity, remembered across
 restarts and used by the omnibox and the right-click menu's "Search … for" as
@@ -751,7 +752,7 @@ ollama serve              # local models on 127.0.0.1:11434
 
 ```bash
 npm run typecheck   # tsc --noEmit
-npm test            # 1408 tests, 0 failures
+npm test            # 1411 tests, 0 failures
 npm run build       # tsc && vite build
 npm run verify:core # all three
 ```

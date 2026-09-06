@@ -8,6 +8,7 @@ import { useSearchEngine, useSearchStore } from "../../../store/searchStore";
 import { formatBytes } from "../../../services/guardianService";
 import { browserViewBridge } from "../../../services/browserView";
 import { useBrowserStore } from "../../../store/browserStore";
+import { foldRecent, visitDay, type RecentVisit } from "../../../utils/browserRecording";
 
 /**
  * The browser panel's home page.
@@ -75,8 +76,14 @@ import { useBrowserStore } from "../../../store/browserStore";
  * this mode does and does not do — measured against the code, not the wish.
  */
 
-/** How much of the trail is worth showing. Older than this is a question for the assistant. */
-const RECENT_LIMIT = 12;
+/**
+ * How much of the trail is worth showing, after folding.
+ *
+ * Counted in *pages* rather than in visits: twelve rows of the same sign-in
+ * page is not twelve things to look at. Anything older than this is a question
+ * for the assistant, which reads the whole file.
+ */
+const RECENT_LIMIT = 10;
 
 /** The shortcut grid, which stops being quick when it needs scrolling. Two rows of five. */
 const BOOKMARK_LIMIT = 10;
@@ -107,7 +114,18 @@ export const BrowserHome: React.FC<{ onOpen: (url: string) => void; private?: bo
     if (!loaded && !isPrivate) void load();
   }, [loaded, load, isPrivate]);
 
-  const recent = useMemo(() => history.slice(0, RECENT_LIMIT), [history]);
+  // Folded by address, newest kept, then cut into Today / Yesterday / Earlier.
+  const recent = useMemo(() => foldRecent(history, RECENT_LIMIT), [history]);
+  const grouped = useMemo(() => {
+    const groups: { day: string; rows: RecentVisit[] }[] = [];
+    for (const visit of recent) {
+      const day = visitDay(visit.visitedAt);
+      const last = groups[groups.length - 1];
+      if (last?.day === day) last.rows.push(visit);
+      else groups.push({ day, rows: [visit] });
+    }
+    return groups;
+  }, [recent]);
   const kept = useMemo(() => bookmarks.slice(0, BOOKMARK_LIMIT), [bookmarks]);
   const inFlight = useMemo(() => Object.entries(active), [active]);
   const bridge = useMemo(() => browserViewBridge(), []);
@@ -208,16 +226,34 @@ export const BrowserHome: React.FC<{ onOpen: (url: string) => void; private?: bo
             {recent.length > 0 && (
               <section className="flex flex-col gap-3">
                 <Heading count={history.length}>Recent</Heading>
-                <div className="flex flex-col">
-                  {recent.map((entry) => (
-                    <Row
-                      key={`${entry.url}-${entry.visitedAt}`}
-                      url={entry.url}
-                      title={entry.title || addressLabel(entry.url)}
-                      meta={addressLabel(entry.url)}
-                      trailing={<span className="text-2xs text-ink-disabled tabular-nums">{relativeAge(entry.visitedAt)}</span>}
-                      onOpen={() => onOpen(entry.url)}
-                    />
+                {/* Narrower than the page. The age is the one field that is
+                    genuinely a column, and a column at the far edge of a wide
+                    panel is a number attached to nothing. */}
+                <div className="flex flex-col gap-3 max-w-xl w-full">
+                  {grouped.map((group) => (
+                    <div key={group.day} className="flex flex-col">
+                      <span className="px-2 pb-1 text-3xs uppercase tracking-wider text-ink-disabled">
+                        {group.day}
+                      </span>
+                      {group.rows.map((entry) => (
+                        <Row
+                          key={entry.url}
+                          url={entry.url}
+                          title={entry.title || addressLabel(entry.url)}
+                          meta={
+                            entry.visits > 1
+                              ? `${addressLabel(entry.url)} · ${entry.visits} visits`
+                              : addressLabel(entry.url)
+                          }
+                          trailing={
+                            <span className="text-2xs text-ink-disabled tabular-nums">
+                              {relativeAge(entry.visitedAt)}
+                            </span>
+                          }
+                          onOpen={() => onOpen(entry.url)}
+                        />
+                      ))}
+                    </div>
                   ))}
                 </div>
               </section>
@@ -226,7 +262,7 @@ export const BrowserHome: React.FC<{ onOpen: (url: string) => void; private?: bo
             {(inFlight.length > 0 || downloads.length > 0) && (
               <section className="flex flex-col gap-3">
                 <Heading count={downloads.length + inFlight.length}>Downloads</Heading>
-                <div className="flex flex-col">
+                <div className="flex flex-col max-w-xl w-full">
                   {inFlight.map(([id, download]) => (
                     <Progress key={id} download={download} />
                   ))}

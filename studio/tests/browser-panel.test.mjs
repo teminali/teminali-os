@@ -2,7 +2,14 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { isRevealable, parseKnownDownloads } from "../electron/browserView.cjs";
-import { downloadAction, foldVisit, visitKey, visitOf } from "../src/utils/browserRecording.ts";
+import {
+  downloadAction,
+  foldRecent,
+  foldVisit,
+  visitDay,
+  visitKey,
+  visitOf,
+} from "../src/utils/browserRecording.ts";
 
 /**
  * The browser panel's side: what gets written down, and which files main will
@@ -134,4 +141,50 @@ test("the persisted reveal list survives a corrupt or hostile file", () => {
   assert.deepEqual(parseKnownDownloads("not json"), []);
   assert.deepEqual(parseKnownDownloads('{"paths":["/x"]}'), []);
   assert.equal(parseKnownDownloads(JSON.stringify(Array.from({ length: 400 }, (_, i) => `/x/${i}`))).length, 200);
+});
+
+/* ── The recent list, as the home page shows it ───────────────────────────── */
+
+/**
+ * The gateway folds a repeat at the head — one navigation reporting itself
+ * three times. It cannot fold a page returned to between other pages, and that
+ * is the shape that filled the home page with six identical rows.
+ */
+test("the same page visited between others is one row, with a count", () => {
+  const history = [
+    { url: "https://a.example/", title: "A", visitedAt: "2026-09-06T12:00:00.000Z" },
+    { url: "https://b.example/", title: "B", visitedAt: "2026-09-06T11:00:00.000Z" },
+    { url: "https://a.example/", title: "A (older title)", visitedAt: "2026-09-06T10:00:00.000Z" },
+    { url: "https://a.example/", title: "A", visitedAt: "2026-09-06T09:00:00.000Z" },
+  ];
+  const folded = foldRecent(history, 10);
+  assert.deepEqual(
+    folded.map((row) => [row.url, row.visits]),
+    [["https://a.example/", 3], ["https://b.example/", 1]],
+  );
+  // The newest stamp and the title that came with it.
+  assert.equal(folded[0].visitedAt, "2026-09-06T12:00:00.000Z");
+  assert.equal(folded[0].title, "A");
+});
+
+test("the limit counts pages, not visits", () => {
+  const history = [];
+  for (let i = 0; i < 30; i += 1) {
+    history.push({ url: `https://x${i % 3}.example/`, title: "x", visitedAt: `2026-09-06T${String(i % 24).padStart(2, "0")}:00:00.000Z` });
+  }
+  assert.equal(foldRecent(history, 10).length, 3);
+  assert.equal(foldRecent(history, 2).length, 2);
+  assert.deepEqual(foldRecent([], 10), []);
+});
+
+test("a visit falls under today, yesterday, or earlier", () => {
+  const now = new Date("2026-09-06T12:00:00.000Z").getTime();
+  const midnight = new Date(now);
+  midnight.setHours(0, 0, 0, 0);
+  assert.equal(visitDay(new Date(now - 60_000).toISOString(), now), "Today");
+  assert.equal(visitDay(new Date(midnight.getTime()).toISOString(), now), "Today");
+  assert.equal(visitDay(new Date(midnight.getTime() - 1).toISOString(), now), "Yesterday");
+  assert.equal(visitDay(new Date(midnight.getTime() - 86_400_000 - 1).toISOString(), now), "Earlier");
+  // A row whose stamp is unreadable is old, not a crash.
+  assert.equal(visitDay("not a date", now), "Earlier");
 });

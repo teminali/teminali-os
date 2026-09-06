@@ -35,7 +35,6 @@ export interface StudioTitleBarProps {
   sidebarCollapsed: boolean;
   onToggleSidebar: () => void;
   onOpenIde?: () => void;
-  onOpenOverflow?: () => void;
 }
 
 export const StudioTitleBar: React.FC<StudioTitleBarProps> = ({
@@ -44,7 +43,6 @@ export const StudioTitleBar: React.FC<StudioTitleBarProps> = ({
   sidebarCollapsed,
   onToggleSidebar,
   onOpenIde,
-  onOpenOverflow,
 }) => {
   const {
     panels,
@@ -64,6 +62,15 @@ export const StudioTitleBar: React.FC<StudioTitleBarProps> = ({
 
   const { sessionHistory, sessionHistoryIndex, goBackSession, goForwardSession } = useStudioStore();
   const [isAdmin, setIsAdmin] = useState(false);
+  /*
+    The overflow button's own copy of the panel menu.
+
+    Its own state rather than the store's `isAddMenuOpen`, because that flag is
+    the tab strip's `+` and one flag driving two anchored popovers would draw
+    both at once. What they share is `addItems` — the same list, from the same
+    place, so the two entry points cannot come to offer different panels.
+  */
+  const [overflowOpen, setOverflowOpen] = useState(false);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -193,9 +200,32 @@ export const StudioTitleBar: React.FC<StudioTitleBarProps> = ({
             IDE
             <ExternalLink size={11} />
           </button>
-          <IconButton onClick={onOpenOverflow} title="More" size={24}>
-            <MoreHorizontal size={15} />
-          </IconButton>
+          {/*
+            The same menu as the tab strip's `+`.
+
+            It used to open the command palette, which is a search dialog — and
+            the sidebar already has search as a whole view, so this was a second
+            door to it wearing an unrelated glyph. ⌘K and ⌘P still open the
+            palette. What this button is for is the one thing the strip's `+`
+            cannot do while the panel region is hidden: open a panel.
+          */}
+          <div className="relative flex-shrink-0">
+            <IconButton
+              onClick={() => setOverflowOpen((previous) => !previous)}
+              active={overflowOpen}
+              title="Open a panel"
+              size={24}
+            >
+              <MoreHorizontal size={15} />
+            </IconButton>
+            <Menu
+              open={overflowOpen}
+              onClose={() => setOverflowOpen(false)}
+              items={addItems}
+              anchor="top-8 right-0"
+              width={264}
+            />
+          </div>
           <IconButton onClick={toggleOpen} active={isOpen} title="Toggle panels" size={24}>
             <PanelRight size={15} />
           </IconButton>

@@ -391,7 +391,6 @@ export default function App() {
           sidebarCollapsed={sidebarCollapsed}
           onToggleSidebar={() => setSidebarCollapsed((previous) => !previous)}
           onOpenIde={() => focusOrOpen({ kind: "file" })}
-          onOpenOverflow={() => setCommandPaletteOpen(true)}
         />
 
         <div className="flex-1 min-h-0 flex">

@@ -486,6 +486,24 @@ menu in main names the chosen engine, an engine arriving over IPC that is not
 https is refused without clearing the choice, and a favicon is only ever asked
 of the site itself.
 
+#### The recent list folds, and says when (2026-09-06, later)
+
+Six identical rows — same title, same host, six ages — because a session spent
+watching four videos leaves the same sign-in page interleaved between them, and
+the gateway's fold only catches a repeat *at the head* (one navigation
+reporting itself as start, stop and title). `foldRecent` folds by address for
+display, keeps the newest stamp and the title that came with it, and puts the
+count beside the host: `accounts.google.com · 6 visits`. The stored history is
+untouched — the assistant still reads every row — and the limit now counts
+**pages** rather than visits, so ten rows are ten different things.
+
+`visitDay` cuts the list into Today / Yesterday / Earlier. Three buckets, not a
+date per row: twelve pages from one afternoon do not need twelve dates, and the
+age already answers the only case where "how long ago" is interesting. The list
+is also narrower than the page, because the age is the one field that is
+genuinely a column and a column at the far edge of a wide panel is a number
+attached to nothing.
+
 #### Private tabs (`utils/privateBrowsing.ts`, 2026-09-06)
 
 A private tab is a tab on another Electron session — `teminali-browser-private`,
@@ -585,6 +603,23 @@ counted. The copy and retry buttons moved back beside the numbers instead of
 being pushed to the far edge by a spacer: a control a whole column away from
 the thing it acts on is one the eye has to hunt for. Pinned by
 `tests/message-telemetry.test.mjs` (4).
+
+#### The overflow button opens panels, not a search box (2026-09-06, later)
+
+The `⋯` beside IDE opened the command palette. The operator, with it and the
+tab strip's `+` circled together: *"that 3 dots menu and the plus icon on the
+right pane's tab bar should show the same thing, that dialog does not serve a
+search purpose — we already have search on the left main tab bar."* Both true:
+the sidebar carries search as a whole view, so this was a second door to it
+wearing a glyph that says nothing about search, and the one thing a `⋯` in the
+title bar is actually good for is the thing the strip's `+` cannot do while the
+panel region is hidden — open a panel.
+
+Both now render `addItems`, the same list built once, so the two entry points
+cannot drift into offering different panels. They do **not** share
+`isAddMenuOpen`: one flag driving two anchored popovers draws both at once, so
+the overflow button keeps its own open state. ⌘K and ⌘P still open the palette,
+and so does the chat's own workspace affordance.
 
 ### Right-click (`electron/contextMenu.cjs`, 2026-09-06)
 
