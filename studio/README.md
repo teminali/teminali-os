@@ -762,7 +762,7 @@ Each is dependency-free Node with its own README and test entry point.
 | `visual-runtime/` | Deterministic PNG/RGBA comparison — exact differing-pixel counts and CIE76 deltas. Measurements, not a score. It does not capture browsers. |
 | `performance-runtime/` | Live Ollama latency harness through the gateway. Records Ollama's authoritative counts; never logs prompt content. |
 | `mcp-runtime/` | MCP client and image-proof helpers. |
-| `voice-runtime/` | Loopback speech sidecar: Whisper recognition, Kokoro synthesis and AudioSet sound labelling on CPU, nothing leaving the machine. The only runtime with its own `package.json`, installed with `npm run voice:install` and started in development with `npm run voice:serve`. Its dependencies are 943 MB in a development tree (including the 251 MB model cache); the packaged app ships a filtered 184 MB of them as an extra resource and downloads the models on first run. See [`voice-runtime/README.md`](voice-runtime/README.md). |
+| `voice-runtime/` | Loopback speech sidecar: Whisper recognition, Kokoro synthesis and AudioSet sound labelling on CPU, nothing leaving the machine. The only runtime with its own `package.json`, installed with `npm run voice:install` and started in development with `npm run voice:serve`. Its dependencies are 943 MB in a development tree (including the 251 MB model cache); the packaged app ships a filtered 97 MB of them as an extra resource and downloads the models on first run. See [`voice-runtime/README.md`](voice-runtime/README.md). |
 
 ---
 
@@ -1099,7 +1099,14 @@ shipped nine `.js` files and nothing else. Per platform because
 only `bin/**/<platform>/${arch}`. The sidecar's own top-level `onnxruntime-node`
 is not shipped at all — nothing imports it; `@huggingface/transformers` pins
 `1.21.0` and nests its own copy, which is the one that loads. Source maps,
-`.d.ts`, `.md` and the transformers `.cache` directory stay out.
+`.d.ts`, `.md` and the transformers `.cache` directory stay out, and so does
+the web half of transformers.js — the `onnxruntime-web` package, the
+`transformers.web` bundles and `ort-wasm-simd-threaded.jsep.wasm`. The sidecar
+is a Node child process, so its package `exports` resolve the `node` condition
+to `dist/transformers.node.mjs`, which requires `onnxruntime-node` and
+`onnxruntime-common` and nothing else; the WASM backend those 91 MB exist to
+drive is never selected. `tests/packaging-resources.test.mjs` fails if any
+platform block stops excluding them.
 
 `electron/main.cjs` spawns `<Resources>/voice-runtime/cli.js` under the app's
 own Electron binary with `ELECTRON_RUN_AS_NODE=1`, the way the MCP shim runs,
@@ -1123,12 +1130,23 @@ other progress surface. Measured with `du -sh` on this machine's cache:
 `onnx-community/whisper-base` 76 MB, `onnx-community/Kokoro-82M-v1.0-ONNX`
 88 MB, `Xenova/ast-finetuned-audioset-10-10-0.4593` 87 MB — 251 MB in all.
 
-Measured on the `--mac --arm64 --dir` build, `du -sh`:
-`Contents/Resources/voice-runtime` is 184 MB (1407 files); the app is 576 MB
-where the previous 1.2.6 build in the same `release/mac-arm64/` was 392 MB.
-The largest pieces are `onnxruntime-web` (68 MB, a static import of
-transformers.js's Node build), `@huggingface` (63 MB, including the nested
-`onnxruntime-node` for `darwin/arm64`), `kokoro-js` (29 MB) and `sharp` (16 MB).
+Measured on the `--mac --arm64 --dir` build, `du -sh`, the same tree built
+twice — once with the web exclusions and once with the config as it stood
+before them:
+
+| | `Resources/voice-runtime` | files | the `.app` |
+| --- | ---: | ---: | ---: |
+| Without the web exclusions | 195 MB | 1408 | 487 MB |
+| With them | **97 MB** | **985** | **388 MB** |
+
+The largest pieces that remain are `@huggingface` (42 MB, including the nested
+`onnxruntime-node` for `darwin/arm64`), `kokoro-js` (29 MB, of which 27 MB is
+voices) and `sharp` (16 MB).
+
+That the pruned build still speaks was checked, not assumed: its
+`cli.js` was spawned from `Contents/MacOS/Teminali OS` with
+`ELECTRON_RUN_AS_NODE=1` against a seeded cache, and `POST /speak` returned
+118 036 bytes of `audio/wav` with `/status` reporting both models ready.
 
 Launched from that build with its own `--user-data-dir`, the sidecar came up
 on the port the app was given and reported all three models ready from a

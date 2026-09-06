@@ -195,6 +195,23 @@ mac:
         - "!**/*.map"
         - "!**/*.md"
         - "!**/*.d.ts"
+        # The web half of transformers.js: 91 MB the Node sidecar never loads.
+        # Its package `exports` resolve the `node` condition to
+        # dist/transformers.node.mjs, which requires onnxruntime-node and
+        # onnxruntime-common and nothing else — never onnxruntime-web, nor the
+        # WASM backend that `ort-wasm-simd-threaded.jsep.wasm` and the
+        # transformers.web bundles exist to drive. Dropping all of it takes the
+        # sidecar's payload from 186 MB to 95 MB on every platform, which is
+        # what NSIS has to push through a hardcoded `-mx=9` on Windows.
+        #
+        # Verified by deleting the three of them outright and running a real
+        # Whisper transcription and a real Kokoro generation against the cached
+        # weights: both succeeded. Import resolution alone does not prove this —
+        # the backend is chosen when a session is created, not when the module
+        # is imported.
+        - "!**/onnxruntime-web/**"
+        - "!**/transformers/dist/transformers.web*"
+        - "!**/transformers/dist/*.wasm"
         - "!**/onnxruntime-node/bin/**/linux/**"
         - "!**/onnxruntime-node/bin/**/win32/**"
         - "!**/onnxruntime-node/bin/**/darwin/*/**"
@@ -282,6 +299,10 @@ win:
         - "!**/*.map"
         - "!**/*.md"
         - "!**/*.d.ts"
+        # The web half of transformers.js — see the macOS entry.
+        - "!**/onnxruntime-web/**"
+        - "!**/transformers/dist/transformers.web*"
+        - "!**/transformers/dist/*.wasm"
         - "!**/onnxruntime-node/bin/**/darwin/**"
         - "!**/onnxruntime-node/bin/**/linux/**"
         - "!**/onnxruntime-node/bin/**/win32/*/**"
@@ -330,6 +351,10 @@ linux:
         - "!**/*.map"
         - "!**/*.md"
         - "!**/*.d.ts"
+        # The web half of transformers.js — see the macOS entry.
+        - "!**/onnxruntime-web/**"
+        - "!**/transformers/dist/transformers.web*"
+        - "!**/transformers/dist/*.wasm"
         - "!**/onnxruntime-node/bin/**/darwin/**"
         - "!**/onnxruntime-node/bin/**/win32/**"
         - "!**/onnxruntime-node/bin/**/linux/*/**"

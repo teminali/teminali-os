@@ -55,13 +55,23 @@ with `du -sh`: whisper-base 76 MB, Kokoro 88 MB, the AudioSet classifier
 What ships is decided in `electron-builder.yml`: the source, and
 `node_modules` minus the `.cache`, source maps, `.d.ts`, `.md`, `.bin`, every
 onnxruntime binary but the one for the platform and architecture being built,
-and this package's own top-level `onnxruntime-node`, which nothing imports —
-`@huggingface/transformers` pins `1.21.0` and nests its own copy. On the macOS
-arm64 build that is 184 MB under `Contents/Resources/voice-runtime`. The
+this package's own top-level `onnxruntime-node`, which nothing imports —
+`@huggingface/transformers` pins `1.21.0` and nests its own copy — and the web
+half of transformers.js: `onnxruntime-web`, the `transformers.web` bundles and
+`ort-wasm-simd-threaded.jsep.wasm`. Nothing here can reach that half. The
+sidecar is a Node process, so `exports` resolve to `dist/transformers.node.mjs`
+and its only ONNX requires are `onnxruntime-node` and `onnxruntime-common`;
+deleting all 91 MB and running a real Whisper transcription and a real Kokoro
+generation against the cached weights is how that was established, because
+import resolution alone does not prove it — the backend is chosen when a
+session is created, not when the module is imported. On the macOS arm64 build
+that leaves 97 MB under `Contents/Resources/voice-runtime`, down from 195 MB. The
 release workflow installs these before it packages (`npm run voice:install`,
 `.github/workflows/release.yml`); without that step an artifact would carry the
 source alone, and the packaged sidecar would exit at its first import while the
-app kept the built-in engine. That step has not yet run in CI.
+app kept the built-in engine. It has run in CI since v0.0.2: the v0.0.3
+artifacts are 188 MB (macOS arm64 `.zip`), 196 MB (macOS x64) and 397 MB
+(the Linux AppImage), all of which carried the unpruned 195 MB.
 
 ## Warm-up is not an error
 
@@ -226,7 +236,7 @@ An M4 Pro, int8, warm, over loopback:
 | Sound classifier, cold (first download) | 123 s; 0.09 s from cache thereafter |
 | Model weights, all three models | 137 MB plus the classifier |
 | `node_modules` | 943 MB, of which 251 MB is the model cache |
-| Shipped in the macOS arm64 app (`Contents/Resources/voice-runtime`) | 184 MB |
+| Shipped in the macOS arm64 app (`Contents/Resources/voice-runtime`) | 97 MB (195 MB before the web half was excluded) |
 
 Long text is split on clause boundaries before synthesis (`splitClauses`).
 Kokoro's own splitter breaks on sentences only, so a single long sentence would

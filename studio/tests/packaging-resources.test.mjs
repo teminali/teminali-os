@@ -150,3 +150,68 @@ test("the release workflow unsets empty signing variables before packaging", () 
     "the packaging step must pin bash, or the guard is a parse error on Windows",
   );
 });
+
+/*
+  The speech sidecar's payload, which every platform block prunes by hand.
+
+  `@huggingface/transformers` ships both halves of itself: the Node half that
+  loads onnxruntime-node, and a web half — the `onnxruntime-web` package, the
+  `transformers.web` bundles, and the 21 MB `ort-wasm-simd-threaded.jsep.wasm`
+  the WASM backend runs on. The sidecar is a Node child process and its package
+  `exports` resolve the `node` condition, so it never touches any of it, but
+  nothing in electron-builder knows that: the filter starts by taking everything.
+
+  Shipped, that dead half is 91 MB of the sidecar's 186 — and on Windows NSIS
+  packs the whole app into app-64.7z with `-mx=9` hardcoded in
+  app-builder-lib (out/targets/archive.js), whatever `compression` is set to.
+  Three Windows jobs in a row were cancelled for running over an hour before
+  anyone read a log; the payload is the lever that is actually left.
+
+  Each platform block repeats the filter, so a fourth target — or a hand-edit
+  of one block — can quietly put all of it back. This asserts it stays out of
+  every one of them, and fails if a new block forgets.
+*/
+test("no platform ships the web half of transformers.js", () => {
+  const lines = config.split("\n");
+  const blocks = [];
+  let platform = null;
+
+  for (let i = 0; i < lines.length; i += 1) {
+    const top = lines[i].match(/^([A-Za-z][\w-]*):/);
+    if (top) platform = top[1];
+    if (!/^\s*-\s+from:\s*voice-runtime\/node_modules\s*$/.test(lines[i])) continue;
+
+    const patterns = [];
+    for (let j = i + 1; j < lines.length; j += 1) {
+      // The next entry, or the next key at or above this entry's level.
+      if (/^\s*-\s+from:/.test(lines[j]) || /^[A-Za-z]/.test(lines[j])) break;
+      const pattern = lines[j].match(/^\s*-\s*"([^"]+)"\s*$/);
+      if (pattern) patterns.push(pattern[1]);
+    }
+    blocks.push({ platform, patterns });
+  }
+
+  assert.equal(
+    blocks.length, 3,
+    `expected the sidecar's dependencies to be pruned in three platform blocks, found ${blocks.length} — ` +
+    "a new target must prune them too, or it ships 91 MB it cannot load",
+  );
+
+  // Every one of these was proven droppable by deleting it and running a real
+  // Whisper transcription and a real Kokoro generation, not by reading imports.
+  const dead = [
+    "!**/onnxruntime-web/**",
+    "!**/transformers/dist/transformers.web*",
+    "!**/transformers/dist/*.wasm",
+  ];
+
+  for (const { platform: name, patterns } of blocks) {
+    for (const pattern of dead) {
+      assert.ok(
+        patterns.includes(pattern),
+        `the ${name} block does not exclude "${pattern}", so that build ships web assets ` +
+        "the Node sidecar never loads — 91 MB through NSIS's hardcoded -mx=9",
+      );
+    }
+  }
+});
