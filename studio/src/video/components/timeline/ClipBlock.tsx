@@ -353,7 +353,7 @@ export const ClipBlock: React.FC<ClipBlockProps> = ({
          reference outlines a clip rather than capping it with a rail,
          and one signal per state is the rule. */
       style={{ left: leftPx, width: widthPx, height: trackHeightPx - 6, border: `1px solid ${tint}` }}
-      className={`editor-clip clip-body absolute top-[3px] rounded-squircle-xs overflow-hidden select-none group transition-shadow ${
+      className={`editor-clip clip-body absolute top-[3px] overflow-hidden select-none group transition-shadow ${
         clip.locked || track.locked ? 'cursor-not-allowed' : 'cursor-grab'
       } ${interaction === 'move' ? 'cursor-grabbing opacity-90 z-20' : ''} ${
         isSelected ? 'is-selected z-10 shadow-clipSelected' : 'shadow-clip'
