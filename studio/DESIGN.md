@@ -2323,9 +2323,23 @@ behaviour it was added to replace. `open_project` rebinds
 `config.workspaceRoot`, which is what bounds every workspace route, the search
 and every terminal — the ground under their feet — so it falls to the same
 `--permission-prompt-tool` dialog that gates a shell command. `workspaceMcpArgs`
-names `mcp__workspace__reveal,mcp__workspace__open_file` in `--allowedTools`,
-and `tests/workspace-mcp.test.mjs` asserts both the exact list and that the bare
-server name never appears there.
+names `mcp__teminali-workspace__reveal,mcp__teminali-workspace__open_file` in
+`--allowedTools`, and `tests/workspace-mcp.test.mjs` asserts both the exact
+list and that the bare server name never appears there.
+
+**The server is called `teminali-workspace`, and the prefix is not cosmetic.**
+It shipped as `workspace`, which Claude Code reserves: a server declared under
+that name in `--mcp-config` is discarded before it is spawned, with no warning
+on stderr, no entry in the CLI's own `mcp_servers` list, and no `failed`
+status — the tools are simply not there. The whole feature was dark from the
+day it shipped. Asked to switch projects the agent said it could not, and
+offered to click the sidebar with the pointer instead, which is the exact
+behaviour these tools were built to replace. Every other server this app
+declares (`screen`, `permissions`, `cut`) loads under its bare name; this one
+was a collision, measured against CLI 2.1.263 by declaring the identical
+server under both names and reading `mcp_servers` back. `WORKSPACE_SERVER_NAME`
+carries the reason, and a test asserts the name is not `workspace` — because
+every other test in that file passes happily on a name the CLI throws away.
 
 **"Open the last project" is a filter, not a model call.** `server/projects.js`
 already stored every recent as `{ path, name, openedAt, kind }`, most-recent-
@@ -3292,7 +3306,21 @@ its pane:
 * **the browser panel's pages**, which are not in this document at all. Main
   reports `webContents.isCurrentlyAudible()` on `audio-state-changed` as part
   of the existing state message, and sends one last `audible: false` when a
-  view is destroyed — the one moment a page cannot report its own silence.
+  view is destroyed — the one moment a page cannot report its own silence;
+* **the video editor's timeline**, which is not in this document either, for a
+  different reason. Its voices *are* media elements, but detached ones:
+  `video/engine/audioEngine.ts` creates each `Audio` only to be a Web Audio
+  source node and never adds it to the document, because the picture comes
+  from a canvas. `querySelectorAll("video, audio")` therefore returns none of
+  them, and `isElementAudible` would call them silent on `isConnected` even if
+  it saw them — so the operator's own footage played past every guard above and
+  came back as something they had said. The engine reports instead of being
+  discovered: `onAudibleChange` fires on a change only (`sync` runs every
+  frame), counts a clip as sounding only when the playhead is over it *and* its
+  gain is above zero — a muted or unsoloed track is silent — and answers false
+  on master mute and `stopAll`. `watchTimelineAudio` in `selfAudio.ts` is what
+  joins the two, so nothing in the video domain has to know a microphone
+  exists.
 
 What the monitor changes is two decisions, and deliberately not the microphone
 itself. **A turn committed while the app was audible needs a wake word.** Not a
@@ -3312,10 +3340,19 @@ turn is made of it; or stopped within `SELF_AUDIO_TAIL_MS` (2 s), which is the
 recogniser's own lag. Push-to-talk is exempt — the operator is holding the
 button, which is a statement about provenance in itself.
 
-Tested in `tests/self-audio.test.mjs` (11): what counts as an audible element,
+Tested in `tests/self-audio.test.mjs` (12): what counts as an audible element,
 the multi-source and tail arithmetic, the removed-element and closed-tab leaks,
 a navigation message that says nothing about audio not being read as silence,
-and that the engine consults the monitor at both gates.
+a playing timeline seen while the document sweep over the same moment finds
+nothing, and that the engine consults the monitor at both gates.
+
+**What this still does not cover, and cannot from here.** Sound from *another
+application* — a video in another browser, a music player — is invisible to all
+three watches, because the app can only report the noise it makes itself.
+Against that, and against another person in the room, the answer is
+`requireSpeakerMatch` ("Only respond to my voice" in voice settings), which
+needs an enrolled voiceprint and is honest in `speakerProfile.ts` about being a
+weak verifier.
 
 
 ### 6.18 A permission prompt can be answered out loud (`approvalIntent.ts`, `hooks/useSpokenApproval.ts`, 2026-09-06)

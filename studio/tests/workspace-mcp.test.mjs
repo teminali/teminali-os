@@ -36,6 +36,22 @@ test("the shim it points at is a real file", () => {
   assert.ok(fs.existsSync(workspaceShimPath()), `${workspaceShimPath()} does not exist`);
 });
 
+test("the server is not called `workspace` — the CLI throws that name away", () => {
+  /*
+    Claude Code reserves `workspace`. A server declared under that name in
+    `--mcp-config` is discarded before it is spawned: no stderr, no entry in
+    the CLI's `mcp_servers`, no failed status — the tools are simply not
+    there, and the agent reports that it cannot switch projects. That is what
+    shipped, and nothing caught it, because every unit here passes on a name
+    the CLI silently refuses. This assertion is the only place that knows.
+  */
+  assert.notEqual(WORKSPACE_SERVER_NAME, "workspace");
+  assert.ok(
+    WORKSPACE_READ_TOOLS.every((tool) => tool.startsWith(`mcp__${WORKSPACE_SERVER_NAME}__`)),
+    "every pre-approved tool must carry the server's real name",
+  );
+});
+
 test("a run's token reaches the shim, and the gateway's bearer does not", () => {
   const spec = workspaceMcpServerSpec("run-1", "tok-1", { execPath: "/bin/node", port: 4319 });
   assert.equal(spec.env.TEMINALI_WORKSPACE_RUN, "run-1");
@@ -58,16 +74,16 @@ test("only the showing tools are pre-approved — naming the server would allow 
     why `bookmark` is not here.
   */
   assert.deepEqual(allowed.split(","), [
-    "mcp__workspace__reveal",
-    "mcp__workspace__open_file",
-    "mcp__workspace__browse",
-    "mcp__workspace__bookmarks",
-    "mcp__workspace__browsing_history",
-    "mcp__workspace__downloads",
+    "mcp__teminali-workspace__reveal",
+    "mcp__teminali-workspace__open_file",
+    "mcp__teminali-workspace__browse",
+    "mcp__teminali-workspace__bookmarks",
+    "mcp__teminali-workspace__browsing_history",
+    "mcp__teminali-workspace__downloads",
   ]);
-  assert.equal(allowed.includes("mcp__workspace__bookmark,"), false);
+  assert.equal(allowed.includes("mcp__teminali-workspace__bookmark,"), false);
   assert.deepEqual(allowed.split(","), [...WORKSPACE_READ_TOOLS]);
-  assert.equal(WORKSPACE_READ_TOOL, "mcp__workspace__reveal");
+  assert.equal(WORKSPACE_READ_TOOL, "mcp__teminali-workspace__reveal");
   assert.equal(allowed.includes("open_project"), false);
   // The bare server name allows everything on it. It must not appear alone.
   assert.equal(allowed.split(",").includes(`mcp__${WORKSPACE_SERVER_NAME}`), false);
@@ -156,7 +172,7 @@ test("the shim speaks MCP and offers exactly the nine tools the design names", a
     { jsonrpc: "2.0", id: 2, method: "tools/list", params: {} },
   ]);
 
-  assert.equal(replies.find((reply) => reply.id === 1).result.serverInfo.name, "workspace");
+  assert.equal(replies.find((reply) => reply.id === 1).result.serverInfo.name, WORKSPACE_SERVER_NAME);
   const names = replies.find((reply) => reply.id === 2).result.tools.map((tool) => tool.name).sort();
   assert.deepEqual(names, ["bookmark", "bookmarks", "browse", "browsing_history", "downloads", "open_file", "open_project", "recent_projects", "reveal"]);
 });

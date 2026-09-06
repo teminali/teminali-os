@@ -11,7 +11,8 @@ import { syncWorkspaceMediaRoot } from "./services/workspaceMedia";
 import { browserViewBridge, reapClosedBrowserViews } from "./services/browserView";
 import { watchBrowserHistory } from "./services/browserHistory";
 import { watchBrowserDownloads } from "./services/browserDownloads";
-import { selfAudio, watchBrowserAudio, watchMediaElements } from "./services/voice/selfAudio";
+import { selfAudio, watchBrowserAudio, watchMediaElements, watchTimelineAudio } from "./services/voice/selfAudio";
+import { audioEngine } from "./video/engine/audioEngine";
 import { usePanelStore } from "./store/panelStore";
 
 /**
@@ -96,15 +97,21 @@ watchBrowserDownloads(browserViewBridge());
 /*
   The app has to know when it is the one making noise.
 
-  The Files panel plays video and audio and the Browser panel loads pages that
-  do, and all of it reaches the microphone, where it is indistinguishable from
-  an operator — it is real speech, correctly transcribed. Both watches are
-  armed here rather than by the panes because a source outlives its pane: a
-  browser tab in the background is unmounted and still audible.
+  The Files panel plays video and audio, the Browser panel loads pages that do,
+  and the video editor plays the operator's own footage; all of it reaches the
+  microphone, where it is indistinguishable from an operator — it is real
+  speech, correctly transcribed. All three watches are armed here rather than
+  by the panes because a source outlives its pane: a browser tab in the
+  background is unmounted and still audible.
+
+  The timeline needs its own watch because its voices are detached elements —
+  Web Audio sources that were never put in the document — so the document
+  sweep below cannot see them however hard it looks.
   See services/voice/selfAudio.ts.
 */
 watchMediaElements(selfAudio);
 watchBrowserAudio(selfAudio, browserViewBridge());
+watchTimelineAudio(selfAudio, audioEngine);
 
 /*
   The video panel's MCP bridge, for the agent CLIs.

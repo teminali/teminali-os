@@ -72,6 +72,26 @@ class AudioPlaybackEngine {
   private peakHold = 0;
   private masterMuted = false;
 
+  /*
+    Whether the timeline is putting sound into the room, and who wants to know.
+
+    Every voice here is a *detached* `Audio` element — created in `acquire`,
+    routed into the graph through `createMediaElementSource`, and never added
+    to the document, because the picture comes from a canvas and this element
+    exists only to be a source node. That makes the whole timeline invisible to
+    `services/voice/selfAudio.ts`, which finds the app's other sound by
+    querying the document for `video, audio` — and an element that is not in
+    the document is not in `querySelectorAll` and would fail `isConnected`
+    anyway. So the microphone heard the operator's own footage, correctly
+    transcribed it, and answered it as if they had said it.
+
+    The engine reports instead of being discovered. It says nothing about
+    microphones and knows nothing about the assistant; `watchTimelineAudio`
+    arms this in `main.tsx` beside the document and browser watchers.
+  */
+  private audible = false;
+  private audibleHandler: ((audible: boolean) => void) | null = null;
+
   /* ── Graph ── */
 
   private ensureContext(): AudioContext | null {
@@ -137,11 +157,33 @@ class AudioPlaybackEngine {
 
   setMasterMuted(muted: boolean): void {
     this.masterMuted = muted;
+    if (muted) this.reportAudible(false);
     if (this.master) this.master.gain.value = muted ? 0 : 1;
   }
 
   isMuted(): boolean {
     return this.masterMuted;
+  }
+
+  /**
+   * Be told when the timeline starts or stops making sound.
+   *
+   * One listener, not a set: there is one pair of speakers and one microphone,
+   * and a second subscriber would mean a second answer to the same question.
+   */
+  onAudibleChange(handler: ((audible: boolean) => void) | null): () => void {
+    this.audibleHandler = handler;
+    handler?.(this.audible);
+    return () => {
+      if (this.audibleHandler === handler) this.audibleHandler = null;
+    };
+  }
+
+  /** Fires only on a change, because `sync` runs every frame. */
+  private reportAudible(next: boolean): void {
+    if (next === this.audible) return;
+    this.audible = next;
+    this.audibleHandler?.(next);
   }
 
   /* ── Voices ── */
@@ -283,6 +325,7 @@ class AudioPlaybackEngine {
     const live = new Set<string>();
     let duckedLive = 0;
     let keyLive = 0;
+    let sounding = 0;
 
     for (const track of tracks) {
       for (const clip of track.clips) {
@@ -305,6 +348,9 @@ class AudioPlaybackEngine {
         const gain = this.gainFor(clip, track, offsetMs, anySolo);
         // A short ramp instead of a jump: stepping gain per frame clicks.
         voice.gain.gain.setTargetAtTime(gain, ctx.currentTime, 0.02);
+        // A clip under the playhead on a muted or unsoloed track is silent,
+        // and silence is not something the microphone has to be careful of.
+        if (isPlaying && gain > 0) sounding++;
 
         // Where in the SOURCE this timeline position lands.
         const sourceSeconds =
@@ -353,6 +399,7 @@ class AudioPlaybackEngine {
     }
 
     this.applyDucking(ctx, duckedLive > 0 && keyLive > 0, isPlaying);
+    this.reportAudible(sounding > 0 && !this.masterMuted);
   }
 
   /**
@@ -401,6 +448,7 @@ class AudioPlaybackEngine {
   stopAll(): void {
     for (const clipId of [...this.voices.keys()]) this.release(clipId);
     this.peakHold = 0;
+    this.reportAudible(false);
   }
 
   /** Discard a clip's voice, so a changed source is reloaded next frame. */

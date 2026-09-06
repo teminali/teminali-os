@@ -7,6 +7,7 @@ import {
   isElementAudible,
   watchBrowserAudio,
   watchMediaElements,
+  watchTimelineAudio,
 } from "../src/services/voice/selfAudio.ts";
 
 /**
@@ -177,10 +178,47 @@ test("a page in the browser panel counts as the app making sound", () => {
   assert.equal(monitor.audible, false);
 });
 
+test("the video editor's timeline counts too, and the document sweep cannot see it", () => {
+  const monitor = new SelfAudioMonitor();
+  let report = () => {};
+  let released = false;
+  const engine = {
+    onAudibleChange(handler) {
+      report = handler;
+      handler(false);
+      return () => { released = true; };
+    },
+  };
+  const stop = watchTimelineAudio(monitor, engine);
+
+  /*
+    The document sweep is run over the same moment to make the point: the
+    timeline's voices are detached `Audio` elements, so a document that knows
+    about no media at all is exactly what `watchMediaElements` sees while the
+    operator's footage is playing out loud.
+  */
+  watchMediaElements(monitor, {
+    addEventListener() {}, removeEventListener() {}, querySelectorAll: () => [],
+  });
+
+  assert.equal(monitor.audible, false);
+  report(true);
+  assert.equal(monitor.audible, true, "a playing timeline is the app making sound");
+  report(false);
+  assert.equal(monitor.audible, false);
+
+  // Stopping the watch forgets the timeline rather than freezing its last word.
+  report(true);
+  stop();
+  assert.equal(released, true);
+  assert.equal(monitor.audible, false);
+});
+
 test("a browser build has no bridge and no watch", () => {
   const monitor = new SelfAudioMonitor();
   assert.doesNotThrow(() => watchBrowserAudio(monitor, null)());
   assert.doesNotThrow(() => watchMediaElements(monitor, null)());
+  assert.doesNotThrow(() => watchTimelineAudio(monitor, null)());
 });
 
 /*

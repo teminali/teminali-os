@@ -49,9 +49,20 @@ const here = path.dirname(fileURLToPath(import.meta.url));
 
 /**
  * The server's name, and so the prefix on every tool the model sees:
- * `mcp__workspace__reveal`.
+ * `mcp__teminali-workspace__reveal`.
+ *
+ * It is **not** `workspace`, and must not be. Claude Code reserves that name:
+ * a server declared as `workspace` in `--mcp-config` is dropped before it is
+ * ever spawned — no warning on stderr, no entry in the CLI's own
+ * `mcp_servers` list, nothing for the operator to see. The agent simply comes
+ * up without a single one of these tools and, asked to switch projects, says
+ * it cannot and offers to click the sidebar with the pointer instead. Every
+ * other name this app uses (`screen`, `permissions`, `cut`) loads normally;
+ * this one was a collision, and the brand prefix is what keeps it from
+ * happening again. Measured against CLI 2.1.263 by declaring the identical
+ * server under both names.
  */
-export const WORKSPACE_SERVER_NAME = "workspace";
+export const WORKSPACE_SERVER_NAME = "teminali-workspace";
 
 /**
  * The tools that only show or read. `open_project` is deliberately absent, and

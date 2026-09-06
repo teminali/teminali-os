@@ -136,7 +136,7 @@ A browser build keeps the sandboxed iframe.
 
 What the browser remembers — bookmarks, history and downloads — is a gateway
 store (`browser-data.json`, `TEMINALI_BROWSER_STORE`), not renderer state, so
-the assistant can read it: the `workspace` MCP server gives an agent CLI
+the assistant can read it: the `teminali-workspace` MCP server gives an agent CLI
 `browse` (show a page in the panel), `bookmarks`, `browsing_history` and
 `downloads` pre-approved, and `bookmark`, which writes, behind the permission
 prompt.

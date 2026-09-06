@@ -205,3 +205,28 @@ export function watchBrowserAudio(
     monitor.set(`browser:${state.id}`, state.audible);
   });
 }
+
+/**
+ * Watch the video editor's timeline, which is not in this document either.
+ *
+ * For a different reason than the browser panel's. Its voices *are* media
+ * elements, but detached ones: created to be Web Audio source nodes and never
+ * added to the document, so `watchMediaElements` cannot find them and
+ * `isElementAudible` would call them silent if it did. The operator's own
+ * footage therefore played into the room past every guard here — reported as
+ * a line of film dialogue arriving in the pane as something they had said.
+ *
+ * The engine reports rather than being discovered, so nothing in the video
+ * domain has to know a microphone exists.
+ */
+export function watchTimelineAudio(
+  monitor: SelfAudioMonitor,
+  engine: { onAudibleChange(handler: (audible: boolean) => void): () => void } | null,
+): () => void {
+  if (!engine) return () => {};
+  const stop = engine.onAudibleChange((audible) => monitor.set("timeline", audible));
+  return () => {
+    stop();
+    monitor.drop("timeline");
+  };
+}

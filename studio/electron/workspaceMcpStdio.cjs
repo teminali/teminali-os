@@ -25,7 +25,7 @@ const PORT = Number(process.env.FRONTIER_GATEWAY_PORT) || 4310;
 const RUN_ID = process.env.TEMINALI_WORKSPACE_RUN || "";
 const TOKEN = process.env.TEMINALI_WORKSPACE_TOKEN || "";
 
-const SERVER_INFO = { name: "workspace", version: "1.0.0" };
+const SERVER_INFO = { name: "teminali-workspace", version: "1.0.0" };
 
 function respond(body) {
   process.stdout.write(`${JSON.stringify({ jsonrpc: "2.0", ...body })}\n`);
