@@ -67,12 +67,14 @@ const TOOLS = [
     description:
       "Open a file in the operator's editor and make it the tab they are looking at. "
       + "This is what to call when they asked to *see* something — `reveal` only scrolls their tree to it. "
-      + "Opens text, images, PDFs and spreadsheets; anything else comes back as a refusal rather than an empty tab. "
+      + "Opens text, images, PDFs, spreadsheets, video and audio, and a folder as a gallery of what is in it — "
+      + "a folder holding two or more videos is additionally a series, with nothing playing until `player_control` starts an episode. "
+      + "Anything else comes back as a refusal rather than an empty tab. "
       + "It reads only: nothing is written, and a tab they have unsaved changes in is left as it is.",
     inputSchema: {
       type: "object",
       properties: {
-        path: { type: "string", description: "A workspace-relative path to a file, such as \"studio/src/App.tsx\". Not an absolute path, and not a folder." },
+        path: { type: "string", description: "A workspace-relative path to a file, such as \"studio/src/App.tsx\", or to a folder. Not an absolute path." },
       },
       required: ["path"],
     },
@@ -148,6 +150,36 @@ const TOOLS = [
     inputSchema: { type: "object", properties: {} },
   },
   {
+    name: "player",
+    description:
+      "What the operator's media player is showing right now: the file or the episode (with its number in the series), "
+      + "playing or paused, position and duration, volume, speed, which subtitles are on and which are available, and the "
+      + "whole episode list when a series is open. Read-only and free. Call it before `player_control` when you need the "
+      + "episode numbers or the subtitle labels, and after, to confirm what happened.",
+    inputSchema: { type: "object", properties: {} },
+  },
+  {
+    name: "player_control",
+    description:
+      "Drive the operator's media player. `action` is one of: play, pause, toggle, restart; seek (value: seconds from the "
+      + "start), seek_by (value: seconds, negative to go back); volume (value: 0–1), mute, unmute; rate (value: 0.25–3, 1 is "
+      + "normal); subtitles (value: a label from `player`, \"on\" for the first available, or \"off\"); fullscreen (value: "
+      + "true/false, or none to toggle); next, previous, episode (value: the episode number, from 1), episodes (back to the "
+      + "gallery). Acts on the file the operator already has open and writes nothing, so it needs no permission. It fails "
+      + "plainly when nothing is open — `open_file` a video, or a folder of videos, first.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        action: {
+          type: "string",
+          enum: ["play", "pause", "toggle", "restart", "seek", "seek_by", "volume", "mute", "unmute", "rate", "subtitles", "fullscreen", "next", "previous", "episode", "episodes"],
+        },
+        value: { description: "What the action takes, if anything: seconds, a 0–1 volume, a rate, an episode number, a subtitle label, or a boolean." },
+      },
+      required: ["action"],
+    },
+  },
+  {
     name: "recent_projects",
     description:
       "List the projects the operator has opened recently, most recent first, each with when it was opened and whether it is "
@@ -190,6 +222,14 @@ async function runTool(name, args) {
     }
     case "downloads": {
       const data = await call("downloads", {});
+      return data.result ?? data;
+    }
+    case "player": {
+      const data = await call("player", {});
+      return data.result ?? data;
+    }
+    case "player_control": {
+      const data = await call("player-control", { action: String(args.action ?? ""), value: args.value });
       return data.result ?? data;
     }
     case "recent_projects": {

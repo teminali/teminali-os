@@ -85,6 +85,14 @@ interface FileSearchResult {
 /** Panels the tab strip hides for everyone but an administrator. */
 const ADMIN_ONLY = new Set<PanelKind>(["release", "arena"]);
 
+/**
+ * Kinds reached by clicking the thing they show, not by name. The gallery is
+ * a folder's contents: offering it as a bare row would give the operator a
+ * panel and no answer to "which folder?", when the tree beside it is already
+ * the way in.
+ */
+const PATH_ONLY = new Set<PanelKind>(["gallery"]);
+
 /** How many rows a section shows before it stops. */
 const PER_SECTION = 6;
 /** How many a scoped tab shows, where the section is the whole answer. */
@@ -330,6 +338,7 @@ export const GlobalSearchView: React.FC = () => {
 
     for (const kind of Object.keys(PANEL_DEFAULTS) as PanelKind[]) {
       if (ADMIN_ONLY.has(kind) && !isAdmin) continue;
+      if (PATH_ONLY.has(kind)) continue;
       const panel = PANEL_DEFAULTS[kind];
       add(
         {

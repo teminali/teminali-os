@@ -636,3 +636,119 @@ test("an unopenable or over-broad project root is refused", async (t) => {
   assert.equal((await broad.json()).error.code, "PROJECT_ROOT_TOO_BROAD");
   assert.equal((await open("")).status, 400);
 });
+
+/* ── The player and the series, over the wire ──────────────────────────────
+   The unit tests for these live in tests/player-state.test.mjs and
+   tests/workspace-series.test.mjs; what is worth proving here is the wiring:
+   that a folder of videos is opened as a series rather than refused, that the
+   snapshot the window publishes is what the agent's `player` reads back, and
+   that a command with nothing playing fails as a sentence rather than being
+   dropped into a stream nobody is reading. */
+
+async function videoWorkspace(files) {
+  const root = await realpath(await mkdtemp(join(tmpdir(), "player-gateway-")));
+  for (const [name, body] of Object.entries(files)) await writeFile(join(root, name), body);
+  return root;
+}
+
+test("any folder opens as a gallery, and one full of videos says it is a series", async (t) => {
+  const { openRun, closeRun } = await import("./permission-bridge.js");
+  const root = await videoWorkspace({});
+  await mkdir(join(root, "Show"), { recursive: true });
+  await writeFile(join(root, "Show", "Episode 1.mkv"), "x");
+  await writeFile(join(root, "Show", "Episode 2.mkv"), "x");
+  await mkdir(join(root, "Notes"), { recursive: true });
+  await writeFile(join(root, "Notes", "clip.mp4"), "x");
+
+  const { gateway, baseUrl } = await startGateway({ config: { workspaceRoot: root } });
+  t.after(() => gateway.close());
+
+  const seen = [];
+  const token = openRun("run-series", (event) => seen.push(event));
+  t.after(() => closeRun("run-series"));
+
+  const open = async (path) => fetch(`${baseUrl}/api/workspace/agent/open-file`, {
+    method: "POST",
+    headers: { "content-type": "application/json", "x-teminali-workspace-token": token },
+    body: JSON.stringify({ runId: "run-series", path }),
+  });
+
+  const series = await open("Show");
+  assert.equal(series.status, 200);
+  const body = await series.json();
+  assert.equal(body.result.series, true);
+  assert.equal(body.result.videos, 2);
+  assert.match(body.result.note, /episode/);
+  assert.deepEqual(seen.at(-1), { type: "workspace", action: "open-folder", path: "Show" });
+
+  /*
+    A folder that is not a series still opens: every folder is a gallery, and
+    the note says which of the two it is, because "start episode 3" and "here
+    are the files" are different next moves for the model.
+  */
+  const plain = await open("Notes");
+  assert.equal(plain.status, 200);
+  const plainBody = await plain.json();
+  assert.equal(plainBody.result.series, false);
+  assert.match(plainBody.result.note, /gallery/);
+  assert.deepEqual(seen.at(-1), { type: "workspace", action: "open-folder", path: "Notes" });
+
+  // A symlink is still refused, so the one thing the reader will not open is
+  // not quietly opened by the folder path.
+  const missing = await open("Nowhere");
+  assert.equal(missing.status, 404);
+});
+
+test("the window publishes what its player is showing, and the agent reads it back", async (t) => {
+  const { openRun, closeRun } = await import("./permission-bridge.js");
+  const { gateway, baseUrl } = await startGateway();
+  t.after(() => gateway.close());
+
+  const seen = [];
+  const token = openRun("run-player", (event) => seen.push(event));
+  t.after(() => closeRun("run-player"));
+
+  const ask = async (route, body) => fetch(`${baseUrl}/api/workspace/agent/${route}`, {
+    method: "POST",
+    headers: { "content-type": "application/json", "x-teminali-workspace-token": token },
+    body: JSON.stringify({ runId: "run-player", ...body }),
+  });
+
+  // Nothing open: a command is a refusal that names the way out, not silence.
+  const early = await ask("player-control", { action: "pause" });
+  assert.equal(early.status, 409);
+  assert.match((await early.json()).error.message, /open_file/);
+
+  const publish = await fetch(`${baseUrl}/api/workspace/player/state`, {
+    method: "POST",
+    headers: authHeaders(),
+    body: JSON.stringify({
+      player: {
+        view: "player", path: "Show/Episode 2.mkv", title: "Episode 2", kind: "video",
+        playing: true, time: 65, duration: 1800, volume: 1, rate: 1,
+        subtitles: { available: ["English"], active: null },
+        series: { folder: "Show", title: "Show", index: 2, count: 6, episodes: [] },
+      },
+    }),
+  });
+  assert.equal(publish.status, 200);
+
+  const read = await ask("player", {});
+  const state = (await read.json()).result;
+  assert.equal(state.player.path, "Show/Episode 2.mkv");
+  assert.match(state.summary, /episode 2 of 6/);
+
+  const paused = await ask("player-control", { action: "seek", value: 120 });
+  assert.equal(paused.status, 200);
+  assert.deepEqual(seen.at(-1), { type: "workspace", action: "player", command: { action: "seek", value: 120 } });
+
+  // A value the pane could not act on is refused here, not forwarded.
+  const bad = await ask("player-control", { action: "volume", value: 11 });
+  assert.equal(bad.status, 400);
+  assert.match((await bad.json()).error.message, /between 0 and 1/);
+
+  // The pane unmounting is a real report, and the agent is told plainly.
+  await fetch(`${baseUrl}/api/workspace/player/state`, { method: "POST", headers: authHeaders(), body: JSON.stringify({ player: null }) });
+  const empty = await ask("player", {});
+  assert.match((await empty.json()).result.summary, /No video or audio is open/);
+});

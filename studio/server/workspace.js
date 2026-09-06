@@ -5,8 +5,8 @@ import { basename, dirname, extname, relative, resolve, sep } from "node:path";
 const DEFAULT_IGNORES = new Set([".git", "node_modules", "dist", "build", "coverage", ".cache", ".DS_Store"]);
 const TEXT_EXTENSIONS = new Set([
   ".c", ".cc", ".cpp", ".css", ".csv", ".go", ".h", ".hpp", ".html", ".java", ".js", ".jsx",
-  ".json", ".md", ".mjs", ".py", ".rb", ".rs", ".sh", ".sql", ".svg", ".toml", ".ts", ".tsx",
-  ".txt", ".xml", ".yaml", ".yml",
+  ".json", ".md", ".mjs", ".py", ".rb", ".rs", ".sh", ".sql", ".srt", ".svg", ".toml", ".ts", ".tsx",
+  ".txt", ".vtt", ".xml", ".yaml", ".yml",
 ]);
 /**
  * Text files whose whole name is the extension, or which have none at all.
@@ -37,9 +37,36 @@ const BINARY_PREVIEW_EXTENSIONS = new Set([".pdf", ".xlsx", ".xls"]);
 // protocol (server/workspace-media.js) with HTTP Range, not the JSON reader.
 // The list is what Chromium's own player demuxes — a container here is no
 // promise about the codec inside it; the pane names that problem on play.
+/**
+ * Video and audio the tree lists and the desktop app streams. Wider than what
+ * Chromium's player can demux on its own: the media protocol asks ffprobe
+ * what is inside and remuxes or re-encodes live through ffmpeg when it has
+ * to (`server/media-probe.js`). `.ts` is deliberately absent — it is
+ * TypeScript here — and so are `.rm`/`.rmvb`, which ffmpeg builds rarely carry.
+ */
 export const MEDIA_EXTENSIONS = new Set([
-  ".mp4", ".webm", ".m4v", ".mov", ".mp3", ".m4a", ".wav", ".ogg", ".flac",
+  ".mp4", ".webm", ".m4v", ".mov", ".mkv", ".avi", ".wmv", ".flv", ".mpg", ".mpeg",
+  ".m2ts", ".mts", ".3gp", ".ogv", ".vob", ".mxf", ".asf", ".f4v",
+  ".mp3", ".m4a", ".wav", ".ogg", ".flac", ".aac", ".opus", ".aiff", ".aif", ".wma", ".amr", ".weba",
 ]);
+
+/** A folder holding fewer direct video files than this is a folder; at or above it, a series. */
+export const SERIES_MIN_EPISODES = 2;
+
+export function isVideoWorkspaceFile(path) {
+  const extension = extname(basename(path)).toLowerCase();
+  return MEDIA_EXTENSIONS.has(extension) && String(MIME_TYPES[extension] || "").startsWith("video/");
+}
+
+/**
+ * How many direct children of a folder are video files — the gateway's half
+ * of the series rule the renderer's `seriesOf` applies to the tree. Only
+ * regular files count; a symlink to a film is refused by the stream anyway.
+ */
+export async function countSeriesVideos(absoluteDirectory) {
+  const entries = await readdir(absoluteDirectory, { withFileTypes: true });
+  return entries.filter((entry) => entry.isFile() && isVideoWorkspaceFile(entry.name)).length;
+}
 const MIME_TYPES = {
   ".apng": "image/apng",
   ".avif": "image/avif",
@@ -67,6 +94,29 @@ const MIME_TYPES = {
   ".xls": "application/vnd.ms-excel",
   ".xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
   ".xml": "application/xml",
+  ".mkv": "video/x-matroska",
+  ".avi": "video/x-msvideo",
+  ".wmv": "video/x-ms-wmv",
+  ".flv": "video/x-flv",
+  ".mpg": "video/mpeg",
+  ".mpeg": "video/mpeg",
+  ".m2ts": "video/mp2t",
+  ".mts": "video/mp2t",
+  ".3gp": "video/3gpp",
+  ".ogv": "video/ogg",
+  ".vob": "video/mpeg",
+  ".mxf": "application/mxf",
+  ".asf": "video/x-ms-asf",
+  ".f4v": "video/x-f4v",
+  ".aac": "audio/aac",
+  ".opus": "audio/ogg",
+  ".aiff": "audio/aiff",
+  ".aif": "audio/aiff",
+  ".wma": "audio/x-ms-wma",
+  ".amr": "audio/amr",
+  ".weba": "audio/webm",
+  ".vtt": "text/vtt",
+  ".srt": "text/plain",
 };
 
 export const WORKSPACE_LIMITS = Object.freeze({ maxDepth: 8, maxEntries: 2_000, maxFileBytes: 8 * 1024 * 1024 });

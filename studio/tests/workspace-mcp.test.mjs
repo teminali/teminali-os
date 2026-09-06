@@ -65,13 +65,17 @@ test("only the showing tools are pre-approved — naming the server would allow 
   const { args } = workspaceMcpArgs("claude", "run-2", "tok-2", { tmpDir, execPath: "/bin/node" });
   const allowed = args[args.indexOf("--allowedTools") + 1];
   /*
-    Six tools now, and each widening was deliberate: `open_file` opens a file
+    Eight tools now, and each widening was deliberate: `open_file` opens a file
     the operator could open with one click, through the same route and the same
     limits, and writes nothing; `browse` shows a page the same way, and the
-    three browser reads read. What must never join them is anything that
-    changes something — a confirmation the operator can answer is the only
-    thing standing between the agent and the ground under their feet. That is
-    why `bookmark` is not here.
+    three browser reads read. `player_control` is the one whose name is a verb,
+    and it belongs here for the same reason: it plays, pauses or seeks a file
+    the operator already opened, in a pane they are looking at, and a prompt
+    before every pause would make the tool not worth calling — which is the
+    behaviour it replaced, an agent reaching for the pointer. What must never
+    join them is anything that changes something the operator did not open — a
+    confirmation they can answer is the only thing standing between the agent
+    and the ground under their feet. That is why `bookmark` is not here.
   */
   assert.deepEqual(allowed.split(","), [
     "mcp__teminali-workspace__reveal",
@@ -80,6 +84,8 @@ test("only the showing tools are pre-approved — naming the server would allow 
     "mcp__teminali-workspace__bookmarks",
     "mcp__teminali-workspace__browsing_history",
     "mcp__teminali-workspace__downloads",
+    "mcp__teminali-workspace__player",
+    "mcp__teminali-workspace__player_control",
   ]);
   assert.equal(allowed.includes("mcp__teminali-workspace__bookmark,"), false);
   assert.deepEqual(allowed.split(","), [...WORKSPACE_READ_TOOLS]);
@@ -136,11 +142,34 @@ test("an opened file reaches the window as its own action, not as a reveal", () 
   closeRun("run-open");
 });
 
+test("a folder reaches the window as a gallery, and a player command as itself", () => {
+  const seen = [];
+  const token = openRun("run-folder", (event) => seen.push(event));
+
+  /*
+    Three actions where there used to be one, and the split is the point.
+    `open-file` puts a file in a tab; `open-folder` opens a folder as the
+    gallery of what is in it, nothing playing; `player` drives whatever is
+    already playing. Collapsing any two would mean the agent asking for a
+    pause and getting a tab, or asking for a folder and getting a refusal.
+  */
+  emitToRun("run-folder", token, { type: "workspace", action: "open-folder", path: "Films/Show" });
+  emitToRun("run-folder", token, { type: "workspace", action: "player", command: { action: "episode", value: 3 } });
+  assert.deepEqual(seen, [
+    { type: "workspace", action: "open-folder", path: "Films/Show" },
+    { type: "workspace", action: "player", command: { action: "episode", value: 3 } },
+  ]);
+  closeRun("run-folder");
+});
+
 /* ── What the agent is told ─────────────────────────────────────────────── */
 
 test("the agent is told about the tree only when the tools are attached", () => {
   assert.match(agentBriefing({ workspace: true }), /reveal/);
   assert.match(agentBriefing({ workspace: true }), /open_file/);
+  // The player tools ride the same attachment: told about only when they exist.
+  assert.match(agentBriefing({ workspace: true }), /player_control/);
+  assert.equal(agentBriefing({ workspace: false }).includes("player_control"), false);
   assert.equal(agentBriefing({ workspace: false }).includes("reveal"), false);
   assert.equal(agentBriefing({ workspace: false }).includes("open_file"), false);
 });
@@ -166,7 +195,7 @@ function askShim(requests) {
   });
 }
 
-test("the shim speaks MCP and offers exactly the nine tools the design names", async () => {
+test("the shim speaks MCP and offers exactly the eleven tools the design names", async () => {
   const replies = await askShim([
     { jsonrpc: "2.0", id: 1, method: "initialize", params: {} },
     { jsonrpc: "2.0", id: 2, method: "tools/list", params: {} },
@@ -174,7 +203,7 @@ test("the shim speaks MCP and offers exactly the nine tools the design names", a
 
   assert.equal(replies.find((reply) => reply.id === 1).result.serverInfo.name, WORKSPACE_SERVER_NAME);
   const names = replies.find((reply) => reply.id === 2).result.tools.map((tool) => tool.name).sort();
-  assert.deepEqual(names, ["bookmark", "bookmarks", "browse", "browsing_history", "downloads", "open_file", "open_project", "recent_projects", "reveal"]);
+  assert.deepEqual(names, ["bookmark", "bookmarks", "browse", "browsing_history", "downloads", "open_file", "open_project", "player", "player_control", "recent_projects", "reveal"]);
 });
 
 test("an unknown tool is a result the agent can act on, not an aborted turn", async () => {

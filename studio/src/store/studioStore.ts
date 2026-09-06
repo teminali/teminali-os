@@ -260,6 +260,19 @@ interface StudioState {
    * own road because it owns a spinner and an error line this cannot reach.
    */
   showFile: (path: string) => Promise<void>;
+  /**
+   * Put a *folder* in front of the operator, as a gallery of its contents —
+   * and, when it holds videos, as a series. The tree is revealed and the
+   * folder opened, exactly as `showFile` does for a file: the two are one
+   * gesture from the outside, and `FileTree` and the agent's `open_file` reach
+   * one or the other on the same rule.
+   *
+   * An empty path is the project root, which is a real destination.
+   *
+   * No read: the tree the sidebar already holds *is* the folder's contents, so
+   * there is nothing to fetch and nothing that can fail.
+   */
+  showFolder: (path: string) => void;
   /** The row the tree should scroll to; timestamped so a repeat reveal re-fires. */
   revealTarget: { path: string; timestamp: number } | null;
   clearRevealTarget: () => void;
@@ -392,6 +405,15 @@ export const useStudioStore = create<StudioState>()(
       })),
       revealTarget: null,
       clearRevealTarget: () => set({ revealTarget: null }),
+
+      showFolder: (folderPath) => {
+        const { revealPath, workspacePath } = get();
+        if (folderPath) revealPath(folderPath);
+        const name = folderPath.split("/").pop() || workspacePath.split("/").filter(Boolean).pop() || "Gallery";
+        void import("./panelStore").then(({ usePanelStore }) => {
+          usePanelStore.getState().focusOrOpen({ kind: "gallery", path: folderPath, label: name });
+        });
+      },
 
       showFile: async (filePath) => {
         const { revealPath, openFile } = get();

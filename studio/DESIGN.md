@@ -4732,6 +4732,166 @@ six instructions containing a newly accepted verb that must still not be
 answers ("run the tests", "approve the pull request").
 
 
+### 6.19 The greeting was closing the microphone it had just opened (2026-09-06)
+
+Reported: *"there is a glitch when it starts it says 'hey there' right? during
+that window it seems I can not interrupt it, because normally as soon as I tap
+to talk I start talking."* Separately, and it turned out to be the same fault:
+*"it took 3 attempts to capture that 'hello how are you'."*
+
+`setState` closes the recogniser whenever the assistant starts speaking, so that
+a one-shot transcriber does not write down the assistant's own voice. The
+greeting goes through that same path — and the greeting is spoken at the one
+moment the operator has just reached for the microphone and is most likely to be
+talking already. So the first thing a session did was open the microphone,
+announce itself, and shut the microphone for the length of the announcement. The
+operator's opening sentence was not being ignored; it was never recorded. It had
+to be repeated until one landed in a gap, which is the three attempts.
+
+Talking over it did not help either. Barge-in wants `BARGE_IN_FRAMES` — 18
+frames, 360 ms of *unbroken* voicing — before it will believe an interruption,
+and it declines entirely while `selfAudio` says the app is making noise. Both
+rules are right for a reply and wrong for a greeting.
+
+Four changes, all in `conversation.ts`:
+
+- The recogniser **stays open** for the greeting. Safe here in a way it is not
+  for a reply, because the greeting is one short string this engine chose and
+  handed to `echoGuard` verbatim a few lines earlier, so anything the microphone
+  brings back is stripped by text.
+- `GREETING_YIELD_FRAMES` is 3 — 60 ms. The greeting stands down at the first
+  sign of a voice and the frame falls straight through to the endpointer as the
+  operator's own, so their sentence is timed from its real beginning.
+- Words beat frames: any transcript arriving mid-greeting abandons it at once,
+  since a recogniser already returning text has settled what the frame counter
+  was still counting towards.
+- `beginAudibleSpeech` now **refuses the floor** when the operator is already
+  mid-utterance, for every caller and not just the greeting. `speaking` closes
+  the recogniser and stops feeding the endpointer, so taking the floor from
+  someone mid-sentence does not talk over them, it deletes them. A greeting that
+  cannot have the floor is abandoned rather than queued.
+
+`abandonGreeting()` bumps `speechEpoch`, which is what makes it safe to call
+before `tts.speak()` has resolved: the handle that arrives afterwards fails its
+own epoch check and cancels itself.
+
+### 6.20 Hearing a voice the room is louder than (`voiceActivity.ts`, 2026-09-06)
+
+Asked for: *"make it 3 times more genius in hearing me… super hearing even at a
+very noisy place."*
+
+The voice-activity test was a single rule — the frame clears the room's noise
+floor by a margin, and its spectral centroid is in the band speech occupies.
+That margin is a *ratio*, which is the flaw: the noisier the room, the louder
+the operator has to be to clear `floor × 2.6`. That is backwards from what a
+person does, and it is why the same sentence at the same volume is heard in a
+quiet room and missed in a busy one.
+
+There is now a second route, and a frame needs only one of them. A vowel is
+periodic; a room full of chatter, traffic and crockery is not. `estimatePitch`
+already reported how periodic each frame was — `prosody.ts` has computed a
+McLeod NSDF clarity all along — but the graph only ever ran it on frames it had
+*already* decided were speech, so it could never rescue one. It now runs first,
+and a frame with a confident fundamental (clarity ≥ 0.7) is admitted at
+`floor × 1.5` instead of `floor × 2.6`.
+
+The centroid band gates both routes: it is the fan-and-fridge test, and a motor
+is periodic enough to fool the pitch route on its own.
+
+While ducked — the assistant's own voice playing — everything tightens, because
+the periodic sound in the room is then most likely to be us. The clarity bar
+rises to 0.82 and the pitch route keeps an absolute floor of 0.02, so it can
+only undercut the loudness route, never open barge-in to speaker bleed.
+
+The decision moved out of the graph into `services/voice/voiceActivity.ts` as
+the pure `isVoicedFrame()`, for the same reason `prosody.ts` and `turnTaking.ts`
+are pure: it can then be stated as arithmetic in a node test rather than
+reproduced with a microphone. Tests: `tests/voice-hearing.test.mjs` (9),
+including the case that motivated it — a voice at 0.02 RMS under a floor that
+has climbed to 0.012, which loudness alone cannot hear and periodicity can.
+
+### 6.21 The snappy setting was not snappy (2026-09-06)
+
+Asked for: *"can we make it be much more faster and not wait up too long to
+start talking."*
+
+`configure()` derived the endpointer's two windows from `endpointSilenceMs`, but
+the ceiling was `Math.max(setting × 2, DEFAULT_ENDPOINTER.maxSilenceMs)` — which
+floored every choice at the balanced default's 1800 ms. "Snappy — 0.6s"
+therefore bought a faster release on a *confident* ending and nothing at all on
+a hesitant one, which is precisely the case the operator sits through. Picking
+the fast setting now means it: 0.6 runs 420–1200 ms where it used to run
+420–1800. The floor is the endpointer's own `minUtteranceMs` doubled, below
+which a window is shorter than the shortest thing it may call an utterance.
+
+The window is also applied in the constructor now, via `applyEndpointerWindow()`.
+It was only ever set on the first `configure()` call, which never arrives if the
+operator never opens the voice settings — so the setting was inert until touched.
+
+### 6.22 Commentary may follow commentary (2026-09-06)
+
+Reported: *"it is not talking through all the steps."*
+
+`noteProgress` would only speak when the assistant was saying nothing at all, so
+every step that began while the previous step's line was still being read was
+dropped rather than queued — a run that moved faster than the sentence
+describing it announced its first step and then went quiet for a minute. The
+gate now also admits a line while the thing in flight is itself commentary
+(`interjecting`), and `speakInterjection` queues it behind the line in progress.
+`PROGRESS_GAP_MS` drops from 3500 to 1500 and is what keeps that from becoming a
+drone.
+
+A reply is still never talked over: `interjecting` is false whenever the speech
+in flight is an answer to the operator, and a non-null `suspendedSpeech` means a
+reply is waiting to resume behind a barge-in. Neither is something a step line
+may pre-empt.
+
+### 6.23 Reopening the microphone was throwing the sentence away (2026-09-06)
+
+Reported: *"it took 3 attempts to capture that 'hello how are you'."*
+
+Two defects, found by reading the recognition path rather than by reproducing
+the symptom, and both introduced by §6.19–§6.22's own session.
+
+**The reopen destroyed a live capture.** `reopen()` had been hardened to stop
+two recognisers running at once, and it did that by aborting whatever session it
+found before opening its replacement. On the local sidecar tier that abort is
+not a polite close. `server/voice.js` answers `streaming: false`, and
+`vibeVoice.ts` takes `capabilities.streamingAsr` from that answer, so the tier
+runs the single-pass path: the recorder buffers the whole utterance and it is
+transcribed in `onstop`. `close()` sets `active = false` *before* stopping the
+recorder, so `onstop` finds `active` false, emits neither a transcript nor an
+empty final, and the audio is discarded without ever reaching whisper. The
+graceful `stop()` leaves `active` true and is the only path that transcribes.
+
+The callers reach `reopen()` on `!this.session?.active || this.reopenDeferred`,
+and a stale `reopenDeferred` is sufficient on its own — `setState("hearing")`
+fires from `speech-start`, so the reopen landed on the first syllable of a turn
+and threw it away. `reopen()` now returns early when the session it was given is
+still active: a live session already is the one pair of ears, and the operator
+should not pay for a stale flag with the sentence they are saying.
+
+**The foreign-language rule never fired.** §6.13's language check reads the
+language the recogniser reported for the turn. `commitTurn()` captured
+`turnConfidence` into a local before resetting its fields but read
+`this.turnLanguage` back at the `scorePlausibility` call site, thirty lines
+after clearing it — so `context.language` was always the empty string, `foreign`
+was always false, and the rule shipped inert. It is read into a local now,
+beside the confidence it was always meant to travel with. The existing tests did
+not catch it because they call `scorePlausibility` directly; nothing in the
+suite constructs a `VoiceEngine`, which is still the gap worth closing.
+
+Neither fix has been confirmed against the reported symptom on a live
+microphone — the diagnosis is from the code, and the engine has no test harness
+that can drive a fake provider through a turn.
+
+The rule going live for the first time carries an exposure worth naming: on
+`auto`, `expected` is `navigator.languages`, and if Electron's renderer reports
+only English while the operator genuinely speaks Kiswahili, a Kiswahili turn is
+now rejected outright — the rule is deliberately not softened by confidence.
+`navigator.languages` has not been measured in this renderer. Pinning the
+language setting narrows `expected` to exactly one and removes the question.
+
 ## 7. The agent command loop (`services/agentCommands.ts`, `services/commandThrashing.ts`)
 
 ### 7.1 Diagnose before retrying (2026-09-05)
@@ -4892,4 +5052,3 @@ through to a canned acknowledgement. A leading filler or wake word is now
 stripped before the test, which matters because speech is what feeds this and
 speech arrives with exactly that preamble. "What's your name" and "who am I
 talking to" join that branch. Tests: `tests/voice-identity.test.mjs`.
-

@@ -54,11 +54,22 @@ const PERMISSION_DETAIL: Record<string, string> = {
   "danger-full-access": "No sandbox at all",
 };
 
-const ICONS: Record<ModelProfileId, React.ReactNode> = {
+/**
+ * One glyph per profile, and the only place they are chosen.
+ *
+ * The composer's own trigger reads from this map rather than drawing its own,
+ * because it drew a hardcoded `Lock` — Max's glyph — beside whichever profile
+ * was actually selected, so Flash and Auto both wore a padlock and read as
+ * unavailable. Max's lock is real (it stays locked until safety
+ * qualification); the other two never were.
+ */
+export const PROFILE_ICONS: Record<ModelProfileId, React.ReactNode> = {
   flash: <Zap size={13} className="text-accent" strokeWidth={2.2} />,
   auto: <Sparkles size={13} className="text-reason" />,
   max: <Lock size={13} className="text-ink-muted" />,
 };
+
+const ICONS = PROFILE_ICONS;
 
 export const ModelPicker: React.FC<ModelPickerProps> = ({ open, onClose }) => {
   const { currentProfile, setProfile, agentSelection, setAgentSelection, agentPermission, setAgentPermission } =

@@ -311,19 +311,49 @@ export function scoreAddressing(
  * Prompt for the local tiebreak. Kept deliberately tiny — it must return one
  * token so the round trip stays under a couple of hundred milliseconds.
  */
+/**
+ * The one model call on the recognition path, and the only one.
+ *
+ * It already ran on every utterance the cheap layers could not place, so
+ * NONSENSE rides along on a round trip that was being paid for anyway — no
+ * second call, no added latency on the turns that are already decided. The
+ * deterministic layers in `plausibility.ts` still run first and still reject
+ * for free; this catches what survives them and is in the right language: room
+ * noise decoded into real words, a fragment of a video the microphone picked
+ * up, half a sentence from a conversation that was not with the assistant.
+ *
+ * The word list is closed and the answers are single words on purpose. A small
+ * local model asked for one of four tokens is fast and hard to derail; asked
+ * to explain itself it is neither.
+ */
 export function classifierPrompt(text: string, lastAssistantTurn: string): string {
   return [
-    "You judge whether a spoken sentence was addressed to a coding assistant or to another person in the room.",
+    "You judge a sentence produced by speech recognition, which may have misheard noise as words.",
     lastAssistantTurn ? `The assistant last said: "${truncate(lastAssistantTurn, 200)}"` : "The assistant has not spoken recently.",
     `The sentence: "${truncate(text, 400)}"`,
     "",
-    "Answer with exactly one word: ASSISTANT if it was addressed to the coding assistant, PERSON if it was addressed to another human, or UNCLEAR.",
+    "Answer with exactly one word:",
+    "NONSENSE if it is not coherent human speech at all — gibberish, a stray fragment, or words that do not form a request or statement anyone would say.",
+    "ASSISTANT if it was addressed to the coding assistant.",
+    "PERSON if it was addressed to another human.",
+    "UNCLEAR if you cannot tell.",
   ].join("\n");
 }
 
-/** Read the classifier's reply into a signed adjustment, or null if unusable. */
-export function parseClassifier(reply: string): number | null {
+/** The classifier said the text was not speech worth acting on. */
+export const CLASSIFIER_NONSENSE = "nonsense";
+
+/**
+ * Read the classifier's reply into a signed adjustment, `"nonsense"`, or null
+ * when it answered with something outside the closed list.
+ *
+ * NONSENSE is checked before ASSISTANT because a model that leads with it and
+ * then explains ("NONSENSE — not addressed to the assistant") must not be read
+ * as the word it happened to mention second.
+ */
+export function parseClassifier(reply: string): number | typeof CLASSIFIER_NONSENSE | null {
   const value = reply.trim().toUpperCase();
+  if (value.startsWith("NONSENSE")) return CLASSIFIER_NONSENSE;
   if (value.startsWith("ASSISTANT")) return 0.26;
   if (value.startsWith("PERSON")) return -0.34;
   if (value.startsWith("UNCLEAR")) return 0;

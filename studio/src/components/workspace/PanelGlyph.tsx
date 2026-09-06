@@ -1,5 +1,5 @@
 import React from "react";
-import { Activity, ChartColumn, Clapperboard, EyeOff, FileText, MessageSquare, PenLine, Rocket, Scale, SquareTerminal, Globe } from "lucide-react";
+import { Activity, ChartColumn, Clapperboard, EyeOff, FileText, LayoutGrid, MessageSquare, PenLine, Rocket, Scale, SquareTerminal, Globe } from "lucide-react";
 import { BrandGlyph } from "../ui";
 import type { PanelKind } from "../../store/panelStore";
 
@@ -45,6 +45,11 @@ export const PanelGlyph: React.FC<{
       return <Scale {...props} />;
     case "video":
       return <Clapperboard {...props} />;
+    // A grid, because that is what the panel is: the contents of one folder.
+    // The clapperboard belongs to the editor, and a tab strip where the two
+    // wore the same mark would not say which one holds a timeline.
+    case "gallery":
+      return <LayoutGrid {...props} />;
     case "file":
     default:
       return <FileText {...props} />;

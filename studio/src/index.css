@@ -1451,3 +1451,55 @@ input:-webkit-autofill:focus {
 /* Text fields carry their focus on the container's lit edge, not on the input
    itself, wherever a `.lit-focus` wrapper provides it. */
 .lit-focus :where(input, textarea):focus-visible { outline: none; }
+
+/* ── The media player ───────────────────────────────────────────────────────
+   Chrome that sits over picture. Everything here is defined against the
+   `--player-*` tokens rather than the app's greys, for the reason the token
+   sheet gives: the background is a frame of film, and a control bar calibrated
+   against #181818 disappears over a snowfield.
+
+   What is left to CSS rather than to Tailwind is the two things utilities
+   cannot reach — `::cue`, which lives in the video's shadow tree, and the
+   native range input the scrubber hides behind its own drawing. The bar itself
+   is one flat fill: a scrim, not a gradient, so the rule holds even here. */
+
+/* The scrubber and the volume slider are real range inputs, kept transparent
+   over the track this pane draws: the a11y tree, the keyboard and the screen
+   reader all get a proper slider, and the eye gets a bar the design owns. */
+.player-range {
+  -webkit-appearance: none;
+  appearance: none;
+  background: transparent;
+  cursor: pointer;
+  margin: 0;
+}
+.player-range::-webkit-slider-runnable-track { background: transparent; height: 100%; }
+.player-range::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 1px;
+  height: 100%;
+  background: transparent;
+  border: none;
+}
+.player-range:focus-visible { outline: none; }
+/* The focus ring lands on the drawn track, not on the invisible input. */
+.player-range:focus-visible + .player-focus { box-shadow: 0 0 0 2px var(--lit-accent-top); }
+
+/* Captions. `--player-cue` is opaque enough to hold a white glyph over a white
+   frame, which a token surface at the app's alphas is not; the plate is flat,
+   and the shadow Chromium adds by default is turned off because a plate and a
+   shadow together read as two treatments of the same problem. */
+.player-surface video::cue {
+  background: var(--player-cue);
+  color: #fff;
+  font-family: var(--font-sans);
+  font-size: var(--text-md);
+  line-height: 1.4;
+  text-shadow: none;
+}
+
+/* A gallery card's play affordance: present on hover, and never a layout
+   change, so a grid of forty does not reflow under the pointer. */
+.episode-card:hover .episode-play { opacity: 1; }
+.episode-play { opacity: 0; transition: opacity var(--dur) var(--ease); }

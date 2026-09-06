@@ -79,7 +79,19 @@ export const WORKSPACE_READ_TOOLS = Object.freeze([
   `mcp__${WORKSPACE_SERVER_NAME}__bookmarks`,
   `mcp__${WORKSPACE_SERVER_NAME}__browsing_history`,
   `mcp__${WORKSPACE_SERVER_NAME}__downloads`,
+  `mcp__${WORKSPACE_SERVER_NAME}__player`,
+  `mcp__${WORKSPACE_SERVER_NAME}__player_control`,
 ]);
+
+/*
+  `player_control` is on the showing side of that line, which is worth saying
+  out loud because it is the only pre-approved tool whose name is a verb.
+  Pausing, seeking, turning subtitles on or moving to the next episode acts on
+  a file the operator opened, in a pane they are looking at, and writes
+  nothing — the same argument `browse` makes. A prompt before every pause would
+  make the tool not worth calling, which is the behaviour it exists to replace:
+  an agent asked to pause a video otherwise reaches for the pointer.
+*/
 
 /**
  * The first of them, kept as a name because the tests and the design docs

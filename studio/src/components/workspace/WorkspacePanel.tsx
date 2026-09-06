@@ -13,6 +13,7 @@ import { UsagePane } from "./panels/UsagePane";
 import { ReleasePane } from "./panels/ReleasePane";
 import { ArenaPane } from "./panels/ArenaPane";
 import { VideoPane } from "./panels/VideoPane";
+import { GalleryPane } from "./panels/GalleryPane";
 import { GuardianPanel } from "../guardian/GuardianPanel";
 
 /**
@@ -106,6 +107,8 @@ const PaneFor: React.FC = () => {
       return <BrowserPane panel={panel} />;
     case "file":
       return <FilePane panel={panel} />;
+    case "gallery":
+      return <GalleryPane panel={panel} />;
     case "canvas":
       return <CanvasPane />;
     case "side":

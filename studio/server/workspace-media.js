@@ -66,10 +66,9 @@ const NO_STORE = { "Cache-Control": "no-store", "Accept-Ranges": "bytes" };
  *   stream. Every refusal carries a `reason` code in the vocabulary of
  *   `server/workspace.js`.
  */
-export async function openWorkspaceMedia(root, requestedPath, request = {}) {
-  const { range = null, method = "GET" } = request;
+export async function resolveMediaPath(root, requestedPath) {
   if (typeof root !== "string" || root === "") {
-    return { status: 503, headers: {}, reason: "WORKSPACE_ROOT_UNKNOWN" };
+    return { ok: false, status: 503, reason: "WORKSPACE_ROOT_UNKNOWN" };
   }
 
   let absolutePath;
@@ -79,23 +78,33 @@ export async function openWorkspaceMedia(root, requestedPath, request = {}) {
     // An escape and a malformed path get the same answer as a missing file:
     // the protocol is reachable by any page the renderer frames, and "that
     // exists but you may not" is a fact worth withholding.
-    return { status: 404, headers: {}, reason: "WORKSPACE_PATH_NOT_FOUND" };
+    return { ok: false, status: 404, reason: "WORKSPACE_PATH_NOT_FOUND" };
   }
 
   let stats;
   try {
     stats = await lstat(absolutePath);
   } catch {
-    return { status: 404, headers: {}, reason: "WORKSPACE_PATH_NOT_FOUND" };
+    return { ok: false, status: 404, reason: "WORKSPACE_PATH_NOT_FOUND" };
   }
   if (!stats.isFile() || stats.isSymbolicLink()) {
-    return { status: 404, headers: {}, reason: "WORKSPACE_FILE_REQUIRED" };
+    return { ok: false, status: 404, reason: "WORKSPACE_FILE_REQUIRED" };
   }
   if (!isStreamableWorkspaceFile(absolutePath)) {
     // Text, pictures and PDFs have a reader already; this route serves only
     // what that reader refuses, so the two can never disagree about a file.
-    return { status: 415, headers: {}, reason: "WORKSPACE_FILE_UNSUPPORTED" };
+    return { ok: false, status: 415, reason: "WORKSPACE_FILE_UNSUPPORTED" };
   }
+  return { ok: true, path: absolutePath, size: stats.size };
+}
+
+export async function openWorkspaceMedia(root, requestedPath, request = {}) {
+  const { range = null, method = "GET" } = request;
+
+  const resolved = await resolveMediaPath(root, requestedPath);
+  if (!resolved.ok) return { status: resolved.status, headers: {}, reason: resolved.reason };
+  const absolutePath = resolved.path;
+  const stats = { size: resolved.size };
 
   const contentType = workspaceMimeType(absolutePath) || "application/octet-stream";
   const parsed = parseByteRange(range, stats.size);

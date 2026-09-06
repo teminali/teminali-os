@@ -293,6 +293,16 @@ contextBridge.exposeInMainWorld("teminali", {
     url: (encodedPath) =>
       workspaceMediaOrigin ? `${workspaceMediaOrigin.scheme}://${workspaceMediaOrigin.nonce}/${encodedPath}` : null,
     /**
+     * The same file through ffmpeg, for a container or codec Chromium cannot
+     * play as it is. There is no file behind this URL, so there is nothing to
+     * seek in: a seek is a new stream, which is what `start` (in seconds) is
+     * for. The pane asks the gateway for the plan before it uses this.
+     */
+    transcodeUrl: (encodedPath, start = 0) =>
+      workspaceMediaOrigin
+        ? `${workspaceMediaOrigin.scheme}://${workspaceMediaOrigin.nonce}/${encodedPath}?transcode=1&start=${Math.max(0, Math.floor(Number(start) || 0))}`
+        : null,
+    /**
      * Tells main which project is open, and does not return until it knows.
      *
      * Synchronous on purpose: the very next thing the pane does is point a

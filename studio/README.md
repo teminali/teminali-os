@@ -52,7 +52,7 @@ route requires it. Roughly sixty routes across:
 | Model mode & routing | `/api/frontier/status` · `/api/frontier/resolve-mode` · `/api/models/*` |
 | Entitlement | `/api/entitlement` · `/api/entitlement/{refresh,sign-in,sign-in/poll,sign-out}` · `/api/entitlement/{plans,checkout}` · `/api/entitlement/order/:id` |
 | Hosted providers | `/api/providers` · `/api/providers/key` · `/api/providers/lanes` |
-| Workspace | `/api/workspace/{tree,file,write,delete,mkdir,search,machine-search,open,projects}`, `/api/workspace/projects/{remember,forget}`, `/api/workspace/browser`, `/api/workspace/browser/{bookmark,unbookmark,visit,download}`, `/api/workspace/browser/history/clear`, `/api/workspace/browser/import`, `/api/workspace/browser/import/sources`, `/api/workspace/agent/{reveal,open-file,projects,open-project,browse,bookmarks,bookmark,browsing-history,downloads}` |
+| Workspace | `/api/workspace/{tree,file,write,delete,mkdir,search,machine-search,open,projects}`, `/api/workspace/projects/{remember,forget}`, `/api/workspace/browser`, `/api/workspace/browser/{bookmark,unbookmark,visit,download}`, `/api/workspace/browser/history/clear`, `/api/workspace/browser/import`, `/api/workspace/browser/import/sources`, `/api/workspace/agent/{reveal,open-file,projects,open-project,browse,bookmarks,bookmark,browsing-history,downloads,player,player-control}`, `/api/workspace/player/state`, `/api/workspace/media/{probe,subtitle}` |
 | Terminal | `/api/terminal/exec` |
 | Agent CLIs | `/api/agents` · `/api/agents/models` · `/api/agents/run` · `/api/agents/permission` · `/api/agents/permission/resolve` |
 | Screen assistant | `/api/assistant/{capabilities,permissions,observe,act}` · `/api/assistant/agent/{observe,act}` (the chat pane's agent, on its run's token) |
@@ -109,20 +109,70 @@ the cut stated on screen — by [ExcelJS](https://www.npmjs.com/package/exceljs)
 loaded on demand so a reader who never opens a spreadsheet never downloads the
 parser. Legacy `.xls` is a different format (BIFF) and the pane says to save it
 as `.xlsx`; the one `.xls` that does open is the HTML table many web apps export
-under that name, which the gateway sniffs and treats as text. **Video and
-audio play** in the desktop app — `.mp4 .webm .m4v .mov .mp3 .m4a .wav .ogg
-.flac` — in Chromium's own player, with seeking, volume, fullscreen and
-picture-in-picture. The bytes do not come from the gateway: a `<video>` cannot
+under that name, which the gateway sniffs and treats as text. **Video and audio
+play** in the desktop app, in a player this app draws: a scrubber, volume,
+speed, subtitles, picture-in-picture, fullscreen, and — in a series — the
+episode either side. The bytes do not come from the gateway: a `<video>` cannot
 carry the session's bearer token, so the app registers `teminali-media://`
 (`electron/workspaceMedia.cjs`, served by `server/workspace-media.js`) under
-the same path guard as the reader, with HTTP Range and no size cap. It is
-Chromium's player and nothing more — H.264 and VP9 video, AAC, MP3, Opus, FLAC
-and WAV audio; a `.mov` holding ProRes or an `.mp4` holding HEVC will not play,
-and the pane says which codec and the ffmpeg line that converts it. No MKV, no
-subtitle tracks, no transcoding. A browser build says playback needs the
-desktop app. A media pane waits for the gateway to name the open project before
-it streams: the shell adopts that root at startup, and until it has one a
-relative path would be resolved against a stale project.
+the same path guard as the reader, with HTTP Range and no size cap. A browser
+build says playback needs the desktop app. A media pane waits for the gateway
+to name the open project before it streams: the shell adopts that root at
+startup, and until it has one a relative path would be resolved against a stale
+project.
+
+**Every format ffmpeg reads, not only the ones Chromium does.** `.mp4 .webm
+.m4v .mov .mkv .avi .wmv .flv .mpg .mpeg .m2ts .mts .3gp .ogv .vob .mxf .asf
+.f4v` and `.mp3 .m4a .wav .ogg .flac .aac .opus .aiff .wma .amr .weba` are
+listed by the tree and opened by the player. Before it points an element
+anywhere the pane asks the gateway what the file holds
+(`POST /api/workspace/media/probe`, `server/media-probe.js`, ffprobe): a file
+Chromium can play is handed to it untouched; a foreign container whose streams
+are fine is rewrapped; HEVC, ProRes, VC-1, AC-3, 10-bit H.264 are re-encoded to
+H.264/AAC live, ffmpeg writing fragmented MP4 straight into the response. That
+stream has no length and no byte ranges, so a seek is a *new* stream from a new
+offset and the player keeps its own timeline over it; the duration comes from
+ffprobe. Without ffmpeg installed the pane says so and names `brew install
+ffmpeg` rather than showing a control bar that never moves.
+
+**Subtitles.** A sidecar `.srt` or `.vtt` beside the video is picked up by
+name — `Episode 1.srt`, or `Episode 1.en.srt`, whose tag becomes the language's
+name in the menu — and SubRip is converted to WebVTT in the renderer, tags,
+decimal commas and coordinate suffixes and all. Subtitle *streams* inside the
+file are read out by ffmpeg on demand and appear in the same menu, labelled
+`embedded`. Bitmap subtitles (PGS, DVD) are not offered: they are pictures, and
+no amount of ffmpeg makes them text. The chosen language is remembered and
+comes back on the next episode.
+
+**The agent has the player's controls.** The `teminali-workspace` MCP server
+carries two more tools: `player` reads what is showing — the episode and its
+number, playing or paused, position, duration, volume, speed, the subtitle
+tracks and which is on — and `player_control` plays, pauses, seeks, sets volume
+or speed, turns subtitles on, goes fullscreen, or moves to another episode.
+Both are pre-approved, because they act on a file the operator opened and write
+nothing; the alternative was an agent asked to pause a video reaching for the
+pointer. `open_file` on a folder opens the gallery, so "show me what is in
+that folder" and "play me the next episode" are both tool calls rather than
+descriptions of which button to press.
+
+**A folder opens as a gallery.** Click any folder — in the tree, or through
+the agent's `open_file` — and the **Gallery** panel shows what is in it as
+cards: a video shows a frame of itself, an image shows itself, and everything
+else wears the same icon the file tree gives it, so the two never disagree
+about what a `.tsx` looks like. A card opens the thing it shows — a folder
+navigates the panel, a video plays, anything else goes to the File panel — and
+a file this app has no viewer for is dimmed rather than pretending. It is one
+panel that navigates, with a breadcrumb back up, so clicking through a tree
+leaves one tab and not six; with no folder chosen it shows the project root.
+
+**A folder of videos is additionally a series.** Two or more video files
+directly inside one folder number the video cards as episodes — the number read
+out of the file name (`S01E04`, `Episode 12`, a leading `03`) — put a progress
+bar under the ones started and a tick on the ones finished, and add one button
+that resumes wherever the operator left off. Playing an episode fills the same
+panel; the next one starts by itself unless that is turned off. Where the
+operator got to in each file is remembered across sessions, for the two hundred
+most recent.
 
 The **Browser** panel is a real browser in the desktop app, not a frame in the
 page. Each tab is an Electron `WebContentsView` with its own session, process

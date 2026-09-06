@@ -14,6 +14,7 @@
  */
 
 import { estimatePitch } from "./prosody";
+import { isVoicedFrame } from "./voiceActivity";
 import { VoiceError } from "./types";
 
 export interface AudioFrame {
@@ -284,15 +285,12 @@ export class AudioGraph {
     const centroid = this.spectralCentroid();
     const floor = this.floor.current;
 
-    // Speech has to clear the floor by a healthy margin and land in a
-    // speech-shaped part of the spectrum. The centroid test is what keeps a
-    // fan or a fridge from reading as a turn.
-    const margin = this.ducked ? 5.5 : 2.6;
-    const minThreshold = this.ducked ? 0.035 : 0.006;
-    const speechBand = centroid > 180 && centroid < 4200;
-    const voiced = rms > Math.max(floor * margin, minThreshold) && speechBand;
-    // Only voiced frames pay for the autocorrelation; silence has no pitch.
-    const pitch = voiced ? estimatePitch(this.timeData, this.sampleRate).f0 : 0;
+    const tone = estimatePitch(this.timeData, this.sampleRate);
+    const voiced = isVoicedFrame(
+      { rms, centroid, noiseFloor: floor, f0: tone.f0, clarity: tone.clarity },
+      this.ducked,
+    );
+    const pitch = voiced ? tone.f0 : 0;
 
     this.floor.update(rms, voiced, this.ducked);
     this.appendHistory(this.timeData);

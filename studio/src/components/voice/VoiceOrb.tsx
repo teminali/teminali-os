@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useEffect, useId, useMemo, useRef, useState } from "react";
 import type { VoiceEmotion, VoiceState } from "../../services/voice";
 import { auraFor, breathFor, eyeScaleFor, mouthFor, MOUTH_REST, VISEME_SHAPES } from "../../utils/orbExpression";
 
@@ -79,8 +79,29 @@ const EMOTION_COLORS: Record<VoiceEmotion, { stroke: string; glow: string; drop:
 /**
  * Temy — the face of the voice assistant.
  *
- * A black squircle with a terminal face, `> _ <`, that behaves like someone in
- * the room rather than like an indicator. The rule everything below follows:
+ * A black **sphere** with a terminal face, `> _ <`, that behaves like someone
+ * in the room rather than like an indicator.
+ *
+ * **The body is a ball; the face is still the wordmark.** The body used to be
+ * a squircle — the app-icon tile, drawn a second time. A tile is a logo and
+ * sits still. A ball has a side facing you, so everything the face already
+ * does — leaning toward the pointer, widening at the operator, wandering off
+ * and coming back — reads as a head turning rather than as a card being
+ * nudged. The mark is untouched: the same `> _ <` at the same coordinates,
+ * lit from inside the glass now instead of printed on a black square.
+ *
+ * **Nothing is drawn around the edge.** No rim, no border, no shadow — the
+ * operator asked for all three gone, in that order, and they were right: a
+ * stroke around a sphere is a circle drawn on top of it, and it flattens the
+ * ball it was meant to finish. Sphericity is carried entirely by light *on*
+ * the body: a key light fixed at the upper left, a bounce off the surface
+ * below, occlusion gathering toward the silhouette, and a specular hotspot
+ * that slides **against** the tilt — because the light stays in the room
+ * while the head turns. Behind the body sits one soft white halo, dim enough
+ * to read as air rather than as a glow, which is the only thing keeping the
+ * black ball off a black page.
+ *
+ * The rule everything below follows:
  *
  * **Whose sound is it?** The one `level` prop carries the microphone while the
  * operator is heard and the synthesiser while Temy speaks, and the state says
@@ -534,8 +555,30 @@ export const VoiceOrb: React.FC<VoiceOrbProps> = ({
 
   const breathKind = breathFor(state);
   const breath = breathKind === "attend" ? "animate-orbAttend" : breathKind === "breathe" ? "animate-orbBreathe" : "";
+  /*
+    The drift belongs to the ball at rest only. While it is being spoken to it
+    holds still and leans in — a listener who keeps bobbing is not listening —
+    and while it speaks or thinks it already has motion of its own.
+  */
+  const float = breathKind === "breathe" ? "animate-orbFloat" : "";
 
-  const cornerRadius = 28;
+  /*
+    The ball, and where the light lands on it.
+
+    The key light is fixed in the room at the upper left, so when the head
+    tilts toward the pointer the highlight slides the *other* way. That
+    counter-motion is most of what separates a sphere from a shaded disc, and
+    it costs two subtractions.
+  */
+  const specX = 45 - currentGaze.tiltY * 0.55;
+  const specY = 37 - currentGaze.tiltX * 0.55;
+
+  /*
+    One gradient namespace per instance. Two orbs are on screen at once — the
+    composer's and the HUD's — and they are often in different states; sharing
+    ids would let whichever mounted last repaint the other in its emotion.
+  */
+  const gid = `temy-${useId().replace(/[^a-zA-Z0-9-]/g, "")}`;
 
   const defaultTitle = isActive
     ? isSpeaking
@@ -580,7 +623,7 @@ export const VoiceOrb: React.FC<VoiceOrbProps> = ({
       title={title ?? defaultTitle}
       aria-label={title ?? defaultTitle}
       className={`group relative flex items-center justify-center select-none overflow-visible ${
-        interactive ? "cursor-pointer outline-none focus-visible:ring-2 focus-visible:ring-white/20 rounded-2xl" : ""
+        interactive ? "cursor-pointer outline-none focus-visible:ring-2 focus-visible:ring-white/20 rounded-full" : ""
       } ${className}`}
       style={{
         width: size,
@@ -588,18 +631,52 @@ export const VoiceOrb: React.FC<VoiceOrbProps> = ({
         perspective: 600,
       }}
     >
-      {/* ── Aura: where sound is allowed to show ─────────────────────────── */}
+      {/*
+        ── Air: the one halo, and it is white ─────────────────────────────────
+
+        A black ball on a #151515 ground has nothing to sit against, and the
+        first two attempts at fixing that were both wrong: a green drop-shadow
+        that never went out, then a black one that read as a smudge. This is
+        white, and deliberately dim — *"use a white glow, but not too light"* —
+        so it registers as air behind the ball rather than as a light source in
+        front of it. It does not change with state; it is not a signal.
+      */}
       <div
         aria-hidden="true"
         className="absolute inset-0 rounded-full pointer-events-none"
         style={{
-          background: `radial-gradient(circle, ${colors.glow} 0%, ${colors.drop} 45%, transparent 72%)`,
-          opacity: aura.opacity,
-          transform: `scale(${aura.scale})`,
-          transition: isHearing ? "opacity 90ms linear, transform 90ms linear" : "opacity 320ms ease, transform 320ms ease",
-          filter: "blur(6px)",
+          background: "radial-gradient(circle, rgba(255, 255, 255, 0.075) 0%, rgba(255, 255, 255, 0.03) 55%, transparent 74%)",
+          transform: "scale(1.28)",
+          filter: "blur(9px)",
         }}
       />
+
+      {/*
+        ── Aura: where sound is allowed to show ───────────────────────────────
+
+        **The glow is for sound, and only for sound.** It used to be drawn in
+        every state — faintly at idle, a little more on hover — and with a
+        coloured drop-shadow under it that never went out. The operator, on the
+        ball: *"i think it will look cleaner without the background glow and
+        the green border."* They were right, and the reason is that a glow that
+        is always on says nothing when it comes on. It now exists only while
+        there is a voice to show — the operator's, or Temy's — so its arrival
+        *is* the signal. Thinking keeps its orbiting arc and nothing else; idle,
+        listening and hover are the bare ball.
+      */}
+      {(isHearing || isSpeaking) && (
+        <div
+          aria-hidden="true"
+          className="absolute inset-0 rounded-full pointer-events-none"
+          style={{
+            background: `radial-gradient(circle, ${colors.glow} 0%, ${colors.drop} 45%, transparent 72%)`,
+            opacity: aura.opacity,
+            transform: `scale(${aura.scale})`,
+            transition: isHearing ? "opacity 90ms linear, transform 90ms linear" : "opacity 320ms ease, transform 320ms ease",
+            filter: "blur(6px)",
+          }}
+        />
+      )}
 
       {/* ── Thinking: one thin arc orbiting behind the face ───────────────── */}
       {isThinking && (
@@ -623,118 +700,210 @@ export const VoiceOrb: React.FC<VoiceOrbProps> = ({
         </svg>
       )}
 
-      {/* ── Breath (CSS) wraps posture (inline), so the two transforms never fight */}
-      <div className={`w-full h-full flex items-center justify-center ${breath}`}>
-        <div
-          className="w-full h-full flex items-center justify-center transition-transform"
-          style={{
-            transform: `rotateX(${currentGaze.tiltX}deg) rotateY(${currentGaze.tiltY}deg) rotate(${currentGaze.headTilt}deg) scale(${
-              isPressed ? 0.94 : currentGaze.lean
-            })`,
-            transformStyle: "preserve-3d",
-            transitionDuration: isHearing ? "360ms" : "420ms",
-            transitionTimingFunction: "cubic-bezier(0.22, 1, 0.36, 1)",
-          }}
-        >
-          <svg
-            viewBox="0 0 128 128"
-            width={size}
-            height={size}
-            className="relative z-10 block overflow-visible"
+      {/* ── Drift wraps breath wraps posture: three layers, because each of the
+             three owns `transform` and they must not fight over it ─────────── */}
+      <div className={`w-full h-full flex items-center justify-center ${float}`}>
+        <div className={`w-full h-full flex items-center justify-center ${breath}`}>
+          <div
+            className="w-full h-full flex items-center justify-center transition-transform"
             style={{
-              filter: `drop-shadow(0 6px 14px rgba(0, 0, 0, 0.75)) drop-shadow(0 0 12px ${colors.drop})`,
+              transform: `rotateX(${currentGaze.tiltX}deg) rotateY(${currentGaze.tiltY}deg) rotate(${currentGaze.headTilt}deg) scale(${
+                isPressed ? 0.94 : currentGaze.lean
+              })`,
+              transformStyle: "preserve-3d",
+              transitionDuration: isHearing ? "360ms" : "420ms",
+              transitionTimingFunction: "cubic-bezier(0.22, 1, 0.36, 1)",
             }}
           >
-            <defs>
-              <filter id={`temyGlow-${effectiveEmotion}`} x="-25%" y="-25%" width="150%" height="150%">
-                <feGaussianBlur in="SourceGraphic" stdDeviation="1.0" result="glow" />
-                <feMerge>
-                  <feMergeNode in="glow" />
-                  <feMergeNode in="SourceGraphic" />
-                </feMerge>
-              </filter>
-            </defs>
-
-            {/* Pure black squircle body */}
-            <rect width="128" height="128" rx={cornerRadius} ry={cornerRadius} fill="#000000" />
-
-            {/* Razor-thin edge sheen; a touch brighter when attended to */}
-            <rect
-              x="1"
-              y="1"
-              width="126"
-              height="126"
-              rx={cornerRadius - 1}
-              ry={cornerRadius - 1}
-              fill="none"
-              stroke={isHovered || isHearing ? "rgba(255, 255, 255, 0.14)" : "rgba(255, 255, 255, 0.08)"}
-              strokeWidth="1.2"
-              className="transition-[stroke] duration-300"
-            />
-
-            {/* ── The face ────────────────────────────────────────────────── */}
-            <g
-              filter={`url(#temyGlow-${effectiveEmotion})`}
-              className="transition-transform duration-150 ease-out"
+            <svg
+              viewBox="0 0 128 128"
+              width={size}
+              height={size}
+              className="relative z-10 block overflow-visible"
               style={{
-                transform: `translate(${currentGaze.x}px, ${currentGaze.y}px)`,
+                /*
+                No filter. Every halo this orb has worn lived on this line: first a
+                coloured one that was on in every state, then a black one that read
+                as a smudge rather than as a shadow on a ground this dark. What
+                separates the ball from the page now is its own shading and the one
+                soft white halo above — nothing is drawn around its edge.
+              */
               }}
             >
-              {/* Left eye */}
-              <path
-                d={eyeProps.leftPath}
-                fill="none"
-                stroke={colors.stroke}
-                strokeWidth="9.5"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                className="transition-all duration-150 ease-out"
-                style={{
-                  transformOrigin: "34.5px 64px",
-                  transform: eyeProps.leftTransform,
-                }}
-              />
+              <defs>
+                {/* The body. Still the brand's black — it just has a direction to be black away from now. */}
+                <radialGradient id={`${gid}-body`} cx="33%" cy="27%" r="84%">
+                  <stop offset="0%" stopColor="#43434a" />
+                  <stop offset="16%" stopColor="#232327" />
+                  <stop offset="40%" stopColor="#111113" />
+                  <stop offset="68%" stopColor="#050506" />
+                  <stop offset="100%" stopColor="#000000" />
+                </radialGradient>
 
-              {/* Mouth: visemes while speaking, a still line otherwise */}
-              {mouthProps.customPath ? (
+                {/* Bounce: the surface below throws a little of Temy's own colour back up
+                    under her. Without it the lower edge dies into the page and the ball
+                    reads as a hole cut in it. */}
+                <radialGradient id={`${gid}-bounce`} cx="63%" cy="90%" r="54%">
+                  <stop offset="0%" stopColor="#ffffff" stopOpacity="0.1" />
+                  <stop offset="52%" stopColor="#ffffff" stopOpacity="0.03" />
+                  <stop offset="100%" stopColor="#ffffff" stopOpacity="0" />
+                </radialGradient>
+
+                {/* The face is lit from inside the glass rather than painted on the front. */}
+                <radialGradient id={`${gid}-core`} cx="50%" cy="53%" r="52%">
+                  <stop offset="0%" stopColor={colors.stroke} stopOpacity="0.1" />
+                  <stop offset="55%" stopColor={colors.stroke} stopOpacity="0.025" />
+                  <stop offset="100%" stopColor={colors.stroke} stopOpacity="0" />
+                </radialGradient>
+
+                {/* Occlusion, gathering at the silhouette. */}
+                <radialGradient id={`${gid}-occlusion`} cx="50%" cy="50%" r="50%">
+                  <stop offset="60%" stopColor="#000000" stopOpacity="0" />
+                  <stop offset="86%" stopColor="#000000" stopOpacity="0.5" />
+                  <stop offset="100%" stopColor="#000000" stopOpacity="0.88" />
+                </radialGradient>
+
+                {/* The sheen the specular hotspot sits in. */}
+                <radialGradient id={`${gid}-spec`} cx="50%" cy="50%" r="50%">
+                  <stop offset="0%" stopColor="#ffffff" stopOpacity="0.5" />
+                  <stop offset="42%" stopColor="#ffffff" stopOpacity="0.13" />
+                  <stop offset="100%" stopColor="#ffffff" stopOpacity="0" />
+                </radialGradient>
+
+                {/* Everything on the body is cut to the silhouette, so no highlight
+                    and no eye can bleed past the edge of the ball. */}
+                <clipPath id={`${gid}-ball`}>
+                  <circle cx="64" cy="64" r="62" />
+                </clipPath>
+
+                <filter id={`${gid}-glow`} x="-25%" y="-25%" width="150%" height="150%">
+                  <feGaussianBlur in="SourceGraphic" stdDeviation="1.0" result="glow" />
+                  <feMerge>
+                    <feMergeNode in="glow" />
+                    <feMergeNode in="SourceGraphic" />
+                  </feMerge>
+                </filter>
+
+                <filter id={`${gid}-soft`} x="-60%" y="-60%" width="220%" height="220%">
+                  <feGaussianBlur stdDeviation="3.4" />
+                </filter>
+              </defs>
+
+              {/* ── The ball ─────────────────────────────────────────────────── */}
+              <g clipPath={`url(#${gid}-ball)`}>
+                <circle cx="64" cy="64" r="62" fill={`url(#${gid}-body)`} />
+                <circle cx="64" cy="64" r="62" fill={`url(#${gid}-bounce)`} />
+                <circle cx="64" cy="64" r="62" fill={`url(#${gid}-core)`} />
+                <circle cx="64" cy="64" r="62" fill={`url(#${gid}-occlusion)`} />
+
+                {/* The sheen, then the hotspot inside it — both sliding against the
+                    tilt, because the light does not turn with the head. */}
+                <ellipse
+                  cx={specX}
+                  cy={specY}
+                  rx="31"
+                  ry="22"
+                  fill={`url(#${gid}-spec)`}
+                  filter={`url(#${gid}-soft)`}
+                  opacity={isHovered || isActive ? 0.95 : 0.75}
+                  transform={`rotate(-26 ${specX} ${specY})`}
+                  className="transition-opacity duration-300"
+                />
+                <ellipse
+                  cx={specX - 5}
+                  cy={specY - 7}
+                  rx="9"
+                  ry="5.5"
+                  fill="#ffffff"
+                  opacity="0.3"
+                  filter={`url(#${gid}-soft)`}
+                  transform={`rotate(-26 ${specX - 5} ${specY - 7})`}
+                />
+
+                {/* The polished top: a crescent of glass just inside the silhouette,
+                    which is the read that says "sphere" fastest. */}
                 <path
-                  d={mouthProps.customPath}
+                  d="M 17 47 A 53 53 0 0 1 105 40"
+                  fill="none"
+                  stroke="#ffffff"
+                  strokeOpacity="0.16"
+                  strokeWidth="3"
+                  strokeLinecap="round"
+                  filter={`url(#${gid}-soft)`}
+                />
+              </g>
+
+              {/* ── The face ────────────────────────────────────────────────── */}
+              <g
+                filter={`url(#${gid}-glow)`}
+                className="transition-transform duration-150 ease-out"
+                style={{
+                  transformOrigin: "64px 64px",
+                  /*
+                    Held a hair off the silhouette and travelling slightly further than the
+                    gaze asks, so the mark reads as painted on a curved front face sliding
+                    past us rather than as a decal dragged across a flat one. The glyph's
+                    own coordinates are untouched.
+                  */
+                  transform: `translate(${currentGaze.x * 1.12}px, ${currentGaze.y * 1.12}px) scale(0.93)`,
+                }}
+              >
+                {/* Left eye */}
+                <path
+                  d={eyeProps.leftPath}
                   fill="none"
                   stroke={colors.stroke}
                   strokeWidth="9.5"
                   strokeLinecap="round"
                   strokeLinejoin="round"
-                  className="transition-all duration-120 ease-out"
+                  className="transition-all duration-150 ease-out"
+                  style={{
+                    transformOrigin: "34.5px 64px",
+                    transform: eyeProps.leftTransform,
+                  }}
                 />
-              ) : (
-                <rect
-                  x={mouthProps.x}
-                  y={mouthProps.y}
-                  width={mouthProps.width}
-                  height={mouthProps.height}
-                  rx={mouthProps.rx}
-                  ry={mouthProps.rx}
-                  fill={colors.stroke}
-                  className="transition-all duration-100 ease-out"
-                />
-              )}
 
-              {/* Right eye */}
-              <path
-                d={eyeProps.rightPath}
-                fill="none"
-                stroke={colors.stroke}
-                strokeWidth="9.5"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                className="transition-all duration-150 ease-out"
-                style={{
-                  transformOrigin: "93.5px 64px",
-                  transform: eyeProps.rightTransform,
-                }}
-              />
-            </g>
-          </svg>
+                {/* Mouth: visemes while speaking, a still line otherwise */}
+                {mouthProps.customPath ? (
+                  <path
+                    d={mouthProps.customPath}
+                    fill="none"
+                    stroke={colors.stroke}
+                    strokeWidth="9.5"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    className="transition-all duration-120 ease-out"
+                  />
+                ) : (
+                  <rect
+                    x={mouthProps.x}
+                    y={mouthProps.y}
+                    width={mouthProps.width}
+                    height={mouthProps.height}
+                    rx={mouthProps.rx}
+                    ry={mouthProps.rx}
+                    fill={colors.stroke}
+                    className="transition-all duration-100 ease-out"
+                  />
+                )}
+
+                {/* Right eye */}
+                <path
+                  d={eyeProps.rightPath}
+                  fill="none"
+                  stroke={colors.stroke}
+                  strokeWidth="9.5"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  className="transition-all duration-150 ease-out"
+                  style={{
+                    transformOrigin: "93.5px 64px",
+                    transform: eyeProps.rightTransform,
+                  }}
+                />
+              </g>
+            </svg>
+          </div>
         </div>
       </div>
 

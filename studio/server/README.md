@@ -85,6 +85,9 @@ is the complete list.
 | --- | --- | --- | --- |
 | `GET` | `/api/workspace/tree` | bearer | The workspace tree under the configured root. |
 | `POST` | `/api/workspace/file` | bearer | Reads one file. Paths over 2,048 characters are rejected. |
+| `POST` | `/api/workspace/player/state` | bearer | The window telling the gateway what its media player is showing, so the agent's `player` tool has something to read. `player: null` is the pane unmounting. Every field is bounded and typed by `sanitisePlayerSnapshot` — a snapshot is data from the renderer, not a payload to keep whole. |
+| `POST` | `/api/workspace/media/probe` | bearer | What a video or audio file holds (ffprobe: container, streams, codecs, duration, subtitle streams) and how it will be played — `direct`, `remux`, `transcode` or `unplayable`, with the reason in words the pane shows. Same path guard as the reader; refuses anything the streaming route does not serve. See `server/media-probe.js`. |
+| `POST` | `/api/workspace/media/subtitle` | bearer | One embedded subtitle stream, written out as WebVTT by ffmpeg, for the player's track menu. `stream` is its index among the subtitle streams, as the probe reports it. 422 when ffmpeg is absent or the stream is a bitmap format. |
 | `POST` | `/api/workspace/write` | bearer | Writes one file. |
 | `POST` | `/api/workspace/delete` | bearer | Removes one file. Same guards as the write path — inside the root, a regular file rather than a symlink, a text extension. Its only caller is rejecting a proposed change to a file the assistant created; see `studio/src/store/changeStore.ts`. |
 | `POST` | `/api/workspace/search` | bearer | Searches the workspace. |
@@ -109,6 +112,8 @@ is the complete list.
 | `POST` | `/api/workspace/agent/bookmark` | **per-run token** | Keeps `{ url, title }`. Writes, so it is **not** pre-approved. |
 | `POST` | `/api/workspace/agent/browsing-history` | **per-run token** | The history, newest first, narrowed by an optional `query` over address and title and capped by `limit` (default 50). Pre-approved. |
 | `POST` | `/api/workspace/agent/downloads` | **per-run token** | The downloads, newest first. Pre-approved. |
+| `POST` | `/api/workspace/agent/player` | **per-run token** | What the operator's media player is showing: the last snapshot the window published to `/api/workspace/player/state`, plus a one-sentence summary so the model need not parse it. The gateway holds no handle on the element — one slot, filled by the window, cleared when the pane unmounts. Read-only and pre-approved. |
+| `POST` | `/api/workspace/agent/player-control` | **per-run token** | Plays, pauses, seeks, sets volume/speed, turns subtitles on, goes fullscreen or moves to another episode. `parsePlayerCommand` (`server/player-state.js`) checks the action and its value here — a refusal names what was wanted, because the reader is a model that will try again — and the command goes out as a `player` event on the run's NDJSON stream for whichever pane holds the element. 409 when no player is open. Pre-approved: it acts on a file the operator opened and writes nothing. |
 | `POST` | `/api/workspace/agent/open-project` | **per-run token** | Switches the workspace to another project, by `path` or by `phrase` — the operator's own words ("the last video project", "the one from yesterday"), resolved against the recents by `server/project-phrase.js`. Rebinds `config.workspaceRoot`, so it is deliberately **not** pre-approved in `--allowedTools`: the call only arrives after the CLI's permission prompt was answered. |
 
 ### Terminal

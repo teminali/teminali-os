@@ -5,7 +5,7 @@ import {
   repairDeterministic,
   polishIsTrustworthy,
 } from "../src/services/voice/transcriptRepair.ts";
-import { scoreAddressing, stripWakeWord, parseClassifier, applyClassifier } from "../src/services/voice/addressing.ts";
+import { scoreAddressing, stripWakeWord, parseClassifier, applyClassifier, classifierPrompt, CLASSIFIER_NONSENSE } from "../src/services/voice/addressing.ts";
 import { completenessScore, Endpointer } from "../src/services/voice/turnTaking.ts";
 import { speakableText, paceFor, PACE_SHORT_WORDS, PACE_LONG_WORDS, PACE_LONG_BOOST } from "../src/services/voice/speakable.ts";
 import { normaliseAddress } from "../src/utils/address.ts";
@@ -417,4 +417,40 @@ test("an untagged fence is still announced", () => {
   const spoken = speakableText("Look:\n```\nraw text\n```\nThat is all.");
   assert.ok(!spoken.includes("raw text"));
   assert.match(spoken, /code block/);
+});
+
+/* ── The classifier's nonsense verdict ────────────────────────────────────── */
+
+/*
+  The one model call on the recognition path already ran on every utterance the
+  cheap signals could not place, so NONSENSE rides a round trip that was being
+  paid for anyway. It catches what the deterministic layers cannot: noise
+  decoded into real words, in the right language.
+*/
+test("the classifier can refuse a sentence as not being speech", () => {
+  assert.equal(parseClassifier("NONSENSE"), CLASSIFIER_NONSENSE);
+  assert.equal(parseClassifier(" nonsense \n"), CLASSIFIER_NONSENSE);
+});
+
+/*
+  A small model that leads with its verdict and then explains itself must be
+  read by the word it led with. "NONSENSE — not addressed to the assistant"
+  mentions both, and the wrong reading of it commits room noise as a turn.
+*/
+test("a nonsense verdict that explains itself is still a nonsense verdict", () => {
+  assert.equal(parseClassifier("NONSENSE - not addressed to the assistant"), CLASSIFIER_NONSENSE);
+});
+
+test("the other three verdicts are unchanged", () => {
+  assert.equal(parseClassifier("ASSISTANT"), 0.26);
+  assert.equal(parseClassifier("PERSON"), -0.34);
+  assert.equal(parseClassifier("UNCLEAR"), 0);
+  assert.equal(parseClassifier("what?"), null);
+});
+
+test("the prompt offers exactly the four words the parser reads", () => {
+  const prompt = classifierPrompt("run the tests", "");
+  for (const word of ["NONSENSE", "ASSISTANT", "PERSON", "UNCLEAR"]) {
+    assert.ok(prompt.includes(word), `the prompt must offer ${word}`);
+  }
 });

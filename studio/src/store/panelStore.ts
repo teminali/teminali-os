@@ -19,7 +19,7 @@ import { create } from "zustand";
 import { persist, createJSONStorage } from "zustand/middleware";
 import { persistablePanels } from "../utils/privateBrowsing";
 
-export type PanelKind = "terminal" | "browser" | "canvas" | "side" | "file" | "guardian" | "claude" | "codex" | "usage" | "release" | "arena" | "video";
+export type PanelKind = "terminal" | "browser" | "canvas" | "side" | "file" | "gallery" | "guardian" | "claude" | "codex" | "usage" | "release" | "arena" | "video";
 
 export interface PanelTab {
   id: string;
@@ -45,6 +45,13 @@ export type PanelSeed = Partial<Omit<PanelTab, "id" | "createdAt" | "kind">> & {
 
 export const PANEL_DEFAULTS: Record<PanelKind, { label: string; shortcut: string }> = {
   file: { label: "File", shortcut: "⌘G" },
+  /*
+    Reached by clicking a folder, not from a menu, and so deliberately without
+    a shortcut — every one an operator's fingers already know is taken, and
+    ⇧⌘E in particular focuses the Explorer. Opened by `showFolder`, from a
+    click in the tree or the agent's `open_file` on a folder.
+  */
+  gallery: { label: "Gallery", shortcut: "" },
   terminal: { label: "Terminal", shortcut: "⌘J" },
   browser: { label: "Browser", shortcut: "⇧⌘B" },
   canvas: { label: "Canvas", shortcut: "⇧⌘A" },
@@ -145,6 +152,10 @@ function matches(panel: PanelTab, seed: PanelSeed): boolean {
   // that "open the usage panel" twice does not leave two behind. Terminals,
   // side chats and browser tabs are the kinds there may be many of.
   if (seed.kind === "file") return Boolean(seed.path) && panel.path === seed.path;
+  // The gallery is one panel that navigates, like a browser with no tabs:
+  // matching on kind alone means clicking through six folders leaves one tab
+  // rather than six. `focusOrOpen` moves it to the new folder.
+  if (seed.kind === "gallery") return true;
   return seed.kind !== "side" && seed.kind !== "terminal" && seed.kind !== "browser";
 }
 
@@ -189,7 +200,15 @@ export const usePanelStore = create<PanelState>()(
             // Reopening a browser at a new address should navigate it.
             panels: state.panels.map((panel) =>
               panel.id === existing.id
-                ? { ...panel, ...(seed.url ? { url: seed.url } : {}), ...(seed.label ? { label: seed.label } : {}) }
+                ? {
+                  ...panel,
+                  ...(seed.url ? { url: seed.url } : {}),
+                  ...(seed.label ? { label: seed.label } : {}),
+                  // A gallery reopened on another folder navigates to it. The
+                  // root is a real destination, so an empty path is honoured
+                  // rather than treated as "no path given".
+                  ...(seed.kind === "gallery" ? { path: seed.path ?? "" } : {}),
+                }
                 : panel,
             ),
           }));
@@ -234,20 +253,24 @@ export const usePanelStore = create<PanelState>()(
       name: "teminali-panels-v1",
       storage: createJSONStorage(() => localStorage),
       /*
-        A stored session can hold a tab of a kind this build no longer has —
-        "recorder", now that the recorder is a dialog. Left alone it does not
-        crash: `WorkspacePanel` falls through to the file pane and the tab
-        strip draws a document glyph, so the operator gets a tab labelled
-        "Record Screen" that opens an empty file view. Dropping it is the
-        only honest answer, and it has to happen on the way OUT of storage
-        rather than in the reducers, because nothing ever calls a reducer
-        for a panel that was simply restored.
+        A stored session can hold a tab of a kind this build no longer has:
+        "recorder", from when the recorder was a panel rather than a dialog,
+        and "series", the name the gallery went by for an afternoon. Left
+        alone neither crashes — `WorkspacePanel` falls through and the tab
+        strip draws a document glyph — but the operator gets a tab labelled
+        "Record Screen" or "Series" that opens onto nothing.
+
+        The filter is now the *live* set of kinds rather than a list of dead
+        names, so the next rename is handled by the rename itself. It has to
+        happen on the way OUT of storage rather than in the reducers, because
+        nothing ever calls a reducer for a panel that was simply restored.
       */
-      version: 2,
+      version: 3,
       migrate: (persisted) => {
         const state = persisted as { panels?: { id: string; kind: string }[]; activePanelId?: string | null };
         if (!state?.panels) return state;
-        const panels = state.panels.filter((panel) => panel.kind !== "recorder");
+        const known = new Set(Object.keys(PANEL_DEFAULTS));
+        const panels = state.panels.filter((panel) => known.has(panel.kind));
         const kept = new Set(panels.map((panel) => panel.id));
         return {
           ...state,

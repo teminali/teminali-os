@@ -47,6 +47,7 @@ import { BrandGlyph } from "../ui/BrandGlyph";
 import { VoiceOrb } from "../voice";
 import type { UseAssistantResult } from "../../hooks/useAssistant";
 import type { ChatMessage } from "../../types";
+import { dispatchPlayerCommand, type PlayerCommand } from "../../services/playerControl";
 
 /**
  * The centre column — the conversation itself.
@@ -522,6 +523,10 @@ export const StudioChat: React.FC<{
             const store = useStudioStore.getState();
             if (event.action === "reveal") store.revealPath(event.path);
             else if (event.action === "open-file") void store.showFile(event.path);
+            else if (event.action === "open-folder") store.showFolder(event.path);
+            // The player is a mounted pane, not the store: the command goes to
+            // whichever pane holds the element. See services/playerControl.ts.
+            else if (event.action === "player") dispatchPlayerCommand(event.command as PlayerCommand);
             else if (event.action === "browse") openBrowserAt(event.url, { newTab: event.newTab });
             else {
               // Exactly what a click in the sidebar does, and in the same

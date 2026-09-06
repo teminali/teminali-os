@@ -15,7 +15,7 @@
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { scorePlausibility, repetitionShare, coherenceShare } from '../src/services/voice/plausibility.ts';
+import { scorePlausibility, repetitionShare, coherenceShare, baseLanguage } from '../src/services/voice/plausibility.ts';
 
 /* ── The failure this exists for ──────────────────────────────────────────── */
 
@@ -137,4 +137,60 @@ test('coherenceShare accepts real words and numbers, rejects the unpronounceable
   assert.equal(coherenceShare('run 42 tests'.split(' ')), 1);
   assert.equal(coherenceShare(['bcdfg', 'xkcdz']), 0);
   assert.equal(coherenceShare(['aaaaa']), 0);
+});
+
+/* ── A language the operator does not speak ───────────────────────────────── */
+
+/*
+  The second reported failure. The operator said "How are you?" and the
+  transcript read "Bagaimana anda lakukan?" — fluent Indonesian, and a
+  translation of what they had actually said. Every rule above passes it: it
+  does not repeat, it is not an artefact phrase, every word is pronounceable,
+  and the recogniser was confident. Whisper had reported the language all
+  along and the engine had named the parameter `_language`.
+*/
+test('a confident decode into a language the operator does not speak is refused', () => {
+  const verdict = scorePlausibility('Bagaimana anda lakukan?', {
+    confidence: 0.95,
+    language: 'id',
+    expected: ['en-US', 'sw-TZ'],
+  });
+  assert.equal(verdict.plausible, false);
+  assert.equal(verdict.signals.foreign, true);
+  assert.match(verdict.reason, /id/);
+});
+
+test('confidence cannot rescue a foreign decode, because loops score high', () => {
+  for (const confidence of [0.2, 0.6, 0.99, 1]) {
+    assert.equal(
+      scorePlausibility('Bagaimana anda lakukan?', { confidence, language: 'id', expected: ['en'] }).plausible,
+      false,
+    );
+  }
+});
+
+test('a language the operator does speak passes, region tags and all', () => {
+  // The operator's own languages: `en-US` from the system, `sw-TZ` pinned.
+  // Whisper reports bare codes, so the comparison is on the base tag.
+  assert.equal(scorePlausibility('how are you?', { confidence: 0.95, language: 'en', expected: ['en-US'] }).plausible, true);
+  assert.equal(scorePlausibility('habari yako?', { confidence: 0.95, language: 'sw', expected: ['en-US', 'sw-TZ'] }).plausible, true);
+  assert.equal(scorePlausibility('habari yako?', { confidence: 0.95, language: 'sw-KE', expected: ['sw-TZ'] }).plausible, true);
+});
+
+/*
+  The rule is evidence, not suspicion. A recogniser that was *told* the
+  language reports the language it was told, and a caller that cannot say what
+  the operator speaks has said nothing — neither may reject anything.
+*/
+test('an unknown language or an unknown expectation rejects nothing', () => {
+  assert.equal(scorePlausibility('Bagaimana anda lakukan?', { confidence: 0.95, expected: ['en'] }).plausible, true);
+  assert.equal(scorePlausibility('Bagaimana anda lakukan?', { confidence: 0.95, language: 'id' }).plausible, true);
+  assert.equal(scorePlausibility('Bagaimana anda lakukan?', { confidence: 0.95, language: 'id', expected: [] }).plausible, true);
+});
+
+test('baseLanguage takes the language off a tag', () => {
+  assert.equal(baseLanguage('en-US'), 'en');
+  assert.equal(baseLanguage('sw_TZ'), 'sw');
+  assert.equal(baseLanguage('ID'), 'id');
+  assert.equal(baseLanguage('  en  '), 'en');
 });

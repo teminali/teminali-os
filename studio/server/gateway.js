@@ -10,7 +10,9 @@ import {
 } from "../../gateway/frontier-runner.js";
 import { BoundedAuditLog } from "./audit-log.js";
 import { createConfig } from "./config.js";
-import { createWorkspaceDirectory, deleteWorkspaceFile, isStreamableWorkspaceFile, isViewableWorkspaceFile, listWorkspaceTree, readWorkspaceFile, resolveWorkspacePath, searchWorkspace, WORKSPACE_LIMITS, writeWorkspaceFile } from "./workspace.js";
+import { countSeriesVideos, createWorkspaceDirectory, deleteWorkspaceFile, isStreamableWorkspaceFile, isViewableWorkspaceFile, listWorkspaceTree, readWorkspaceFile, resolveWorkspacePath, searchWorkspace, SERIES_MIN_EPISODES, WORKSPACE_LIMITS, writeWorkspaceFile } from "./workspace.js";
+import { createPlayerRegistry, describePlayer, parsePlayerCommand, PlayerCommandError } from "./player-state.js";
+import { extractSubtitleVtt, mediaTools, playbackPlan, probeMedia } from "./media-probe.js";
 import { TERMINAL_LIMITS, runWorkspaceCommand } from "./terminal.js";
 import { searchMachine } from "./machine-search.js";
 import { forgetVoiceStatus, readBounded, speak, transcribe, voiceStatus } from "./voice.js";
@@ -356,6 +358,8 @@ const WORKSPACE_AGENT_ROUTES = new Set([
   "/api/workspace/agent/bookmark",
   "/api/workspace/agent/browsing-history",
   "/api/workspace/agent/downloads",
+  "/api/workspace/agent/player",
+  "/api/workspace/agent/player-control",
 ]);
 
 export async function createGateway(options = {}) {
@@ -374,6 +378,13 @@ export async function createGateway(options = {}) {
    * the user has to restart the app to get what they just paid for.
    */
   const voiceTierEntitled = async () => grants(await readEntitlement(config.licenceStorePath), "voice.vibevoice");
+
+  /*
+    The last thing the window said its media player was showing, for the
+    agent's `player` tool. One slot, because the window mounts one pane at a
+    time; see server/player-state.js.
+  */
+  const player = options.playerRegistry || createPlayerRegistry();
 
   const sessionToken = options.sessionToken || randomBytes(32).toString("base64url");
   const tokenFingerprint = createHash("sha256").update(sessionToken).digest("hex").slice(0, 12);
@@ -771,9 +782,32 @@ export async function createGateway(options = {}) {
           } catch {
             throw new GatewayError(404, "WORKSPACE_PATH_NOT_FOUND", `There is nothing at "${body?.path}" in this workspace.`);
           }
+          if (stats.isDirectory() && !stats.isSymbolicLink()) {
+            /*
+              A folder opens as a gallery of what is in it — the same panel a
+              click in the tree opens (`galleryOf` in
+              src/services/workspaceGallery.ts), so what the agent opens and
+              what the operator opens are the same surface. A folder holding
+              `SERIES_MIN_EPISODES` videos or more is additionally a series,
+              and the note says so, because "you can start episode 3" and "here
+              are the files" are different next moves for the model.
+            */
+            const videos = await countSeriesVideos(absolutePath);
+            const opened = relative(config.workspaceRoot, absolutePath).split(sep).join("/");
+            const delivered = emitToRun(runId, token, { type: "workspace", action: "open-folder", path: opened });
+            const note = videos >= SERIES_MIN_EPISODES
+              ? `It is open in the operator's editor as a series of ${videos} episodes — the gallery, nothing playing yet. \`player_control\` with action "episode" and a number starts one.`
+              : "It is open in the operator's editor as a gallery of its contents. A card opens the file it shows.";
+            replyJson(response, 200, {
+              result: delivered
+                ? { opened, videos, series: videos >= SERIES_MIN_EPISODES, note }
+                : { opened, videos, series: videos >= SERIES_MIN_EPISODES, note: "The folder is readable, but this turn's stream is closed, so no gallery was opened." },
+            });
+            return;
+          }
           if (!stats.isFile() || stats.isSymbolicLink()) {
             throw new GatewayError(400, "WORKSPACE_FILE_REQUIRED",
-              `"${body?.path}" is not a regular file the editor will open — a folder, or a symlink. \`open_file\` opens a file into an editor tab; \`reveal\` is the one that shows a folder in the tree.`);
+              `"${body?.path}" is not a regular file the editor will open — a symlink, or something that is not a file. \`open_file\` opens a file into an editor tab, or a folder of videos as a series; \`reveal\` is the one that shows a folder in the tree.`);
           }
           if (!isViewableWorkspaceFile(absolutePath)) {
             throw new GatewayError(415, "WORKSPACE_FILE_UNSUPPORTED",
@@ -790,6 +824,44 @@ export async function createGateway(options = {}) {
             result: delivered
               ? { opened, note: "It is open in the operator's editor and is the tab they are looking at." }
               : { opened, note: "The file is readable, but this turn's stream is closed, so no tab was opened." },
+          });
+          return;
+        }
+
+        /*
+          The player, from the agent's side.
+
+          The gateway holds no handle on the element. `player` answers with
+          the last snapshot the window published to `/api/workspace/player/state`
+          (behind the bearer, below), and `player-control` checks the request
+          and puts it on the run's stream for the pane to execute. Both are
+          pre-approved: they act on a file the operator opened, in a pane they
+          are looking at, and write nothing. See server/player-state.js.
+        */
+        if (route === "/api/workspace/agent/player") {
+          const current = player.current();
+          replyJson(response, 200, { result: { player: current, summary: describePlayer(current) } });
+          return;
+        }
+
+        if (route === "/api/workspace/agent/player-control") {
+          let command;
+          try {
+            command = parsePlayerCommand(body);
+          } catch (error) {
+            if (error instanceof PlayerCommandError) throw new GatewayError(400, error.code, error.message);
+            throw error;
+          }
+          const before = player.current();
+          if (!before) {
+            throw new GatewayError(409, "PLAYER_NOT_OPEN",
+              "No video or audio is open in the operator's editor. `open_file` a media file, or a folder of videos, first.");
+          }
+          const delivered = emitToRun(runId, token, { type: "workspace", action: "player", command });
+          replyJson(response, 200, {
+            result: delivered
+              ? { command, note: `Sent to the player. Before it: ${describePlayer(before)} Call \`player\` to read the result.` }
+              : { command, note: "The player is open, but this turn's stream is closed, so the command was not delivered." },
           });
           return;
         }
@@ -1705,6 +1777,76 @@ export async function createGateway(options = {}) {
           replyJson(response, 200, await listWorkspaceTree(config.workspaceRoot));
         } catch (error) {
           throw workspaceError(error);
+        }
+        return;
+      }
+
+      /*
+        The window telling the gateway what its player is showing, so the
+        agent's `player` tool has something to read. `player: null` is the
+        pane unmounting. Bounded and typed by `sanitisePlayerSnapshot`.
+      */
+      if (request.method === "POST" && route === "/api/workspace/player/state") {
+        const report = await readJson(request, config.maxJsonBytes);
+        replyJson(response, 200, { ok: true, player: player.report(report?.player ?? null) });
+        return;
+      }
+
+      /*
+        What a media file holds and how it will be played — ffprobe's summary,
+        the plan (`direct`, `remux`, `transcode`, `unplayable`) and whether the
+        tools are installed. The pane asks before it points an element at the
+        protocol, so a `.mkv` holding HEVC is streamed through ffmpeg rather
+        than handed to a player that will only fire `error`. Same path guard
+        as the reader; see server/media-probe.js.
+      */
+      if (request.method === "POST" && route === "/api/workspace/media/probe") {
+        const probeRequest = await readJson(request, config.maxJsonBytes);
+        if (typeof probeRequest?.path !== "string" || probeRequest.path.length > 2_048) {
+          throw new GatewayError(400, "INVALID_WORKSPACE_PATH", "A bounded workspace-relative file path is required.");
+        }
+        let absolutePath;
+        try {
+          absolutePath = resolveWorkspacePath(config.workspaceRoot, probeRequest.path);
+        } catch (error) {
+          throw workspaceError(error);
+        }
+        let stats;
+        try {
+          stats = await lstatNodeFile(absolutePath);
+        } catch {
+          throw new GatewayError(404, "WORKSPACE_FILE_NOT_FOUND", "The workspace file no longer exists.");
+        }
+        if (!stats.isFile() || stats.isSymbolicLink()) throw new GatewayError(400, "WORKSPACE_FILE_REQUIRED", "A regular workspace file is required.");
+        if (!isStreamableWorkspaceFile(absolutePath)) throw new GatewayError(415, "WORKSPACE_FILE_UNSUPPORTED", "Only video and audio are probed.");
+        const tools = await mediaTools();
+        const probe = await probeMedia(absolutePath, tools);
+        const plan = playbackPlan(probe, { ffmpeg: tools.ffmpeg, path: absolutePath });
+        replyJson(response, 200, { probe, plan, tools: { ffmpeg: Boolean(tools.ffmpeg), ffprobe: Boolean(tools.ffprobe) } });
+        return;
+      }
+
+      /* One embedded text subtitle stream, as WebVTT, for the player's track menu. */
+      if (request.method === "POST" && route === "/api/workspace/media/subtitle") {
+        const subtitleRequest = await readJson(request, config.maxJsonBytes);
+        if (typeof subtitleRequest?.path !== "string" || subtitleRequest.path.length > 2_048) {
+          throw new GatewayError(400, "INVALID_WORKSPACE_PATH", "A bounded workspace-relative file path is required.");
+        }
+        const stream = Number(subtitleRequest.stream);
+        if (!Number.isInteger(stream) || stream < 0 || stream > 64) throw new GatewayError(400, "MEDIA_STREAM_REQUIRED", "`stream` is the subtitle stream's index, from the probe.");
+        let absolutePath;
+        try {
+          absolutePath = resolveWorkspacePath(config.workspaceRoot, subtitleRequest.path);
+        } catch (error) {
+          throw workspaceError(error);
+        }
+        if (!isStreamableWorkspaceFile(absolutePath)) throw new GatewayError(415, "WORKSPACE_FILE_UNSUPPORTED", "Only video and audio carry subtitle streams.");
+        const tools = await mediaTools();
+        try {
+          const vtt = await extractSubtitleVtt(absolutePath, stream, tools);
+          replyJson(response, 200, { vtt });
+        } catch (error) {
+          throw new GatewayError(422, "MEDIA_SUBTITLE_FAILED", error instanceof Error ? error.message : "The subtitle stream could not be read.");
         }
         return;
       }

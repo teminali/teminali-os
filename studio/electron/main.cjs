@@ -11,7 +11,7 @@ const { resolveRealPath, processWithFfmpeg, formatAuditLine, findFfmpeg } = requ
 const { initScreenRecorder, shutdownScreenRecorder } = require("./screenRecorder.cjs");
 const { initVideoProjects, shutdownVideoProjects } = require("./videoProjects.cjs");
 const { initVideoExport, shutdownVideoExport } = require("./videoExport.cjs");
-const { registerWorkspaceMediaScheme, initWorkspaceMedia } = require("./workspaceMedia.cjs");
+const { registerWorkspaceMediaScheme, initWorkspaceMedia, stopWorkspaceTranscodes } = require("./workspaceMedia.cjs");
 const { initBrowserViews } = require("./browserView.cjs");
 const { attachContextMenu } = require("./contextMenu.cjs");
 
@@ -1163,6 +1163,13 @@ app.whenReady().then(async () => {
 });
 
 app.on("will-quit", () => {
+  // An ffmpeg started for a live transcode is a child of this process and
+  // outlives it if nothing kills it; a paused film would keep encoding.
+  try {
+    stopWorkspaceTranscodes();
+  } catch (error) {
+    log("Could not stop media transcodes:", error.message);
+  }
   // A global shortcut outlives the process that registered it if it is not
   // released, and the next launch would then find its own hotkey taken.
   try {

@@ -188,6 +188,31 @@
   --tl-max: #65c466;
 
   /* ---------------------------------------------------------------------
+     PLAYER — chrome that sits over picture, not over the app's greys.
+
+     The one surface in this interface whose background is unknown: a frame of
+     film, which may be a snowfield in one shot and a night interior in the
+     next. Every other token in this sheet is calibrated against a known grey,
+     and using those here would leave a control bar that vanishes over a bright
+     frame. So the player's chrome is defined against BLACK — a flat scrim, one
+     fill, no gradient — and its marks are white at fixed alphas, which is the
+     only pair that holds over both extremes.
+
+     `--player-accent` is the brand green, unchanged: the played span of the
+     scrubber is the same "this is ours and this is live" the accent means
+     everywhere else. It is the one hue on this surface.
+     --------------------------------------------------------------------- */
+  --player-scrim: rgb(0 0 0 / 0.62);      /* the control bar's own plate */
+  --player-veil: rgb(0 0 0 / 0.34);       /* over the picture while paused */
+  --player-track: rgb(255 255 255 / 0.22);
+  --player-buffered: rgb(255 255 255 / 0.38);
+  --player-ink: rgb(255 255 255 / 0.96);
+  --player-ink-dim: rgb(255 255 255 / 0.62);
+  --player-hover: rgb(255 255 255 / 0.14);
+  --player-edge: rgb(255 255 255 / 0.12);
+  --player-cue: rgb(0 0 0 / 0.78);        /* the caption plate */
+
+  /* ---------------------------------------------------------------------
      SYNTAX — Cursor's dark editor theme.
      --------------------------------------------------------------------- */
   --syn-keyword: #c586c0;

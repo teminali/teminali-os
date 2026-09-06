@@ -74,6 +74,8 @@ export interface PlausibilitySignals {
   coherence: number;
   /** What the recogniser reported, passed through for the log. -1 if unknown. */
   confidence: number;
+  /** The recogniser decoded a language the operator does not speak. */
+  foreign: boolean;
 }
 
 export interface PlausibilityVerdict {
@@ -84,6 +86,11 @@ export interface PlausibilityVerdict {
   signals: PlausibilitySignals;
 }
 
+/** The language part of a BCP-47 tag: `en-US` and `en` both give `en`. */
+export function baseLanguage(tag: string): string {
+  return tag.trim().toLowerCase().split(/[-_]/)[0] ?? "";
+}
+
 export interface PlausibilityContext {
   /**
    * 0-1 from the recogniser, or -1 when it does not report one. The local
@@ -92,6 +99,17 @@ export interface PlausibilityContext {
    * text-only evidence when it is absent rather than assuming the worst.
    */
   confidence?: number;
+  /**
+   * The language the recogniser decided this was, as it reported it. Only the
+   * detecting tier sets it; a recogniser that was *told* the language reports
+   * the language it was told and so can never disagree.
+   */
+  language?: string;
+  /**
+   * The languages the operator speaks, as base tags. Empty disables the rule
+   * entirely — an unknown expectation is not evidence of anything.
+   */
+  expected?: readonly string[];
 }
 
 /** Words, lowercased, punctuation dropped. Numbers count; bare symbols do not. */
@@ -179,8 +197,51 @@ export function scorePlausibility(text: string, context: PlausibilityContext = {
   const stripped = text.toLowerCase().replace(/[^\p{L}\p{N}\s.']/gu, "").replace(/[.\s]+$/u, "").trim();
   const hallucination = HALLUCINATION_PHRASES.includes(stripped);
 
-  const signals: PlausibilitySignals = { repetition: repetition.share, dominance, hallucination, coherence, confidence };
+  /*
+    Did the recogniser decode a language the operator does not speak?
+
+    Reported failure: the operator said "How are you?" and the transcript read
+    "Bagaimana anda lakukan?" — fluent Indonesian, a translation of what they
+    actually said. Nothing above catches it and nothing should: it does not
+    repeat, it is not an artefact phrase, every word is pronounceable, and the
+    recogniser was confident. It is wrong for exactly one reason, and that
+    reason was sitting unused in the result all along — whisper reports the
+    language it decoded, and `onResult` named the parameter `_language`.
+
+    This rule only ever fires on the detecting tier and only when the caller
+    can say what the operator speaks. Both unknown is silence, not suspicion.
+  */
+  const detected = context.language ? baseLanguage(context.language) : "";
+  const expected = (context.expected ?? []).map(baseLanguage).filter(Boolean);
+  const foreign = Boolean(detected) && expected.length > 0 && !expected.includes(detected);
+
+  const signals: PlausibilitySignals = {
+    repetition: repetition.share,
+    dominance,
+    hallucination,
+    coherence,
+    confidence,
+    foreign,
+  };
   const reject = (reason: string): PlausibilityVerdict => ({ plausible: false, reason, signals });
+
+  /*
+    Rejected outright, and deliberately not softened by confidence. The
+    doctrine at the top of this file applies here more than anywhere: the
+    recogniser is not unsure when it hallucinates, it is confident. Language
+    detection on a short utterance is the least reliable thing whisper does,
+    and a sentence in a language the operator does not speak is not something
+    they said, however sure the decoder was that they said it.
+
+    The bias against false rejection lives in `expected` instead of in a
+    threshold: it comes from `navigator.languages` — the operating system's own
+    list of what this person reads and speaks — so a genuinely multilingual
+    operator's languages are all in it, and pinning the language setting
+    narrows it to exactly one.
+  */
+  if (foreign) {
+    return reject(`That decoded as ${detected}, which is not a language you speak.`);
+  }
 
   /*
     A repetition loop. Three conditions together, because each alone has an

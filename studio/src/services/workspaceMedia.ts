@@ -24,11 +24,32 @@ export const WORKSPACE_MEDIA_TYPES: Record<string, string> = {
   ".webm": "video/webm",
   ".m4v": "video/x-m4v",
   ".mov": "video/quicktime",
+  ".mkv": "video/x-matroska",
+  ".avi": "video/x-msvideo",
+  ".wmv": "video/x-ms-wmv",
+  ".flv": "video/x-flv",
+  ".mpg": "video/mpeg",
+  ".mpeg": "video/mpeg",
+  ".m2ts": "video/mp2t",
+  ".mts": "video/mp2t",
+  ".3gp": "video/3gpp",
+  ".ogv": "video/ogg",
+  ".vob": "video/mpeg",
+  ".mxf": "application/mxf",
+  ".asf": "video/x-ms-asf",
+  ".f4v": "video/x-f4v",
   ".mp3": "audio/mpeg",
   ".m4a": "audio/mp4",
   ".wav": "audio/wav",
   ".ogg": "audio/ogg",
   ".flac": "audio/flac",
+  ".aac": "audio/aac",
+  ".opus": "audio/ogg",
+  ".aiff": "audio/aiff",
+  ".aif": "audio/aiff",
+  ".wma": "audio/x-ms-wma",
+  ".amr": "audio/amr",
+  ".weba": "audio/webm",
 };
 
 export interface WorkspaceMedia {
@@ -47,6 +68,37 @@ export interface WorkspaceMediaBridge {
    * reads the root off its own gateway.
    */
   announceRoot(root: string): boolean;
+  /**
+   * The same file through ffmpeg, for a container or codec Chromium cannot
+   * play as it is. There is no file behind that URL and so nothing to seek
+   * in: `start`, in seconds, is where the new stream begins. Absent in a
+   * build older than the transcode, hence optional.
+   */
+  transcodeUrl?(encodedPath: string, start?: number): string | null;
+}
+
+/** What `server/media-probe.js` reads out of a file with ffprobe. */
+export interface MediaProbe {
+  container: string;
+  format: string | null;
+  duration: number | null;
+  video: { codec: string; profile: string | null; width: number | null; height: number | null; fps: number | null; pixelFormat: string | null } | null;
+  audio: { codec: string; channels: number | null; sampleRate: number | null } | null;
+  subtitles: { stream: number; codec: string; language: string | null; title: string | null; text: boolean }[];
+}
+
+/** How the file will be played: as it is, rewrapped, re-encoded, or not at all. */
+export interface PlaybackPlan {
+  mode: "direct" | "remux" | "transcode" | "unplayable";
+  video: "copy" | "h264" | null;
+  audio: "copy" | "aac" | null;
+  reason: string;
+}
+
+export interface MediaProbeResult {
+  probe: MediaProbe | null;
+  plan: PlaybackPlan;
+  tools: { ffmpeg: boolean; ffprobe: boolean };
 }
 
 function extensionOf(path: string): string {
@@ -73,9 +125,66 @@ export function workspaceMediaBridge(): WorkspaceMediaBridge | null {
  * Each segment encoded on its own, so a `#` or a space in a file name reaches
  * main as part of the path and not as a fragment or a break.
  */
+function encodePath(path: string): string {
+  return path.split("/").map(encodeURIComponent).join("/");
+}
+
 export function workspaceMediaUrl(bridge: WorkspaceMediaBridge | null | undefined, path: string): string | null {
   if (!bridge) return null;
-  return bridge.url(path.split("/").map(encodeURIComponent).join("/"));
+  return bridge.url(encodePath(path));
+}
+
+/**
+ * The URL for a file Chromium cannot demux or decode as it is: ffmpeg reads it
+ * and writes fragmented MP4 down the same protocol. Because there is no file
+ * behind it, a seek is a *new stream* at another `start`, not a byte range —
+ * which is why the player rebuilds its element instead of setting
+ * `currentTime`.
+ */
+export function workspaceTranscodeUrl(bridge: WorkspaceMediaBridge | null | undefined, path: string, start = 0): string | null {
+  if (!bridge?.transcodeUrl) return null;
+  return bridge.transcodeUrl(encodePath(path), start);
+}
+
+/**
+ * What the file holds and how it will be played, from the gateway's ffprobe.
+ *
+ * A miss is not fatal: the caller hands the bytes to the element, which is
+ * what happened before this route existed, and the element says for itself
+ * when it cannot play them.
+ */
+export async function probeWorkspaceMedia(path: string, signal?: AbortSignal): Promise<MediaProbeResult | null> {
+  const { GatewayClient } = await import("./gatewayClient");
+  try {
+    const response = await GatewayClient.request("/api/workspace/media/probe", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ path }),
+      signal,
+    });
+    if (!response.ok) return null;
+    return (await response.json()) as MediaProbeResult;
+  } catch {
+    return null;
+  }
+}
+
+/** One embedded subtitle stream as WebVTT text, or null when ffmpeg cannot write it. */
+export async function readEmbeddedSubtitle(path: string, stream: number, signal?: AbortSignal): Promise<string | null> {
+  const { GatewayClient } = await import("./gatewayClient");
+  try {
+    const response = await GatewayClient.request("/api/workspace/media/subtitle", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ path, stream }),
+      signal,
+    });
+    if (!response.ok) return null;
+    const body = (await response.json()) as { vtt?: string };
+    return typeof body.vtt === "string" ? body.vtt : null;
+  } catch {
+    return null;
+  }
 }
 
 export const NEEDS_DESKTOP_APP = "Playing video and audio needs the desktop app — a browser build has no media protocol to stream from.";

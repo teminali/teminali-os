@@ -4,18 +4,19 @@ import { WorkspaceService } from "../../../services/workspaceService";
 import { highlightCode } from "../../../utils/syntaxHighlight";
 import { IconButton, EmptyState, Button } from "../../ui";
 import { usePanelStore, type PanelTab } from "../../../store/panelStore";
+import { usePlayerStore } from "../../../store/playerStore";
 import { useStudioStore } from "../../../store/studioStore";
 import { formatBytes } from "../../../services/guardianService";
 import { describesWorkspaceDrop, resolveWorkspaceDrop, workspaceRelative } from "../../../services/workspaceDrop";
 import { SheetPreview } from "./SheetPreview";
 import {
   NEEDS_DESKTOP_APP,
-  describeMediaError,
-  formatDuration,
   workspaceMediaBridge,
   workspaceMediaOf,
   workspaceMediaUrl,
 } from "../../../services/workspaceMedia";
+import { findTreeNode, subtitleTracksFor, episodeTitle, type SubtitleTrack } from "../../../services/workspaceGallery";
+import { MediaPlayer } from "./MediaPlayer";
 
 /**
  * File viewer and editor.
@@ -449,7 +450,7 @@ const PreviewSurface: React.FC<{ preview: Preview; path?: string }> = ({ preview
   }
 
   if (preview.mimeType.startsWith("video/") || preview.mimeType.startsWith("audio/")) {
-    return <MediaPreview url={preview.url} kind={preview.mimeType.startsWith("video/") ? "video" : "audio"} path={path ?? ""} />;
+    return <MediaPreview kind={preview.mimeType.startsWith("video/") ? "video" : "audio"} path={path ?? ""} />;
   }
 
   if (preview.mimeType === XLSX_MIME) {
@@ -483,70 +484,36 @@ const PreviewSurface: React.FC<{ preview: Preview; path?: string }> = ({ preview
 };
 
 /**
- * Video and audio, played by Chromium.
+ * Video and audio, in the app's own player.
  *
- * The element is the player: seeking, volume, fullscreen and picture-in-
- * picture come from `controls`, and the bytes come from `teminali-media://`,
- * which answers HTTP Range so the scrubber works. Chromium demuxes and decodes
- * the file itself, and that is the whole promise — H.264 and VP9 video; AAC,
- * MP3, Opus, FLAC and WAV audio. A container the gateway admits can still hold
- * a codec the player lacks (ProRes in a .mov, HEVC in an .mp4), and when it
- * does the element fires `error` and this names the codec and the ffmpeg line
- * that fixes it, in place of a control bar that never moves. Real-time
- * transcoding is a separate project and is not pretended here.
+ * The element used to carry `controls`, which is Chromium's control bar: a
+ * closed shadow tree nothing outside it can read or press. That cost three
+ * things — subtitles from a sidecar file, a timeline that survives a live
+ * ffmpeg transcode, and an agent able to press play — so `MediaPlayer` owns
+ * the controls now and this component only decides what to hand it: the
+ * sidecar subtitle files sitting beside the video in the tree, and where the
+ * operator left off.
+ *
+ * The tree is read rather than the disk: `studioStore.files` already holds the
+ * folder, so the sidecars are found without a second listing and cannot
+ * disagree with what the Explorer shows.
  */
-const MediaPreview: React.FC<{ url: string; kind: "video" | "audio"; path: string }> = ({ url, kind, path }) => {
-  const [meta, setMeta] = React.useState<string | null>(null);
-  const [failure, setFailure] = React.useState<string | null>(null);
+const MediaPreview: React.FC<{ kind: "video" | "audio"; path: string }> = ({ kind, path }) => {
+  const files = useStudioStore((state) => state.files);
+  const positions = usePlayerStore((state) => state.positions);
 
-  const onLoadedMetadata = (event: React.SyntheticEvent<HTMLMediaElement>) => {
-    const element = event.currentTarget;
-    const parts = [formatDuration(element.duration)];
-    if (element instanceof HTMLVideoElement && element.videoWidth) parts.push(`${element.videoWidth} × ${element.videoHeight}`);
-    setMeta(parts.filter(Boolean).join(" · "));
-  };
-  const onError = (event: React.SyntheticEvent<HTMLMediaElement>) => {
-    setFailure(describeMediaError(event.currentTarget.error?.code ?? 0, path));
-  };
+  const sidecars: SubtitleTrack[] = React.useMemo(() => {
+    const folder = path.includes("/") ? path.slice(0, path.lastIndexOf("/")) : "";
+    const parent = folder ? findTreeNode(files, folder) : null;
+    const siblings = folder ? parent?.children ?? [] : files;
+    const self = siblings.find((sibling) => sibling.path === path);
+    return self ? subtitleTracksFor(self, siblings) : [];
+  }, [files, path]);
 
-  if (failure) {
-    return (
-      <EmptyState
-        icon={<AlertTriangle size={26} strokeWidth={1.6} />}
-        title="Chromium cannot play this file"
-        detail={failure}
-      />
-    );
-  }
+  const name = path.split("/").pop() ?? path;
+  const position = positions[path];
+  // Resuming something all but finished lands on the credits; that starts again.
+  const startAt = position && position.duration > 0 && position.time / position.duration < 0.9 ? position.time : 0;
 
-  return (
-    <div className="flex-1 min-h-0 flex flex-col bg-surface-sunken">
-      <div className="flex-1 min-h-0 flex items-center justify-center p-6">
-        {kind === "video" ? (
-          <video
-            src={url}
-            controls
-            preload="metadata"
-            className="max-w-full max-h-full outline-none"
-            onLoadedMetadata={onLoadedMetadata}
-            onError={onError}
-          />
-        ) : (
-          <audio
-            src={url}
-            controls
-            preload="metadata"
-            className="w-full max-w-xl"
-            onLoadedMetadata={onLoadedMetadata}
-            onError={onError}
-          />
-        )}
-      </div>
-      <div className="h-8 flex-shrink-0 flex items-center gap-2 px-4 border-t border-edge-chrome text-2xs text-ink-muted font-mono">
-        <span>{meta ?? "Reading…"}</span>
-        <div className="flex-1" />
-        <span className="text-ink-disabled truncate">Chromium player · H.264, VP9, AAC, MP3, Opus, FLAC, WAV</span>
-      </div>
-    </div>
-  );
+  return <MediaPlayer path={path} kind={kind} title={episodeTitle(name)} sidecars={sidecars} startAt={startAt} />;
 };

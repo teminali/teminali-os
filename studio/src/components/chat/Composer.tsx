@@ -1,12 +1,12 @@
 import React, { useEffect, useRef, useState } from "react";
-import { Lock, Plus, Square, Mic, MicOff, X } from "lucide-react";
+import { Plus, Square, Mic, MicOff, X } from "lucide-react";
 import { VoiceButton } from "../voice/VoiceButton";
 import { VoiceOrb } from "../voice/VoiceOrb";
 import { VoiceReviewBar } from "../voice/VoiceReviewBar";
 import { VoiceHud } from "../voice/VoiceHud";
 import type { UseVoiceResult } from "../../hooks/useVoice";
 import { useAssistantSession } from "../assistant/AssistantContext";
-import { ModelPicker } from "./ModelPicker";
+import { ModelPicker, PROFILE_ICONS } from "./ModelPicker";
 import { ComposerMenu } from "./ComposerMenu";
 import { readTrigger, type ActiveTrigger, type ComposerMenuItem } from "../../utils/composerTrigger";
 import { AttachmentStrip } from "./AttachmentStrip";
@@ -185,6 +185,8 @@ export const Composer: React.FC<ComposerProps> = ({
   const [menuItems, setMenuItems] = useState<ComposerMenuItem[]>([]);
   const [menuIndex, setMenuIndex] = useState(0);
   const setSkill = useStudioStore((state) => state.setSkill);
+  // Which engine this composer is actually on, for the trigger's glyph.
+  const currentProfile = useStudioStore((state) => state.currentProfile);
 
   const syncTrigger = (element: HTMLTextAreaElement) => {
     const next = readTrigger(element.value, element.selectionStart ?? element.value.length);
@@ -494,7 +496,7 @@ export const Composer: React.FC<ComposerProps> = ({
                 className="flex items-center gap-1.5 text-sm text-ink-dim hover:text-ink-high transition-colors duration-ds ease-ds"
               >
                 {modelName}
-                <Lock size={12} className="text-ink-soft" strokeWidth={1.8} />
+                {PROFILE_ICONS[currentProfile]}
               </button>
               <ModelPicker open={pickerOpen} onClose={() => setPickerOpen(false)} />
             </div>

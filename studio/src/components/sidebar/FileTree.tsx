@@ -9,6 +9,7 @@ import { WorkspaceService } from "../../services/workspaceService";
 import { languageForPath as languageFor } from "../../services/language";
 import { WORKSPACE_PATH_MIME } from "../../services/workspaceDrop";
 
+
 /**
  * A file's glyph, tinted in its language colour.
  *
@@ -69,7 +70,7 @@ export const FileTreeItem: React.FC<{
   onError?: (message: string) => void;
 }> = ({ item, depth = 0, filter = "", onError }) => {
   const [isLoading, setIsLoading] = useState(false);
-  const { showFile, tabs, activeTabId, expandedPaths, toggleExpanded, revealTarget, clearRevealTarget } = useStudioStore();
+  const { showFile, showFolder, tabs, activeTabId, expandedPaths, toggleExpanded, revealTarget, clearRevealTarget } = useStudioStore();
   const isOpen = expandedPaths.has(item.path);
   const rowRef = useRef<HTMLButtonElement>(null);
   const activeTab = tabs.find((tab) => tab.id === activeTabId);
@@ -115,7 +116,15 @@ export const FileTreeItem: React.FC<{
 
   const handleClick = async () => {
     if (isDirectory) {
+      /*
+        A folder shows what is in it: the gallery in the panel, *and* the
+        folder expanded in the tree, because a click that opened a panel and
+        took the expansion away would answer half the gesture. One gallery
+        panel navigates, so clicking through a tree does not leave a tab
+        behind at every level — see store/panelStore.ts.
+      */
       toggleExpanded(item.path);
+      showFolder(item.path);
       return;
     }
     setIsLoading(true);

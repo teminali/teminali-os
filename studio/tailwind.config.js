@@ -375,6 +375,13 @@ export default {
           "0%,100%": { transform: "scale(1)" },
           "50%": { transform: "scale(1.022)" },
         },
+        // A ball wants air under it. A slow vertical drift, on a period that
+        // does not divide the breath's, so the two never land together and
+        // start reading as one pulse.
+        orbFloat: {
+          "0%,100%": { transform: "translateY(1.1%)" },
+          "50%": { transform: "translateY(-1.9%)" },
+        },
         // The same breath while it is being spoken to: shallower and quicker,
         // which is what attention looks like on a person.
         orbAttend: {
@@ -415,6 +422,7 @@ export default {
         listening: "listening 1.4s var(--ease) infinite",
         orbBreathe: "orbBreathe 4.2s ease-in-out infinite",
         orbAttend: "orbAttend 1.9s ease-in-out infinite",
+        orbFloat: "orbFloat 5.6s ease-in-out infinite",
         orbThink: "orbThink 2.4s linear infinite",
         overlayTarget: "overlayTarget var(--dur-slow) var(--ease) both",
         "fade-in": "fade-in var(--dur-fast) var(--ease)",

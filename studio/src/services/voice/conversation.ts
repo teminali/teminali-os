@@ -24,6 +24,7 @@ import { Endpointer, DEFAULT_ENDPOINTER } from "./turnTaking";
 import { ProsodyTracker } from "./prosody";
 import {
   applyClassifier,
+  CLASSIFIER_NONSENSE,
   classifierPrompt,
   parseClassifier,
   scoreAddressing,
@@ -39,6 +40,7 @@ import { cleanTranscript, isNonSpeechOrBlank, polishIsTrustworthy, polishPrompt,
 import { scorePlausibility } from "./plausibility";
 import { createRoster, probeAll, resolve, type ProviderRoster, type ResolvedProviders } from "./providers";
 import {
+  DEFAULT_LANGUAGE,
   DEFAULT_VOICE_SETTINGS,
   VoiceError,
   type AddressingVerdict,
@@ -119,8 +121,18 @@ type Listener = (snapshot: VoiceSnapshot) => void;
 
 /** Sustained speech needed to count as a barge-in rather than a cough or speaker bleed. */
 const BARGE_IN_FRAMES = 18;
+/**
+ * How little it takes to talk over the greeting: three frames, 60 ms.
+ *
+ * `BARGE_IN_FRAMES` is 18 — 360 ms of *unbroken* voicing — because cutting a
+ * reply short on a cough is worse than finishing the sentence. The greeting is
+ * the opposite case. It plays at the one moment the operator has just reached
+ * for the microphone and is therefore most likely to be talking already, and
+ * nothing is lost by abandoning it: it says "hey there", not an answer.
+ */
+const GREETING_YIELD_FRAMES = 3;
 /** Minimum gap between spoken progress lines, so a busy run speaks timely step updates without droning. */
-const PROGRESS_GAP_MS = 3500;
+const PROGRESS_GAP_MS = 1500;
 /** No progress line this soon after the operator spoke; the reply to them comes first. */
 const PROGRESS_AFTER_TURN_MS = 1200;
 /** "Still on it." is said at most this often, however much encouragement arrives. */
@@ -154,6 +166,8 @@ export class VoiceEngine {
   private level = 0;
   private transcript = "";
   private finalTranscript = "";
+  /** The language the recogniser decoded this turn as, when it reports one. */
+  private turnLanguage = "";
   /**
    * The weakest confidence any part of this turn came back with, or -1 when
    * the engine reported none. The weakest rather than the last, because an
@@ -173,6 +187,19 @@ export class VoiceEngine {
   private isStreamDone = false;
   private suspendedSpeech: string[] | null = null;
   private currentlySpeakingText: string | null = null;
+  /*
+    Which reply the audio in flight belongs to.
+
+    `tts.speak()` does not resolve until the sidecar has rendered and scheduled
+    the first clause, and until it does there is no `SynthesisHandle` to cancel
+    — so `dropSpeech()` had nothing to stop, and a reply the operator had
+    already talked over began playing the moment its render landed. The epoch
+    is bumped by every drop; a `speak()` whose epoch is stale by the time it
+    resolves cancels itself instead of speaking.
+  */
+  private speechEpoch = 0;
+  /** A `speak()` is in flight and has not yet produced an audible clause. */
+  private speechPending = false;
   private readonly echo = new EchoGuard();
   /** What was heard and deliberately not answered. See `ambientMemory.ts`. */
   private readonly ambient = new AmbientMemory();
@@ -206,6 +233,9 @@ export class VoiceEngine {
   private assistantTurnEndedAt = 0;
   private assistantAskedQuestion = false;
   private bargeInRun = 0;
+  /** True from the moment the opening line is asked for until it is spoken, abandoned or dropped. */
+  private greeting = false;
+  private greetingYieldRun = 0;
   private turnStartedAt = 0;
   /**
    * Whether the recogniser emits partial text mid-utterance. whisper.cpp does
@@ -226,6 +256,8 @@ export class VoiceEngine {
   private speechWatchdogTimer: number | null = null;
   /** A reopen `onClose` skipped because a final transcript was still expected. */
   private reopenDeferred = false;
+  /** A `reopen()` is between its guard and its `listen()`. See `reopen`. */
+  private reopening = false;
   private abort: AbortController | null = null;
 
   private host: VoiceHost;
@@ -234,6 +266,9 @@ export class VoiceEngine {
     this.host = host;
     this.graph = new AudioGraph({ onFrame: (frame) => this.onFrame(frame) });
     this.profile = SpeakerProfile.load();
+    // The endpointer otherwise runs on its own defaults until the first
+    // `configure()` — which never arrives if the operator never opens settings.
+    this.applyEndpointerWindow();
   }
 
   /* ── Subscription ──────────────────────────────────────────────────────── */
@@ -303,7 +338,25 @@ export class VoiceEngine {
       } else if ((state === "hearing" || state === "thinking") && !this.streamingAsr && (!this.session?.active || this.reopenDeferred)) {
         this.reopenDeferred = false;
         void this.reopen();
-      } else if (state === "speaking" && !this.streamingAsr && this.session?.active) {
+      } else if (state === "speaking" && !this.streamingAsr && this.session?.active && !this.greeting) {
+        /*
+          The recogniser is closed while the assistant talks so that a
+          one-shot transcriber does not write down the assistant's own voice.
+
+          Not for the greeting. The greeting is spoken the instant the session
+          opens — the same instant the operator, having just tapped to talk,
+          starts their sentence — and closing the microphone for it made the
+          app deaf for exactly as long as it was saying "hey there". The
+          operator: *"during that window it seems I can not interrupt it,
+          because normally as soon as I tap to talk I start talking."* Their
+          words were not being ignored, they were never recorded, and the
+          sentence had to be repeated until one landed in a gap.
+
+          Leaving it open is safe here in a way it is not for a reply, because
+          the greeting is one short string this engine chose: `echoGuard` was
+          handed it verbatim a few lines above and strips it from anything the
+          microphone brings back.
+        */
         this.reopenDeferred = true;
         this.session.abort();
       }
@@ -317,16 +370,33 @@ export class VoiceEngine {
   configure(patch: Partial<VoiceSettings>): void {
     const tierChanged = patch.tier !== undefined && patch.tier !== this.settings.tier;
     this.settings = { ...this.settings, ...patch };
-    // The setting is the window for a turn whose finish is uncertain; a
-    // clearly finished one releases at 0.7× and a dangling clause holds to 2×.
-    // "Balanced" (900) therefore runs 630–1800 ms. The endpointer's learned
-    // pacing floor sits on top of this and is untouched by a settings change.
-    this.endpointer.configure({
-      minSilenceMs: Math.max(400, Math.round(this.settings.endpointSilenceMs * 0.7)),
-      maxSilenceMs: Math.max(Math.round(this.settings.endpointSilenceMs * 2), DEFAULT_ENDPOINTER.maxSilenceMs),
-    });
+    this.applyEndpointerWindow();
     if (tierChanged) void this.probe();
     this.emit();
+  }
+
+  /**
+   * Turn the one exposed setting into the endpointer's two windows.
+   *
+   * The setting is the window for a turn whose finish is uncertain; a clearly
+   * finished one releases at 0.7× and a dangling clause holds to 2×. The
+   * endpointer's learned pacing floor sits on top of this and is untouched by
+   * a settings change.
+   *
+   * The ceiling used to be `Math.max(setting * 2, DEFAULT_ENDPOINTER.maxSilenceMs)`,
+   * which floored every choice at the balanced default's 1800 ms — so "Snappy —
+   * 0.6s" bought a faster release on a *confident* ending and nothing at all on
+   * a hesitant one, which is the case the operator actually waits through.
+   * Picking the fast setting now means it: 0.6 runs 420–1200 ms where it used
+   * to run 420–1800. The absolute floor is the endpointer's own
+   * `minUtteranceMs` doubled — below that a window is shorter than the
+   * shortest thing it is allowed to call an utterance.
+   */
+  private applyEndpointerWindow(): void {
+    this.endpointer.configure({
+      minSilenceMs: Math.max(400, Math.round(this.settings.endpointSilenceMs * 0.7)),
+      maxSilenceMs: Math.max(DEFAULT_ENDPOINTER.minUtteranceMs * 2, Math.round(this.settings.endpointSilenceMs * 2)),
+    });
   }
 
   get currentSettings(): VoiceSettings {
@@ -386,6 +456,7 @@ export class VoiceEngine {
     this.interrupted = false;
     this.transcript = "";
     this.finalTranscript = "";
+    this.turnLanguage = "";
     this.pending = null;
     this.verdict = null;
     this.narration = null;
@@ -481,6 +552,8 @@ export class VoiceEngine {
 
   async stop(): Promise<void> {
     this.suspendedSpeech = null;
+    this.greeting = false;
+    this.greetingYieldRun = 0;
     this.currentlySpeakingText = null;
     this.speechQueue = [];
     this.isProcessingSpeechQueue = false;
@@ -533,25 +606,43 @@ export class VoiceEngine {
 
     // While the assistant is actively speaking, we watch for an interruption / barge-in.
     if (this.state === "speaking") {
-      if (!this.settings.allowBargeIn) return;
       /*
-        A film is not an interruption. Our own playback arrives as a long run
-        of voiced frames, which is precisely the shape barge-in looks for, so
-        a video playing in the Files panel cut the assistant off mid-sentence
-        as reliably as the operator could. See services/voice/selfAudio.ts.
+        The greeting is a courtesy, not a turn, so it does not get barge-in's
+        benefit of the doubt: three voiced frames and it stands down, and this
+        frame falls through to the endpointer as the operator's own. Barge-in's
+        `selfAudio` suppression is skipped with it — that rule exists to stop a
+        film in the Files panel cutting a reply off, and no film is playing two
+        frames after the microphone opened.
       */
-      if (selfAudio.audible) {
-        this.bargeInRun = 0;
+      if (this.greeting) {
+        this.greetingYieldRun = frame.voiced ? this.greetingYieldRun + 1 : 0;
+        if (this.greetingYieldRun < GREETING_YIELD_FRAMES) {
+          this.emit();
+          return;
+        }
+        this.greetingYieldRun = 0;
+        this.abandonGreeting();
+      } else {
+        if (!this.settings.allowBargeIn) return;
+        /*
+          A film is not an interruption. Our own playback arrives as a long run
+          of voiced frames, which is precisely the shape barge-in looks for, so
+          a video playing in the Files panel cut the assistant off mid-sentence
+          as reliably as the operator could. See services/voice/selfAudio.ts.
+        */
+        if (selfAudio.audible) {
+          this.bargeInRun = 0;
+          this.emit();
+          return;
+        }
+        this.bargeInRun = frame.voiced ? this.bargeInRun + 1 : 0;
+        if (this.bargeInRun >= BARGE_IN_FRAMES) {
+          this.bargeInRun = 0;
+          this.handleBargeIn();
+        }
         this.emit();
         return;
       }
-      this.bargeInRun = frame.voiced ? this.bargeInRun + 1 : 0;
-      if (this.bargeInRun >= BARGE_IN_FRAMES) {
-        this.bargeInRun = 0;
-        this.handleBargeIn();
-      }
-      this.emit();
-      return;
     }
 
     // "thinking" is a tool run or a generation in flight, and it is precisely
@@ -648,7 +739,17 @@ export class VoiceEngine {
     }
   }
 
-  private onResult(transcript: string, isFinal: boolean, _language: string, confidence = -1): void {
+  private onResult(transcript: string, isFinal: boolean, language: string, confidence = -1): void {
+    /*
+      Words are better evidence than voiced frames, and they can arrive first.
+      The microphone stays open through the greeting now, so a recogniser that
+      is already returning text has settled the question the frame counter was
+      still counting towards: someone is talking, and it is not us.
+    */
+    if (this.greeting && this.withoutEcho(cleanTranscript(transcript)).trim()) this.abandonGreeting();
+    // Kept, not discarded: a turn decoded as a language the operator does not
+    // speak is a hallucination, and this is the only place it is reported.
+    if (isFinal && language) this.turnLanguage = language;
     if (confidence >= 0) {
       this.turnConfidence = this.turnConfidence < 0 ? confidence : Math.min(this.turnConfidence, confidence);
     }
@@ -733,12 +834,68 @@ export class VoiceEngine {
     this.finalFallbackTimer = null;
   }
 
+  /**
+   * Is a listening session still wanted?
+   *
+   * A method, not an inline `this.state !== "idle"`: the compiler narrows a
+   * `this` property from an earlier guard and does not widen it again across
+   * an `await`, so written inline the post-open check reads as dead code to
+   * TypeScript — which is exactly the case it exists for, the state having
+   * changed while the recogniser was opening.
+   */
+  private stillWanted(): boolean {
+    return this.state !== "idle" && !this.abort?.signal.aborted;
+  }
+
   private async reopen(): Promise<void> {
     this.reopenDeferred = false;
     const asr = this.providers?.asr;
     if (!asr || this.state === "idle" || this.abort?.signal.aborted) return;
+
+    /*
+      **One pair of ears.** `asr.listen()` is awaited, and every caller tests
+      `!this.session?.active` *before* that await — so two reopens racing the
+      same gap both pass the test, both open a recogniser, and the second
+      assignment orphans the first. The orphan is not stopped by anything: it
+      keeps running on the same microphone with its handler still pointing at
+      `onResult`, so one spoken sentence arrives as two finals and the engine,
+      which builds a turn by appending finals, writes it down twice —
+      *"How are you doing? How are you doing?"* from a single utterance.
+
+      `webSpeech.ts` already guards the same symptom *within* a session
+      (`finalsDelivered`); that guard cannot see a second session, which is why
+      it did not catch this one. Two ways to hear double, two guards.
+    */
+    if (this.reopening) return;
+
+    /*
+      A live session is already the one pair of ears. Reopening over it costs
+      the operator the sentence they are in the middle of saying.
+
+      `abort` is not a polite close. On the non-streaming tier — which is what
+      the local whisper sidecar reports (`server/voice.js` answers
+      `streaming: false`, and `vibeVoice.ts` takes `streamingAsr` from that) —
+      the whole utterance is buffered in the recorder and transcribed in
+      `onstop`. `close()` sets `active = false` *before* it stops the recorder,
+      so `onstop` finds `active` false, emits neither a transcript nor an empty
+      final, and the audio is discarded without ever being sent. The graceful
+      `stop()` leaves `active` true and is the only path that transcribes.
+
+      The callers reach here on `!this.session?.active || this.reopenDeferred`,
+      and a stale `reopenDeferred` is enough on its own: `setState("hearing")`
+      fires on `speech-start`, so the reopen landed on the first syllable of a
+      turn and threw it away. That is what "it took 3 attempts to capture
+      'hello how are you'" was made of. The flag is cleared and the ears kept.
+    */
+    if (this.session?.active) return;
+
+    this.reopening = true;
+    // Nothing may outlive the assignment below.
+    this.session?.abort();
+    this.session = null;
+
     try {
-      this.session = await asr.listen(
+      const session = await asr.listen(
         {
           language: this.settings.language,
           continuous: true,
@@ -765,8 +922,20 @@ export class VoiceEngine {
           },
         },
       );
+      /*
+        The session was stopped while this one was opening. Without this the
+        microphone comes back up *after* voice mode was switched off, and
+        nothing holds a reference to close it.
+      */
+      if (!this.stillWanted()) {
+        session.abort();
+        return;
+      }
+      this.session = session;
     } catch (error) {
       this.fail(error instanceof VoiceError ? error : new VoiceError((error as Error).message, "ASR_FAILED"));
+    } finally {
+      this.reopening = false;
     }
   }
 
@@ -779,7 +948,8 @@ export class VoiceEngine {
 
     if (suspended && suspended.length > 0) {
       this.speechQueue = [...suspended, ...this.speechQueue];
-      this.setState("speaking");
+      // Thinking until a clause is audible, like every other speak path.
+      this.setState("thinking");
       void this.processSpeechQueue();
       return;
     }
@@ -799,8 +969,14 @@ export class VoiceEngine {
     this.awaitingFinal = false;
     const raw = cleanTranscript(this.transcript);
     const confidence = this.turnConfidence;
+    // Read before the reset below, exactly like `confidence`. Left as a field
+    // read at the `scorePlausibility` call site it was always the empty string
+    // by the time the gate saw it, and the foreign-language rule — the whole
+    // point of carrying the language this far — could never fire.
+    const language = this.turnLanguage;
     this.transcript = "";
     this.finalTranscript = "";
+    this.turnLanguage = "";
     this.turnConfidence = -1;
     this.endpointer.reset();
 
@@ -866,7 +1042,11 @@ export class VoiceEngine {
       operator asked for the rejection to land before the text becomes a
       prompt.
     */
-    const plausibility = scorePlausibility(heard, { confidence });
+    const plausibility = scorePlausibility(heard, {
+      confidence,
+      language,
+      expected: this.expectedLanguages(),
+    });
     if (!plausibility.plausible) {
       this.lastRejected = {
         text: heard,
@@ -1028,6 +1208,26 @@ export class VoiceEngine {
     await this.send(repaired.repaired);
   }
 
+  /**
+   * The languages the operator speaks, as base tags, for the foreign-language
+   * rule in `plausibility.ts`.
+   *
+   * A pinned language setting is an exact answer and narrows this to one. On
+   * `auto` — the default, and the only setting under which the recogniser can
+   * disagree at all — the answer comes from `navigator.languages`, which is
+   * the operating system's own ordered list of what this person reads and
+   * speaks. That is why the rule can afford to reject outright: the list is
+   * the operator's, not a guess, and a multilingual operator's languages are
+   * already in it. `DEFAULT_LANGUAGE` is added because the product's own
+   * language is always understood here.
+   */
+  private expectedLanguages(): string[] {
+    const pinned = this.settings.language;
+    if (pinned && pinned !== "auto") return [pinned];
+    const fromSystem = typeof navigator !== "undefined" ? [...(navigator.languages ?? [navigator.language])] : [];
+    return [...new Set([...fromSystem.filter(Boolean), DEFAULT_LANGUAGE])];
+  }
+
   /** Blend the cheap signals, then pay for the model only if still unsure. */
   private async judgeAddressing(text: string, durationSeconds: number): Promise<AddressingVerdict> {
     const context: AddressingContext = {
@@ -1047,7 +1247,24 @@ export class VoiceEngine {
     try {
       const reply = await this.completeWithin(classifierPrompt(text, this.host.lastAssistantText()), CLASSIFIER_TIMEOUT_MS);
       const adjustment = parseClassifier(reply);
-      return adjustment === null ? verdict : applyClassifier(verdict, adjustment);
+      if (adjustment === null) return verdict;
+      /*
+        Not "addressed to someone else" — *not speech*. The deterministic
+        layers reject what they can prove for free; this is the same round trip
+        they already pay for when the cheap signals cannot place an utterance,
+        and it catches what survives them and is in the right language: room
+        noise decoded into real words, a fragment of a video the microphone
+        picked up, half of someone else's sentence.
+      */
+      if (adjustment === CLASSIFIER_NONSENSE) {
+        return {
+          directed: false,
+          confidence: 0.9,
+          reason: "The local model read it as not being speech.",
+          signals: { ...verdict.signals, classifier: null },
+        };
+      }
+      return applyClassifier(verdict, adjustment);
     } catch {
       // A classifier failure must never silence the assistant.
       return verdict;
@@ -1156,12 +1373,21 @@ export class VoiceEngine {
     const tts = this.providers?.tts;
     if (!tts) return;
 
-    this.setState("speaking");
-    this.graph.setDucked(true);
+    const epoch = this.speechEpoch;
+    this.speechPending = true;
+    this.greeting = true;
+    this.greetingYieldRun = 0;
     this.echo.remember(this.settings.greeting);
     try {
-      this.synthesis = await tts.speak({
+      const handle = await tts.speak({
         text: this.settings.greeting.trim(),
+        // Rendering the greeting takes long enough that the operator can be
+        // mid-sentence by the time its audio is ready. `beginAudibleSpeech`
+        // refuses the floor in that case, and a greeting that cannot have the
+        // floor is not worth saying at all.
+        onStart: () => {
+          if (!this.beginAudibleSpeech(epoch)) this.abandonGreeting();
+        },
         language: this.settings.language === "auto" ? navigator.language : this.settings.language,
         voice: this.settings.ttsVoice ?? undefined,
         rate: paceFor(this.settings.ttsRate, this.settings.greeting),
@@ -1172,6 +1398,7 @@ export class VoiceEngine {
           }
         },
         onEnd: () => {
+          this.greeting = false;
           this.level = 0;
           this.synthesis = null;
           this.echo.markEnded();
@@ -1179,12 +1406,47 @@ export class VoiceEngine {
           if (this.state === "speaking") this.setState("listening");
         },
       });
+      if (epoch !== this.speechEpoch) {
+        this.greeting = false;
+        handle.cancel();
+        return;
+      }
+      this.synthesis = handle;
     } catch {
+      this.greeting = false;
+      this.speechPending = false;
       this.level = 0;
       this.echo.markEnded();
       this.graph.setDucked(false);
-      if (this.state === "speaking") this.setState("listening");
+      // "speaking" only if a clause got out before it failed; otherwise this is
+      // still the thinking state the wait was shown as.
+      if (this.state === "speaking" || this.state === "thinking") this.setState("listening");
     }
+  }
+
+  /**
+   * Stand down mid-greeting, because the operator is talking.
+   *
+   * Bumping the epoch is what makes this safe to call before `tts.speak()` has
+   * resolved: the handle that arrives afterwards fails its own epoch check and
+   * cancels itself, so there is no window in which the greeting comes back
+   * after being abandoned. The state goes to `listening` rather than `hearing`
+   * because nothing has been transcribed yet — `onFrame` falls straight through
+   * to the endpointer on the same frame, and the operator's sentence is timed
+   * from its real beginning rather than from wherever the greeting let go.
+   */
+  private abandonGreeting(): void {
+    if (!this.greeting) return;
+    this.greeting = false;
+    this.greetingYieldRun = 0;
+    this.speechEpoch += 1;
+    this.speechPending = false;
+    this.synthesis?.cancel();
+    this.synthesis = null;
+    this.echo.markEnded();
+    this.graph.setDucked(false);
+    this.level = 0;
+    if (this.state === "speaking") this.setState(this.transcript ? "hearing" : "listening");
   }
 
   /**
@@ -1250,8 +1512,11 @@ export class VoiceEngine {
     const timeoutMs = Math.max(14000, text.length * 150);
     this.speechWatchdogTimer = window.setTimeout(() => {
       this.speechWatchdogTimer = null;
-      if (this.currentlySpeakingText === text && this.state === "speaking") {
+      // `speechPending` too: the wait for a clause is shown as thinking now, and
+      // a synthesiser that never answers must still be given up on.
+      if (this.currentlySpeakingText === text && (this.state === "speaking" || this.speechPending)) {
         console.warn("[VoiceEngine] Speech playback watchdog fired for:", text);
+        this.speechPending = false;
         this.level = 0;
         this.currentlySpeakingText = null;
         try {
@@ -1262,6 +1527,37 @@ export class VoiceEngine {
         void this.processSpeechQueue();
       }
     }, timeoutMs);
+  }
+
+  /**
+   * The first clause of a reply is audible.
+   *
+   * **The state says what the operator can hear, not what we intend.** Every
+   * speak path used to call `setState("speaking")` before awaiting the
+   * synthesiser, so the HUD announced speech — and the orb its speaking face —
+   * for the whole of the request and the first clause's render. The operator:
+   * *"the chatbot starts talking before the voice is starting to get heard."*
+   * That window is thinking, and it is now shown as thinking; `speaking`
+   * begins on the provider's `onStart`, which both providers fire when the
+   * first clause is scheduled.
+   *
+   * Returns false when the reply was dropped while its audio was rendering, in
+   * which case the caller must not speak it.
+   */
+  private beginAudibleSpeech(epoch: number): boolean {
+    if (epoch !== this.speechEpoch) return false;
+    /*
+      The operator got there first.
+      `speaking` closes the recogniser and stops feeding the endpointer, so
+      taking the floor from someone who is already mid-sentence does not talk
+      over them — it deletes them. Audio that was rendered while they started
+      is not worth that, whoever asked for it.
+    */
+    if (this.state === "hearing" || this.transcript.trim()) return false;
+    this.speechPending = false;
+    if (this.state !== "idle") this.setState("speaking");
+    this.graph.setDucked(true);
+    return true;
   }
 
   private clearSpeechWatchdog(): void {
@@ -1333,8 +1629,13 @@ export class VoiceEngine {
     }
 
     this.interrupted = false;
-    this.setState("speaking");
-    this.graph.setDucked(true);
+    /*
+      Not `setState("speaking")` yet — see `beginAudibleSpeech`. Ducking waits
+      with it: there is nothing to duck under while the clause is still being
+      rendered, and dropping the other audio early only makes the wait louder.
+    */
+    const epoch = this.speechEpoch;
+    this.speechPending = true;
     this.echo.remember(text);
 
     this.armSpeechWatchdog(text);
@@ -1346,9 +1647,10 @@ export class VoiceEngine {
     this.preparedSpeech = null;
 
     try {
-      this.synthesis = await tts.speak({
+      const handle = await tts.speak({
         text,
         ...(prepared ? { prepared } : {}),
+        onStart: () => this.beginAudibleSpeech(epoch),
         onBoundary: (charIndex) => this.warmNextBlock(tts, text, charIndex),
         language: this.settings.language === "auto" ? navigator.language : this.settings.language,
         voice: this.settings.ttsVoice ?? undefined,
@@ -1368,15 +1670,26 @@ export class VoiceEngine {
           void this.processSpeechQueue();
         },
       });
+      /*
+        The operator talked over this reply while it was still rendering. The
+        handle only exists now, which is the first moment it could be stopped.
+      */
+      if (epoch !== this.speechEpoch) {
+        handle.cancel();
+        return;
+      }
+      this.synthesis = handle;
     } catch (ttsErr) {
+      this.speechPending = false;
       console.warn("[VoiceEngine] Primary TTS failed, trying built-in speech fallback:", ttsErr);
       const fallback = this.roster.builtin?.capabilities.tts && this.roster.builtin !== tts
         ? this.roster.builtin
         : null;
       if (fallback) {
         try {
-          this.synthesis = await fallback.speak({
+          const fallbackHandle = await fallback.speak({
             text,
+            onStart: () => this.beginAudibleSpeech(epoch),
             language: this.settings.language === "auto" ? navigator.language : this.settings.language,
             voice: undefined,
             rate: paceFor(this.settings.ttsRate, text),
@@ -1395,11 +1708,17 @@ export class VoiceEngine {
               void this.processSpeechQueue();
             },
           });
+          if (epoch !== this.speechEpoch) {
+            fallbackHandle.cancel();
+            return;
+          }
+          this.synthesis = fallbackHandle;
           return;
         } catch (fbErr) {
           console.error("[VoiceEngine] Fallback speech synthesis failed:", fbErr);
         }
       }
+      this.speechPending = false;
       this.clearSpeechWatchdog();
       this.level = 0;
       this.currentlySpeakingText = null;
@@ -1512,10 +1831,8 @@ export class VoiceEngine {
     this.synthesis = null;
 
     const inSession = this.state !== "idle";
-    if (inSession) {
-      this.setState("speaking");
-      this.graph.setDucked(true);
-    }
+    const epoch = this.speechEpoch;
+    this.speechPending = true;
 
     const restore = () => {
       this.synthesis = null;
@@ -1537,8 +1854,12 @@ export class VoiceEngine {
 
     this.echo.remember(spoken);
     try {
-      this.synthesis = await tts.speak({
+      const handle = await tts.speak({
         text: spoken,
+        onStart: () => {
+          if (inSession) this.beginAudibleSpeech(epoch);
+          else this.speechPending = false;
+        },
         language: this.settings.language === "auto" ? navigator.language : this.settings.language,
         voice: this.settings.ttsVoice ?? undefined,
         rate: paceFor(this.settings.ttsRate, spoken),
@@ -1553,7 +1874,13 @@ export class VoiceEngine {
           restore();
         },
       });
+      if (epoch !== this.speechEpoch) {
+        handle.cancel();
+        return;
+      }
+      this.synthesis = handle;
     } catch {
+      this.speechPending = false;
       this.level = 0;
       restore();
     }
@@ -1580,14 +1907,31 @@ export class VoiceEngine {
     this.narration = clean;
 
     const now = Date.now();
-    const quiet = this.suspendedSpeech === null && !this.isProcessingSpeechQueue && this.speechQueue.length === 0;
+    /*
+      Silent, or already talking about the run.
+
+      `quiet` used to mean "saying nothing at all", which dropped every step
+      that started while an earlier step was still being read — so a run that
+      moved faster than the sentence describing it announced its first step and
+      then went quiet for a minute. The operator: *"it is not talking through
+      all the steps."* Commentary may follow commentary; `speakInterjection`
+      queues it behind the line in progress, and `PROGRESS_GAP_MS` is what
+      keeps that from becoming a drone.
+
+      A reply is still not interrupted. `interjecting` is false whenever the
+      speech in flight is an answer to the operator, and `suspendedSpeech`
+      being non-null means a reply is waiting to resume behind a barge-in —
+      neither is something a step line may talk over.
+    */
+    const idle = !this.isProcessingSpeechQueue && this.speechQueue.length === 0;
+    const quiet = this.suspendedSpeech === null && (idle || this.interjecting);
     const allowed =
       this.mode === "conversation" &&
       this.settings.speakReplies &&
       this.settings.narrateProgress &&
       quiet &&
       Boolean(this.host.isBusy?.()) &&
-      (this.state === "thinking" || this.state === "listening") &&
+      (this.state === "thinking" || this.state === "listening" || (this.state === "speaking" && this.interjecting)) &&
       now - this.lastProgressSpokenAt >= PROGRESS_GAP_MS &&
       now - this.lastUserTurnAt >= PROGRESS_AFTER_TURN_MS;
 
@@ -1714,6 +2058,7 @@ export class VoiceEngine {
     this.awaitingFinal = false;
     this.transcript = "";
     this.finalTranscript = "";
+    this.turnLanguage = "";
     this.endpointer.reset();
     this.lastIntent = { intent: "stop", reason: "Asked to stop.", text: spoken, at: Date.now() };
     this.lastUserTurnAt = Date.now();
@@ -1723,6 +2068,11 @@ export class VoiceEngine {
 
   /** Stop talking and forget what was queued. The run itself is untouched. */
   private dropSpeech(): void {
+    // Anything still rendering belongs to a reply that no longer exists.
+    this.speechEpoch += 1;
+    this.speechPending = false;
+    this.greeting = false;
+    this.greetingYieldRun = 0;
     this.clearSpeechWatchdog();
     this.suspendedSpeech = null;
     this.speechQueue = [];

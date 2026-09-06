@@ -109,6 +109,8 @@ type AgentEvent =
   | { type: "edit"; path: string; before: string; after: string; existedBefore: boolean; size: number | null; modified: string | null }
   | { type: "workspace"; action: "reveal"; path: string }
   | { type: "workspace"; action: "open-file"; path: string }
+  | { type: "workspace"; action: "open-folder"; path: string }
+  | { type: "workspace"; action: "player"; command: { action: string; value?: number | string | boolean } }
   | { type: "workspace"; action: "open-project"; path: string; name: string; kind?: "video" | "code" }
   | { type: "workspace"; action: "browse"; url: string; newTab: boolean }
   /* The agent asking to look through the camera. Answered here rather than
