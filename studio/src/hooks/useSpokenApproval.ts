@@ -80,8 +80,15 @@ export function useSpokenApproval(voiceRef: React.MutableRefObject<UseVoiceResul
     const voice = voiceRef.current;
     if (!isListening(voice)) return;
     spokenFor.current = pending.id;
+    /*
+      `expectsAnswer` is what opens the engine's follow-up window. An aside is
+      spoken outside a turn, so nothing else marks the assistant as having just
+      asked something — and without that mark the addressing gate reads the
+      one-word answer as room noise and never hands it to `consume`.
+    */
     void voice?.speakAside(
       describeApprovalRequest({ asker: pending.asker, action: pending.action, alwaysLabel: pending.alwaysLabel }),
+      { expectsAnswer: true },
     );
     // `voiceRef` is a ref and `withdraw` a stable store action.
     // eslint-disable-next-line react-hooks/exhaustive-deps

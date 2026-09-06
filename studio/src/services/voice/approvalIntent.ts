@@ -46,6 +46,7 @@ const MAX_ANSWER_WORDS = 6;
  */
 const ALWAYS = [
   /^(?:yes[,.]?\s+)?always(?:\s+allow(?:\s+(?:it|that|them))?)?$/,
+  /^(?:allow|approve|accept)\s+always$/,
   /^(?:yes[,.]?\s+)?(?:don'?t|do\s+not|no\s+need\s+to|stop)\s+ask(?:ing)?(?:\s+(?:me\s+)?again)?$/,
   /^allow\s+(?:them\s+)?all$/,
   /^always\s+(?:do|run)\s+(?:it|that)$/,
@@ -58,7 +59,16 @@ const ALWAYS = [
  */
 const ALLOW = [
   /^(?:yes|yeah|yep|yup|yah|ya|aye|sure|ok|okay|okey|alright|right|correct|approved?|granted?)$/,
+  /*
+    The bare verbs the prompt itself puts on screen. "Run" is the button and
+    "allow" is the word the spoken question uses, so both are what an operator
+    actually says back — a table that took "yes" but not "allow" was refusing
+    the vocabulary it had just taught them.
+  */
+  /^(?:allow|approve|accept|permit|run)$/,
   /^(?:yes|yeah|yep|yup|sure|ok|okay|alright)[,.]?\s+(?:please|thanks|go\s+ahead|do\s+it|run\s+it|allow\s+it|that'?s\s+fine)$/,
+  /* "yes allow", "yeah run it", "ok approve that" — an affirmative and the verb. */
+  /^(?:yes|yeah|yep|yup|sure|ok|okay|alright)[,.]?\s+(?:allow|approve|accept|permit|run|do)(?:\s+(?:it|that|this))?$/,
   /^(?:please\s+)?(?:go\s+ahead|carry\s+on|proceed|continue)(?:\s+(?:and\s+)?(?:do|run)\s+it)?$/,
   /^(?:you\s+can\s+|please\s+)?(?:do|run|allow|approve|accept)\s+(?:it|that|this|the\s+command)$/,
   /^(?:that'?s|thats)\s+(?:fine|ok|okay|good)$/,

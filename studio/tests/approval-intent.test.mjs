@@ -35,6 +35,42 @@ test("\"always\" beats the plain yes inside it", () => {
   }
 });
 
+test("the words the prompt itself teaches are answers", () => {
+  /*
+    The regression this pins: the spoken question says "say yes to allow it"
+    and the button says "Run", and the table took neither "allow" nor "yes
+    allow". An operator who repeated the vocabulary they had just been given
+    watched the prompt sit there — which is exactly what happened in the app.
+  */
+  for (const phrase of ["allow", "approve", "accept", "permit", "run", "Allow.", "RUN"]) {
+    assert.equal(classifyApprovalReply(phrase), "allow", phrase);
+  }
+  for (const phrase of ["yes allow", "yes, allow", "yeah allow it", "ok approve that", "sure run it", "yep do it"]) {
+    assert.equal(classifyApprovalReply(phrase), "allow", phrase);
+  }
+});
+
+test("the wider grant still wins when both readings fit", () => {
+  // "allow always" is an always, not an allow; the ALWAYS table is tried first.
+  for (const phrase of ["allow always", "approve always", "yes always", "always allow"]) {
+    assert.equal(classifyApprovalReply(phrase), "allow-always", phrase);
+  }
+});
+
+test("the new verbs did not widen into instructions", () => {
+  // Each of these contains a newly accepted verb and is not an answer to it.
+  for (const phrase of [
+    "run the tests",
+    "allow the deploy to finish",
+    "run it after the build passes",
+    "approve the pull request",
+    "accept the terms on that page",
+    "permit me to explain",
+  ]) {
+    assert.equal(classifyApprovalReply(phrase), null, phrase);
+  }
+});
+
 test("a sentence is an instruction, not an answer", () => {
   /*
     The whole safety of the feature. Each of these contains a word the tables

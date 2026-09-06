@@ -3318,6 +3318,20 @@ keyboard and the buttons are in front of them.
 It is spoken with `speakAside`, not `speakReply` — the question is not part of
 the model's turn and must not queue behind one.
 
+**An aside that asks something has to say so** (fixed 2026-09-06, found by hand
+in the running app: the prompt read itself out, the operator answered, and it
+went on standing). The addressing gate (§6.4) is what decides whether an
+utterance was meant for the assistant at all, and a bare "yes" carries none of
+the signals it looks for — no wake word, no imperative, no domain noun. The one
+signal that does cover it is the follow-up window: *we just asked something, so
+a reply is expected*. Only `speakReply` was opening that window, and the
+approval question is deliberately not a reply, so the window stayed shut and a
+one-word answer scored as room noise and was dropped **before `consume` ever
+saw it**. Both halves were built and neither could reach the other. So
+`speakAside` now takes `{ expectsAnswer }` and marks the assistant as having
+asked when the line finishes speaking — the same mark `speakReply` leaves when
+its text ends in a question mark, which the spoken prompt does not.
+
 **Who answers, and how narrowly.** `services/voice/approvalIntent.ts` is pure
 and holds the whole decision. The risk it is built around is a false allow: the
 microphone hears the room, and running a command the operator never agreed to is
@@ -3332,6 +3346,12 @@ accepts —
 - **"always" is tested before "yes"**, because every way of saying it contains
   one, and the wider grant has to win the tie or *"yes, always"* would allow once
   and ask again immediately;
+- the table takes **the words the prompt itself teaches**. The spoken question
+  says "say yes to allow it" and the button says `Run`, and the table took
+  neither `allow` nor `yes allow` — it was refusing the vocabulary it had just
+  handed the operator, which is how the fix above came to be found. Bare
+  `allow` / `approve` / `accept` / `permit` / `run`, and an affirmative before
+  any of them, are answers; `allow always` is an always;
 - anything unmatched is `null`, and null is the safe answer: nothing approved,
   nothing denied, the words travel on as ordinary speech.
 
@@ -3351,11 +3371,14 @@ an engine is listening, and nothing at all when none is. An operator who has jus
 been read a command needs to know "yes" is a word something is waiting for;
 otherwise they say it to an assistant that was never armed.
 
-Tested in `tests/approval-intent.test.mjs` (10): the affirmatives, the
+Tested in `tests/approval-intent.test.mjs` (13): the affirmatives, the
 negatives, "always" beating the "yes" inside it, six sentences that contain an
 answer word and must not be read as answers, words that merely contain one, the
 phrasing of the spoken question, a shell one-liner announced rather than
-recited, and that both prompts still render every button they had.
+recited, and that both prompts still render every button they had — plus the
+vocabulary the prompt teaches, the always-beats-allow tie for the new verbs, and
+six instructions containing a newly accepted verb that must still not be
+answers ("run the tests", "approve the pull request").
 
 
 ## 7. The agent command loop (`services/agentCommands.ts`, `services/commandThrashing.ts`)

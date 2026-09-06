@@ -699,7 +699,7 @@ ollama serve              # local models on 127.0.0.1:11434
 
 ```bash
 npm run typecheck   # tsc --noEmit
-npm test            # 1328 tests, 0 failures
+npm test            # 1331 tests, 0 failures
 npm run build       # tsc && vite build
 npm run verify:core # all three
 ```

@@ -1479,7 +1479,7 @@ export class VoiceEngine {
    * no state to return to, and forcing "listening" would light up the HUD over
    * a microphone that was never started.
    */
-  async speakAside(text: string): Promise<void> {
+  async speakAside(text: string, options: { expectsAnswer?: boolean } = {}): Promise<void> {
     const spoken = speakableText(text);
     if (!spoken.trim()) return;
 
@@ -1502,6 +1502,15 @@ export class VoiceEngine {
       if (!inSession) return;
       this.graph.setDucked(false);
       this.assistantTurnEndedAt = Date.now();
+      /*
+        An aside that asked something is still the assistant having asked
+        something. Without this the follow-up window never opens for it, and
+        the addressing gate — which has no idea a prompt is standing — scores
+        the bare "yes" that answers it as ambient room speech and drops it
+        before the host ever sees it. That is exactly how a spoken permission
+        prompt came to read itself out and then ignore the answer.
+      */
+      if (options.expectsAnswer || /\?\s*$/.test(spoken)) this.assistantAskedQuestion = true;
       if (this.state === "speaking") this.setState("listening");
     };
 

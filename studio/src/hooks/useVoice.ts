@@ -62,7 +62,7 @@ export interface UseVoiceResult extends VoiceSnapshot {
   /** Enqueue a sentence chunk to explain on the go during live token streaming. */
   enqueueSpeechChunk: (chunk: string, isFinal: boolean) => Promise<void>;
   /** Speak a line outside a voice turn — the screen assistant's path. */
-  speakAside: (text: string) => Promise<void>;
+  speakAside: (text: string, options?: { expectsAnswer?: boolean }) => Promise<void>;
   /** Tell the voice layer what the run just started doing, for the HUD and the occasional spoken line. */
   noteProgress: (line: string) => void;
   /** The streamed part of a reply is spoken; the digest of the rest is being made. */
@@ -148,7 +148,7 @@ export function useVoice(host: VoiceHost): UseVoiceResult {
     update,
     speakReply: useCallback((text: string) => engine.speakReply(text), [engine]),
     enqueueSpeechChunk: useCallback((chunk: string, isFinal: boolean) => engine.enqueueSpeechChunk(chunk, isFinal), [engine]),
-    speakAside: useCallback((text: string) => engine.speakAside(text), [engine]),
+    speakAside: useCallback((text: string, options?: { expectsAnswer?: boolean }) => engine.speakAside(text, options), [engine]),
     noteProgress: useCallback((line: string) => engine.noteProgress(line), [engine]),
     noteDigesting: useCallback(() => engine.noteDigesting(), [engine]),
     captureEnrolmentClip: useCallback((seconds?: number) => engine.captureEnrolmentClip(seconds), [engine]),
