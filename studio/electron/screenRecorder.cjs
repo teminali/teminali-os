@@ -110,12 +110,12 @@ function stamp(d) {
 function recordingsRoot() {
   for (const name of ["videos", "documents"]) {
     try {
-      return path.join(app.getPath(name), "Teminali Code Recordings");
+      return path.join(app.getPath(name), "Teminali OS Recordings");
     } catch {
       /* try the next one */
     }
   }
-  return path.join(os.tmpdir(), "teminali-code-recordings");
+  return path.join(os.tmpdir(), "teminali-os-recordings");
 }
 
 /* ── The cursor track ───────────────────────────────────────────── */
@@ -481,7 +481,7 @@ function teardown(session) {
 /**
  * A `file://` URL the renderer can hand to a `<video>` element.
  *
- * `encodeURI` rather than raw concatenation: "Teminali Code Recordings"
+ * `encodeURI` rather than raw concatenation: "Teminali OS Recordings"
  * has spaces in it, and an unencoded space in a URL is where a media
  * element stops loading with no error at all.
  */
@@ -641,7 +641,7 @@ function initScreenRecorder(mainWindowGetter) {
       return { ok: false, message: "Only macOS keeps a grant that can go stale like this." };
     }
     const services = ["ScreenCapture", "Camera", "Microphone", "Accessibility", "ListenEvent"];
-    const bundleIds = ["code.teminali.app"];
+    const bundleIds = ["os.teminali.app"];
     await Promise.all(
       bundleIds.flatMap((bundleId) =>
         services.map(
@@ -654,7 +654,7 @@ function initScreenRecorder(mainWindowGetter) {
     );
     return {
       ok: true,
-      message: "Cleared Teminali Code's recording permissions. They are asked for again on the next launch.",
+      message: "Cleared Teminali OS's recording permissions. They are asked for again on the next launch.",
     };
   });
 

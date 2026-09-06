@@ -1,4 +1,4 @@
-# Teminali Code billing
+# Teminali OS billing
 
 The service that decides who is paying, and signs a licence saying so.
 

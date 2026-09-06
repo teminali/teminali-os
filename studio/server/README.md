@@ -1,6 +1,6 @@
 # The local gateway (`studio/server/`)
 
-Every privileged thing Teminali Code does — reading the workspace, running a
+Every privileged thing Teminali OS does — reading the workspace, running a
 command, driving the screen, spending a provider token — happens here, not in
 the renderer. The renderer is treated as untrusted: it may ask, and the gateway
 decides.

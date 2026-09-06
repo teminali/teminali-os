@@ -53,7 +53,7 @@ async function ask(toolName, input) {
 const TOOL = {
   name: TOOL_NAME,
   description:
-    "Ask the Teminali Code operator to approve a tool call. Called by the CLI in place of a terminal prompt; never call it directly.",
+    "Ask the Teminali OS operator to approve a tool call. Called by the CLI in place of a terminal prompt; never call it directly.",
   inputSchema: {
     type: "object",
     properties: {
@@ -143,4 +143,4 @@ process.stdin.on("data", (chunk) => {
 
 process.stdin.on("end", () => process.exit(0));
 
-process.stderr.write("Teminali Code permission MCP shim ready.\n");
+process.stderr.write("Teminali OS permission MCP shim ready.\n");

@@ -33,7 +33,7 @@ function renderIcon() {
   const electron = {
     Menu: { buildFromTemplate: () => ({}) },
     Tray: class {},
-    app: { getName: () => "Teminali Code" },
+    app: { getName: () => "Teminali OS" },
     nativeImage: {
       createFromBuffer(buffer, { width, height, scaleFactor }) {
         representations.push({ buffer, width, height, scaleFactor });

@@ -125,7 +125,7 @@ function turnId(): string {
 }
 
 /**
- * Bring Teminali Code to the front.
+ * Bring Teminali OS to the front.
  *
  * Reaching through `window.teminali` rather than taking a prop because the
  * decision to come back is made here, in the turn, and threading a callback
@@ -140,7 +140,7 @@ function focusStudio(): void {
 }
 
 /**
- * Whether the assistant should come back to Teminali Code once a turn ends.
+ * Whether the assistant should come back to Teminali OS once a turn ends.
  *
  * The assistant genuinely drives other applications now, so "where should the
  * operator be looking when this finishes" stopped being obvious. Three

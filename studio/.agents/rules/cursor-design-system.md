@@ -1,7 +1,7 @@
 # 🎨 Teminali Design System (TDS) — Canonical Contract & Component Governance
 
 > **Canonical System Contract for Teminali Suite & Autonomous AI Agents**
-> Ecosystem: **Teminali Code**, **Teminali Cut**, **Teminali Guardian**, and all generated web applications.
+> Ecosystem: **Teminali OS**, **Teminali Cut**, **Teminali Guardian**, and all generated web applications.
 > Mandate: Protect the **Classic Cursor Obsidian Dark** aesthetic at all costs during updates, features, and refactors. Every UI change MUST be implemented at the centralized component primitive level (`src/components/ui/`) for 100% reusability and visual consistency.
 
 ---
@@ -55,7 +55,7 @@ All UI components MUST be imported from `src/components/ui/` rather than creatin
 ## 3. Strict Component-Level Governance Law
 
 > ⚠️ **RULE FOR ALL AI ASSISTANTS & CONTRIBUTORS**:
-> Whenever updating, improving, or adding any UI in Teminali Code:
+> Whenever updating, improving, or adding any UI in Teminali OS:
 > 1. Check if a canonical component exists in `src/components/ui/`.
 > 2. If styling or behavior needs improvement, **update the shared component in `src/components/ui/`** so the improvement propagates everywhere consistently.
 > 3. NEVER create duplicate one-off styled buttons, modals, or tab switchers in individual page components.
@@ -63,7 +63,7 @@ All UI components MUST be imported from `src/components/ui/` rather than creatin
 
 ## 4. Official Models (Engineered Wrappers)
 
-In Teminali Code, models are not raw weights we train; they are **engineered wrapper architectures** designed to dynamically route, format, and orchestrate prompts against the best-fit underlying engines and local providers:
+In Teminali OS, models are not raw weights we train; they are **engineered wrapper architectures** designed to dynamically route, format, and orchestrate prompts against the best-fit underlying engines and local providers:
 
 1. **Frontier Auto** (Flagship):
    - Official adaptive router and orchestration wrapper.

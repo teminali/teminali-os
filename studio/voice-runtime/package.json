@@ -3,7 +3,7 @@
   "private": true,
   "version": "0.1.0",
   "type": "module",
-  "description": "Loopback speech sidecar for Teminali Code: Kokoro TTS and Whisper ASR over the VOICE_SIDECAR.md contract.",
+  "description": "Loopback speech sidecar for Teminali OS: Kokoro TTS and Whisper ASR over the VOICE_SIDECAR.md contract.",
   "main": "index.js",
   "scripts": {
     "start": "node cli.js",

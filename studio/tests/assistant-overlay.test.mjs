@@ -174,7 +174,7 @@ test("hiding is total, so closing the editor takes the bubble with it", (t) => {
   assert.equal(window().isVisible(), false);
 });
 
-test("the overlay stands down while Teminali Code is in front", (t) => {
+test("the overlay stands down while Teminali OS is in front", (t) => {
   t.mock.timers.enable({ apis: ["setTimeout"] });
   const { overlay, window } = attach();
 

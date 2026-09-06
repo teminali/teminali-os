@@ -89,11 +89,11 @@ export const FIREFOX_DIR = "Firefox/Profiles";
 
 /** Why Safari cannot be read, in words the operator can act on. */
 export const SAFARI_REASON =
-  "Safari's history is protected by macOS. Grant Teminali Code Full Disk Access in System Settings › Privacy & Security to import it.";
+  "Safari's history is protected by macOS. Grant Teminali OS Full Disk Access in System Settings › Privacy & Security to import it.";
 
 /** Why autofill is not offered, in words that are actually true. */
 export const AUTOFILL_REASON =
-  "Teminali Code has no autofill store yet, so there is nowhere for saved addresses or cards to go.";
+  "Teminali OS has no autofill store yet, so there is nowhere for saved addresses or cards to go.";
 
 /** A title is display text: one line, no control characters, bounded. */
 function cleanTitle(value) {

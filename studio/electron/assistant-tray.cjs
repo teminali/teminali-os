@@ -198,7 +198,7 @@ function attachAssistantTray({
    * Brings the window back, and decides whether to take focus doing it.
    *
    * Focus is not cosmetic here: the assistant reads the accessibility tree of
-   * the frontmost application, so raising Teminali Code in front of the app the
+   * the frontmost application, so raising Teminali OS in front of the app the
    * operator is asking about makes it observe itself. Anything that starts an
    * assistant turn shows the window without activating; only "Open Teminali
    * Code", where the window *is* what was asked for, takes focus.
@@ -365,8 +365,8 @@ function attachAssistantTray({
       { type: "separator" },
       ...permissionItems(),
       { type: "separator" },
-      { label: "Open Teminali Code", click: () => reveal(null) },
-      { label: "Quit Teminali Code", role: "quit" },
+      { label: "Open Teminali OS", click: () => reveal(null) },
+      { label: "Quit Teminali OS", role: "quit" },
     );
 
     const menu = Menu.buildFromTemplate(items);

@@ -1,5 +1,7 @@
 import readline from "node:readline";
 import path from "node:path";
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import process from "node:process";
 import os from "node:os";
 import {
@@ -11,6 +13,22 @@ import {
   modelModeForProfile,
   selectProfileForMode,
 } from "./frontier-runner.js";
+
+/*
+  The version in the footer, read from the root manifest rather than written
+  out here. `npm_package_version` is set only when the TUI was started through
+  an npm script, so the fallback beside it is what a directly-executed run
+  shows — and a literal went stale the moment the version moved: the 0.0.1
+  reset would have shipped a footer still claiming 0.1.0.
+*/
+const PACKAGE_VERSION = (() => {
+  try {
+    const manifest = fileURLToPath(new URL("../package.json", import.meta.url));
+    return JSON.parse(readFileSync(manifest, "utf8")).version || "0.0.0";
+  } catch {
+    return "0.0.0";
+  }
+})();
 
 const COLOR_ENABLED = Boolean(process.stdout.isTTY)
   && !("NO_COLOR" in process.env)
@@ -275,7 +293,7 @@ ${fitAnsi(hints, terminalWidth)}
 
 export function renderFooter(state) {
   const dir = state.targetDir.replace(os.homedir(), "~");
-  const version = process.env.npm_package_version || "0.1.0";
+  const version = process.env.npm_package_version || PACKAGE_VERSION;
   const width = state.terminalWidth ?? getTerminalWidth();
   const available = Math.max(4, width - version.length - 2);
   const fittedDir = fitAnsi(dir, available);

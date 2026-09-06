@@ -91,11 +91,11 @@ export const SourceGrid: React.FC<Props> = ({ sources, loading, selectedId, onSe
                     : 'No other windows are open.')
                 /* Not "you have not allowed it yet". The commonest reason
                    for zero displays on a machine that HAS allowed it is
-                   that the grant went stale when Teminali Code updated, and
+                   that the grant went stale when Teminali OS updated, and
                    the footer offers the one button that fixes that. */
                 : 'No displays were offered. Either screen recording has not been allowed for '
-                  + 'Teminali Code, or it was allowed for an earlier version and stopped matching when '
-                  + 'Teminali Code updated. Click "Reset permissions" or "Open settings" below.'}
+                  + 'Teminali OS, or it was allowed for an earlier version and stopped matching when '
+                  + 'Teminali OS updated. Click "Reset permissions" or "Open settings" below.'}
             </p>
           </div>
         ) : (

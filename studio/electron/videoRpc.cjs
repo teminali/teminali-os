@@ -52,7 +52,7 @@ function resolvePort() {
  */
 function endpointFile(port = resolvePort()) {
   const name = port === DEFAULT_PORT ? "video-bridge.json" : `video-bridge-${port}.json`;
-  return path.join(os.tmpdir(), `teminali-code-${name}`);
+  return path.join(os.tmpdir(), `teminali-os-${name}`);
 }
 
 function send(res, status, body) {
@@ -125,7 +125,7 @@ function startVideoRpcServer({ bridge, log = () => {}, port = resolvePort(), tok
       const { method, params } = JSON.parse(await readBody(req));
 
       if (!bridge.isReady()) {
-        send(res, 503, { error: "The Teminali Code video panel is not available — is the app open?" });
+        send(res, 503, { error: "The Teminali OS video panel is not available — is the app open?" });
         return;
       }
 
@@ -168,7 +168,7 @@ function startVideoRpcServer({ bridge, log = () => {}, port = resolvePort(), tok
     if (error.code === "EADDRINUSE") {
       log(
         `[video] port ${port} is already in use, so this instance has no MCP bridge. ` +
-        "Another Teminali Code is probably running; relaunch with a different " +
+        "Another Teminali OS is probably running; relaunch with a different " +
         "TEMINALI_VIDEO_RPC_PORT to give both one."
       );
       return;

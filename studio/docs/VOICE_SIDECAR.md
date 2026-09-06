@@ -1,6 +1,6 @@
 # Voice sidecar — VibeVoice
 
-Teminali Code has two voice tiers. The built-in tier uses the browser's own
+Teminali OS has two voice tiers. The built-in tier uses the browser's own
 speech engine and needs no installation. The premium tier runs
 [VibeVoice](https://github.com/microsoft/VibeVoice) (MIT) locally and is what
 this document is about.

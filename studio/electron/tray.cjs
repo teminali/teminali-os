@@ -209,7 +209,7 @@ function attachGuardianTray({ getWindow, onCreateWindow, log = () => {} }) {
       { type: "separator" },
       { label: "Open Guardian", click: revealGuardian },
       { type: "separator" },
-      { label: "Quit Teminali Code", role: "quit" },
+      { label: "Quit Teminali OS", role: "quit" },
     );
 
     const menu = Menu.buildFromTemplate(items);

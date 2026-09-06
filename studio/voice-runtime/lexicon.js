@@ -59,7 +59,7 @@ export function phoneticKey(text) {
  * seen in its training text and so will always spell as something else.
  */
 export const DOMAIN_TERMS = [
-  "Teminali", "Teminali Code", "Frontier", "Kokoro", "Whisper", "ONNX",
+  "Teminali", "Teminali OS", "Frontier", "Kokoro", "Whisper", "ONNX",
   "gateway", "sidecar", "studio", "voice-runtime", "agent-runtime",
   "mcp-runtime", "performance-runtime", "quality-runtime", "visual-runtime",
   "Electron", "npm", "npx", "tsc", "git", "grep", "ripgrep", "ngram",
@@ -127,7 +127,7 @@ const MAX_WINDOW = 3;
  * Rewrite the phrases in `text` that a domain term explains.
  *
  * Windows of one to three words are tried longest-first, so "to Minoli Code"
- * resolves to "Teminali Code" rather than leaving "Code" stranded. Punctuation
+ * resolves to "Teminali OS" rather than leaving "Code" stranded. Punctuation
  * riding on a word is carried through; a term that already matches its own
  * canonical spelling is left exactly as the model wrote it, capital letters
  * and all.

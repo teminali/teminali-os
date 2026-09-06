@@ -46,7 +46,7 @@ const SHAPE = `{
 
 export function systemPrompt(mode: AssistantMode): string {
   const shared = [
-    "You are the screen assistant inside Teminali Code. You are looking at the operator's actual screen.",
+    "You are the screen assistant inside Teminali OS. You are looking at the operator's actual screen.",
     "",
     "Rules:",
     "1. Answer with one JSON object and nothing else. No prose before it, no code fence around it.",

@@ -4,7 +4,7 @@ import { resolve } from "node:path";
 
 import { SCREEN_RECORDING_PANE, appBundlePath, revealForScreenRecording } from "../server/screen-recording.js";
 
-const PACKAGED_EXE = "/Applications/Teminali Code.app/Contents/MacOS/Teminali Code";
+const PACKAGED_EXE = "/Applications/Teminali OS.app/Contents/MacOS/Teminali OS";
 
 /** Records what the reveal reached for, and in which order. */
 function spy({ platform = "darwin", packaged = true, execPath = PACKAGED_EXE } = {}) {
@@ -35,7 +35,7 @@ function spy({ platform = "darwin", packaged = true, execPath = PACKAGED_EXE } =
 /* ── Finding the bundle to drag ───────────────────────────────────────────── */
 
 test("the bundle is the .app three levels above the executable", () => {
-  assert.equal(appBundlePath(PACKAGED_EXE, resolve), "/Applications/Teminali Code.app");
+  assert.equal(appBundlePath(PACKAGED_EXE, resolve), "/Applications/Teminali OS.app");
 });
 
 test("a path that is not inside an .app yields nothing to drag", () => {
@@ -54,12 +54,12 @@ test("the pane is opened and the bundle revealed", async () => {
   const result = await revealForScreenRecording(args);
 
   assert.equal(result.ok, true);
-  assert.equal(result.bundlePath, "/Applications/Teminali Code.app");
+  assert.equal(result.bundlePath, "/Applications/Teminali OS.app");
   assert.deepEqual(
     calls.filter(([kind]) => kind !== "wait"),
     [
       ["pane", SCREEN_RECORDING_PANE],
-      ["reveal", "/Applications/Teminali Code.app"],
+      ["reveal", "/Applications/Teminali OS.app"],
     ],
   );
 });

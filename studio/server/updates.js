@@ -160,7 +160,7 @@ export async function checkForUpdate({
 
   try {
     const response = await fetchImpl(`https://api.github.com/repos/${repo}/releases/latest`, {
-      headers: { accept: "application/vnd.github+json", "user-agent": "teminali-code-updater" },
+      headers: { accept: "application/vnd.github+json", "user-agent": "teminali-os-updater" },
       signal: AbortSignal.timeout(UPDATE_LIMITS.checkTimeoutMs),
     });
 
@@ -249,7 +249,7 @@ export async function listReleases({
     const response = await fetchImpl(
       `https://api.github.com/repos/${repo}/releases?per_page=${UPDATE_LIMITS.releasePageSize}`,
       {
-        headers: { accept: "application/vnd.github+json", "user-agent": "teminali-code-updater" },
+        headers: { accept: "application/vnd.github+json", "user-agent": "teminali-os-updater" },
         signal: AbortSignal.timeout(UPDATE_LIMITS.checkTimeoutMs),
       },
     );
@@ -349,7 +349,7 @@ export async function downloadAsset({ url, name, onProgress, signal, fetchImpl =
   const destination = join(UPDATE_DIRECTORY, name);
 
   const response = await fetchImpl(url, {
-    headers: { accept: "application/octet-stream", "user-agent": "teminali-code-updater" },
+    headers: { accept: "application/octet-stream", "user-agent": "teminali-os-updater" },
     redirect: "follow",
     signal,
   });

@@ -87,7 +87,7 @@ export function screenMcpArgs(engine, runId, token, { execPath = process.execPat
   if (engine !== "claude" || !runId || !token || !available) return { args: [] };
 
   const spec = screenMcpServerSpec(runId, token, { execPath, port });
-  const file = path.join(tmpDir, `teminali-code-mcp-screen-${runId}.json`);
+  const file = path.join(tmpDir, `teminali-os-mcp-screen-${runId}.json`);
   fs.writeFileSync(file, JSON.stringify({ mcpServers: { [SCREEN_SERVER_NAME]: spec } }, null, 2), {
     encoding: "utf8",
     mode: 0o600,

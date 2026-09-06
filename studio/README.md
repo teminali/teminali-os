@@ -1,14 +1,14 @@
-# Teminali Code
+# Teminali OS
 
-**An autonomous AI code studio that runs on your machine.**
+**An autonomous AI studio that runs on your machine.**
 
 A desktop application (Electron + React) whose models, speech, screen
 understanding and agents all run locally by default. Hosted providers are
 available and never required. Everything the renderer can reach goes through one
 loopback gateway that never binds off `127.0.0.1`.
 
-- Package: `@teminali/code` · version **1.2.9** · app id `code.teminali.app`
-- Ships as `Teminali-Code-<version>-macOS-Apple-Silicon.dmg` / `-Intel.dmg`,
+- Package: `@teminali/os` · version **0.0.1** · app id `os.teminali.app`
+- Ships as `Teminali-OS-<version>-macOS-Apple-Silicon.dmg` / `-Intel.dmg`,
   a Windows NSIS installer, and a Linux AppImage, from
   [`teminali/releases`](https://github.com/teminali/releases/releases).
 
@@ -160,7 +160,7 @@ displaced or renamed, and imported history cannot bury what you did here today.
 
 **Safari** is listed but cannot be read: macOS protects `~/Library/Safari`
 until the app is granted Full Disk Access, so it says that instead of failing.
-**Autofill is not imported** — Teminali Code has no autofill store yet, so
+**Autofill is not imported** — Teminali OS has no autofill store yet, so
 there would be nowhere for saved addresses or cards to go, and the dialog says
 so rather than offering a tick box that does nothing. macOS only for now.
 
@@ -335,7 +335,7 @@ your screen and either explains it or acts on it.
   that part it hands back to you.
 - **The agent is told where it is.** It is spawned with a briefing
   (`server/agent-briefing.js`, via `--append-system-prompt`) saying it is a
-  panel in Teminali Code rather than a terminal, that the operator may be
+  panel in Teminali OS rather than a terminal, that the operator may be
   speaking to it through the voice assistant rather than typing, and which of
   its tools came from this application. Without it the agent answered questions
   about itself wrongly and offered workarounds for problems it did not have.
@@ -626,7 +626,7 @@ deliberately **not** in this app's dependencies, so today the module reports
 `not-installed` and the recorder falls back to inferring attention from the
 track (travel, then stillness). The operator can also mark a moment by hand.
 
-Takes land in `~/Videos/Teminali Code Recordings/<timestamp>/`, mode 0700 —
+Takes land in `~/Videos/Teminali OS Recordings/<timestamp>/`, mode 0700 —
 never in a temp directory, because losing a recording to a reboot would be
 indefensible. Each take is remuxed to MP4 before it reaches a timeline: a
 MediaRecorder file carries no duration in its header and no cue index, so a
@@ -695,16 +695,14 @@ and a sample. Images: up to 4, PNG/JPEG/WebP, 1536px max edge.
 
 ### Releases and updates
 
-The studio ships itself, out of **two repositories**. `teminali/teminalicode`
+The studio ships itself, out of **two repositories**. `teminali/teminali-os`
 (`TEMINALI_SOURCE_REPO`) is private and holds the code, the tags and
 `.github/workflows/release.yml`. `teminali/releases` (`TEMINALI_RELEASE_REPO`)
 is public and holds nothing but the published releases and their assets. The
 split exists because an update check runs with **no credential**: a private
 repository answers an anonymous caller `404`, and the updater can only render
-that as "this repository has no releases yet" — which is what every build up to
-and including 1.2.8 did, because those builds asked the private repository.
-**1.2.9 is the first build that asks the public one**; anything older cannot be
-reached by an update it cannot see and has to be replaced by hand, once.
+that as "this repository has no releases yet". Every build asks the public
+repository, so an update check never needs a token.
 
 Publishing (`/api/updates/publish`, the Release panel) is administrator-only and
 drives typecheck → test → build → preflight → tag → CI → notes through the `gh`
@@ -799,7 +797,7 @@ because `artifactName` cannot branch on architecture. That is only safe because
 ### Publishing across two repositories
 
 `electron-builder.yml` publishes to `teminali/releases`, and the workflow runs in
-`teminali/teminalicode`. A workflow's default `GITHUB_TOKEN` is scoped to the
+`teminali/teminali-os`. A workflow's default `GITHUB_TOKEN` is scoped to the
 repository it runs in, so it **cannot** create a release or upload an asset in
 the other one — the build goes green and the upload does not happen. Add a PAT
 with `contents: write` on `teminali/releases` as the `RELEASES_TOKEN` secret;
@@ -986,7 +984,7 @@ Everything is optional; every default is loopback.
 | `TEMINALI_CUT_MCP_URL` | `http://127.0.0.1:3888` |
 | `FRONTIER_WORKSPACE_ROOT` | the repository root |
 | `TEMINALI_RELEASE_REPO` | `teminali/releases` — public; published releases are read from here |
-| `TEMINALI_SOURCE_REPO` | `teminali/teminalicode` — private; tags and the release workflow live here |
+| `TEMINALI_SOURCE_REPO` | `teminali/teminali-os` — private; tags and the release workflow live here |
 | `TEMINALI_RUNTIME_MODE` | `local` (or `api`) |
 | `FRONTIER_AUDIT_PATH` | `benchmark-results/gateway-audit.jsonl`; `userData/gateway/` in a packaged app |
 | `TEMINALI_LICENCE_STORE` | `benchmark-results/licence.json` (written `0600`) |

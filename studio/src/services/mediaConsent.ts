@@ -170,7 +170,7 @@ function deniedRoots(policy: ConsentPolicy): Array<{ path: string; label: string
     { path: `${home}/.aws`, label: "AWS credentials" },
     { path: `${home}/.gnupg`, label: "GnuPG keys" },
     { path: `${home}/Library/Keychains`, label: "the macOS keychain" },
-    { path: trimSlash(policy.userData), label: "Teminali Code's own state" },
+    { path: trimSlash(policy.userData), label: "Teminali OS's own state" },
   ];
 }
 

@@ -96,8 +96,8 @@ const NEEDS_ACCESSIBILITY = {
   source: "cursor-only",
   reason: "needs-accessibility",
   message:
-    "macOS has not allowed Teminali Code to see input from other apps, so zooms are placed from "
-    + "where the pointer travelled to and stopped. Turn Teminali Code on under Privacy & Security, "
+    "macOS has not allowed Teminali OS to see input from other apps, so zooms are placed from "
+    + "where the pointer travelled to and stopped. Turn Teminali OS on under Privacy & Security, "
     + "Accessibility, then relaunch it for zooms on real clicks.",
 };
 

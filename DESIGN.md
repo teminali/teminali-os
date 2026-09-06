@@ -1,4 +1,4 @@
-# Design — Teminali Code
+# Design — Teminali OS
 
 > **The Teminali Design System (TDS) lives in one place:
 > [`studio/DESIGN.md`](studio/DESIGN.md).**

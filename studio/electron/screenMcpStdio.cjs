@@ -390,4 +390,4 @@ process.stdin.on("data", (chunk) => {
 
 process.stdin.on("end", () => process.exit(0));
 
-process.stderr.write("Teminali Code screen MCP shim ready — forwarding to the live screen.\n");
+process.stderr.write("Teminali OS screen MCP shim ready — forwarding to the live screen.\n");

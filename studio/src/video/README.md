@@ -199,7 +199,7 @@ Four notes, each of which is a decision rather than an accident:
   gateway spawns the CLIs, and in development it is a *separate* process from
   Electron main, so it cannot be handed a token from main's memory — and
   putting one in main's environment would leak it into every child process the
-  operator's agent goes on to spawn. `$TMPDIR/teminali-code-video-bridge.json`,
+  operator's agent goes on to spawn. `$TMPDIR/teminali-os-video-bridge.json`,
   mode 0600, written only by the instance that actually holds the port, and
   removed on quit. A file whose pid is gone is treated as absent, so a stale one
   costs nothing.

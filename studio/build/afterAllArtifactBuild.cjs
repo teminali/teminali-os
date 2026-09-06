@@ -4,7 +4,7 @@ const path = require('node:path');
 /**
  * Names the macOS disk images after the Mac they run on.
  *
- * `Teminali-Code-1.1.0-macOS-arm64.dmg` tells someone standing on the release
+ * `Teminali-OS-1.1.0-macOS-arm64.dmg` tells someone standing on the release
  * page nothing about which of the two files to click. These become
  * `-Apple-Silicon.dmg` and `-Intel.dmg`, which is what the download button on
  * an Apple support page would say.
@@ -45,7 +45,7 @@ function relabel(file) {
 /**
  * The product name has a space in it, and GitHub does not accept one in an
  * asset name — it substitutes a dot, so the file arrives as
- * `Teminali.Code-...dmg` while its neighbours are `Teminali-Code-...`.
+ * `Teminali.OS-...dmg` while its neighbours are `Teminali-OS-...`.
  *
  * electron-builder normally spares us this: it computes a safe name alongside
  * each artifact and uploads under that. Artifacts handed back from this hook do

@@ -484,7 +484,7 @@ export function refusal(capability, entitlement) {
     message:
       entitlement?.state === "grace"
         ? "This licence needs to be refreshed. Connect to the internet to renew it."
-        : UPGRADE_MESSAGE[capability] ?? "Teminali Code Pro is required for this feature.",
+        : UPGRADE_MESSAGE[capability] ?? "Teminali OS Pro is required for this feature.",
   };
 }
 
@@ -499,10 +499,10 @@ export function refusal(capability, entitlement) {
  */
 const UPGRADE_MESSAGE = Object.freeze({
   "frontier.escalation":
-    "Teminali Code Pro is required for the hosted escalation lanes. Flash and Max stay available on the free plan.",
+    "Teminali OS Pro is required for the hosted escalation lanes. Flash and Max stay available on the free plan.",
   "voice.vibevoice":
-    "Teminali Code Pro is required for the VibeVoice speech tier. The built-in voices stay available on the free plan.",
-  "frontier.max": "Teminali Code Pro is required for the Frontier Max profile. Flash stays available on the free plan.",
+    "Teminali OS Pro is required for the VibeVoice speech tier. The built-in voices stay available on the free plan.",
+  "frontier.max": "Teminali OS Pro is required for the Frontier Max profile. Flash stays available on the free plan.",
 });
 
 export { licenceGrants };

@@ -292,7 +292,7 @@ export const VersionControl: React.FC<VersionControlProps> = ({ updates, onOpenU
         onClick={() => setOpen((previous) => !previous)}
         aria-haspopup="menu"
         aria-expanded={open}
-        title={`Teminali Code ${version ?? ""} — version, updates and rollback`}
+        title={`Teminali OS ${version ?? ""} — version, updates and rollback`}
         className={`h-[22px] pl-2 pr-1.5 rounded-full flex items-center gap-1 font-mono text-2xs tabular-nums
                     border border-edge bg-surface/80 backdrop-blur-sm transition-colors duration-ds ease-ds
                     ${open ? "text-ink-body" : "text-ink-faint hover:text-ink-muted"}`}

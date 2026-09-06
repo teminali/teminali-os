@@ -187,7 +187,7 @@ export const StatusDot: React.FC<{
    there is ONE decision about what a section label or a keycap looks
    like, and changing it changes it everywhere.
 
-   They are the same primitives Teminali Code ships, at the same
+   They are the same primitives Teminali OS ships, at the same
    measurements, so a panel can be moved between the two products
    without being re-styled on arrival.
    ─────────────────────────────────────────────────────────────────── */

@@ -19,8 +19,8 @@
 
    It does NOT protect against a determined owner of the machine, and
    nothing running on that machine could. The key is derived from a
-   secret this app wrote and this app can read; anything Teminali Code
-   can decrypt, someone with Teminali Code can decrypt. Saying so is not
+   secret this app wrote and this app can read; anything Teminali OS
+   can decrypt, someone with Teminali OS can decrypt. Saying so is not
    a disclaimer — it is the difference between a design built for what
    it can do and one that pretends to be a vault.
 
@@ -51,7 +51,7 @@ const path = require("node:path");
 
    All base64url, dot-separated, ASCII. Text rather than binary so that
    somebody who finds one of these can see what it is: "this is an
-   encrypted Teminali Code file" is useful, and a wall of bytes that
+   encrypted Teminali OS file" is useful, and a wall of bytes that
    might be a corrupt video is not.                                   */
 
 /** First field of every sealed file. Bump if the format ever changes. */
@@ -97,7 +97,7 @@ function seal(deviceKey, purpose, plaintext) {
 function open(deviceKey, purpose, text) {
   const parts = String(text ?? "").split(".");
   if (parts.length !== 5 || parts[0] !== ENVELOPE_MAGIC) {
-    return { ok: false, reason: "not-sealed", message: "Not a sealed Teminali Code file." };
+    return { ok: false, reason: "not-sealed", message: "Not a sealed Teminali OS file." };
   }
   if (parts[1] !== purpose) {
     return {

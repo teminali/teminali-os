@@ -88,7 +88,7 @@ test('perfectCaptionCues applies offsetMs accurately', () => {
 
 test('generateCuesFromText creates timed balanced cues from plain script', () => {
   const script =
-    'Teminali Code is an autonomous AI studio. It builds websites, web applications, and edits videos live on the canvas. Everything is verified with automated tests.';
+    'Teminali OS is an autonomous AI studio. It builds websites, web applications, and edits videos live on the canvas. Everything is verified with automated tests.';
   const cues = generateCuesFromText(script, 15000, 0, 42);
 
   assert.ok(cues.length >= 3, 'Should produce at least 3 cues for the 3 sentences');

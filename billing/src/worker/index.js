@@ -1,5 +1,5 @@
 /**
- * Teminali Code billing — the whole API surface.
+ * Teminali OS billing — the whole API surface.
  *
  * Hand-rolled routing, on purpose and to match the rest of the product.
  * teminaliCode has no framework anywhere: the gateway is raw `node:http` with

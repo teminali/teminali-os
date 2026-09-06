@@ -104,11 +104,11 @@ function initVideoToolBridge() {
 function ask(channel, payload, timeoutMs = DEFAULT_TIMEOUT_MS) {
   return new Promise((resolve, reject) => {
     if (!targetWindow || targetWindow.isDestroyed()) {
-      reject(new Error("Teminali Code is not running — open the app and try again."));
+      reject(new Error("Teminali OS is not running — open the app and try again."));
       return;
     }
     if (!rendererReady) {
-      reject(new Error("The Teminali Code window is still loading. Try again in a moment."));
+      reject(new Error("The Teminali OS window is still loading. Try again in a moment."));
       return;
     }
 

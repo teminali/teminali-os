@@ -115,7 +115,7 @@ function studioCapabilities(workingDirectory?: string): EngineCapabilities {
       no RPC and no second process. `executeTool` validates against the same
       Zod schemas advertised above and never throws.
     */
-    runVideoTool: (tool, args) => executeTool(tool, args, "Teminali Code chat"),
+    runVideoTool: (tool, args) => executeTool(tool, args, "Teminali OS chat"),
   };
 }
 

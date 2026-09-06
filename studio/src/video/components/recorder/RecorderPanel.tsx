@@ -213,9 +213,9 @@ const SetupFooter: React.FC<{
             <AlertTriangle className="w-3.5 h-3.5 text-spectrum-amber flex-shrink-0" />
             <span
               className="text-ui-sm text-spectrum-textMuted truncate"
-              title="Teminali Code's permissions need refreshing on macOS update."
+              title="Teminali OS's permissions need refreshing on macOS update."
             >
-              Screen recording looks enabled but macOS is refusing it. Updating Teminali Code does this.
+              Screen recording looks enabled but macOS is refusing it. Updating Teminali OS does this.
             </span>
             <button
               onClick={() => void store.repairScreenPermission()}
@@ -228,7 +228,7 @@ const SetupFooter: React.FC<{
           <div className="flex items-center gap-2">
             <AlertTriangle className="w-3.5 h-3.5 text-spectrum-amber flex-shrink-0" />
             <span className="text-ui-sm text-spectrum-textMuted truncate">
-              macOS has not allowed Teminali Code to record the screen yet.
+              macOS has not allowed Teminali OS to record the screen yet.
             </span>
             <button
               onClick={() => void store.repairScreenPermission()}

@@ -1,6 +1,6 @@
 # Diligence Engine — Manual Test Plan
 
-Scenarios a human runs by hand in Teminali Code. Written by an independent review pass, then updated after the five defects it found were fixed.
+Scenarios a human runs by hand in Teminali OS. Written by an independent review pass, then updated after the five defects it found were fixed.
 
 See [INVESTIGATION_DOCTRINE.md](./INVESTIGATION_DOCTRINE.md) for what the feature is and why.
 

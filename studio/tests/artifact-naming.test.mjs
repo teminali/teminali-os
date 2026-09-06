@@ -34,37 +34,37 @@ async function build(names) {
 // electron-builder writes the product name unaltered and computes a GitHub-safe
 // name separately, at upload time.
 const MAC_BUILD = [
-  "Teminali Code-1.1.1-macOS-arm64.dmg",
-  "Teminali Code-1.1.1-macOS-arm64.dmg.blockmap",
-  "Teminali Code-1.1.1-macOS-arm64.zip",
-  "Teminali Code-1.1.1-macOS-x64.dmg",
-  "Teminali Code-1.1.1-macOS-x64.dmg.blockmap",
-  "Teminali Code-1.1.1-macOS-x64.zip",
+  "Teminali OS-1.1.1-macOS-arm64.dmg",
+  "Teminali OS-1.1.1-macOS-arm64.dmg.blockmap",
+  "Teminali OS-1.1.1-macOS-arm64.zip",
+  "Teminali OS-1.1.1-macOS-x64.dmg",
+  "Teminali OS-1.1.1-macOS-x64.dmg.blockmap",
+  "Teminali OS-1.1.1-macOS-x64.zip",
   "latest-mac.yml",
 ];
 
 test("the disk images are named after the Mac they run on", async () => {
   const { onDisk } = await build(MAC_BUILD);
-  assert.ok(onDisk.includes("Teminali-Code-1.1.1-macOS-Apple-Silicon.dmg"));
-  assert.ok(onDisk.includes("Teminali-Code-1.1.1-macOS-Intel.dmg"));
-  assert.ok(!onDisk.includes("Teminali Code-1.1.1-macOS-arm64.dmg"));
-  assert.ok(!onDisk.includes("Teminali Code-1.1.1-macOS-x64.dmg"));
+  assert.ok(onDisk.includes("Teminali-OS-1.1.1-macOS-Apple-Silicon.dmg"));
+  assert.ok(onDisk.includes("Teminali-OS-1.1.1-macOS-Intel.dmg"));
+  assert.ok(!onDisk.includes("Teminali OS-1.1.1-macOS-arm64.dmg"));
+  assert.ok(!onDisk.includes("Teminali OS-1.1.1-macOS-x64.dmg"));
 });
 
 test("a blockmap follows the disk image it describes", async () => {
   // It is named after its subject and useless without it, so leaving it behind
   // under the old name would put a file on the release page describing nothing.
   const { onDisk } = await build(MAC_BUILD);
-  assert.ok(onDisk.includes("Teminali-Code-1.1.1-macOS-Apple-Silicon.dmg.blockmap"));
-  assert.ok(onDisk.includes("Teminali-Code-1.1.1-macOS-Intel.dmg.blockmap"));
+  assert.ok(onDisk.includes("Teminali-OS-1.1.1-macOS-Apple-Silicon.dmg.blockmap"));
+  assert.ok(onDisk.includes("Teminali-OS-1.1.1-macOS-Intel.dmg.blockmap"));
 });
 
 test("nothing but the disk images is touched", async () => {
   // The .zip names are what latest-mac.yml lists by hand, and renaming one
   // would mean rewriting that manifest to match. The DMGs need no manifest.
   const { onDisk } = await build(MAC_BUILD);
-  assert.ok(onDisk.includes("Teminali Code-1.1.1-macOS-arm64.zip"));
-  assert.ok(onDisk.includes("Teminali Code-1.1.1-macOS-x64.zip"));
+  assert.ok(onDisk.includes("Teminali OS-1.1.1-macOS-arm64.zip"));
+  assert.ok(onDisk.includes("Teminali OS-1.1.1-macOS-x64.zip"));
   assert.ok(onDisk.includes("latest-mac.yml"));
 });
 
@@ -73,10 +73,10 @@ test("the renamed files are the ones handed back for publishing", async () => {
   // precisely so that it does not upload them itself under the old names.
   const { published } = await build(MAC_BUILD);
   assert.deepEqual(published.sort(), [
-    "Teminali-Code-1.1.1-macOS-Apple-Silicon.dmg",
-    "Teminali-Code-1.1.1-macOS-Apple-Silicon.dmg.blockmap",
-    "Teminali-Code-1.1.1-macOS-Intel.dmg",
-    "Teminali-Code-1.1.1-macOS-Intel.dmg.blockmap",
+    "Teminali-OS-1.1.1-macOS-Apple-Silicon.dmg",
+    "Teminali-OS-1.1.1-macOS-Apple-Silicon.dmg.blockmap",
+    "Teminali-OS-1.1.1-macOS-Intel.dmg",
+    "Teminali-OS-1.1.1-macOS-Intel.dmg.blockmap",
   ]);
 });
 
@@ -87,35 +87,35 @@ test("a renamed file is not left in the build result under its old name", async 
   // nothing at all.
   const { reported } = await build(MAC_BUILD);
   assert.deepEqual(reported, [
-    "Teminali Code-1.1.1-macOS-arm64.zip",
-    "Teminali Code-1.1.1-macOS-x64.zip",
+    "Teminali OS-1.1.1-macOS-arm64.zip",
+    "Teminali OS-1.1.1-macOS-x64.zip",
     "latest-mac.yml",
   ]);
 });
 
 test("the name that lands on the release page has no space in it", async () => {
   // GitHub substitutes a dot for a space, so an unfixed name would arrive as
-  // `Teminali.Code-...dmg` beside siblings called `Teminali-Code-...`. The
+  // `Teminali.OS-...dmg` beside siblings called `Teminali-OS-...`. The
   // publisher uses the name on disk for anything this hook hands back, so the
   // substitution has to happen here.
-  const { published } = await build(["Teminali Code-1.1.1-macOS-arm64.dmg"]);
-  assert.deepEqual(published, ["Teminali-Code-1.1.1-macOS-Apple-Silicon.dmg"]);
+  const { published } = await build(["Teminali OS-1.1.1-macOS-arm64.dmg"]);
+  assert.deepEqual(published, ["Teminali-OS-1.1.1-macOS-Apple-Silicon.dmg"]);
 });
 
 test("a Windows or Linux build passes through untouched", async () => {
   // The hook runs on all three runners. On two of them there is nothing to do,
   // and it must not invent something.
   const { published, onDisk } = await build([
-    "Teminali-Code-Setup-1.1.1-Windows-x64.exe",
-    "Teminali-Code-Setup-1.1.1-Windows-x64.exe.blockmap",
-    "Teminali-Code-1.1.1-Linux-x86_64.AppImage",
+    "Teminali-OS-Setup-1.1.1-Windows-x64.exe",
+    "Teminali-OS-Setup-1.1.1-Windows-x64.exe.blockmap",
+    "Teminali-OS-1.1.1-Linux-x86_64.AppImage",
     "latest.yml",
   ]);
   assert.deepEqual(published, []);
   assert.deepEqual(onDisk, [
-    "Teminali-Code-1.1.1-Linux-x86_64.AppImage",
-    "Teminali-Code-Setup-1.1.1-Windows-x64.exe",
-    "Teminali-Code-Setup-1.1.1-Windows-x64.exe.blockmap",
+    "Teminali-OS-1.1.1-Linux-x86_64.AppImage",
+    "Teminali-OS-Setup-1.1.1-Windows-x64.exe",
+    "Teminali-OS-Setup-1.1.1-Windows-x64.exe.blockmap",
     "latest.yml",
   ]);
 });

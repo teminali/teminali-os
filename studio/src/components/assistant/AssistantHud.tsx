@@ -69,7 +69,7 @@ export interface AssistantHudProps {
  *
  * Accessibility is granted to the application responsible for the pointer
  * helper, never to the helper itself, and that application is not always the
- * one whose name is on the window. A packaged run is "Teminali Code". A
+ * one whose name is on the window. A packaged run is "Teminali OS". A
  * development run is attributed to whatever launched it — the terminal that ran
  * `npm start`, not Electron and not the product — so the only honest advice
  * there is to test from the installed app.
@@ -292,7 +292,7 @@ export const AssistantHud: React.FC<AssistantHudProps> = ({ assistant, transcrip
           </p>
         )}
 
-        {/* Action bar for user controls: Back to Teminali Code, Retry, Dismiss */}
+        {/* Action bar for user controls: Back to Teminali OS, Retry, Dismiss */}
         {turn && (
           <div className="flex items-center justify-between pt-2.5 border-t border-edge/60 mt-1">
             <div className="flex items-center gap-2">
@@ -302,7 +302,7 @@ export const AssistantHud: React.FC<AssistantHudProps> = ({ assistant, transcrip
                 onClick={handleBackToStudio}
                 icon={<ArrowLeft size={12} />}
               >
-                Back to Teminali Code
+                Back to Teminali OS
               </Button>
               {turn.question && (
                 <Button

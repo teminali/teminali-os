@@ -462,7 +462,7 @@ export function publishRelease({ appRoot, version, notes = "", repo, sourceRepo 
         await git(appRoot, ["add", "package.json", "package-lock.json"]);
         await git(appRoot, ["commit", "-m", `release: v${version}`]);
         committed = true;
-        await git(appRoot, ["tag", "-a", `v${version}`, "-m", `Teminali Code ${version}`]);
+        await git(appRoot, ["tag", "-a", `v${version}`, "-m", `Teminali OS ${version}`]);
         await git(appRoot, ["push", "origin", plan.branch]);
         await git(appRoot, ["push", "origin", `v${version}`]);
         onEvent({ type: "output", id: "tag", kind: "stdout", text: `Pushed ${plan.branch} and v${version}\n` });
@@ -481,7 +481,7 @@ export function publishRelease({ appRoot, version, notes = "", repo, sourceRepo 
         await step("notes", "Write the release notes", () =>
           command("notes", "gh", [
             "release", "edit", `v${version}`, "--repo", repo,
-            "--title", `Teminali Code ${version}`,
+            "--title", `Teminali OS ${version}`,
             "--notes", notes.slice(0, 20_000),
           ]));
       }

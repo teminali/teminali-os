@@ -40,13 +40,13 @@ test("a term claims its own key", () => {
 
 test("repairs the product name Whisper has never read", () => {
   assert.equal(
-    repairVocabulary("the file is in my projects to Minoli Code Studio."),
-    "the file is in my projects Teminali Code Studio.",
+    repairVocabulary("the file is in my projects to Minoli OS Studio."),
+    "the file is in my projects Teminali OS Studio.",
   );
 });
 
 test("repairs across a multi-word window, longest first", () => {
-  assert.equal(repairVocabulary("open to Minnally Code"), "open Teminali Code");
+  assert.equal(repairVocabulary("open to Minnally OS"), "open Teminali OS");
 });
 
 test("leaves a word the model already spelled correctly exactly as it was", () => {

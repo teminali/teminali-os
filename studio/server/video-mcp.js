@@ -33,7 +33,7 @@ const DEFAULT_PORT = 3899;
 /** Must agree with electron/videoRpc.cjs, which writes this file. */
 function endpointFile(port) {
   const name = port === DEFAULT_PORT ? "video-bridge.json" : `video-bridge-${port}.json`;
-  return path.join(os.tmpdir(), `teminali-code-${name}`);
+  return path.join(os.tmpdir(), `teminali-os-${name}`);
 }
 
 /**
@@ -145,7 +145,7 @@ export function videoMcpArgs(engine, { env = process.env, execPath = process.exe
       confusing once during verification.
     */
     const file = writeConfig(
-      path.join(tmpDir, `teminali-code-mcp-${MCP_SERVER_NAME}.json`),
+      path.join(tmpDir, `teminali-os-mcp-${MCP_SERVER_NAME}.json`),
       { mcpServers: { [MCP_SERVER_NAME]: spec } }
     );
     /*

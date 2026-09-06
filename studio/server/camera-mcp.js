@@ -103,7 +103,7 @@ export function cameraMcpArgs(engine, runId, token, { execPath = process.execPat
   if (engine !== "claude" || !runId || !token) return { args: [] };
 
   const spec = cameraMcpServerSpec(runId, token, { execPath, port });
-  const file = path.join(tmpDir, `teminali-code-mcp-camera-${runId}.json`);
+  const file = path.join(tmpDir, `teminali-os-mcp-camera-${runId}.json`);
   fs.writeFileSync(file, JSON.stringify({ mcpServers: { [CAMERA_SERVER_NAME]: spec } }, null, 2), {
     encoding: "utf8",
     mode: 0o600,

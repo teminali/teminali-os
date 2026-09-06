@@ -26,7 +26,7 @@ export const SCREEN_RECORDING_PANE =
 /**
  * The `.app` three levels above the executable.
  *
- * `Teminali Code.app/Contents/MacOS/Teminali Code` is the shape, so the bundle
+ * `Teminali OS.app/Contents/MacOS/Teminali OS` is the shape, so the bundle
  * is the third parent. Returns null rather than guessing when the path is not
  * that shape — an unpackaged run is a bare binary somewhere in node_modules,
  * and revealing whatever happens to sit three levels above it would point the
@@ -46,7 +46,7 @@ export function appBundlePath(execPath, resolvePath) {
  * sentence, not a stack trace.
  *
  * `isDevelopmentBundle` is true when the bundle being revealed is the Electron
- * shell rather than a built Teminali Code. Revealing it is still correct — in
+ * shell rather than a built Teminali OS. Revealing it is still correct — in
  * development that bundle is what macOS is being asked to trust — but the
  * operator is dragging something called Electron, and an interface that does
  * not say so looks broken.

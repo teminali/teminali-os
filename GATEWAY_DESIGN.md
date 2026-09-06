@@ -14,7 +14,7 @@ A local OpenAI-compatible gateway that lets a client use explicitly authorized
 model-provider credentials through a single endpoint while respecting each
 credential's published limits.
 
-Two clients exist. Teminali Code's studio is the primary one and reaches the
+Two clients exist. Teminali OS's studio is the primary one and reaches the
 gateway through its own local server; OpenCode is the original one and still
 works, via `opencode.gateway.jsonc`. Neither needed a workflow change to gain
 the pooling behaviour, which was the point.

@@ -322,7 +322,7 @@ export const AssistantOverlaySurface: React.FC = () => {
                   className="px-3 py-1.5 rounded-lg bg-accent text-frame-top text-xs font-semibold hover:opacity-90 transition-opacity flex items-center gap-1.5 shadow-sm"
                 >
                   <ArrowLeft size={12} />
-                  Back to Teminali Code
+                  Back to Teminali OS
                 </button>
                 <button
                   type="button"

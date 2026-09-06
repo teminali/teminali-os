@@ -132,7 +132,7 @@ export function parseProject(text: string): ParseResult {
   if (typeof data.version !== 'number' || data.version > VIDEO_PROJECT_VERSION) {
     return {
       ok: false,
-      error: `That project was saved by a newer version of Teminali Code (format ${String(data.version)}).`,
+      error: `That project was saved by a newer version of Teminali OS (format ${String(data.version)}).`,
     };
   }
   if (!data.project || typeof data.project !== 'object') {

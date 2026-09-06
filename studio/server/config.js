@@ -94,7 +94,7 @@ export function createConfig(environment = process.env, overrides = {}) {
     // report as "this repository has no releases yet".
     appRoot: resolve(environment.TEMINALI_APP_ROOT || process.cwd()),
     releaseRepo: environment.TEMINALI_RELEASE_REPO || "teminali/releases",
-    sourceRepo: environment.TEMINALI_SOURCE_REPO || "teminali/teminalicode",
+    sourceRepo: environment.TEMINALI_SOURCE_REPO || "teminali/teminali-os",
     // Every benchmark that has been run. Diffs are not kept; see arena.js.
     arenaHistoryPath: resolve(environment.TEMINALI_ARENA_HISTORY || resolve(process.cwd(), "benchmark-results", "arena-runs.jsonl")),
     // "local" runs Ollama models; "api" routes to a hosted provider.

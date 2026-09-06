@@ -1,6 +1,6 @@
-# Teminali Code
+# Teminali OS
 
-The monorepo behind **Teminali Code** — an autonomous AI code studio that runs
+The monorepo behind **Teminali OS** — an autonomous AI studio that runs
 on your machine. Local models, local speech, local screen understanding; hosted
 providers available and never required. Since v1.2.0 it also records the screen
 and edits what it recorded: a screen recorder that hands its take to a timeline
@@ -8,12 +8,12 @@ already cut, and an exporter that renders that timeline back out to a file.
 
 The product ships as a desktop application from
 [`teminali/releases`](https://github.com/teminali/releases/releases)
-(currently **v1.2.8**). Everything below is how it is built.
+(currently **v0.0.1**). Everything below is how it is built.
 
 > The repository directory is `teminaliCode`, under `my_projects/teminali/`, and
 > the internal package is `@teminali/core`. "Frontier" survives as the name of
 > the routing gateway and the local model wrapper (Frontier Flash / Auto / Max);
-> the *product* is Teminali Code.
+> the *product* is Teminali OS.
 
 ## Repository layout
 

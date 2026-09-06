@@ -199,7 +199,7 @@ export const AssistantSettingsPanel: React.FC<{ assistant: UseAssistantResult }>
                             {reveal.isDevelopmentBundle && (
                               <>
                                 {" "}
-                                This is a development run, so the bundle is the Electron shell rather than Teminali Code
+                                This is a development run, so the bundle is the Electron shell rather than Teminali OS
                                 — that is the one macOS is being asked to trust here.
                               </>
                             )}

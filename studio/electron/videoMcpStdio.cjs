@@ -3,7 +3,7 @@
 
    An MCP client — the Claude Code CLI, the Codex CLI, anything else — speaks
    newline-delimited JSON-RPC to this over stdio. It owns no state of its own:
-   every tool call is forwarded to the running Teminali Code window through the
+   every tool call is forwarded to the running Teminali OS window through the
    local RPC bridge, so edits land in the timeline actually on screen instead of
    in a fresh store this process would otherwise have to itself.
 
@@ -25,7 +25,7 @@ const DEFAULT_PORT = 3899;
 
 function endpointFile(port) {
   const name = port === DEFAULT_PORT ? "video-bridge.json" : `video-bridge-${port}.json`;
-  return path.join(os.tmpdir(), `teminali-code-${name}`);
+  return path.join(os.tmpdir(), `teminali-os-${name}`);
 }
 
 /**
@@ -181,4 +181,4 @@ process.stdin.on("data", (chunk) => {
 // Nothing to serve once the client hangs up.
 process.stdin.on("end", () => process.exit(0));
 
-process.stderr.write("Teminali Code video MCP shim ready — forwarding to the live panel.\n");
+process.stderr.write("Teminali OS video MCP shim ready — forwarding to the live panel.\n");

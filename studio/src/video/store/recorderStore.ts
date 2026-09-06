@@ -456,7 +456,7 @@ export const useRecorderStore = create<RecorderState>((set, get) => ({
     const result = await api.resetScreenPermission();
     useUiStore.getState().pushToast({
       kind: result.ok ? 'success' : 'error',
-      title: result.ok ? 'Restarting Teminali Code' : 'Could not reset the permission',
+      title: result.ok ? 'Restarting Teminali OS' : 'Could not reset the permission',
       detail: result.message,
       ttl: result.ok ? 2500 : 8000,
     });

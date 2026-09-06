@@ -212,4 +212,4 @@ process.stdin.on("end", () => {
   exitWhenIdle();
 });
 
-process.stderr.write("Teminali Code camera MCP shim ready — forwarding to the live window.\n");
+process.stderr.write("Teminali OS camera MCP shim ready — forwarding to the live window.\n");

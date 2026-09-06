@@ -28,7 +28,7 @@ function log(...args) {
   console.log(...args);
 }
 
-log("Teminali Code main process starting...");
+log("Teminali OS main process starting...");
 log("App path:", app.getAppPath());
 log("UserData path:", app.getPath("userData"));
 log("IsPackaged:", app.isPackaged);
@@ -301,7 +301,7 @@ function createWindow() {
     // removes them entirely.
     frame: false,
     backgroundColor: "#08090E",
-    title: "Teminali Code",
+    title: "Teminali OS",
     show: false,
     webPreferences: {
       nodeIntegration: false,
@@ -437,7 +437,7 @@ function activateAssistant() {
   if (window.isMinimized()) window.restore();
   // Shown without being focused, deliberately. The assistant reads the
   // accessibility tree of whichever application is frontmost, so taking focus
-  // here would point it at Teminali Code instead of the app the operator was
+  // here would point it at Teminali OS instead of the app the operator was
   // actually looking at when they pressed the shortcut — the assistant would
   // answer questions about its own window. The tray's "Open" item still brings
   // the app forward for anyone who wants that.
@@ -592,7 +592,7 @@ ipcMain.handle("updates:install", async (_event, filePath) => {
     if (!app.isPackaged) {
       return { ok: false, reason: "A development build cannot replace itself." };
     }
-    // Teminali Code.app/Contents/MacOS/Teminali Code — the bundle is three
+    // Teminali OS.app/Contents/MacOS/Teminali OS — the bundle is three
     // levels above the executable.
     const bundlePath = path.resolve(app.getPath("exe"), "..", "..", "..");
     const { installMacUpdate } = await loadMacInstaller();
@@ -831,7 +831,7 @@ ipcMain.handle("dialog:open-folder", async (event) => {
  *
  * Accessibility is granted to a bundle, not to a helper: the pointer binary is
  * ad-hoc signed and short-lived, so TCC judges whoever is responsible for it.
- * The name of that bundle is the executable's, which is "Teminali Code" in a
+ * The name of that bundle is the executable's, which is "Teminali OS" in a
  * packaged run and "Electron" in a development one — and the renderer cannot
  * work either out for itself. `isPackaged` rides along because a development
  * run launched from a terminal is attributed to the terminal, which makes the
@@ -1107,7 +1107,7 @@ app.on("will-quit", () => {
 });
 
 /* The overlay points at other applications, so it stands down while the
-   operator is inside Teminali Code. Focus moving between our own windows fires
+   operator is inside Teminali OS. Focus moving between our own windows fires
    blur before the next focus, hence the deferred re-read rather than trusting
    the blur on its own. */
 app.on("browser-window-focus", () => assistantOverlay?.setAppFocused(true));

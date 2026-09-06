@@ -119,7 +119,7 @@ export function workspaceMcpArgs(engine, runId, token, { execPath = process.exec
   if (engine !== "claude" || !runId || !token) return { args: [] };
 
   const spec = workspaceMcpServerSpec(runId, token, { execPath, port });
-  const file = path.join(tmpDir, `teminali-code-mcp-workspace-${runId}.json`);
+  const file = path.join(tmpDir, `teminali-os-mcp-workspace-${runId}.json`);
   fs.writeFileSync(file, JSON.stringify({ mcpServers: { [WORKSPACE_SERVER_NAME]: spec } }, null, 2), {
     encoding: "utf8",
     mode: 0o600,

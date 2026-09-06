@@ -282,4 +282,4 @@ process.stdin.on("data", (chunk) => {
 
 process.stdin.on("end", () => process.exit(0));
 
-process.stderr.write("Teminali Code workspace MCP shim ready — forwarding to the live workspace.\n");
+process.stderr.write("Teminali OS workspace MCP shim ready — forwarding to the live workspace.\n");

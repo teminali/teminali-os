@@ -1,5 +1,5 @@
-appId: code.teminali.app
-productName: Teminali Code
+appId: os.teminali.app
+productName: Teminali OS
 
 directories:
   output: release
@@ -171,19 +171,19 @@ mac:
   # prompted around.
   extendInfo:
     NSMicrophoneUsageDescription: >-
-      Teminali Code listens when you press its microphone or its shortcut, so
+      Teminali OS listens when you press its microphone or its shortcut, so
       you can dictate and ask about what is on your screen.
     NSCameraUsageDescription: >-
-      Teminali Code takes a single photograph with your camera when you ask its
+      Teminali OS takes a single photograph with your camera when you ask its
       assistant to look at you, and only after you approve that request.
     NSAppleEventsUsageDescription: >-
-      Teminali Code reads the controls of the application in front so its
+      Teminali OS reads the controls of the application in front so its
       assistant can point at them by name rather than guessing where they are.
 
 dmg:
   artifactName: ${productName}-${version}-macOS-${arch}.${ext}
   # No ${arch}: it expanded to "-arm64", so mounting the Apple Silicon image
-  # opened a volume called "Teminali Code 1.1.0 -arm64" — contradicting the file
+  # opened a volume called "Teminali OS 1.1.0 -arm64" — contradicting the file
   # the reader just chose, in the machine vocabulary the rename exists to avoid.
   # It cannot say "Apple Silicon" instead: the volume name is baked in when the
   # image is built and the template cannot branch on architecture either. It is
@@ -237,7 +237,7 @@ nsis:
   allowToChangeInstallationDirectory: true
   createDesktopShortcut: true
   createStartMenuShortcut: true
-  shortcutName: Teminali Code
+  shortcutName: Teminali OS
 
 # ── Linux ──────────────────────────────────────────────────────────
 linux:
@@ -267,10 +267,10 @@ linux:
         # wins, and the root copy has the same bin/ layout as the nested one.
         - "!onnxruntime-node/**"
   # Named explicitly. Left to itself electron-builder derives this from the
-  # package name, which is scoped — "@teminali/code" becomes "@teminalicode",
+  # package name, which is scoped — "@teminali/os" becomes "@teminalios",
   # and an "@" is not legal in a Linux executable path. The AppImage build fails
   # outright rather than warning.
-  executableName: teminali-code
+  executableName: teminali-os
   # Copies `desktopName` out of package.json into the .desktop entry. Without
   # the pair, desktop environments cannot associate a running window with its
   # entry and the app takes a generic icon. The name itself lives in

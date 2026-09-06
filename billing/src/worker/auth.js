@@ -5,7 +5,7 @@
  * provider can send the user back to that only this process can receive, and a
  * loopback listener is a port anything else on the machine can race for. So
  * the browser half and the app half are joined by a short code the person
- * types. Teminali Code shows the code, the person authorises in whatever
+ * types. Teminali OS shows the code, the person authorises in whatever
  * browser they already trust, and the app polls until it is done.
  *
  * **The app polls US, not the provider.** That is the whole design:

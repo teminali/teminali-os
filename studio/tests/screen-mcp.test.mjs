@@ -100,7 +100,7 @@ test("a run's token authorises that run and dies with it", () => {
 
 test("the agent is told it is in an application, not a terminal", () => {
   const briefing = agentBriefing({ screen: true, video: true });
-  assert.match(briefing, /Teminali Code/);
+  assert.match(briefing, /Teminali OS/);
   assert.match(briefing, /not a terminal/);
   /*
     The two names the product must never be called appear here exactly once

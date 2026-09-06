@@ -1,10 +1,16 @@
-# Teminali Code — working agreement
+# Teminali OS — working agreement
 
-The product is **Teminali Code** (`@teminali/code`, published as `teminali/teminalicode`).
-The repository directory is `teminaliCode`, under `my_projects/teminali/` beside
-`landing` and `teminaliCut`, and the root package is `@teminali/core`;
-"Frontier" now names only the routing gateway and the local model wrapper
-(Frontier Flash / Auto / Max). Never reintroduce "Teminali Studio" or "Frontier Code".
+The product is **Teminali OS** (`@teminali/os`, published as `teminali/teminali-os`).
+The repository directory is still `teminaliCode` on disk, under
+`my_projects/teminali/` beside `landing` and `teminaliCut` — deliberately not
+renamed, because a git worktree and every absolute path in these docs point at
+it. The root package is `@teminali/core`; "Frontier" names only the routing
+gateway and the local model wrapper (Frontier Flash / Auto / Max).
+
+The product was called **Teminali Code** until the 0.0.1 reset. Never
+reintroduce "Teminali Code", "Teminali Studio" or "Frontier Code"; the one place
+the old name still legitimately appears is `studio/tests/updates.test.mjs`,
+where legacy asset fixtures prove the update matcher survives a rename.
 
 ## Docs are part of the feature, not a follow-up
 

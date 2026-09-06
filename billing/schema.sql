@@ -1,5 +1,5 @@
 -- ═══════════════════════════════════════════════════════════════════
--- Teminali Code billing — D1 schema.
+-- Teminali OS billing — D1 schema.
 --
 -- This is the first database in teminaliCode, and it is deliberately not
 -- in teminaliCode. The app is `node:http`, manual routing and JSON on

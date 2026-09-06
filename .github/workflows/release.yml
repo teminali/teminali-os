@@ -1,4 +1,4 @@
-# Builds Teminali Code for macOS, Windows and Linux and publishes one release.
+# Builds Teminali OS for macOS, Windows and Linux and publishes one release.
 #
 # Each platform is built on its own runner because they do not cross-compile
 # honestly: packaging an NSIS installer from macOS needs wine, and a Linux
@@ -257,7 +257,7 @@ jobs:
             echo "" >> "$NOTES_FILE"
 
             gh release edit "$TAG_NAME" --repo "$RELEASE_REPO" \
-              --title "Teminali Code ${TAG_NAME#v}" --notes-file "$NOTES_FILE"
+              --title "Teminali OS ${TAG_NAME#v}" --notes-file "$NOTES_FILE"
             echo "Release notes successfully published for $TAG_NAME!"
           else
             echo "Release notes already exist for $TAG_NAME."

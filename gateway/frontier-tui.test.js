@@ -1,4 +1,5 @@
 import test from "node:test";
+import { readFileSync } from "node:fs";
 import assert from "node:assert/strict";
 import {
   activityCopy,
@@ -173,5 +174,7 @@ test("renderFooter displays current working directory", () => {
   const footer = renderFooter({ targetDir: "/Users/test/my-project" });
   assert.ok(typeof footer === "string");
   assert.ok(footer.includes("my-project"));
-  assert.ok(footer.includes("0.1.0"));
+  // Read, not written: a literal here is what let the footer drift at the 0.0.1 reset.
+  const { version } = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8"));
+  assert.ok(footer.includes(version));
 });

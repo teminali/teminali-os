@@ -2,7 +2,7 @@
   "name": "@teminali/billing",
   "version": "0.1.0",
   "private": true,
-  "description": "Teminali Code billing — accounts, subscriptions, Stripe and Lipia, and the signer that issues Pro licences",
+  "description": "Teminali OS billing — accounts, subscriptions, Stripe and Lipia, and the signer that issues Pro licences",
   "type": "module",
   "scripts": {
     "dev": "wrangler dev",

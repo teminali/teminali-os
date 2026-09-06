@@ -110,7 +110,7 @@ export const CaptureOptions: React.FC<Props> = ({
 
       {permissions?.camera === 'denied' && (
         <PermissionNote
-          text="Camera access is off for Teminali Code."
+          text="Camera access is off for Teminali OS."
           action="Open settings"
           onAction={() => onRequestPermission('camera')}
         />
@@ -156,7 +156,7 @@ export const CaptureOptions: React.FC<Props> = ({
 
       {permissions?.microphone === 'denied' && (
         <PermissionNote
-          text="Microphone access is off for Teminali Code."
+          text="Microphone access is off for Teminali OS."
           action="Open settings"
           onAction={() => onRequestPermission('microphone')}
         />
@@ -197,7 +197,7 @@ export const CaptureOptions: React.FC<Props> = ({
       </Row>
 
       <ToggleRow
-        label="Hide Teminali Code while recording"
+        label="Hide Teminali OS while recording"
         checked={settings.hideWindow}
         onChange={(v) => onChange('hideWindow', v)}
         hint="A floating bar stays, and it is kept out of the capture"

@@ -29,7 +29,7 @@ import {
 /* ── Harness ──────────────────────────────────────────────────────────────── */
 
 const HOME = "/home/op";
-const USER_DATA = "/home/op/Library/Application Support/Teminali Code";
+const USER_DATA = "/home/op/Library/Application Support/Teminali OS";
 const POLICY = { home: HOME, userData: USER_DATA };
 
 /**
@@ -134,7 +134,7 @@ test("the deny list refuses inside a granted root", async () => {
     [`${HOME}/.aws/credentials.mp4`, /AWS credentials/],
     [`${HOME}/.gnupg/secring.mp4`, /GnuPG keys/],
     [`${HOME}/Library/Keychains/login.mp4`, /the macOS keychain/],
-    [`${USER_DATA}/state.mp4`, /Teminali Code's own state/],
+    [`${USER_DATA}/state.mp4`, /Teminali OS's own state/],
     // Not a named root: the dotfile rule is about the path, so a folder of
     // footage that happens to hold a .env did not make the .env footage.
     [`${HOME}/.env.mp4`, /a hidden file or folder \(\.env\.mp4\)/],

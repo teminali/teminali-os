@@ -1,7 +1,7 @@
 # 🎨 Teminali Design System (TDS) — Canonical Contract & Component Governance
 
 > **Canonical System Contract for Teminali Suite & Autonomous AI Agents**
-> Ecosystem: **Teminali Code**, **Teminali Cut**, **Teminali Guardian**, and all generated web apps.
+> Ecosystem: **Teminali OS**, **Teminali Cut**, **Teminali Guardian**, and all generated web apps.
 > Mandate: reproduce **Cursor's Obsidian Dark** exactly. Every UI change MUST be made at the token
 > or primitive level so it propagates everywhere at once.
 
@@ -2272,14 +2272,14 @@ second recorder.
 ### The assistant never takes focus, because focus is the target
 
 Activating the assistant used to call `window.show()` then `window.focus()`,
-which made Teminali Code the frontmost application. The pointer helper reads the
+which made Teminali OS the frontmost application. The pointer helper reads the
 tree of `NSWorkspace.shared.frontmostApplication`, so the assistant would look
 at the screen and find **itself** — the operator asks about Spotify from inside
-Spotify, and the assistant inventories the Teminali Code window it just raised.
+Spotify, and the assistant inventories the Teminali OS window it just raised.
 Every door that starts a turn — the global shortcut, the tray's "Talk to the
 assistant", a tray double-click — now shows the window with `showInactive()`,
 and the frontmost application stays whatever the operator was using. Only "Open
-Teminali Code" still activates, because there the operator asked for the window
+Teminali OS" still activates, because there the operator asked for the window
 rather than for an answer.
 
 `/api/assistant/observe` also accepts an optional `pid`. `observe()` always took
@@ -2453,7 +2453,7 @@ shows. `npm run assistant:doctor` reports the whole path on the screen as it is.
 Naming the permission is not enough on its own, because the switch is not
 labelled with the product. TCC grants Accessibility to the application
 *responsible* for the pointer helper, never to the ad-hoc-signed helper itself,
-so the row to turn on is "Teminali Code" in a packaged run — and in a
+so the row to turn on is "Teminali OS" in a packaged run — and in a
 development run it is whatever launched the window, which for `npm start` is the
 terminal. The HUD reads `window.teminali.host` (`{ name, isPackaged }`, put
 there by `assistant:host-sync` in `main.cjs`) and says which of those two cases
@@ -2715,7 +2715,7 @@ to hidden.
 
 The alternative considered and rejected was enlarging the macOS pointer through
 Accessibility → Pointer size. That is a system-wide preference affecting every
-application at all times and persisting after Teminali Code quits; this is
+application at all times and persisting after Teminali OS quits; this is
 app-local, themed, and gone the moment the turn ends.
 
 ### The chat pane gets the same hands, through the same gate (2026-09-05)
@@ -2814,7 +2814,7 @@ in. The dukabotai.com refusal and this are the same failure seen from two sides.
 `server/agent-briefing.js` is the fix, delivered through
 `--append-system-prompt` so it lands as context about the world rather than as a
 message in the transcript the operator never sent. It carries only what the
-agent cannot find out for itself: that it is a panel in Teminali Code and not a
+agent cannot find out for itself: that it is a panel in Teminali OS and not a
 terminal, that a voice assistant called Temy may be the one speaking and its
 words will carry speech-recognition errors rather than typing errors, which
 tools came from this application, and — when the screen tools were withheld —

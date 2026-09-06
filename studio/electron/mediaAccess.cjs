@@ -168,7 +168,7 @@ function processWithFfmpeg(options = {}) {
     });
   }
 
-  const dir = path.join(os.tmpdir(), "teminali-code-processed");
+  const dir = path.join(os.tmpdir(), "teminali-os-processed");
   fs.mkdirSync(dir, { recursive: true });
 
   const safe = path.basename(String(options.name || "processed")).replace(/[^\w.\-]+/g, "_") || "processed";

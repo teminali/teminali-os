@@ -1,7 +1,7 @@
 /**
  * The Lipia rail — mobile money, through pay.mhasibudigital.com.
  *
- * Teminali Code is a tenant of Lipia the same way Kerf and DukaBot are. Lipia
+ * Teminali OS is a tenant of Lipia the same way Kerf and DukaBot are. Lipia
  * wraps Selcom, holds the merchant credentials and the static-IP proxy
  * Selcom's whitelisting requires, and hands back one clean REST surface — so
  * this file knows about Lipia and nothing about Selcom, HMAC order signing, or
@@ -121,7 +121,7 @@ export async function startCharge(env, { user, price, msisdn, kind = "initial", 
       customer_msisdn: msisdn,
       customer_email: user.email ?? undefined,
       customer_name: user.name ?? undefined,
-      description: `Teminali Code ${price.plan_id} — ${price.interval}`,
+      description: `Teminali OS ${price.plan_id} — ${price.interval}`,
       external_id: orderId,
       // `order_id` is what comes back on the webhook. `external_id` is echoed
       // too, but metadata is the field Lipia's dispatcher guarantees.
@@ -212,7 +212,7 @@ export async function webhook(request, env) {
   const orderId = data.metadata?.order_id ?? data.external_id ?? null;
 
   // Lipia is multi-tenant and this endpoint may receive events for products
-  // that are not Teminali Code. An unknown order is acknowledged with 200,
+  // that are not Teminali OS. An unknown order is acknowledged with 200,
   // never retried at us, and recorded — a 4xx here would put Lipia into a
   // twelve-hour retry ladder over something we will never handle.
   if (!orderId) {

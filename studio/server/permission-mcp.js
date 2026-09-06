@@ -43,7 +43,7 @@ export function permissionMcpServerSpec(runId, token, { execPath = process.execP
 export function permissionMcpArgs(runId, token, { execPath = process.execPath, tmpDir = os.tmpdir(), port } = {}) {
   if (!runId || !token) return { args: [] };
   const spec = permissionMcpServerSpec(runId, token, { execPath, port });
-  const file = path.join(tmpDir, `teminali-code-mcp-permissions-${runId}.json`);
+  const file = path.join(tmpDir, `teminali-os-mcp-permissions-${runId}.json`);
   fs.writeFileSync(file, JSON.stringify({ mcpServers: { [PERMISSION_SERVER_NAME]: spec } }, null, 2), {
     encoding: "utf8",
     mode: 0o600,

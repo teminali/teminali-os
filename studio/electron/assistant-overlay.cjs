@@ -36,7 +36,7 @@ function attachAssistantOverlay({ devUrl, indexPath, log = () => {} }) {
   let lastState = null;
   /**
    * Whether one of our own windows is in front. The overlay exists to point at
-   * *other* applications; drawn over Teminali Code itself it covers the thing
+   * *other* applications; drawn over Teminali OS itself it covers the thing
    * the operator is already looking at, so it stands down until they leave.
    */
   let appFocused = false;
@@ -152,7 +152,7 @@ function attachAssistantOverlay({ devUrl, indexPath, log = () => {} }) {
   /**
    * Reconcile visibility against the three things that decide it: whether there
    * is anything to draw, whether the operator put it away, and whether they are
-   * looking at Teminali Code. Kept in one place so no caller can show the
+   * looking at Teminali OS. Kept in one place so no caller can show the
    * overlay while another reason to stay hidden is still true.
    */
   function clearExpiry() {

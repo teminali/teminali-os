@@ -223,7 +223,7 @@ export const CursorSettingsModal: React.FC<{
     { id: "profile", label: "Profile", icon: User },
     { id: "appearance", label: "Appearance & Tokens", icon: SunMoon },
     { id: "plan", label: "Plan & Usage", icon: CreditCard },
-    { id: "agents", label: "Teminali Code", icon: Bot },
+    { id: "agents", label: "Teminali OS", icon: Bot },
     { id: "cloud-agents", label: "Cloud Agents", icon: Cloud, isExternal: true },
     { id: "git", label: "Git & PRs", icon: GitBranch },
     { id: "worktrees", label: "Worktrees", icon: GitFork },
@@ -249,7 +249,7 @@ export const CursorSettingsModal: React.FC<{
             {/* Back Button & Title */}
             <div className="flex items-center gap-2 px-2 py-1">
 
-              <span className="text-sm font-semibold text-ink-bright tracking-tight">Teminali Code Settings</span>
+              <span className="text-sm font-semibold text-ink-bright tracking-tight">Teminali OS Settings</span>
             </div>
 
             {/* Settings Search Bar */}
@@ -362,7 +362,7 @@ export const CursorSettingsModal: React.FC<{
             /* ========================================================================= */
             <>
               <div>
-                <h1 className="text-lg font-semibold text-ink-bright tracking-tight">Teminali Code Settings</h1>
+                <h1 className="text-lg font-semibold text-ink-bright tracking-tight">Teminali OS Settings</h1>
                 <p className="text-xs text-ink-muted mt-1">Configure your local gateway, model execution lanes, and editor preferences.</p>
               </div>
 

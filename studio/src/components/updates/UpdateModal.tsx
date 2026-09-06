@@ -58,7 +58,7 @@ export const UpdateModal: React.FC<UpdateModalProps> = ({ updates, isOpen, onClo
           <div className="rounded-xl border border-edge bg-surface-sunken px-3.5 py-3 space-y-1.5">
             <div className="flex items-center justify-between">
               <span className="text-xs font-semibold text-ink-strong">
-                Teminali Code {latest?.name || latest?.tag || "Update"}
+                Teminali OS {latest?.name || latest?.tag || "Update"}
               </span>
               {latest?.url && (
                 <a
@@ -183,7 +183,7 @@ export const UpdateModal: React.FC<UpdateModalProps> = ({ updates, isOpen, onClo
           </Button>
         ) : phase === "installed" || awaitingRestart ? (
           <Button variant="primary" size="sm" onClick={() => void updates.restart()} icon={<RotateCw size={13} />}>
-            Restart Teminali Code
+            Restart Teminali OS
           </Button>
         ) : asset && desktop ? (
           <Button

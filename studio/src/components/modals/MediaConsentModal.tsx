@@ -88,7 +88,7 @@ export const MediaConsentModal: React.FC = () => {
         <p className="px-4 pt-2.5 pb-3 text-2xs text-ink-disabled leading-relaxed">
           {spawns
             ? "Allowing this also lets ffmpeg run for the rest of this session. Nothing is written over the original file, and nothing is remembered after you quit."
-            : "The grant lasts until you quit Teminali Code. Nothing is written to disk and nothing is remembered."}
+            : "The grant lasts until you quit Teminali OS. Nothing is written to disk and nothing is remembered."}
         </p>
 
         <footer className="flex items-center justify-end gap-2 px-4 py-3 border-t border-edge-subtle">

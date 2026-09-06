@@ -56,7 +56,7 @@ export const ALWAYS_PROTECTED = Object.freeze([
   // Anything that owns a shell the operator may be working in.
   "Terminal", "iTerm2", "iTerm", "Warp", "Alacritty", "kitty", "WezTerm", "Ghostty", "Hyper",
   // Ourselves and our runtime.
-  "Teminali Code", "Teminali", "Electron", "node", "Ollama", "ollama",
+  "Teminali OS", "Teminali", "Electron", "node", "Ollama", "ollama",
   // Anything mid-flight that would corrupt if interrupted.
   "Disk Utility", "Time Machine", "backupd", "Migration Assistant",
   // Transfers in flight: quitting these throws away progress with no prompt.

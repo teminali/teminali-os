@@ -1,7 +1,7 @@
 # Task State
 
 > **Superseded work log — historical.** This tracked the pre-rename harness
-> effort and stopped being updated before Teminali Code shipped. Its `Completed`
+> effort and stopped being updated before Teminali OS shipped. Its `Completed`
 > and `Evidence` entries are kept as a record of how the system got here, with
 > their original figures intact; do not read the counts in them as current.
 >

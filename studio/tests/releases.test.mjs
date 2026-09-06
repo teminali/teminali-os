@@ -241,7 +241,7 @@ test("a real publish checks the repository before it touches the manifest", asyn
   const result = await publishRelease({
     appRoot: root,
     version: "1.2.3",
-    repo: "teminali/teminalicode",
+    repo: "teminali/teminali-os",
     dryRun: false,
     onEvent: (event) => {
       if (event.type === "step" && event.status === "running") steps.push(event.id);
@@ -286,7 +286,7 @@ async function scratchRepo() {
 test("a detached HEAD is refused before anything else is considered", async () => {
   const { root, run } = await scratchRepo();
   run("checkout", "--detach");
-  await assert.rejects(() => preflight(root, "1.1.0", "teminali/teminalicode"), /detached HEAD/);
+  await assert.rejects(() => preflight(root, "1.1.0", "teminali/teminali-os"), /detached HEAD/);
 });
 
 test("an uncommitted change stops the release and says which file", async () => {
@@ -296,7 +296,7 @@ test("an uncommitted change stops the release and says which file", async () => 
   await writeManifest(joinManifest(root, "README.md"), "unfinished\n");
 
   await assert.rejects(
-    () => preflight(root, "1.1.0", "teminali/teminalicode"),
+    () => preflight(root, "1.1.0", "teminali/teminali-os"),
     (error) => {
       assert.match(error.message, /1 uncommitted change\b/);
       assert.match(error.message, /README\.md/);
@@ -313,7 +313,7 @@ test("the version files this run is about to rewrite are not counted as dirty", 
   run("tag", "v1.1.0");
   await writeManifest(joinManifest(root, "package.json"), `${JSON.stringify({ name: "x", version: "1.1.0" }, null, 2)}\n`);
 
-  await assert.rejects(() => preflight(root, "1.1.0", "teminali/teminalicode"), /Tag v1\.1\.0 already exists locally/);
+  await assert.rejects(() => preflight(root, "1.1.0", "teminali/teminali-os"), /Tag v1\.1\.0 already exists locally/);
 });
 
 test("a tag that already exists is refused rather than moved", async () => {
@@ -321,5 +321,5 @@ test("a tag that already exists is refused rather than moved", async () => {
   // points at, for everyone who has not downloaded it yet.
   const { root, run } = await scratchRepo();
   run("tag", "v1.1.0");
-  await assert.rejects(() => preflight(root, "1.1.0", "teminali/teminalicode"), /already exists locally/);
+  await assert.rejects(() => preflight(root, "1.1.0", "teminali/teminali-os"), /already exists locally/);
 });

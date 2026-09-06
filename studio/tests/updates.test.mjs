@@ -36,7 +36,7 @@ test("each platform is offered the artifact it can actually install, not a manif
 
 test("the matcher survives the product being renamed", () => {
   // The release that exists right now was built as "Teminali Studio". An update
-  // check from a build called "Teminali Code" must still find it, which is why
+  // check from a build called "Teminali OS" must still find it, which is why
   // matching is on extension and architecture rather than on the product name.
   const older = [{ name: "Teminali.Studio-1.0.0-macOS-arm64.zip", size: 1, browser_download_url: "https://github.com/a/b/c.zip" }];
   assert.equal(assetForPlatform(older, { platform: "darwin", arch: "arm64" }).name, "Teminali.Studio-1.0.0-macOS-arm64.zip");
@@ -58,11 +58,11 @@ test("the packagers' own spellings of an architecture all resolve", () => {
   // Observed in CI, not imagined: electron-builder writes `x64` into the .dmg
   // and `x86_64` into the .AppImage from the same template.
   const mixed = [
-    { name: "Teminali Code-1.1.0-Linux-x86_64.AppImage", size: 1, browser_download_url: "https://github.com/a/b/l.AppImage" },
-    { name: "Teminali Code-1.1.0-Linux-arm64.AppImage", size: 1, browser_download_url: "https://github.com/a/b/la.AppImage" },
+    { name: "Teminali OS-1.1.0-Linux-x86_64.AppImage", size: 1, browser_download_url: "https://github.com/a/b/l.AppImage" },
+    { name: "Teminali OS-1.1.0-Linux-arm64.AppImage", size: 1, browser_download_url: "https://github.com/a/b/la.AppImage" },
   ];
-  assert.equal(assetForPlatform(mixed, { platform: "linux", arch: "x64" }).name, "Teminali Code-1.1.0-Linux-x86_64.AppImage");
-  assert.equal(assetForPlatform(mixed, { platform: "linux", arch: "arm64" }).name, "Teminali Code-1.1.0-Linux-arm64.AppImage");
+  assert.equal(assetForPlatform(mixed, { platform: "linux", arch: "x64" }).name, "Teminali OS-1.1.0-Linux-x86_64.AppImage");
+  assert.equal(assetForPlatform(mixed, { platform: "linux", arch: "arm64" }).name, "Teminali OS-1.1.0-Linux-arm64.AppImage");
 
   const amd = [{ name: "App-1.0.0-amd64.AppImage", size: 1, browser_download_url: "https://github.com/a/b/c.AppImage" }];
   assert.equal(assetForPlatform(amd, { platform: "linux", arch: "x64" }).name, "App-1.0.0-amd64.AppImage");
@@ -80,13 +80,13 @@ test("the real release shape resolves to the zip, never the labelled dmg", () =>
   // DMGs to say which Mac they are for and leaves the zips as arm64 / x64, so
   // both spellings are present at once and the .dmg must lose.
   const labelled = [
-    { name: "Teminali-Code-1.1.1-macOS-Apple-Silicon.dmg", size: 1, browser_download_url: "https://github.com/a/b/as.dmg" },
-    { name: "Teminali-Code-1.1.1-macOS-Intel.dmg", size: 1, browser_download_url: "https://github.com/a/b/i.dmg" },
-    { name: "Teminali-Code-1.1.1-macOS-arm64.zip", size: 1, browser_download_url: "https://github.com/a/b/as.zip" },
-    { name: "Teminali-Code-1.1.1-macOS-x64.zip", size: 1, browser_download_url: "https://github.com/a/b/i.zip" },
+    { name: "Teminali-OS-1.1.1-macOS-Apple-Silicon.dmg", size: 1, browser_download_url: "https://github.com/a/b/as.dmg" },
+    { name: "Teminali-OS-1.1.1-macOS-Intel.dmg", size: 1, browser_download_url: "https://github.com/a/b/i.dmg" },
+    { name: "Teminali-OS-1.1.1-macOS-arm64.zip", size: 1, browser_download_url: "https://github.com/a/b/as.zip" },
+    { name: "Teminali-OS-1.1.1-macOS-x64.zip", size: 1, browser_download_url: "https://github.com/a/b/i.zip" },
   ];
-  assert.equal(assetForPlatform(labelled, { platform: "darwin", arch: "arm64" }).name, "Teminali-Code-1.1.1-macOS-arm64.zip");
-  assert.equal(assetForPlatform(labelled, { platform: "darwin", arch: "x64" }).name, "Teminali-Code-1.1.1-macOS-x64.zip");
+  assert.equal(assetForPlatform(labelled, { platform: "darwin", arch: "arm64" }).name, "Teminali-OS-1.1.1-macOS-arm64.zip");
+  assert.equal(assetForPlatform(labelled, { platform: "darwin", arch: "x64" }).name, "Teminali-OS-1.1.1-macOS-x64.zip");
 });
 
 test("a blockmap sitting beside the zip is never mistaken for it", () => {
@@ -94,17 +94,17 @@ test("a blockmap sitting beside the zip is never mistaken for it", () => {
   // in the architecture and in the word zip, and it is not an application.
   const withBlockmaps = [
     { name: "Teminali.Code-1.1.7-macOS-arm64.zip.blockmap", size: 1, browser_download_url: "https://github.com/a/b/a.blockmap" },
-    { name: "Teminali-Code-1.1.7-macOS-arm64.zip", size: 1, browser_download_url: "https://github.com/a/b/a.zip" },
+    { name: "Teminali-OS-1.1.7-macOS-arm64.zip", size: 1, browser_download_url: "https://github.com/a/b/a.zip" },
   ];
-  assert.equal(assetForPlatform(withBlockmaps, { platform: "darwin", arch: "arm64" }).name, "Teminali-Code-1.1.7-macOS-arm64.zip");
+  assert.equal(assetForPlatform(withBlockmaps, { platform: "darwin", arch: "arm64" }).name, "Teminali-OS-1.1.7-macOS-arm64.zip");
 });
 
 test("a macOS release with no zip offers nothing rather than a dmg", () => {
   // Deliberate. The dmg cannot be installed without the dialog this whole
   // change exists to remove, so "no update yet" is the honest answer.
   const dmgOnly = [
-    { name: "Teminali-Code-1.1.1-macOS-Apple-Silicon.dmg", size: 1, browser_download_url: "https://github.com/a/b/as.dmg" },
-    { name: "Teminali-Code-1.1.1-macOS-Intel.dmg", size: 1, browser_download_url: "https://github.com/a/b/i.dmg" },
+    { name: "Teminali-OS-1.1.1-macOS-Apple-Silicon.dmg", size: 1, browser_download_url: "https://github.com/a/b/as.dmg" },
+    { name: "Teminali-OS-1.1.1-macOS-Intel.dmg", size: 1, browser_download_url: "https://github.com/a/b/i.dmg" },
   ];
   assert.equal(assetForPlatform(dmgOnly, { platform: "darwin", arch: "arm64" }), null);
 });
@@ -185,10 +185,10 @@ const OLDER = RUNNING_PATCH > 0
 function release(overrides = {}) {
   return {
     tag_name: NEWER,
-    name: `Teminali Code ${NEWER}`,
+    name: `Teminali OS ${NEWER}`,
     body: "Notes",
     published_at: "2026-09-02T00:00:00Z",
-    html_url: `https://github.com/teminali/teminalicode/releases/tag/${NEWER}`,
+    html_url: `https://github.com/teminali/teminali-os/releases/tag/${NEWER}`,
     draft: false,
     prerelease: false,
     assets: MAC_RELEASE,
@@ -258,7 +258,7 @@ test("an update with no build for this platform says which platform", async () =
 /* ── What the version control can offer ───────────────────────────────────── */
 
 function listing(tags) {
-  return tags.map((tag) => release({ tag_name: tag, name: `Teminali Code ${tag}`, html_url: `https://github.com/x/y/releases/tag/${tag}` }));
+  return tags.map((tag) => release({ tag_name: tag, name: `Teminali OS ${tag}`, html_url: `https://github.com/x/y/releases/tag/${tag}` }));
 }
 
 test("every release is placed relative to the build that is running", async () => {

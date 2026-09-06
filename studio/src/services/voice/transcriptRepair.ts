@@ -125,7 +125,7 @@ const RULES: Rule[] = [
   { pattern: /(?<![.\w])\bj\s*s\s*o\s*n\b/gi, replace: "JSON", kind: "code-term" },
 
   // Product names, so the assistant is not asked to fix "terminally studio".
-  { pattern: /\bteminali\s+(?:code|studio)\b/gi, replace: "Teminali Code", kind: "model" },
+  { pattern: /\bteminali\s+(?:code|studio)\b/gi, replace: "Teminali OS", kind: "model" },
   { pattern: /\bfrontier\s+(auto|flash)\b/gi, replace: (_m, v: string) => `Frontier ${v[0].toUpperCase()}${v.slice(1).toLowerCase()}`, kind: "model" },
 
   // Shell forms.
