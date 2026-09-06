@@ -459,7 +459,9 @@ Three consequences worth writing down:
   `EmptyState` branch is gone: an empty grid with one `+` in it explains itself
   better than a paragraph saying the page is empty.
 - **A shortcut wears the site's own favicon**, asked of the site itself at
-  `/favicon.ico` and falling back to the derived mark when there is none. This
+  `/favicon.ico` and falling back to the derived mark when there is none. So do
+  the rows of the recent list — a trail of coloured letters is a list you read,
+  a trail of favicons is one you recognise. This
   is a deliberate narrowing of the rule above, not a reversal of it: the site
   the operator bookmarked already knows they visit it, while the favicon
   service that was refused is a third party told the whole list at once. A page
@@ -668,6 +670,77 @@ right-click on nothing still offers something true (an empty menu is the bug
 this replaced), and that no two separators ever sit together.
 
 `electron/*.cjs` needs a **full application restart**, not a reload.
+
+### Search means search (`search/GlobalSearchView.tsx`, `utils/globalSearch.ts`, 2026-09-06)
+
+The operator: *"now we have to make our real search mega — able to cover all
+things that could be searched on the platform."* The box said "Search across
+all" and answered only with lines inside text files. A chat they had, a page
+they kept, a file by its name, a panel, a skill, a project — all unreachable
+from the one field in the app that is *called* search.
+
+**Ten sources, one field.** Panels, skills, projects, workspace files by name,
+files and folders elsewhere on the machine, file contents, chats and what was
+said inside them, bookmarks, history and downloads — then a last row that takes
+the query to the web, because "it is not in here" deserves an answer that does
+not require retyping the words somewhere else.
+
+**Only two lanes cost anything.** Eight sources are already in memory: the panel
+list and the skills are constants, the chats and the browser's three lists are
+stores this app keeps, and the filenames are one tree fetched once on mount.
+Matching them is a pass over arrays and needs no debounce, which is what makes
+the scope tabs instant — they narrow what is *drawn* rather than searching
+again, so their counts are true rather than a promise about a search that has
+not run. Content search (the gateway walks the workspace) and the machine lane
+(a spawned process) keep their debounce and their abort.
+
+**The ranking is predictable, not fuzzy** (`utils/globalSearch.ts`). Four tiers
+— equal, prefix, word start, contains — and a length term small enough that it
+can only settle ties, never lift a candidate into the tier above. Subsequence
+matching reads as clever until `gls` matches forty things and buries the file
+actually called `gls.ts`; a search box is worth typing into twice only if the
+first answer is where you expect it. Multi-field candidates score as their
+**best** field rather than the sum, so a long path full of coincidences cannot
+outrank the thing the operator named. Pinned in `tests/global-search.test.mjs`
+(8), including that ranking is stable within a score — two equally good answers
+keep the order their sources were asked in rather than swapping as you type.
+
+Administrator-only panels are omitted for everyone else, the same check the tab
+strip's add menu makes: a row that always refuses is §2's dead affordance.
+
+#### Files on the machine (`server/machine-search.js`, 2026-09-06)
+
+*"Can it also search files and folders from my Mac or Windows?"* Yes on macOS,
+and the reason it is not simply "yes" is the reason it is fast: the workspace
+search is a walk, and a home directory is not walkable — hundreds of thousands
+of entries, and a search that takes eleven seconds is one nobody uses twice. So
+this asks the index that already exists, **Spotlight**, through `mdfind`.
+Windows and Linux have no index that can be assumed present (`dir /s` and
+`find` are the walk this exists to avoid; Everything and `locate` are
+installations, not guarantees), so they are told so in one line under the
+results rather than given something slow that looks broken.
+
+Four bounds, each one a rule:
+
+- **No shell string.** `mdfind` is spawned with an argument array, so a query
+  containing a quote or a semicolon is a query. A query that starts with `-`
+  is refused before the spawn, because no quoting stops a leading dash being
+  read as a flag.
+- **`-onlyin $HOME`.** "My files" is what was asked for, and it keeps `/System`
+  and every mounted volume out of the answer.
+- **Killed at 2.5s, capped at 40 rows.** A `stat` per row is the cost of saying
+  file-or-folder, and forty is already more than a person reads.
+- **It reads nothing.** The result is a path, a name and a flag. Opening one
+  goes through the same boundary a dropped file does — the project moves to the
+  folder holding it and the file is opened from inside the new root — because
+  nothing outside the workspace root is read across it. Same policy, same code
+  (`services/workspaceDrop.ts`).
+
+`tests/machine-search.test.mjs` (7) drives the whole path with an injected
+spawn: that a hostile query stays one argument, that a hung process is killed
+rather than left running, that a missing `mdfind` is "nothing found" rather than
+a thrown error, and that a file deleted since the index was written is dropped
+instead of shown.
 
 ### Every row in the sidebar does something (`sidebar/StudioSidebar.tsx`, `sidebar/FileTree.tsx`, 2026-09-06)
 

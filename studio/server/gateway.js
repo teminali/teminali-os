@@ -12,6 +12,7 @@ import { BoundedAuditLog } from "./audit-log.js";
 import { createConfig } from "./config.js";
 import { createWorkspaceDirectory, deleteWorkspaceFile, isStreamableWorkspaceFile, isViewableWorkspaceFile, listWorkspaceTree, readWorkspaceFile, resolveWorkspacePath, searchWorkspace, WORKSPACE_LIMITS, writeWorkspaceFile } from "./workspace.js";
 import { TERMINAL_LIMITS, runWorkspaceCommand } from "./terminal.js";
+import { searchMachine } from "./machine-search.js";
 import { forgetVoiceStatus, readBounded, speak, transcribe, voiceStatus } from "./voice.js";
 import { act, assistantCapabilities, observe, requestAccessibility } from "./assistant.js";
 import { AGENTS, AGENT_LIMITS, agentAvailability, isAgentEngine, runAgentTurn } from "./agent-cli.js";
@@ -1618,6 +1619,21 @@ export async function createGateway(options = {}) {
             SEARCH_PATTERN_INVALID: "That regular expression is not valid.",
           }[code] ?? "The workspace search failed.");
         }
+        return;
+      }
+
+      /*
+        Files and folders on the machine, outside the workspace.
+
+        A GET with the query in the address, because it reads nothing and
+        changes nothing — and because the answer is a list of paths, not their
+        contents. Spotlight only, home directory only, bounded in time and
+        count; a platform without an index says so rather than walking a disk.
+        See server/machine-search.js.
+      */
+      if (request.method === "GET" && route === "/api/workspace/machine-search") {
+        const query = new URL(request.url, "http://127.0.0.1").searchParams;
+        replyJson(response, 200, await searchMachine(query.get("q")));
         return;
       }
 

@@ -1,6 +1,20 @@
 import { GatewayClient } from "./gatewayClient";
 import type { FileItem } from "../types";
 
+/** One file or folder found outside the workspace. */
+export interface MachineSearchResult {
+  path: string;
+  name: string;
+  directory: boolean;
+}
+
+export interface MachineSearchResponse {
+  /** False where the platform has no index to ask; `reason` says why. */
+  available: boolean;
+  reason: string | null;
+  results: MachineSearchResult[];
+}
+
 export interface WorkspaceTreeResponse {
   rootName: string;
   files: FileItem[];
@@ -142,6 +156,24 @@ export class WorkspaceService {
    * quietly excludes unopened files answers "no matches" for strings that are
    * plainly there on disk.
    */
+  /**
+   * Files and folders on the machine, outside the workspace.
+   *
+   * A different question from `search`, with a different answer: that one walks
+   * the project on disk, this one asks Spotlight, which is why it is macOS
+   * only and says so in `available` rather than failing. It returns paths and
+   * names — never contents — and opening one still goes through the workspace
+   * boundary. See server/machine-search.js.
+   */
+  static async searchMachine(query: string, signal?: AbortSignal): Promise<MachineSearchResponse> {
+    const response = await GatewayClient.request(
+      `/api/workspace/machine-search?q=${encodeURIComponent(query)}`,
+      { method: "GET", signal },
+    );
+    await GatewayClient.expectOk(response);
+    return (await response.json()) as MachineSearchResponse;
+  }
+
   static async search(query: string, options: WorkspaceSearchOptions = {}): Promise<WorkspaceSearchResponse> {
     const { signal, ...flags } = options;
     const response = await GatewayClient.request("/api/workspace/search", {

@@ -52,7 +52,7 @@ route requires it. Roughly sixty routes across:
 | Model mode & routing | `/api/frontier/status` · `/api/frontier/resolve-mode` · `/api/models/*` |
 | Entitlement | `/api/entitlement` · `/api/entitlement/{refresh,sign-in,sign-in/poll,sign-out}` · `/api/entitlement/{plans,checkout}` · `/api/entitlement/order/:id` |
 | Hosted providers | `/api/providers` · `/api/providers/key` · `/api/providers/lanes` |
-| Workspace | `/api/workspace/{tree,file,write,delete,mkdir,search,open,projects}`, `/api/workspace/projects/{remember,forget}`, `/api/workspace/browser`, `/api/workspace/browser/{bookmark,unbookmark,visit,download}`, `/api/workspace/browser/history/clear`, `/api/workspace/agent/{reveal,open-file,projects,open-project,browse,bookmarks,bookmark,browsing-history,downloads}` |
+| Workspace | `/api/workspace/{tree,file,write,delete,mkdir,search,machine-search,open,projects}`, `/api/workspace/projects/{remember,forget}`, `/api/workspace/browser`, `/api/workspace/browser/{bookmark,unbookmark,visit,download}`, `/api/workspace/browser/history/clear`, `/api/workspace/agent/{reveal,open-file,projects,open-project,browse,bookmarks,bookmark,browsing-history,downloads}` |
 | Terminal | `/api/terminal/exec` |
 | Agent CLIs | `/api/agents` · `/api/agents/models` · `/api/agents/run` · `/api/agents/permission` · `/api/agents/permission/resolve` |
 | Screen assistant | `/api/assistant/{capabilities,permissions,observe,act}` · `/api/assistant/agent/{observe,act}` (the chat pane's agent, on its run's token) |
@@ -76,6 +76,11 @@ and transcripts are never written to it.
 
 A 48px activity bar, a 212px sidebar panel beside it, the conversation, and a
 workspace panel strip. Sidebar views: **Chats · Explorer · Search · My Projects · Skills**.
+**Search** covers the whole application from one field: panels, skills,
+projects, workspace files by name and by content, files and folders elsewhere
+on the machine (macOS, through Spotlight), chats and what was said in them,
+bookmarks, history and downloads — with a last row that takes the query to the
+web. Scope tabs narrow what is drawn rather than searching again.
 The rail stays on screen when the panel is collapsed, so a dismissed
 sidebar is one click from open on any view. The panel strip holds any number of
 tabs of twelve kinds:
@@ -752,7 +757,7 @@ ollama serve              # local models on 127.0.0.1:11434
 
 ```bash
 npm run typecheck   # tsc --noEmit
-npm test            # 1411 tests, 0 failures
+npm test            # 1426 tests, 0 failures
 npm run build       # tsc && vite build
 npm run verify:core # all three
 ```

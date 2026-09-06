@@ -548,7 +548,9 @@ const Row: React.FC<{
 }> = ({ url, icon, title, meta, tone, onOpen, trailing }) => {
   const body = (
     <>
-      {url ? <Mark url={url} size={20} /> : <span className="w-5 flex justify-center flex-shrink-0">{icon}</span>}
+      {/* The site's own icon here too. A trail of coloured letters is a list
+          you read; a trail of favicons is one you recognise. */}
+      {url ? <Mark url={url} size={20} icon /> : <span className="w-5 flex justify-center flex-shrink-0">{icon}</span>}
       <span className="text-xs text-ink-high truncate">{title}</span>
       <span className={`text-2xs truncate ${tone === "danger" ? "text-danger" : "text-ink-faint"}`}>{meta}</span>
     </>
