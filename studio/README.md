@@ -721,6 +721,15 @@ back, which is where a regression introduced by an update lives. A rollback is
 confirmed before it runs, downloads that release's own asset and installs it the
 same way an update is installed. There is no update banner.
 
+How the downloaded asset becomes the running app differs by platform, and
+`electron/main.cjs` (`updates:install`) is where it differs:
+
+| Platform | Asset | What happens |
+| --- | --- | --- |
+| macOS | `.zip` | Expanded and swapped over the bundle in-process (`server/install-macos.js`); Gatekeeper never sees a LaunchServices request. |
+| Windows | `.exe` (NSIS) | Opened, then the app quits 1.5 s later so the installer never has to kill it. The installer's finish page reopens the new build. |
+| Linux, AppImage | `.AppImage` | `chmod 755`, then written over the running image at `$APPIMAGE` (a mounted image keeps its inode until exit). "Close and Reopen" relaunches that path. An unpacked Linux build is opened instead. |
+
 ---
 
 ## Verification runtimes
@@ -774,7 +783,7 @@ ollama serve              # local models on 127.0.0.1:11434
 
 ```bash
 npm run typecheck   # tsc --noEmit
-npm test            # 1466 tests, 0 failures
+npm test            # 1473 tests, 0 failures
 npm run build       # tsc && vite build
 npm run verify:core # all three
 ```
@@ -793,6 +802,55 @@ npm run package:linux
 `build/afterAllArtifactBuild.cjs` renames the two macOS DMGs after the fact,
 because `artifactName` cannot branch on architecture. That is only safe because
 `dmg.publish: null` is set in `electron-builder.yml` — do not remove it.
+
+### The installer wizard
+
+Each platform's installer is dressed from `build/`:
+
+- **Windows** — the assisted NSIS installer (welcome → install mode → folder →
+  progress → finish). `build/installer.nsh` defines the welcome and finish
+  pages (`customWelcomePage`, `customFinishPage`; the finish page keeps
+  electron-builder's `StartApp` so a replaced build is still started with
+  `--updated`). `build/installerSidebar.bmp` (164×314) and
+  `build/installerHeader.bmp` (150×57) are the wizard's art; NSIS accepts only
+  uncompressed 24-bit BMP3 and renders anything else as a black rectangle.
+  The install is per-user, needs no administrator password, and creates Start
+  menu and desktop shortcuts.
+- **macOS** — the disk image window: `build/dmg-background.png` (660×400, with
+  an `@2x`), the app at (180,190), the Applications link at (480,190), and the
+  arrow drawn between them. Coordinates live in `electron-builder.yml`
+  (`dmg.contents`) and in the art script, and must agree.
+- **Linux** — an AppImage has no installer; the wizard is the desktop's. It
+  needs FUSE (`libfuse2` on Ubuntu 22.04 and later).
+
+`scripts/installer-art.sh` redraws all four files from `build/icon.png` using
+the app's own palette from `src/styles/tokens.css`; run it after any change to
+the mark and commit the output.
+
+### Running on Windows and Linux
+
+Nothing in `server/` is macOS-only by accident; what is macOS-only says so
+(`machineSearchAvailability`, the pointer helper, `say`). Two things are
+platform work rather than platform limits:
+
+- **Finding a command.** `server/command-resolver.js` resolves a CLI name the
+  way the shell would. On Windows an npm-installed `claude` is `claude.cmd`,
+  CreateProcess finds only `.exe`, and Node refuses a `.cmd` without a shell —
+  so a bare `spawn("claude")` reports "not installed" on every Windows machine
+  that has it. The resolver walks PATH × PATHEXT; an npm shim is run under
+  node directly (arguments verbatim, so a multi-line prompt survives), and any
+  other batch file goes through `cmd.exe` with cross-spawn's escaping. Every
+  agent, plan-probe and arena spawn goes through it. `server/bin-paths.js`
+  appends each platform's usual tool prefixes to PATH — npm's, Claude Code's
+  installer's, winget's on Windows; `~/.local/bin`, `~/.npm-global/bin`,
+  `/snap/bin` on Linux.
+- **Startup.** `electron/main.cjs` sets the Windows AppUserModelId to the
+  appId so a pinned shortcut and the running window are one taskbar button;
+  takes the single-instance lock in packaged builds (a second launch focuses
+  the first); and on Linux enables PipeWire capture for Wayland sessions and
+  drops Chromium's sandbox **only** when running from an AppImage on a kernel
+  whose AppArmor forbids unprivileged user namespaces (Ubuntu 24.04), which
+  otherwise kills the app before its first window.
 
 ### Publishing across two repositories
 

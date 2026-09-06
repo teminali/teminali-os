@@ -28,8 +28,8 @@
  *      seconds, Codex blocks. stdin is therefore closed, not inherited.
  */
 
-import { spawn } from "node:child_process";
 import { withBinPaths } from "./bin-paths.js";
+import { spawnCommand } from "./command-resolver.js";
 import { videoMcpArgs } from "./video-mcp.js";
 import { permissionMcpArgs } from "./permission-mcp.js";
 import { screenMcpArgs } from "./screen-mcp.js";
@@ -575,7 +575,7 @@ export function runAgentTurn(options) {
     let settled = false;
     let summary = null;
 
-    const child = spawn(binary, args, {
+    const child = spawnCommand(binary, args, {
       cwd: workingDirectory,
       env,
       // stdin is closed rather than inherited: both CLIs block on a pipe they
@@ -719,7 +719,7 @@ export async function agentAvailability(env = agentEnvironment()) {
   const entries = await Promise.all(
     Object.entries(AGENTS).map(async ([engine, agent]) => {
       const version = await new Promise((resolvePromise) => {
-        const child = spawn(agent.bin, ["--version"], { env, stdio: ["ignore", "pipe", "ignore"] });
+        const child = spawnCommand(agent.bin, ["--version"], { env, stdio: ["ignore", "pipe", "ignore"] });
         let out = "";
         const timer = setTimeout(() => {
           child.kill("SIGKILL");

@@ -191,6 +191,24 @@ dmg:
   # architecture has already been chosen. The cost is that mounting both at once
   # makes macOS append a "1" to the second.
   title: ${productName} ${version}
+  # The window a person sees after mounting the image: the app on the left, the
+  # Applications link on the right, and a drawn arrow between them on the
+  # background. Coordinates are icon centres and match the arrow in
+  # scripts/installer-art.sh; the @2x file beside the background is picked up
+  # for Retina displays on its own.
+  background: build/dmg-background.png
+  window:
+    width: 660
+    height: 400
+  iconSize: 128
+  contents:
+    - x: 180
+      y: 190
+      type: file
+    - x: 480
+      y: 190
+      type: link
+      path: /Applications
   # `${arch}` above still writes arm64 and x64; build/afterAllArtifactBuild.cjs
   # rewrites those two to Apple-Silicon and Intel once every artifact is built.
   #
@@ -231,6 +249,11 @@ win:
         # wins, and the root copy has the same bin/ layout as the nested one.
         - "!onnxruntime-node/**"
 
+# The assisted (multi-page) installer, with its own welcome and finish pages.
+# build/installer.nsh holds the pages; scripts/installer-art.sh draws the two
+# bitmaps. NSIS wants them as uncompressed 24-bit BMP at exactly 164×314 and
+# 150×57 — the script sets both, and a PNG or an alpha channel here renders as
+# a black rectangle rather than failing the build.
 nsis:
   oneClick: false
   perMachine: false
@@ -238,6 +261,12 @@ nsis:
   createDesktopShortcut: true
   createStartMenuShortcut: true
   shortcutName: Teminali OS
+  uninstallDisplayName: Teminali OS
+  runAfterFinish: true
+  include: build/installer.nsh
+  installerSidebar: build/installerSidebar.bmp
+  uninstallerSidebar: build/installerSidebar.bmp
+  installerHeader: build/installerHeader.bmp
 
 # ── Linux ──────────────────────────────────────────────────────────
 linux:

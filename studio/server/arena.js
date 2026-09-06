@@ -82,35 +82,64 @@ function appendTail(current, chunk, max = 8_000) {
 }
 
 /**
- * Runs one verification command in a sandbox, and can genuinely stop it.
+ * The platform's shell running `command`, in a form `killTree` can end.
  *
- * Deliberately `spawn` with `detached` rather than `execFile` with a signal.
+ * On macOS and Linux it is `/bin/sh -c`, spawned `detached` so the shell leads
+ * its own process group. On Windows it is `cmd.exe /c` — there is no `/bin/sh`
+ * — and no group: Windows has no process groups to speak of, so the tree is
+ * ended by `taskkill` walking it instead.
+ */
+function spawnShell(command, cwd, env) {
+  const stdio = ["ignore", "pipe", "pipe"];
+  if (process.platform === "win32") {
+    return spawn(env.ComSpec || "cmd.exe", ["/d", "/s", "/c", `"${command}"`], {
+      cwd,
+      env,
+      stdio,
+      windowsVerbatimArguments: true,
+      windowsHide: true,
+    });
+  }
+  return spawn("/bin/sh", ["-c", command], { cwd, detached: true, env, stdio });
+}
+
+/**
+ * Ends `child` and everything it started.
+ *
  * A check is `npm test`, which is a shell, which is npm, which is node: killing
  * only the process we started leaves that whole tree running — verified, not
- * assumed — in a directory the benchmark is about to delete. `detached` makes
- * the shell a process-group leader so the negative pid kills everything it
- * spawned, which is what "Stop" has to mean when the thing being stopped is a
- * test suite.
+ * assumed — in a directory the benchmark is about to delete. The negative pid
+ * kills the process group the detached shell leads; `taskkill /T` is the same
+ * walk on Windows.
+ */
+function killTree(child) {
+  if (process.platform === "win32") {
+    spawn("taskkill", ["/pid", String(child.pid), "/T", "/F"], { stdio: "ignore", windowsHide: true })
+      .on("error", () => child.kill());
+    return;
+  }
+  try {
+    process.kill(-child.pid, "SIGKILL");
+  } catch {
+    child.kill("SIGKILL");
+  }
+}
+
+/**
+ * Runs one verification command in a sandbox, and can genuinely stop it —
+ * "Stop" has to mean the whole tree when the thing being stopped is a test
+ * suite, and `spawnShell` / `killTree` are what make that true on each platform.
  */
 function runCheck(command, cwd, { timeoutMs, signal }) {
   return new Promise((resolve) => {
-    const child = spawn("/bin/sh", ["-c", command], {
-      cwd,
-      detached: true,
-      env: withBinPaths(),
-      stdio: ["ignore", "pipe", "pipe"],
-    });
+    const child = spawnShell(command, cwd, withBinPaths());
     let stdout = "";
     let stderr = "";
     let halted = null;
 
     const stop = (reason) => {
       halted = halted ?? reason;
-      try {
-        process.kill(-child.pid, "SIGKILL");
-      } catch {
-        child.kill("SIGKILL");
-      }
+      killTree(child);
     };
 
     const timer = setTimeout(() => stop("timed out"), timeoutMs);

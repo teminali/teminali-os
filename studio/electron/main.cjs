@@ -19,6 +19,60 @@ const { attachContextMenu } = require("./contextMenu.cjs");
 // only grants a scheme its privileges before `app.ready`. Handled after it.
 registerWorkspaceMediaScheme();
 
+/* ── Per-platform startup ──────────────────────────────────────────────────
+   Everything here has to happen before `app.ready`.
+   ───────────────────────────────────────────────────────────────────────── */
+
+// Windows groups taskbar buttons and routes notifications by this id. The NSIS
+// installer stamps the same id on the shortcuts it creates, so a pinned
+// shortcut and the running window are one button rather than two.
+if (process.platform === "win32") app.setAppUserModelId("os.teminali.app");
+
+if (process.platform === "linux") {
+  // Screen capture on a Wayland session goes through the PipeWire portal, and
+  // Chromium only asks the portal when told to. Without this, desktopCapturer
+  // lists nothing on GNOME's default session and the recorder has no sources.
+  app.commandLine.appendSwitch("enable-features", "WebRTCPipeWireCapturer");
+
+  // Ubuntu 24.04 stops unprivileged processes creating user namespaces, which
+  // is how Chromium sandboxes its renderers when its setuid helper cannot be
+  // used — and inside an AppImage it cannot be, because the image is mounted
+  // nosuid. The app then dies before its first window with "Failed to move to
+  // new namespace". Only that combination drops the sandbox; a distribution
+  // without the restriction, or an unpacked install, keeps it.
+  if (process.env.APPIMAGE && apparmorRestrictsUserNamespaces()) {
+    app.commandLine.appendSwitch("no-sandbox");
+  }
+}
+
+function apparmorRestrictsUserNamespaces() {
+  try {
+    return fs.readFileSync("/proc/sys/kernel/apparmor_restrict_unprivileged_userns", "utf8").trim() === "1";
+  } catch {
+    return false;
+  }
+}
+
+// One running copy per machine. macOS enforces this for a bundle on its own;
+// Windows and Linux start a second process for a second double-click, and each
+// would bring up its own gateway. Packaged builds only: a development window
+// beside an installed app is a normal thing to want.
+const singleInstance = !app.isPackaged || app.requestSingleInstanceLock();
+if (!singleInstance) {
+  app.quit();
+} else {
+  app.on("second-instance", () => {
+    const existing = mainWindow && !mainWindow.isDestroyed() ? mainWindow : null;
+    if (!existing) {
+      createWindow();
+      return;
+    }
+    if (existing.isMinimized()) existing.restore();
+    existing.show();
+    existing.focus();
+  });
+}
+
 const logFile = path.join(app.getPath("userData"), "studio-main.log");
 function log(...args) {
   const line = `[${new Date().toISOString()}] ${args.join(" ")}\n`;
@@ -553,10 +607,20 @@ ipcMain.handle("assistant:reveal-for-screen-recording", async () => {
    an in-place patch — Squirrel will not apply an update to a binary it cannot
    verify, and no amount of wiring changes that.
 
-   Windows and Linux hand that artifact to the operating system to open. macOS
-   cannot: Gatekeeper refuses to launch an ad-hoc bundle through LaunchServices
-   and offers only Done / Move to Bin. So macOS downloads the published .zip and
-   swaps the bundle in this process instead — see server/install-macos.js.
+   Windows hands that artifact to the operating system to open, then quits:
+   the NSIS installer replaces the files and, by its own finish page, starts
+   the new build. Quitting first is what keeps the installer from having to
+   kill this process mid-write.
+
+   Linux running as an AppImage is a single file, so the downloaded image is
+   written over the running one — the mounted copy keeps its inode until exit,
+   which is how AppImageUpdate does it too — and the relaunch names that path.
+   An unpacked Linux build cannot be replaced from inside, so it is opened.
+
+   macOS cannot open its artifact at all: Gatekeeper refuses to launch an
+   ad-hoc bundle through LaunchServices and offers only Done / Move to Bin. So
+   macOS downloads the published .zip and swaps the bundle in this process
+   instead — see server/install-macos.js.
 
    The consequence handled here is the restart. Each ad-hoc build carries a
    different signature, and macOS keys Screen Recording, Accessibility and
@@ -611,10 +675,38 @@ ipcMain.handle("updates:install", async (_event, filePath) => {
     return result.ok ? { ok: true } : { ok: false, reason: result.message };
   }
 
+  if (process.platform === "linux") {
+    // A download has no execute bit; without one the AppImage is a file the
+    // desktop offers to open in an archive manager.
+    await fs.promises.chmod(filePath, 0o755);
+    const running = process.env.APPIMAGE;
+    if (running && app.isPackaged) {
+      const staged = `${running}.new`;
+      try {
+        await fs.promises.copyFile(filePath, staged);
+        await fs.promises.chmod(staged, 0o755);
+        await fs.promises.rename(staged, running);
+      } catch (error) {
+        log("Could not replace the running AppImage:", error.message);
+        await fs.promises.rm(staged, { force: true }).catch(() => {});
+        return { ok: false, reason: `The AppImage at ${running} could not be replaced: ${error.message}` };
+      }
+      log("Replaced the running AppImage at", running);
+      return { ok: true, replaced: true };
+    }
+  }
+
   const problem = await shell.openPath(filePath);
   if (problem) {
     log("Could not open the installer:", problem);
     return { ok: false, reason: problem };
+  }
+
+  if (process.platform === "win32") {
+    // Long enough for the renderer to draw its "closing" state; short enough
+    // that the installer's own "is running" check does not get there first.
+    setTimeout(() => app.quit(), 1_500);
+    return { ok: true, quitting: true };
   }
   return { ok: true };
 });
@@ -633,7 +725,10 @@ ipcMain.handle("updates:restart", () => {
   try {
     delete process.env.TEMINALI_APP_VERSION;
     delete process.env.TEMINALI_APP_ROOT;
-    app.relaunch();
+    // An AppImage's execPath is inside the mount that goes away with this
+    // process; the image itself is what to start, and it may just have been
+    // replaced with the new build.
+    app.relaunch(process.platform === "linux" && process.env.APPIMAGE ? { execPath: process.env.APPIMAGE } : undefined);
   } catch (error) {
     log("Relaunch could not be queued:", error.message);
   }
@@ -887,6 +982,7 @@ process.on("unhandledRejection", (reason) => {
 
 app.whenReady().then(async () => {
   log("app.whenReady resolved");
+  if (!singleInstance) return;
 
   /*
    * Let the screen assistant see this window's own controls.

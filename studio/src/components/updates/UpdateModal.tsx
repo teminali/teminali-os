@@ -36,6 +36,10 @@ export const UpdateModal: React.FC<UpdateModalProps> = ({ updates, isOpen, onClo
   // macOS replaces the bundle in place rather than handing a .dmg to the
   // Finder, so it never asks anyone to drag anything anywhere.
   const isMac = typeof navigator !== "undefined" && /Mac/i.test(navigator.userAgent);
+  const platform = window.teminali?.platform ?? (isMac ? "darwin" : "");
+  // Linux replaces its own AppImage in place, the way macOS swaps its bundle;
+  // Windows is the one platform that hands over to an installer.
+  const installsInPlace = isMac || platform === "linux";
   const latest = status?.latest;
   const asset = status?.asset;
   const desktop = Boolean(window.teminali?.updates);
@@ -134,7 +138,9 @@ export const UpdateModal: React.FC<UpdateModalProps> = ({ updates, isOpen, onClo
             <p className="text-2xs text-ink-faint">
               {isMac
                 ? "Expanding update archive, updating application files, and refreshing security signatures…"
-                : "Extracting package files and launching operating system installer…"}
+                : platform === "linux"
+                  ? "Writing the new AppImage over the running one…"
+                  : "Opening the installer. Teminali OS closes so the installer can replace it, and reopens when it finishes…"}
             </p>
           </div>
         )}
@@ -143,15 +149,17 @@ export const UpdateModal: React.FC<UpdateModalProps> = ({ updates, isOpen, onClo
         {(phase === "installed" || awaitingRestart) && (
           <div className="rounded-xl border border-edge bg-surface-sunken px-3.5 py-3 space-y-2">
             <p className="text-sm text-ink-prose">
-              {isMac
+              {installsInPlace
                 ? "The new version is in place. Reopen the app below to start running it."
-                : "The installer is open. Follow it through, then reopen the app below."}
+                : "The installer is open. Follow it through; it reopens Teminali OS when it finishes."}
             </p>
-            <p className="text-2xs text-ink-faint leading-relaxed">
-              This app is not signed with an Apple Developer certificate, so macOS treats each new build as a different
-              application and clears its Screen Recording, Accessibility and Microphone access. You will be asked to
-              grant them once more — the assistant's settings panel says which are missing.
-            </p>
+            {isMac && (
+              <p className="text-2xs text-ink-faint leading-relaxed">
+                This app is not signed with an Apple Developer certificate, so macOS treats each new build as a different
+                application and clears its Screen Recording, Accessibility and Microphone access. You will be asked to
+                grant them once more — the assistant's settings panel says which are missing.
+              </p>
+            )}
           </div>
         )}
 
@@ -175,11 +183,11 @@ export const UpdateModal: React.FC<UpdateModalProps> = ({ updates, isOpen, onClo
           <Button variant="primary" size="sm" disabled icon={<Loader2 size={13} className="animate-spin" />}>
             {updates.installProgress
               ? `Installing (${Math.round(updates.installProgress.percent)}%)`
-              : (isMac ? "Installing into Applications…" : "Opening Installer…")}
+              : (installsInPlace ? "Installing…" : "Opening Installer…")}
           </Button>
         ) : phase === "ready" ? (
           <Button variant="primary" size="sm" onClick={() => void updates.install()} icon={<ArrowDownToLine size={13} />}>
-            {isMac ? "Install the update" : "Open the installer"}
+            {installsInPlace ? "Install the update" : "Open the installer"}
           </Button>
         ) : phase === "installed" || awaitingRestart ? (
           <Button variant="primary" size="sm" onClick={() => void updates.restart()} icon={<RotateCw size={13} />}>

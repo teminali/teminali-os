@@ -36,7 +36,7 @@
 
 import { readFile, writeFile, mkdir } from "node:fs/promises";
 import { dirname } from "node:path";
-import { spawn } from "node:child_process";
+import { spawnCommand } from "./command-resolver.js";
 import { AGENTS, agentEnvironment } from "./agent-cli.js";
 
 /** A spawn that cannot hang the panel behind a CLI waiting on something. */
@@ -175,7 +175,7 @@ function runProbe(bin, args, env) {
   return new Promise((resolvePromise) => {
     let child;
     try {
-      child = spawn(bin, args, { env, stdio: ["ignore", "pipe", "pipe"] });
+      child = spawnCommand(bin, args, { env, stdio: ["ignore", "pipe", "pipe"] });
     } catch {
       resolvePromise({ ok: false, missing: true, stdout: "", stderr: "" });
       return;

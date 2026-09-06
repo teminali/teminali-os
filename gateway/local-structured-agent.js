@@ -75,7 +75,10 @@ export function runNpmTest(directory, { timeoutMs = 60_000 } = {}) {
     execFile(
       process.platform === "win32" ? "npm.cmd" : "npm",
       ["test", "--silent"],
-      { cwd: directory, timeout: timeoutMs, maxBuffer: 128 * 1024 },
+      // `shell` on Windows only: npm is a .cmd there, and Node refuses to run
+      // one without a shell (CVE-2024-27980). The arguments are fixed, so the
+      // shell sees nothing it could misread.
+      { cwd: directory, timeout: timeoutMs, maxBuffer: 128 * 1024, shell: process.platform === "win32", windowsHide: true },
       (error, stdout, stderr) => {
         const output = `${stdout ?? ""}${stderr ?? ""}`.slice(-16_384);
         resolve({

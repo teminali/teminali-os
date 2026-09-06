@@ -379,7 +379,11 @@ are), **Check for updates**, and **exactly one** previous release to roll back
 to. One, not a catalogue — the regression a rollback is for arrived in the
 update just installed, so the build below it is the one that answers, and a
 longer list invites landing on a version nobody is testing. A rollback is
-confirmed in place before it runs and names what it costs. There is **no update
+confirmed in place before it runs and names what it costs. `UpdateModal` says
+what the install does **on the platform showing it**: macOS and a Linux
+AppImage are replaced in place and reopened; Windows hands over to the
+installer and quits, and the modal says so. The Apple-permissions warning is
+rendered on macOS only — it is not true anywhere else. There is **no update
 banner**; the announcement is a dot on this control and the pill in
 `SidebarFooter`, both reading the one `useUpdates` check so they cannot
 disagree. In a browser the rollback rows are absent rather than dead — replacing

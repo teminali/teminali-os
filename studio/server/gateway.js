@@ -1,6 +1,6 @@
 import { createHash, randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
 import http from "node:http";
-import { dirname, relative, sep } from "node:path";
+import { dirname, relative, sep, basename } from "node:path";
 import { Readable, pipeline } from "node:stream";
 import {
   MODEL_MODES,
@@ -710,7 +710,7 @@ export async function createGateway(options = {}) {
 
         if (route === "/api/workspace/agent/projects") {
           replyJson(response, 200, {
-            current: { path: config.workspaceRoot, name: config.workspaceRoot.split("/").filter(Boolean).pop() || config.workspaceRoot },
+            current: { path: config.workspaceRoot, name: basename(config.workspaceRoot) || config.workspaceRoot },
             recent: await listRecentProjects(config.projectsStorePath),
           });
           return;
@@ -1493,7 +1493,7 @@ export async function createGateway(options = {}) {
 
       if (request.method === "GET" && route === "/api/workspace/projects") {
         replyJson(response, 200, {
-          current: { path: config.workspaceRoot, name: config.workspaceRoot.split("/").filter(Boolean).pop() || config.workspaceRoot },
+          current: { path: config.workspaceRoot, name: basename(config.workspaceRoot) || config.workspaceRoot },
           recent: await listRecentProjects(config.projectsStorePath),
         });
         return;
