@@ -410,6 +410,39 @@ forwarding the callbacks and the chat supplying them — because either alone is
 still silence. `ArenaPane` remains deliberately unsubscribed: its contestants
 work in sandboxes and must not move the operator's tree.
 
+### The browser's home page (`panels/BrowserHome.tsx`, `utils/siteMark.ts`, 2026-09-06)
+
+It opened onto the right three things and showed them as one thing: three
+undifferentiated lists of 28-pixel rows in a narrow centred column, every row
+wearing the same grey glyph, and every row putting its host at the far right
+with `ml-auto` — so a page titled "hello world - Google Search" had the words
+"hello world" floating a hand's width away from it, attached to nothing.
+
+The three sections are shaped by how they are used. **Bookmarks are a target
+grid**: they are the reason to open this page, they are aimed at rather than
+read, and a tile is a bigger target than a row. **History is a list**, scanned
+in order, with its two useful fields — where, and how long ago — beside the
+title rather than across the page from it; only the age goes right, because
+only the age is genuinely a column. **Downloads are a status**, so one still
+arriving shows a determinate bar — and only when the total is known, since a
+bar faking progress against an unknown size is a lie the operator would use to
+decide whether to wait. The search field is given the width and height to be
+the first thing found, rather than being a row-sized box above three lists of
+rows.
+
+**The mark on every row is derived, not fetched.** A list where every row wears
+the same glyph is one nobody scans; the icon is the only part the eye finds
+before it reads. The obvious source is `google.com/s2/favicons?domain=…`, which
+would mean this application quietly telling Google every site the operator has
+ever kept — for an app whose browser store is on disk precisely so nobody else
+holds it, that is not a trade worth making for an icon. So `utils/siteMark.ts`
+derives the site's own initial on a hue hashed from its hostname: deterministic,
+offline, and stable, so the same site is the same colour in every list. Its
+`relativeAge` is now also what the sidebar's chat rows use, so two lists cannot
+describe the same span of time differently. Tested in
+`tests/site-mark.test.mjs` (5), including that short hostnames a naive
+character sum would collide — "npm" and "mdn" — are spread apart.
+
 ### One microphone, and no reserved emptiness between turns (2026-09-06)
 
 **The panel chats no longer offer the microphone.** Every surface that mounts a

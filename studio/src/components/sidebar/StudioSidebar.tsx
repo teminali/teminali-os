@@ -4,6 +4,9 @@ import { type ProjectEntry } from "../../services/workspaceService";
 import { useProjectLibrary } from "../../hooks/useProjectLibrary";
 import { usePanelStore } from "../../store/panelStore";
 import { useStudioStore, type ChatSession } from "../../store/studioStore";
+// One vocabulary for "how long ago": the browser's Recent list says "2d" too,
+// and two lists describing the same span differently is two lists to read.
+import { relativeAge as age } from "../../utils/siteMark";
 import { SectionLabel, SidebarRow, IconButton } from "../ui";
 
 /**
@@ -39,19 +42,6 @@ export interface StudioSidebarProps {
   activeView: string;
 }
 
-/** Compact relative age, the way Cursor shows it: "1m", "21h", "2d". */
-function age(iso: string): string {
-  const then = new Date(iso).getTime();
-  if (!Number.isFinite(then)) return "";
-  const minutes = Math.floor((Date.now() - then) / 60000);
-  if (minutes < 1) return "now";
-  if (minutes < 60) return `${minutes}m`;
-  const hours = Math.floor(minutes / 60);
-  if (hours < 24) return `${hours}h`;
-  const days = Math.floor(hours / 24);
-  if (days < 7) return `${days}d`;
-  return `${Math.floor(days / 7)}w`;
-}
 
 export const StudioSidebar: React.FC<StudioSidebarProps> = () => {
   const { chatSessions, activeSessionId, switchSession, newChatSession } = useStudioStore();
