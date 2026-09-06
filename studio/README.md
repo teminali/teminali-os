@@ -754,6 +754,14 @@ the workflow prefers it and falls back to `GITHUB_TOKEN` so a fork still builds.
 The release-notes job passes `--repo teminali/releases` for the same reason:
 without it the notes are written to the private release nobody can read.
 
+That fallback is convenient on a fork and dangerous on a tag, so the build job's
+**first step refuses to run** when `RELEASES_TOKEN` is missing and the ref is a
+`v*` tag. Without it the fallback produces a green build that published nothing
+— which is how the public v1.2.8 came to be assembled by hand — and a PAT
+expires, so the same failure is one day away at all times rather than a
+one-off. `workflow_dispatch` is exempt: the rehearsal path is allowed to build
+without the token.
+
 ### Signing — wired, pending a certificate
 
 There is no Apple Developer ID, so every build is **ad-hoc signed** by
