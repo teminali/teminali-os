@@ -86,6 +86,8 @@ class NoiseFloor {
 export class AudioGraph {
   private context: AudioContext | null = null;
   private stream: MediaStream | null = null;
+  /** Survives a restart: a muted conversation stays muted if the graph rebuilds. */
+  private muted = false;
   private source: MediaStreamAudioSourceNode | null = null;
   private analyser: AnalyserNode | null = null;
   private gain: GainNode | null = null;
@@ -179,8 +181,38 @@ export class AudioGraph {
     this.timeData = new Float32Array(this.analyser.fftSize);
     this.freqData = new Float32Array(this.analyser.frequencyBinCount);
 
+    // A graph rebuilt during a muted conversation must not come back hot.
+    if (this.muted) this.setMuted(true);
+
     const interval = Math.max(10, Math.round(1000 / this.options.fps));
     this.timer = window.setInterval(() => this.tick(), interval);
+  }
+
+  /**
+   * Silence the microphone without giving it up.
+   *
+   * `track.enabled = false` makes the track deliver digital silence: the
+   * recogniser keeps running and hears nothing, the graph stays built, and the
+   * OS permission is not surrendered — so unmuting is instant and does not
+   * re-prompt. Stopping the track instead would end the capture and force a
+   * fresh getUserMedia, which on macOS re-arms the orange recording dot and,
+   * on a denied second prompt, would strand a live conversation with no way
+   * back.
+   *
+   * This exists because the mic hears whatever the room hears. A video playing
+   * on the machine arrives as operator speech and is transcribed as a prompt —
+   * which is how a conversation ends up answering "the girls are resting" in
+   * Russian. Noise suppression cannot help: that audio is not noise, it is
+   * speech that simply is not addressed to us.
+   */
+  setMuted(muted: boolean): void {
+    this.muted = muted;
+    this.stream?.getAudioTracks().forEach((track) => { track.enabled = !muted; });
+  }
+
+  /** Whether the microphone is currently delivering silence on purpose. */
+  isMuted(): boolean {
+    return this.muted;
   }
 
   stop(): void {

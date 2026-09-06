@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from "react";
-import { Lock, Plus, Square, Mic, X } from "lucide-react";
+import { Lock, Plus, Square, Mic, MicOff, X } from "lucide-react";
 import { VoiceButton } from "../voice/VoiceButton";
 import { VoiceOrb } from "../voice/VoiceOrb";
 import { VoiceReviewBar } from "../voice/VoiceReviewBar";
@@ -315,20 +315,38 @@ export const Composer: React.FC<ComposerProps> = ({
           <div className="flex items-center gap-1.5 flex-shrink-0">
             <button
               type="button"
-              onClick={() => {
-                if (voice.state === "listening" || voice.state === "hearing") {
-                  voice.silence();
-                }
-              }}
+              /*
+                Mute, not silence().
+
+                The microphone hears the room, and the room includes whatever
+                the machine is playing: a video's dialogue arrives as operator
+                speech and is sent as a prompt. Noise suppression cannot help —
+                that audio is speech, just not speech addressed to us. The only
+                answer is a switch the operator controls, and the mic icon is
+                where anyone would look for it.
+
+                Ending the conversation to stop being heard is the workaround
+                this replaces: it throws away the turn and costs a restart.
+              */
+              onClick={() => voice.toggleMute()}
               className={`w-8 h-8 rounded-full flex items-center justify-center transition-colors ${
-                voice.state === "hearing"
-                  ? "text-success bg-success/15"
-                  : "text-ink-muted hover:text-ink-high hover:bg-surface-hover"
+                voice.muted
+                  ? "text-danger bg-danger/15 hover:bg-danger/25"
+                  : voice.state === "hearing"
+                    ? "text-success bg-success/15"
+                    : "text-ink-muted hover:text-ink-high hover:bg-surface-hover"
               }`}
-              title={voice.state === "hearing" ? "Hearing you" : "Listening"}
-              aria-label="Microphone"
+              title={
+                voice.muted
+                  ? "Muted — click to unmute"
+                  : voice.state === "hearing"
+                    ? "Hearing you. Click to mute"
+                    : "Listening. Click to mute"
+              }
+              aria-label={voice.muted ? "Unmute microphone" : "Mute microphone"}
+              aria-pressed={voice.muted}
             >
-              <Mic size={15} />
+              {voice.muted ? <MicOff size={15} /> : <Mic size={15} />}
             </button>
             <button
               type="button"

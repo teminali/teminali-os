@@ -59,6 +59,15 @@ asarUnpack:
   - electron/screenMcpStdio.cjs
   # Same again: `workspaceShimPath()` rewrites to the unpacked copy.
   - electron/workspaceMcpStdio.cjs
+  # And again for the camera. This line was missing until v0.0.2:
+  # `cameraShimPath()` rewrote the path to app.asar.unpacked like the other
+  # three, but nothing unpacked the file, so the agent CLI was told to spawn
+  # something that did not exist and the server died on start — the model
+  # reported "teminali-camera failed to connect (Connection closed)" and
+  # answered questions about the operator from screenshots instead of the
+  # webcam. tests/asar-unpack.test.mjs now fails if a shim rewrite has no
+  # matching entry here.
+  - electron/cameraMcpStdio.cjs
 
 # server/gateway.js imports "../../gateway/frontier-runner.js" — the one module
 # under server/ that reaches outside this package. From inside the archive that

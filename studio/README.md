@@ -783,7 +783,7 @@ ollama serve              # local models on 127.0.0.1:11434
 
 ```bash
 npm run typecheck   # tsc --noEmit
-npm test            # 1494 tests, 0 failures
+npm test            # 1500 tests, 0 failures
 npm run build       # tsc && vite build
 npm run verify:core # all three
 ```
@@ -842,6 +842,24 @@ the gateway down.
 `tests/packaged-imports.test.mjs` models the packaged tree and fails if any
 static import under `server/` lands somewhere neither the asar nor the extra
 resources carry.
+
+### A shim that rewrites its path must be unpacked (`asarUnpack`)
+
+The four MCP shims are spawned as their own processes, so they must be real
+files: nothing can spawn a path inside an asar. Each `*ShimPath()` rewrites
+`app.asar/` to `app.asar.unpacked/`, and electron-builder only puts a file
+there if `asarUnpack` names it. The rewrite and the entry live in different
+files, and nothing tied them together — so **the camera shipped with the
+rewrite and without the entry**. v0.0.2's packaged app had `screen`, `video`
+and `workspace` under `app.asar.unpacked/electron/` and no
+`cameraMcpStdio.cjs`, so the agent was pointed at a file that did not exist,
+the server exited on start, and the model reported *"teminali-camera failed to
+connect (Connection closed)"* — then answered questions about the operator
+from screenshots, having never opened the webcam. A checkout cannot notice:
+there is no asar, the rewrite is a no-op, and the file is where the path says.
+
+`tests/asar-unpack.test.mjs` pairs the two halves in both directions — every
+rewrite needs an entry, and every entry needs a rewrite.
 
 ### The installer wizard
 

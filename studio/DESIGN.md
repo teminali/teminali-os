@@ -3333,6 +3333,38 @@ a lost turn. Three structural tests in `tests/voice-astra.test.mjs` enforce the
 rule, in the same spirit as the `VoiceHost` forwarding test: this is a class of
 bug that reading the diff does not catch.
 
+### 6.2b Mute (`services/voice/audioGraph.ts`, `chat/Composer.tsx`, 2026-09-06)
+
+The microphone hears the room, and the room includes whatever the machine is
+playing. A video's dialogue arrives as operator speech and is transcribed as a
+prompt — which is how a live conversation came to receive *"Terima kasih"* and
+*"Девушки отдыхают"* as turns, and answer them. Noise suppression cannot help:
+that audio is not noise, it is speech that simply is not addressed to us, and
+the addressing gate in §6.1 judges intent, not provenance.
+
+Before this the only way to stop being heard was to end the conversation,
+which throws the turn away and costs a restart. The mic icon already in the
+composer is now the switch, because that is where a person looks for it.
+
+`AudioGraph.setMuted()` sets `track.enabled = false`, which delivers digital
+silence: the recogniser keeps running and hears nothing, the graph stays
+built, and the OS permission is not surrendered, so unmuting is instant and
+never re-prompts. Stopping the track would end the capture, re-arm the orange
+recording dot on the next start, and — if the second prompt were denied —
+strand a live conversation with no way back. The flag survives a graph
+rebuild, so a muted conversation does not come back hot.
+
+Muting also discards the in-flight transcript and its auto-send countdown:
+whatever was part-heard when the operator reached for mute is exactly what
+they did not want sent, and leaving the timer running would send it a moment
+after being told not to.
+
+Not unit-tested, and worth saying why: `audioGraph.ts` imports `./prosody`
+without an extension, which the suite's plain `node --test` cannot resolve.
+The voice modules that are tested (`ambientMemory.ts`, `addressing.ts`) have
+no relative imports at all. Typecheck and the production build cover it; the
+behaviour needs a microphone.
+
 ### 6.3 The sidecar that ships (`studio/voice-runtime/`)
 
 `docs/VOICE_SIDECAR.md` describes the contract; `voice-runtime/` is a working

@@ -54,6 +54,10 @@ export interface UseVoiceResult extends VoiceSnapshot {
   recoverRejected: () => Promise<void>;
   /** Stop a spoken reply without it counting as an interruption. */
   silence: () => void;
+  /** Silence the microphone without ending the conversation. */
+  setMuted: (muted: boolean) => void;
+  /** Flip the microphone between silenced and live. */
+  toggleMute: () => void;
   /** Reset the 1-minute inactivity sleep timer. */
   touch: () => void;
   update: (patch: Partial<VoiceSettings>) => void;
@@ -144,6 +148,10 @@ export function useVoice(host: VoiceHost): UseVoiceResult {
     discard: useCallback(() => engine.discard(), [engine]),
     recoverRejected: useCallback(() => engine.recoverRejected(), [engine]),
     silence: useCallback(() => engine.silence(), [engine]),
+    setMuted: useCallback((muted) => engine.setMuted(muted), [engine]),
+    // Reads the engine rather than the render's snapshot, so a double click
+    // cannot toggle twice from one stale value.
+    toggleMute: useCallback(() => engine.setMuted(!engine.snapshot().muted), [engine]),
     touch: useCallback(() => engine.touch(), [engine]),
     update,
     speakReply: useCallback((text: string) => engine.speakReply(text), [engine]),

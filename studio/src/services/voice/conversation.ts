@@ -107,6 +107,8 @@ export interface VoiceSnapshot {
   /** True when a spoken reply was cut short by the operator. */
   interrupted: boolean;
   hasProfile: boolean;
+  /** The operator silenced the microphone; the conversation is still open. */
+  muted: boolean;
   /** The latest progress or interjection line — what the assistant last said about the run. */
   narration: string | null;
   /** How the last committed utterance was read: stop, acknowledge, status, or instruction. */
@@ -258,9 +260,28 @@ export class VoiceEngine {
       speaking: this.state === "speaking",
       interrupted: this.interrupted,
       hasProfile: this.profile !== null,
+      muted: this.graph.isMuted(),
       narration: this.narration,
       lastIntent: this.lastIntent,
     };
+  }
+
+  /**
+   * Silence or restore the microphone without ending the conversation.
+   *
+   * A muted turn is also a discarded turn: whatever was part-heard when the
+   * operator reached for mute is exactly what they did not want sent, so the
+   * in-flight transcript and its auto-send countdown go with it. Leaving them
+   * would send the sentence a moment after being told not to.
+   */
+  setMuted(muted: boolean): void {
+    if (this.graph.isMuted() === muted) return;
+    this.graph.setMuted(muted);
+    if (muted) {
+      this.transcript = "";
+      this.autoSendDeadline = null;
+    }
+    this.emit();
   }
 
   private emit(): void {
