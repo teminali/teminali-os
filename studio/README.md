@@ -518,7 +518,9 @@ Whisper, Kokoro-82M and an AudioSet sound classifier on CPU, started with
 when the sidecar is up, and otherwise the best installed macOS voice with the
 same preference — an Enhanced or Premium Ava, Samantha, Serena or Kate wins
 over a man's voice across a region boundary, while a robotic one never does. Its synthesis streams clause by clause, so a long reply
-starts speaking after its first clause. The browser
+starts speaking after its first clause rather than after all of it — measured
+on an M4 Pro, a 35-word reply begins speaking at 0.29 s where the whole file
+takes 1.97 s. The browser
 speech engine is the always-available fallback. Each capability is routed
 independently, so a sidecar serving only synthesis still leaves recognition on
 the local tier. Push-to-talk dictation and
@@ -893,7 +895,7 @@ Each is dependency-free Node with its own README and test entry point.
 | `visual-runtime/` | Deterministic PNG/RGBA comparison — exact differing-pixel counts and CIE76 deltas. Measurements, not a score. It does not capture browsers. |
 | `performance-runtime/` | Live Ollama latency harness through the gateway. Records Ollama's authoritative counts; never logs prompt content. |
 | `mcp-runtime/` | MCP client and image-proof helpers. |
-| `voice-runtime/` | Loopback speech sidecar: Whisper recognition, Kokoro synthesis and AudioSet sound labelling on CPU, nothing leaving the machine. The only runtime with its own `package.json`, installed with `npm run voice:install` and started in development with `npm run voice:serve`. Its dependencies are 943 MB in a development tree (including the 251 MB model cache); the packaged app ships a filtered 97 MB of them as an extra resource and downloads the models on first run. See [`voice-runtime/README.md`](voice-runtime/README.md). |
+| `voice-runtime/` | Loopback speech sidecar: Whisper recognition, Kokoro synthesis and AudioSet sound labelling on CPU, nothing leaving the machine. The only runtime with its own `package.json`, installed with `npm run voice:install` and started in development with `npm run voice:serve`. Its dependencies are 1.2 GB in a development tree (including the 474 MB model cache); the packaged app ships a filtered 97 MB of them as an extra resource and downloads the models on first run. See [`voice-runtime/README.md`](voice-runtime/README.md). |
 
 ---
 
@@ -1260,7 +1262,12 @@ and caches for 15 s — reports each model as it becomes ready; a cold sidecar
 answers `{}` and the studio keeps the built-in engine until then. There is no
 other progress surface. Measured with `du -sh` on this machine's cache:
 `onnx-community/whisper-base` 76 MB, `onnx-community/Kokoro-82M-v1.0-ONNX`
-88 MB, `Xenova/ast-finetuned-audioset-10-10-0.4593` 87 MB — 251 MB in all.
+311 MB, `Xenova/ast-finetuned-audioset-10-10-0.4593` 87 MB — 474 MB in all.
+Kokoro was 88 MB and the total 251 MB until 2026-09-07, when synthesis stopped
+being quantised: `fp32` is 2.3x faster than `q8` on Apple Silicon and grades no
+worse, and the download is the only thing quantisation was buying
+(`DESIGN.md` §6.24). `TEMINALI_TTS_DTYPE=q4` gets 291 MB at the same speed, and
+`q8` is still there for 88 MB and the old latency.
 
 Measured on the `--mac --arm64 --dir` build, `du -sh`, the same tree built
 twice — once with the web exclusions and once with the config as it stood

@@ -13,7 +13,13 @@
 import { KokoroTTS } from "kokoro-js";
 
 export const TTS_MODEL = process.env.TEMINALI_TTS_MODEL || "onnx-community/Kokoro-82M-v1.0-ONNX";
-const TTS_DTYPE = process.env.TEMINALI_TTS_DTYPE || "q8";
+/* fp32, not q8. Quantising was supposed to buy speed and bought the opposite:
+   measured on an M4 Pro over six sentences, q8 gave 1259ms to first audio at
+   2.1x realtime and UTMOS 4.410, fp32 gave 529ms at 5.3x and 4.440. Int8 kernels
+   fall off Accelerate's fast paths here, so the quantised model is slower, worse
+   and no cheaper (1.32 vs 1.05 CPU-seconds per second of audio). q4 measures
+   level with fp32 if a smaller download ever matters more than the margin. */
+const TTS_DTYPE = process.env.TEMINALI_TTS_DTYPE || "fp32";
 
 /** Kokoro's own default. Warm, American, and the closest thing it has to Siri. */
 export const DEFAULT_VOICE = process.env.TEMINALI_TTS_VOICE || "af_heart";
@@ -34,6 +40,22 @@ const CLAUSE_BREAK = new RegExp(
   "gi",
 );
 const MAX_CLAUSE_WORDS = 18;
+/**
+ * Only the first clause decides when the operator hears anything; every later
+ * one renders while an earlier one is still playing, and at 5.3x realtime they
+ * never catch up to the ear. So the first clause is cut short and the rest are
+ * left long, which buys latency without flattening the prosody of the whole
+ * utterance the way a smaller MAX_CLAUSE_WORDS would.
+ *
+ * The cap is conditional, and that is the point: it does nothing when
+ * punctuation already breaks the opening early, and a great deal when it does
+ * not. Measured at fp32, p50 of five renders of the first clause -- an opening
+ * that breaks at a conjunction, 287ms at 18 against 261ms at 6 (noise, since
+ * both yield the same four words); "Open the file at studio slash server slash
+ * voice dot js and check...", 640ms against 308ms; a 24-word sentence with no
+ * punctuation before its full stop, 928ms against 332ms.
+ */
+const FIRST_CLAUSE_WORDS = 6;
 
 let loading = null;
 
@@ -44,8 +66,11 @@ export function loadTts() {
   return loading;
 }
 
-/** Split text into clauses no longer than `MAX_CLAUSE_WORDS`. */
-export function splitClauses(text, maxWords = MAX_CLAUSE_WORDS) {
+/**
+ * Split text into clauses no longer than `maxWords`, with the first capped at
+ * `firstMaxWords` so speech starts sooner.
+ */
+export function splitClauses(text, maxWords = MAX_CLAUSE_WORDS, firstMaxWords = FIRST_CLAUSE_WORDS) {
   const parts = String(text ?? "").split(CLAUSE_BREAK).map((part) => part.trim()).filter(Boolean);
   const clauses = [];
   for (const part of parts) {
@@ -60,7 +85,20 @@ export function splitClauses(text, maxWords = MAX_CLAUSE_WORDS) {
       clauses.push(words.slice(start, start + maxWords).join(" "));
     }
   }
-  return clauses.length ? clauses : [String(text ?? "").trim()].filter(Boolean);
+  if (!clauses.length) return [String(text ?? "").trim()].filter(Boolean);
+  // Split the opening clause down to the shorter cap. Word boundaries only, so
+  // every piece stays a literal substring of the input and clauseOffsets can
+  // still find it.
+  const cap = Math.max(1, Math.min(firstMaxWords, maxWords));
+  const head = clauses[0].split(/\s+/);
+  if (head.length > cap) {
+    const pieces = [];
+    for (let start = 0; start < head.length; start += cap) {
+      pieces.push(head.slice(start, start + cap).join(" "));
+    }
+    clauses.splice(0, 1, ...pieces);
+  }
+  return clauses;
 }
 
 const escapeRegExp = (value) => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");

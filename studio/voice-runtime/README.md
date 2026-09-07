@@ -16,8 +16,9 @@ Both run on CPU through `onnxruntime-node`. Nothing leaves the machine.
 
 Every other `*-runtime` in `studio/` is a plain directory sharing the studio's
 `node_modules`. This one carries its own `package.json` because its
-dependencies are 943 MB on disk (`du -sh node_modules`; 251 MB of that is the
-model cache transformers.js keeps inside its own package) — `onnxruntime-node`
+dependencies are 692 MB on disk, plus another 474 MB of model cache that
+transformers.js keeps inside its own package — 1.2 GB in all (`du -sk`,
+2026-09-07) — because `onnxruntime-node`
 ships native binaries for every platform, and `@huggingface/transformers`
 pulls in `sharp`. Keeping them here keeps them out of the application's
 dependency tree. The packaged app ships them pruned to one platform and
@@ -49,8 +50,9 @@ sets transformers.js's `env.cacheDir` from it before warm-up. Without it
 transformers.js caches inside its own package — inside the signed bundle when
 packaged. The weights are a first-run download; `/status` reports each model
 as it becomes ready and nothing else does. Measured on this machine's cache
-with `du -sh`: whisper-base 76 MB, Kokoro 88 MB, the AudioSet classifier
-87 MB — 251 MB in all.
+with `du -sh`: whisper-base 76 MB, Kokoro 311 MB, the AudioSet classifier
+87 MB — 474 MB in all. Kokoro was 88 MB and the total 251 MB until 2026-09-07,
+when synthesis stopped being quantised; see *Synthesis is not quantised*.
 
 What ships is decided in `electron-builder.yml`: the source, and
 `node_modules` minus the `.cache`, source maps, `.d.ts`, `.md`, `.bin`, every
@@ -77,7 +79,7 @@ artifacts are 188 MB (macOS arm64 `.zip`), 196 MB (macOS x64) and 397 MB
 
 The models load in the background and `/status` reports only what is ready. A
 cold sidecar answers `{}`, which the gateway reads as "no speech models here"
-and falls back to the local tier, so the operator keeps a voice while ~137 MB
+and falls back to the local tier, so the operator keeps a voice while ~474 MB
 of weights download on first run. A sidecar serving only one capability is also
 legal: `server/voice.js` routes each of synthesis and recognition
 independently.
@@ -217,7 +219,8 @@ goes unlogged.
 | `TEMINALI_SOUND_MODEL` | `Xenova/ast-finetuned-audioset-10-10-0.4593` | AudioSet classifier behind `sounds=1`. |
 | `TEMINALI_SOUND_THRESHOLD` | `0.35` | Confidence a label needs before it is reported. |
 | `TEMINALI_TTS_VOICE` | `af_heart` | One of the 28 voices `/status` lists. |
-| `TEMINALI_ASR_DTYPE` / `TEMINALI_TTS_DTYPE` / `TEMINALI_SOUND_DTYPE` | `q8` | Quantisation. |
+| `TEMINALI_ASR_DTYPE` / `TEMINALI_SOUND_DTYPE` | `q8` | Quantisation. |
+| `TEMINALI_TTS_DTYPE` | `fp32` | Synthesis is **not** quantised, since 2026-09-07: `q8` measured slower here, not faster (see *Measured on this machine*). `q4` measures level with `fp32` if download size ever matters more than the margin. |
 | `TEMINALI_FFMPEG` | first of `/opt/homebrew/bin`, `/usr/local/bin`, `/usr/bin`, then `PATH` | Decodes the recorder's webm/opus to 16 kHz mono. |
 
 `ffmpeg` is a hard requirement for recognition: Node cannot decode Opus and the
@@ -225,18 +228,41 @@ studio's `MediaRecorder` produces `audio/webm;codecs=opus`.
 
 ## Measured on this machine
 
-An M4 Pro, int8, warm, over loopback:
+An M4 Pro, warm, over loopback. Synthesis runs at `fp32`; recognition and the
+sound classifier are int8:
 
 | | |
 | --- | --- |
-| `Running the tests.` -> 1.55 s of audio | **0.51 s** |
-| `Two edits were made, and the tests passed.` -> 3.10 s of audio | **1.12 s** |
+| `Running the tests.` -> 0.96 s of audio | **0.24 s** |
+| `Two edits were made, and the tests passed.` -> 2.07 s of audio | **0.48 s** |
 | Recognition of a 2.5 s utterance | accurate, confidence 0.92 |
 | Naming a sound in a wordless clip | **0.22 s** |
 | Sound classifier, cold (first download) | 123 s; 0.09 s from cache thereafter |
-| Model weights, all three models | 137 MB plus the classifier |
-| `node_modules` | 943 MB, of which 251 MB is the model cache |
+| Model weights, all three models | 474 MB (whisper-base 76, Kokoro `fp32` 311, AudioSet 87) |
+| `node_modules` | 1.2 GB, of which 474 MB is the model cache |
 | Shipped in the macOS arm64 app (`Contents/Resources/voice-runtime`) | 97 MB (195 MB before the web half was excluded) |
+
+### Synthesis is not quantised (2026-09-07)
+
+`TEMINALI_TTS_DTYPE` defaulted to `q8` until 2026-09-07 on the assumption that a
+smaller model is a faster one. Measured through this sidecar, on the same texts,
+warm, three runs each, it is the opposite:
+
+| | `q8` | `fp32` |
+| --- | ---: | ---: |
+| `Running the tests.` | 530 ms | **245 ms** |
+| `Two edits were made, and the tests passed.` | 1130 ms | **478 ms** |
+| 35-word reply, first clause on the wire | 666 ms | **286 ms** |
+| 35-word reply, whole file | 4527 ms | **1972 ms** |
+
+Int8 Kokoro is roughly 2.3x slower here and no cheaper: it costs more CPU per
+second of audio, and it grades marginally worse (UTMOS 4.410 against 4.440 over
+a six-sentence corpus). The download is the only thing quantisation buys — 88 MB
+against 311 MB — so `q8` remains available through the variable, and `q4`
+(291 MB) measures level with `fp32` if that trade ever matters.
+
+Recognition and the sound classifier are untouched and stay int8; this was
+measured for Kokoro only.
 
 Long text is split on clause boundaries before synthesis (`splitClauses`).
 Kokoro's own splitter breaks on sentences only, so a single long sentence would
@@ -244,19 +270,37 @@ render as one block and give up the latency win entirely. A conjunction opens
 the next clause rather than being the break: until 2026-09-05 the split
 consumed it, and "I tried, but it failed" was spoken as "I tried, it failed".
 
+**The first clause is capped shorter than the rest** (`FIRST_CLAUSE_WORDS`, 6
+words, against `MAX_CLAUSE_WORDS`'s 18; `splitClauses` takes both as
+parameters). Only the first clause decides when anything is heard — every later
+one renders while an earlier one plays, and at this speed they never catch up to
+the ear — so shortening only the opening buys latency without flattening the
+prosody of the whole utterance the way a smaller `MAX_CLAUSE_WORDS` would. It
+does nothing when punctuation already breaks early, and a great deal when it does
+not. Measured at `fp32`, p50 of five runs, time to render the first clause:
+
+| opening | 18-word cap | 6-word cap |
+| --- | ---: | ---: |
+| "The build finished cleanly and every test..." — breaks at *and*, so both caps yield the same four words | 287 ms | 261 ms (noise) |
+| "Open the file at studio slash server slash voice dot js and check..." | 640 ms | **308 ms** |
+| A 24-word sentence with no punctuation before its full stop | 928 ms | **332 ms** |
+
+The split is on whitespace only, so every piece stays a literal substring of the
+input and `clauseOffsets` can still locate it.
+
 With `"stream": true` each clause is written as a frame (`stream.js`, format in
 [`../docs/VOICE_SIDECAR.md`](../docs/VOICE_SIDECAR.md)) the moment Kokoro
 returns it, and `/status` says `"streaming": true` under `tts`. Measured on this
-machine for a 36-word reply (13.4 s of speech): the first clause is on the wire
-at 1.1 s, where the whole file arrived at 6.2 s; the total render is the same.
+machine for a 35-word reply (10.4 s of speech): the first clause is on the wire
+at 0.29 s, where the whole file arrived at 1.97 s; the total render is the same.
 Each frame carries the clause's character offsets, so the studio can say how
 much of a reply was heard when the operator cuts in. The render stops when the
 client hangs up, at a clause boundary: inference holds the event loop, so the
 closed socket is noticed between clauses and the clause rendered in between is
-discarded. Measured through the gateway from the app on 2026-09-05: the studio
-cut in during the second clause and the sidecar stopped after writing its
-fourth, and a reply requested in that window got its first clause at 3.2 s
-instead of 1.2 s.
+discarded. Measured through the gateway from the app on 2026-09-05, at the
+then-default `q8`: the studio cut in during the second clause and the sidecar
+stopped after writing its fourth, and a reply requested in that window got its
+first clause at 3.2 s instead of 1.2 s.
 
 ## Known limits
 

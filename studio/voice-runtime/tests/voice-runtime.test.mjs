@@ -111,9 +111,28 @@ test("long text is split on clauses so the first audio is not held up", () => {
 
 test("a clause with nothing to break on is cut on word count", () => {
   const long = Array.from({ length: 40 }, (_, i) => `word${i}`).join(" ");
-  const clauses = splitClauses(long, 18);
+  const clauses = splitClauses(long, 18, 18);
   assert.equal(clauses.length, 3);
   for (const clause of clauses) assert.ok(clause.split(" ").length <= 18);
+});
+
+test("the first clause is cut shorter than the rest, so speech starts sooner", () => {
+  // Only the opening clause gates time-to-first-audio; later ones render while
+  // an earlier one is still playing. Measured at fp32 on an M4 Pro, capping the
+  // first at 6 words took first-chunk p50 from 510ms to 348ms.
+  const long = Array.from({ length: 40 }, (_, i) => `word${i}`).join(" ");
+  const clauses = splitClauses(long, 18, 6);
+  assert.equal(clauses[0].split(" ").length, 6);
+  assert.ok(clauses.length > 3, `expected the head to be split further, got ${clauses.length}`);
+  // Everything the head did not claim is still cut at the long cap.
+  for (const clause of clauses) assert.ok(clause.split(" ").length <= 18);
+  // No word is lost or reordered by splitting the head.
+  assert.equal(clauses.join(" "), long);
+});
+
+test("a first-clause cap larger than the clause leaves it alone", () => {
+  const clauses = splitClauses("Two edits were made.", 18, 6);
+  assert.deepEqual(clauses, ["Two edits were made."]);
 });
 
 test("a short line stays whole", () => {

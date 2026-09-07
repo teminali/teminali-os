@@ -4297,10 +4297,11 @@ arrive: `server/voice.js#speak` hands back a stream instead of a buffer and the
 route pipes it. `src/services/voice/clausePlayer.ts` schedules each clause on a
 shared AudioContext to start the instant the previous one ends, so a reply plays
 as one utterance while its tail is still rendering. Measured on the M4 Pro for a
-36-word reply (13.4 s of speech): first audio at 1.1 s, where the whole-file
-path delivered it at 6.2 s; the total render is unchanged. Verified in the
+35-word reply (10.4 s of speech): first audio at 0.29 s, where the whole-file
+path delivered it at 1.97 s; the total render is unchanged. Verified in the
 app's runtime on 2026-09-05 (Electron 44, the real `clausePlayer.ts` against
-the relay and the sidecar) for a 50-word reply (18.5 s of speech): the first
+the relay and the sidecar) for a 50-word reply (18.5 s of speech), at the
+then-default `q8` and so slower than §6.24 now measures: the first
 clause was scheduled at 1.35 s where the whole file arrived at 9.2 s, six
 clauses played with no gap between them, and `onEnd` reported all 276
 characters. A barge-in 2.5 s in reported 35 characters, inside the second
@@ -5290,6 +5291,70 @@ only English while the operator genuinely speaks Kiswahili, a Kiswahili turn is
 now rejected outright — the rule is deliberately not softened by confidence.
 `navigator.languages` has not been measured in this renderer. Pinning the
 language setting narrows `expected` to exactly one and removes the question.
+
+### 6.24 The quantised model was the slow one (`voice-runtime/tts.js`, 2026-09-07)
+
+The operator asked what Pocket TTS is, found the sidecar already runs Kokoro,
+and asked which wins on latency *and* on quality. The measured answer was that
+the migration is not worth its cost — tuned Kokoro grades 4.440 UTMOS against
+Pocket 24L's 4.482, a gap nobody hears, and the latency gap closed once Kokoro
+was tuned. What shipped instead is the tuning, two lines of it.
+
+**`TEMINALI_TTS_DTYPE` now defaults to `fp32`, not `q8`.** The `q8` default was
+never measured; it rested on the assumption that a smaller model is a faster
+one. On Apple Silicon it is the reverse — int8 kernels fall off Accelerate's
+fast paths, so the quantised model is about **2.3x slower**, costs more CPU per
+second of audio, and grades marginally worse. Measured through the sidecar,
+warm, three runs each:
+
+| | `q8` | `fp32` |
+| --- | ---: | ---: |
+| `Running the tests.` | 530 ms | **245 ms** |
+| 35-word reply, first clause on the wire | 666 ms | **286 ms** |
+| 35-word reply, whole file | 4527 ms | **1972 ms** |
+| UTMOS, six-sentence corpus | 4.410 | **4.440** |
+
+Quantisation buys download size and nothing else here: 88 MB against 311 MB.
+`q4` (291 MB) measures level with `fp32`, so it is the option if packaging ever
+needs one. Recognition and the sound classifier were not measured and stay int8.
+
+**The first clause is now capped shorter than the rest** — `FIRST_CLAUSE_WORDS`
+is 6 where `MAX_CLAUSE_WORDS` stays 18, and `splitClauses(text, maxWords,
+firstMaxWords)` takes both. Only the first clause decides when the operator
+hears anything; every later one renders while an earlier one is still playing,
+and at this speed they never catch up to the ear. Cutting the whole utterance
+into 6-word pieces would flatten its prosody for no gain, so only the opening is
+cut.
+
+It changes nothing when punctuation already breaks early, and a great deal when
+it does not — which is the case the old cap handled worst. Time to render the
+first clause, `fp32`, p50 of five runs:
+
+| opening | 18 | 6 |
+| --- | ---: | ---: |
+| "The build finished cleanly and every test..." — breaks at *and*, same four words either way | 287 ms | 261 ms (noise) |
+| "Open the file at studio slash server slash voice dot js and check..." | 640 ms | **308 ms** |
+| A 24-word sentence with no punctuation before its full stop | 928 ms | **332 ms** |
+
+The split is on whitespace only. `clauseOffsets` locates each clause as a
+literal substring of the text as sent, which is what lets a barge-in report the
+character offset actually heard (§6.3); a piece that re-joined or
+re-punctuated its words would not be findable, so this must not be "improved"
+into one that does.
+
+Tests: `voice-runtime/tests/voice-runtime.test.mjs` — the clause-splitting
+cases cover the short first clause, the uniform-cap path with both caps passed
+explicitly, and offsets surviving the split.
+
+Two things measured on the way and worth not re-deriving. Kokoro's published
+voice grades are unreliable: `af_bella` is graded A- and measures 3.792,
+`af_nicole` is graded B- and measures 2.895, while the shipped `af_heart`
+(4.410), `af_kore` (4.416) and `af_sarah` (4.404) tie at the ceiling — the
+default was already the right one. And a Pocket TTS migration would be
+*additive*, not a swap: ASR stays on `@huggingface/transformers` under Node
+regardless, so a Python TTS sidecar means roughly 1.2 GB of Node plus 1.06 GB of
+Python. Community ONNX and Rust ports exist and are unverified.
+
 
 ## 7. The agent command loop (`services/agentCommands.ts`, `services/commandThrashing.ts`)
 
