@@ -16,7 +16,15 @@ const SCAFFOLD_FILENAMES: Record<string, string> = {
 
 const CODE_LANGUAGES = new Set(["css", "csv", "go", "html", "java", "javascript", "js", "json", "jsx", "markdown", "md", "mjs", "py", "python", "rb", "rs", "sql", "svg", "toml", "ts", "tsx", "typescript", "xml", "yaml", "yml"]);
 
-function safeRelativePath(value?: string): string | null {
+/**
+ * A workspace-relative path, or null when the value is not one.
+ *
+ * Shared with `agentCommands.pathsReadByCommand` so that a path read on the
+ * shell and a path written in an edit block normalise to the same string —
+ * without that, `./scripts/deploy.sh` read and `scripts/deploy.sh` written
+ * would be two different files to the applier's seen-path guard.
+ */
+export function normalizeWorkspacePath(value?: string): string | null {
   if (!value) return null;
   const normalized = value.trim().replace(/^["'`]|["'`]$/g, "").replace(/^\.\//, "").replace(/\\/g, "/");
   if (!normalized || normalized.length > 2_048 || normalized.startsWith("/") || normalized.includes("\0")) return null;
@@ -36,10 +44,10 @@ export function parseWorkspaceEdits(text: string, options: { activePath?: string
     const precedingText = text.slice(Math.max(0, match.index - 240), match.index);
     const precedingCandidates = [...precedingText.matchAll(/(?:^|\n)\s*(?:#{1,6}\s+)?(?:\*\*|`)?([\w@+.,() -]*(?:\/[^\s*`]+)+|[\w@+.,() -]+\.[a-z0-9]+)(?:\*\*|`)?\s*$/gim)];
     const precedingPath = precedingCandidates.at(-1)?.[1]?.trim();
-    const headerPath = safeRelativePath(metadataPath?.[1] || metadataPath?.[2] || metadataPath?.[3] || positionalPath || precedingPath);
+    const headerPath = normalizeWorkspacePath(metadataPath?.[1] || metadataPath?.[2] || metadataPath?.[3] || positionalPath || precedingPath);
     let content = match[2];
     const firstLine = content.match(/^\s*(?:(?:\/\/|#)\s*(?:file|path)\s*:\s*([^\s]+)|<!--\s*(?:file|path)\s*:\s*([^>]+?)\s*-->)\s*\n/i);
-    const commentPath = safeRelativePath(firstLine?.[1] || firstLine?.[2]);
+    const commentPath = normalizeWorkspacePath(firstLine?.[1] || firstLine?.[2]);
     if (commentPath && firstLine) content = content.slice(firstLine[0].length);
     const path = headerPath || commentPath;
     candidates.push({ path: path || "", content, complete: match[3] === "```", explicit: Boolean(path), language });
@@ -48,7 +56,7 @@ export function parseWorkspaceEdits(text: string, options: { activePath?: string
   const explicit = candidates.filter((candidate) => candidate.explicit);
   if (explicit.length > 0) return explicit.map(({ path, content, complete }) => ({ path, content, complete }));
 
-  const activePath = safeRelativePath(options.activePath);
+  const activePath = normalizeWorkspacePath(options.activePath);
   const editable = candidates.filter((candidate) => CODE_LANGUAGES.has(candidate.language));
   if (activePath && editable.length === 1 && EDIT_INTENT.test(options.userPrompt || "")) {
     const [{ content, complete }] = editable;

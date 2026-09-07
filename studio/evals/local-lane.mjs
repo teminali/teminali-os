@@ -415,11 +415,16 @@ const CASES = [
       fell 2/3 -> 0/3 in the same run and recovered on the revert. Reverted.
 
       That is the third time prose has bought this lane nothing, so the fix
-      belongs in the pipeline: the applier must refuse to overwrite a file the
-      conversation has never seen, the way it already refuses a truncating
-      rewrite (`isTruncatingRewrite`, liveEditService.ts). `isTruncatingRewrite`
-      does not cover this — it needs a base of 25+ lines and a block under half
-      of it, so an invented 6-line script over a real 20-line one passes.
+      went into the pipeline instead, and is now built: `commitEdits` refuses
+      to overwrite an existing file whose contents never entered the
+      conversation (`liveEditService.ts`, fed by `pathsSeenInToolCalls` in
+      `agentCommands.ts`). `isTruncatingRewrite` did not cover this — it needs
+      a base of 25+ lines and a block under half of it, so an invented 6-line
+      script over a real 20-line one passed.
+
+      The case stays red anyway, and that is not a bug. It grades what the
+      model writes; the applier changes only what reaches disk. Red here now
+      means "the lane still guesses", not "the operator's file is at risk".
 
       Do not loosen this grader to make it green.
     */

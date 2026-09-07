@@ -2,6 +2,7 @@
 // Parsing, safety classification, and execution live together so the rules a
 // command is judged by cannot drift from the code that runs it.
 import type { ToolCall } from "../types";
+import { normalizeWorkspacePath } from "./liveEditProtocol.ts";
 import { htmlToText, looksLikeHtml } from "./readablePage.ts";
 
 export type CommandRisk = "auto" | "confirm" | "blocked";
@@ -549,6 +550,73 @@ export function buildCommandEvidence(executions: CommandExecution[]): string {
 
 export function hasExecutableCommands(text: string): boolean {
   return parseAgentCommands(text).some((request) => request.risk !== "blocked");
+}
+
+/* ────────────────────────────────────────────────────────────────
+   What the conversation has actually read
+   Consumed by the Live Edit applier, which refuses to overwrite a
+   file whose contents never entered the conversation.
+   ──────────────────────────────────────────────────────────────── */
+
+/**
+ * Binaries that put a file's *contents* on the conversation.
+ *
+ * Deliberately openers, not searchers. `grep -n flag deploy.sh` prints the one
+ * line that matched, and a model that has seen one line of a file has no
+ * business overwriting all of it — that is the exact shape of the
+ * `read-before-edit` eval case. `wc`, `ls` and `stat` describe a file without
+ * showing it and are absent for the same reason.
+ */
+const READ_BINARIES = new Set(["awk", "bat", "cat", "head", "less", "more", "nl", "sed", "tail"]);
+
+/** Tokens that take a filename but write to it rather than read it. */
+const REDIRECTS = new Set([">", ">>", "1>", "2>", "&>"]);
+
+function tokenize(segment: string): string[] {
+  return [...segment.matchAll(/"([^"]*)"|'([^']*)'|(\S+)/g)].map((match) => match[1] ?? match[2] ?? match[3] ?? "");
+}
+
+/**
+ * The paths a command read out loud.
+ *
+ * A fact, not a guess: the binary is one that prints a file and the path is an
+ * argument to it. Everything ambiguous is left out, because the cost is
+ * asymmetric — a path wrongly left out costs one more turn, a path wrongly
+ * included costs the operator's file.
+ */
+export function pathsReadByCommand(command: string): string[] {
+  const found: string[] = [];
+  for (const segment of segments(String(command ?? ""))) {
+    const tokens = tokenize(segment);
+    const binary = tokens[0]?.replace(/^.*\//, "");
+    if (!binary || !READ_BINARIES.has(binary)) continue;
+    for (let index = 1; index < tokens.length; index += 1) {
+      const token = tokens[index];
+      // `cat a > b` reads a and *writes* b; skip the operator and its target.
+      if (REDIRECTS.has(token)) {
+        index += 1;
+        continue;
+      }
+      if (!token || token === "-" || token.startsWith("-") || /^\d/.test(token)) continue;
+      const path = normalizeWorkspacePath(token);
+      if (path) found.push(path);
+    }
+  }
+  return [...new Set(found)];
+}
+
+/**
+ * The paths this turn's tool calls read.
+ *
+ * Only a completed run counts. A command that errored may have read nothing —
+ * `cat` on a path that does not exist exits 1 — and an unread file is the case
+ * this whole set exists to catch.
+ */
+export function pathsSeenInToolCalls(calls: readonly ToolCall[] | undefined): string[] {
+  if (!calls?.length) return [];
+  return calls
+    .filter((call) => call.name === "frontier.run_command" && call.status === "completed")
+    .flatMap((call) => pathsReadByCommand(String(call.arguments?.command ?? "")));
 }
 
 /* ────────────────────────────────────────────────────────────────

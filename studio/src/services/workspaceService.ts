@@ -1,4 +1,4 @@
-import { GatewayClient } from "./gatewayClient";
+import { GatewayClient } from "./gatewayClient.ts";
 import type { FileItem } from "../types";
 
 /** One file or folder found outside the workspace. */

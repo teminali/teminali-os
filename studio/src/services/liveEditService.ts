@@ -1,7 +1,7 @@
-import { GatewayError } from "./gatewayClient";
-import { WorkspaceService, type WorkspaceFileResponse } from "./workspaceService";
-import { isTruncatingRewrite, parseWorkspaceEdits, type ParsedWorkspaceEdit } from "./liveEditProtocol";
-export { parseWorkspaceEdits } from "./liveEditProtocol";
+import { GatewayError } from "./gatewayClient.ts";
+import { WorkspaceService, type WorkspaceFileResponse } from "./workspaceService.ts";
+import { isTruncatingRewrite, normalizeWorkspacePath, parseWorkspaceEdits, type ParsedWorkspaceEdit } from "./liveEditProtocol.ts";
+export { parseWorkspaceEdits } from "./liveEditProtocol.ts";
 
 export type LiveEditPhase = "idle" | "streaming" | "committing" | "complete" | "stopped" | "error";
 
@@ -42,6 +42,14 @@ interface ObserveInput {
   activePath?: string;
   userPrompt: string;
   dirtyPaths: string[];
+  /**
+   * Paths whose contents entered this conversation, from
+   * `agentCommands.pathsSeenInToolCalls`. Anything else is a file the model
+   * has never opened, and a path block for one of those is an invention.
+   */
+  seenPaths?: string[];
+  /** The chat session these messages belong to; a new one forgets what was seen. */
+  conversationId?: string;
 }
 
 class CopilotLiveEditService {
@@ -65,6 +73,9 @@ class CopilotLiveEditService {
   private pendingLoads = new Map<string, Promise<WorkspaceFileResponse | null>>();
   private dirtyPaths = new Set<string>();
   private draftRevision = 0;
+  /** Paths this conversation has read, been shown, or already written. */
+  private seenPaths = new Set<string>();
+  private seenConversationId: string | null = null;
 
   private commitListeners = new Set<(edit: CommittedEdit) => void>();
 
@@ -84,6 +95,7 @@ class CopilotLiveEditService {
 
   observe(input: ObserveInput) {
     this.dirtyPaths = new Set(input.dirtyPaths);
+    this.rememberSeen(input);
     const edits = parseWorkspaceEdits(input.text, { activePath: input.activePath, userPrompt: input.userPrompt });
     if (input.isStreaming) {
       const draft = edits.at(-1);
@@ -130,6 +142,27 @@ class CopilotLiveEditService {
       file: base ?? undefined,
     });
   };
+
+  /**
+   * Accumulate what this conversation knows the contents of.
+   *
+   * The open file counts alongside the files the model read: the operator is
+   * looking at it, so an edit to it is the one they asked for and the one they
+   * can watch land. Everything else has to have been read out loud.
+   */
+  private rememberSeen(input: ObserveInput) {
+    const conversationId = input.conversationId ?? null;
+    if (conversationId !== this.seenConversationId) {
+      this.seenConversationId = conversationId;
+      this.seenPaths.clear();
+    }
+    for (const path of input.seenPaths ?? []) {
+      const normalized = normalizeWorkspacePath(path);
+      if (normalized) this.seenPaths.add(normalized);
+    }
+    const active = normalizeWorkspacePath(input.activePath);
+    if (active) this.seenPaths.add(active);
+  }
 
   private async readBase(path: string): Promise<WorkspaceFileResponse | null> {
     if (this.baseByPath.has(path)) return this.baseByPath.get(path) ?? null;
@@ -188,6 +221,32 @@ class CopilotLiveEditService {
       }
       try {
         const base = await this.readBase(edit.path);
+        /*
+          A path block overwrites, so writing one for a file whose contents
+          never entered the conversation commits an invention over the real
+          thing. The eval case `read-before-edit` measured that 3/3: asked to
+          add a flag to a script it had never opened, the local lane answered
+          with a whole new script. Prose did not move it — teaching the prompt
+          cost a section of the prompt and made the lane worse — so the applier
+          refuses, and the refusal names the command that fixes it.
+
+          This is a fact, not a heuristic: either the path was read out loud on
+          the shell, or it is the file the operator has open, or the assistant
+          wrote it itself earlier this conversation. `isTruncatingRewrite` does
+          not cover it — that needs a 25-line base and a block under half of
+          it, so an invented six-line script over a real twenty-line one was
+          committed before this guard existed.
+        */
+        if (base && !this.seenPaths.has(edit.path)) {
+          this.fail(
+            requestId,
+            edit.path,
+            new Error(
+              `Refused to overwrite ${edit.path}: nothing in this conversation has read it, so that block would replace the file with a guess. Read it first (\`cat ${edit.path}\`), then edit it.`,
+            ),
+          );
+          continue;
+        }
         // A path block overwrites, so a fragment in one is a deletion of every
         // line it left out. Refusing costs a turn; committing costs the file.
         if (base && isTruncatingRewrite(base.content, edit.content)) {
@@ -227,6 +286,9 @@ class CopilotLiveEditService {
           }),
         );
         this.baseByPath.set(edit.path, written);
+        // Written is seen: the content on disk is now the content the model
+        // just produced, so the next edit to it is not an invention.
+        this.seenPaths.add(edit.path);
         this.targetContent = written.content;
         if (following) {
           this.publish({ file: written, committed: true, detail: `Saved ${edit.path}; finishing Live Edit playback` });

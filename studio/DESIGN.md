@@ -1506,8 +1506,10 @@ shell syntax errors, and nothing edited. The case failed the run that copied
 it, which is the right verdict for a command that cannot run. The example is
 now one line of `python3 -c`.
 
-**It is 3/3 in the full run and 2/3 in the isolated one — 5 of 6 observed runs
-at temperature 0.15.** So the prompt is not the guarantee. `isTruncatingRewrite`
+**Pooled across four sessions, 16 of 19 observed runs at temperature 0.15** —
+3/3 and 2/3 when the case was introduced, 2/3 twice on re-measurement, then 2/2
+and 5/5 at `ccd7a60`. The 7 of 7 at `ccd7a60` were isolated and uncontended;
+the earlier thirds were not. So the prompt is not the guarantee. `isTruncatingRewrite`
 is: the applier refuses a block that keeps under half of an existing file of 25
 lines or more, and reports which numbers it refused on. Both thresholds are a
 judgement and are written down where they live. Below the floor, "rewrite the
@@ -1644,10 +1646,13 @@ configured there is nothing to call, so a case would only grade the model's
 willingness to invent one.
 
 `read-before-edit` stays red on purpose, as `web-search-open` does. It grades
-the model's half, and prose did not move it; the fix belongs in the applier,
-which already refuses a truncating rewrite but not a same-size invention —
+the model's half, and prose did not move it; the fix belonged in the applier,
+which already refused a truncating rewrite but not a same-size invention —
 `isTruncatingRewrite` needs a 25-line base and a block under half of it, so an
-invented 6-line script over a real 20-line one is still committed today.
+invented 6-line script over a real 20-line one was committed. That guard was
+built the next session; see "A file nobody read is not a file you may
+overwrite" below. The case stays red, because the applier cannot change what
+the model writes — only what reaches disk.
 
 ### A fence is not always one command per line (`services/agentCommands.ts`, 2026-09-07)
 
@@ -1696,6 +1701,62 @@ Two properties worth keeping:
 `edit-long-file` measured 2/3 after the change, unchanged from before it: the
 model on this lane does not reach for a heredoc on its own, so the fix does not
 move the score. It removes a way to lose the operator's file when it does.
+
+### A file nobody read is not a file you may overwrite (`services/liveEditService.ts`, `services/agentCommands.ts`, 2026-09-07)
+
+The `read-before-edit` case above is 0/3 and destructive: asked to add a flag to
+`scripts/deploy.sh`, the local lane never opens the file and answers with a
+whole-file `path=` block holding a script it invented. Committing that does not
+edit the operator's deploy script, it replaces it.
+
+Prose was measured against this and failed — 188 characters into
+`[TO CHANGE A FILE YOU HAVE NOT SEEN IN FULL]` scored 0/3 unchanged while
+evicting the `multi-agent` section and dropping `edit-long-file` to 0/3. So the
+guard is in the applier, next to `isTruncatingRewrite`, which does not cover
+this shape: it needs a 25-line base and a block under half of it, so a
+six-line invention over a real twenty-line script passed.
+
+**`commitEdits` refuses a whole-file overwrite of an existing file this
+conversation has not seen.** Three things count as seen, and all three are
+facts rather than judgements:
+
+- **It was read out loud on the shell.** `pathsSeenInToolCalls` walks the
+  conversation's `frontier.run_command` tool calls and keeps the paths named by
+  a *completed* one whose binary prints a file: `cat`, `head`, `tail`, `nl`,
+  `bat`, `sed`, `awk`, `less`, `more`. A command that errored counts for
+  nothing — `cat` on a path that does not exist exits 1, which is exactly the
+  case being caught.
+- **It is the file the operator has open** (`activePath`). They are looking at
+  it, so the edit is the one they asked for and the one they can watch land.
+- **The assistant wrote it earlier this conversation.** Having written the
+  bytes, it knows them; without this every scaffold answer's second edit would
+  be refused.
+
+`grep` and `rg` are deliberately absent, and so are `wc`, `ls` and `stat`.
+`grep -n verbose scripts/deploy.sh` prints the one line that matched, and a
+model that has seen one line of a file has no business overwriting all of it —
+that is the failure, not the fix. The consequence is a guard that errs toward
+refusing: a path wrongly left out costs one more turn, a path wrongly included
+costs the operator's file. The refusal names the way out
+("Read it first (`cat scripts/deploy.sh`), then edit it."), because a refusal
+the model cannot act on just buys another guess.
+
+A file that does not exist yet is created, never refused — there is nothing to
+destroy. The set is cleared when the chat session changes, so a new
+conversation cannot overwrite on the last one's evidence.
+
+`safeRelativePath` became the exported `normalizeWorkspacePath` so that a path
+read on the shell and a path written in an edit block normalise to the same
+string; `./scripts/deploy.sh` and `scripts/deploy.sh` were otherwise two
+different files to the guard.
+
+The eval score does not move and is not expected to: `read-before-edit` grades
+what the model writes, and the applier changes only what reaches disk. Tested in
+`tests/live-edit.test.mjs` (13, up from 10) and `tests/agent-commands.test.mjs`
+(49, up from 45). One incidental fix made the first of those possible at all:
+`liveEditService.ts` and `workspaceService.ts` imported their neighbours without
+a `.ts` extension, which Vite resolves and `node --test` does not, so nothing had
+ever unit-tested the applier.
 
 ### The browser panel is a view, not a frame (`electron/browserView.cjs`, `services/browserView.ts`, `panels/BrowserPane.tsx`)
 

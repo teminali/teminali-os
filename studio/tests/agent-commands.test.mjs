@@ -8,6 +8,8 @@ import {
   documentationShellFence,
   formatCommandEvidence,
   parseAgentCommands,
+  pathsReadByCommand,
+  pathsSeenInToolCalls,
 } from "../src/services/agentCommands.ts";
 
 test("only an explicit run fence is executable", () => {
@@ -535,4 +537,62 @@ test("an unterminated heredoc stays one command rather than shredding", () => {
   const requests = parseAgentCommands(fenceOf("python3 - <<'EDIT'", "import os", "print(os.getcwd())"));
   assert.equal(requests.length, 1);
   assert.match(requests[0].command, /print\(os\.getcwd\(\)\)$/);
+});
+
+/*
+  Which files the conversation has actually read.
+
+  This answers one question for the Live Edit applier — did the bytes of this
+  file come back? — and the applier refuses a whole-file overwrite when the
+  answer is no. Every case below is therefore about being wrong in the safe
+  direction: a path left out costs one more turn, a path wrongly included costs
+  the operator's file.
+*/
+
+test("a file printed on the shell is a file the conversation has read", () => {
+  assert.deepEqual(pathsReadByCommand("cat scripts/deploy.sh"), ["scripts/deploy.sh"]);
+  assert.deepEqual(pathsReadByCommand("sed -n '1,80p' src/app.ts"), ["src/app.ts"]);
+  assert.deepEqual(pathsReadByCommand("head -40 a.js b.js"), ["a.js", "b.js"]);
+
+  // Normalised the same way an edit block's path is, or the two would be
+  // different files to the guard.
+  assert.deepEqual(pathsReadByCommand("cat ./scripts/deploy.sh"), ["scripts/deploy.sh"]);
+});
+
+test("searching a file is not reading it", () => {
+  // `grep -n flag deploy.sh` prints the line that matched. A model that has
+  // seen one line of a file has no business overwriting all of it, which is
+  // the whole shape of the `read-before-edit` eval case.
+  assert.deepEqual(pathsReadByCommand("grep -n verbose scripts/deploy.sh"), []);
+  assert.deepEqual(pathsReadByCommand("rg --files-with-matches PORT ."), []);
+  // Describing a file is not showing it either.
+  assert.deepEqual(pathsReadByCommand("wc -l scripts/deploy.sh"), []);
+  assert.deepEqual(pathsReadByCommand("ls -la scripts/"), []);
+});
+
+test("a read only counts for the segment that did it", () => {
+  // The pipeline's first word is the reader; `head` here consumes stdin.
+  assert.deepEqual(pathsReadByCommand("cat src/app.ts | head -20"), ["src/app.ts"]);
+  // Each segment is classified on its own terms.
+  assert.deepEqual(pathsReadByCommand("ls src && cat src/app.ts"), ["src/app.ts"]);
+  // A redirect target is written, not read.
+  assert.deepEqual(pathsReadByCommand("cat src/app.ts > backup.ts"), ["src/app.ts"]);
+  // An absolute path is outside the workspace and normalises to nothing.
+  assert.deepEqual(pathsReadByCommand("cat /etc/hosts"), []);
+});
+
+test("only a command that came back counts as evidence", () => {
+  const call = (command, status) => ({
+    id: "t1",
+    name: "frontier.run_command",
+    arguments: { command },
+    status,
+    result: "exit 0 · 4 ms\n#!/bin/sh",
+  });
+  assert.deepEqual(pathsSeenInToolCalls([call("cat scripts/deploy.sh", "completed")]), ["scripts/deploy.sh"]);
+  // `cat` on a path that does not exist exits 1 — and an unread file is
+  // precisely the case the applier's guard exists to catch.
+  assert.deepEqual(pathsSeenInToolCalls([call("cat scripts/deploy.sh", "error")]), []);
+  assert.deepEqual(pathsSeenInToolCalls([{ ...call("cat a.txt", "completed"), name: "frontier.patch_file" }]), []);
+  assert.deepEqual(pathsSeenInToolCalls(undefined), []);
 });
