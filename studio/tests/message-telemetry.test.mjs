@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { telemetry } from "../src/utils/messageTelemetry.ts";
+import { telemetry, loadWorthNaming } from "../src/utils/messageTelemetry.ts";
 
 /**
  * The row under a reply, on hover. It was five flex children with a gap
@@ -44,4 +44,25 @@ test("a duration is one decimal and a token count is grouped", () => {
   const [, tokens, duration] = telemetry({ timestamp: "x", tokensCount: 1234567, durationSec: 12.349 });
   assert.equal(tokens, "1,234,567 tok");
   assert.equal(duration, "12.3s");
+});
+
+test("a cold start is named, so a slow turn is not mistaken for a slow model", () => {
+  const fields = telemetry({ durationSec: 12.4, loadSec: 8.1 });
+  assert.ok(fields.includes("12.4s (8.1s load)"));
+});
+
+test("a warm model's millisecond load is not printed", () => {
+  const fields = telemetry({ durationSec: 12.4, loadSec: 0.04 });
+  assert.ok(fields.includes("12.4s"));
+});
+
+test("a load that is a small share of a long turn is not worth naming", () => {
+  assert.equal(loadWorthNaming(60, 2), false);
+  assert.equal(loadWorthNaming(6, 2), true);
+});
+
+test("a load nobody measured is not named", () => {
+  assert.equal(loadWorthNaming(12.4, undefined), false);
+  assert.equal(loadWorthNaming(undefined, 8.1), false);
+  assert.equal(loadWorthNaming(0, 8.1), false);
 });

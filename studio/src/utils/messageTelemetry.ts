@@ -23,7 +23,27 @@ export interface TelemetrySource {
   engineUsed?: string;
   tokensCount?: number;
   durationSec?: number;
+  /**
+   * Of `durationSec`, the part spent loading the model's weights rather than
+   * answering. Only the local lane has one; an agent CLI reports zero.
+   */
+  loadSec?: number;
   costLabel?: string;
+}
+
+/**
+ * A load is worth naming when it changes what the number means.
+ *
+ * Ollama reports a load duration on every turn, and on a warm model it is
+ * milliseconds — printing that is noise, and noise in this row is what made
+ * the row wrap. A cold turn is different: most of the wait was weights, and
+ * without saying so the row reads as a slow model, which is the wrong thing to
+ * go and fix. So: at least a second of it, and at least a fifth of the turn.
+ */
+export function loadWorthNaming(durationSec?: number, loadSec?: number): boolean {
+  if (typeof loadSec !== "number" || typeof durationSec !== "number") return false;
+  if (loadSec < 1 || durationSec <= 0) return false;
+  return loadSec >= durationSec * 0.2;
 }
 
 /**
@@ -48,7 +68,11 @@ export function telemetry(message: TelemetrySource): string[] {
     fields.push(`${message.tokensCount.toLocaleString()} tok`);
   }
   if (typeof message.durationSec === "number" && message.durationSec > 0) {
-    fields.push(`${message.durationSec.toFixed(1)}s`);
+    fields.push(
+      loadWorthNaming(message.durationSec, message.loadSec)
+        ? `${message.durationSec.toFixed(1)}s (${message.loadSec!.toFixed(1)}s load)`
+        : `${message.durationSec.toFixed(1)}s`,
+    );
   }
   if (message.costLabel) fields.push(message.costLabel);
   return fields;

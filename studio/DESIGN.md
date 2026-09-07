@@ -1758,6 +1758,22 @@ what the model writes, and the applier changes only what reaches disk. Tested in
 a `.ts` extension, which Vite resolves and `node --test` does not, so nothing had
 ever unit-tested the applier.
 
+### A cold start is not a slow model (`utils/messageTelemetry.ts`, `services/frontierEngine.ts`, 2026-09-07)
+
+`loadDurationMs` was measured on every local turn and read by nothing. It is the
+part of the turn Ollama spent loading weights, and without it the row under a
+first reply says `31.4s` and reads as a slow model — which sends the operator to
+tune the wrong thing.
+
+The row now says `31.4s (24.8s load)`, but only when that changes the meaning of
+the number: at least a second of load, and at least a fifth of the turn. A warm
+model reports milliseconds, and printing those is the noise this row was
+already narrowed to avoid. `loadWorthNaming` holds the rule and
+`tests/message-telemetry.test.mjs` pins it.
+
+Only the local lane has a cold start; an agent CLI reports zero and the field is
+dropped like every other unmeasured one.
+
 ### An agent's thread belongs to the chat, not to the mount (`utils/chatSessions.ts`, `store/studioStore.ts`, `components/chat/StudioChat.tsx`, 2026-09-07)
 
 An agent CLI keeps its own resumable session, and the chat hands its id back on

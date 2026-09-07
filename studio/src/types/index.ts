@@ -79,6 +79,12 @@ export interface ChatMessage {
   costLabel?: string;
   tokensCount?: number;
   durationSec?: number;
+  /**
+   * Of `durationSec`, the seconds spent loading the model's weights. Only the
+   * local lane has a cold start; the row names it only when it is large enough
+   * to change what `durationSec` means — see `utils/messageTelemetry.ts`.
+   */
+  loadSec?: number;
   engineUsed?: string;
   mode?: ModelModeId;
   routeReason?: string;

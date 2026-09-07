@@ -457,6 +457,7 @@ export const StudioChat: React.FC<{
               costLabel: data.costLabel,
               tokensCount: data.tokensCount,
               durationSec: data.durationSec,
+              loadSec: Number((data.telemetry.loadDurationMs / 1000).toFixed(2)),
               engineUsed: data.engineUsed,
             }));
             setStreaming(false);
