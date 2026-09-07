@@ -1474,6 +1474,28 @@ word.
 
 Tested in `tests/ask-tool-calls.test.mjs` (16).
 
+### A question with no answer channel (`services/systemPrompt.ts`, `components/chat/CursorMarkdownRenderer.tsx`, 2026-09-07)
+
+Observed, in the operator's words: *"the assistant asked to say yes or no to
+refuse for command but there was never a prompt to click yes or no or always,
+and even when i said yes, nothing happened"*.
+
+Nothing was broken in the gate. The model had asked **in prose** — a sentence
+in the reply offering to run something if the operator agreed. Prose is not a
+channel: `createApprovalGate` never had a request, so no prompt was drawn, and
+the word "yes" typed into the composer is a new turn, not an answer. The mandate
+told the model it had full access and never told it not to ask for permission
+anyway, so item 3 of `[FULL COMPUTER ACCESS & AUTONOMOUS ACTION MANDATE]` now
+does: **never ask permission to run a command**, because whatever genuinely
+needs a decision is gated by Teminali and drawn as a real prompt with buttons.
+Every later item renumbered; the fence contract is unchanged.
+
+Adjacent, from the same screenshot: a streamed `---` was drawn as a full-width
+rule across the transcript. Models emit thematic breaks out of markdown-file
+habit, and in a column where message blocks already separate themselves it is a
+line that divides nothing. `CursorMarkdownRenderer` still *parses* the rule — so
+the dashes never surface as a stray paragraph — and renders nothing for it.
+
 ### An edit is not a rewrite (`services/systemPrompt.ts`, `services/liveEditProtocol.ts`, 2026-09-07)
 
 A path block is applied by **overwriting the file**. That is right for a file
@@ -5417,6 +5439,20 @@ agent answer is a round trip through the gateway, and until it returns a second
 "yes" would answer the same prompt twice. The verdict is acknowledged aloud —
 "Allowed.", "Refused.", "Allowed, and I won't ask again." — because an operator
 who speaks to a machine and hears nothing says it again louder.
+
+**The third answer had to be said out loud too (2026-09-07).** The table took
+`always` from the first day, `describeApprovalRequest` took an `alwaysLabel`
+from the first day, and the spoken question never used it — it offered two
+answers where three are live. An operator across the room cannot learn the word
+from the button, because the button is the thing they cannot reach. The question
+now ends *"Say yes to allow it, always to stop asking about `npm`, or no to
+refuse"*, with the scope named when it is short enough to say and dropped when
+it is not; a prompt with no scope to widen still offers only two answers, since
+teaching a word the gate would ignore is worse than teaching none. On screen,
+`CommandApprovalPrompt`'s microphone hint says all three words rather than
+keeping two of them in a tooltip nobody hovers and nobody hears, and the refusal
+button is **Don't allow** rather than "Skip" — it refuses, it does not defer,
+and it should carry the same word the ear is listening for.
 
 **On screen**, both prompts grow a `say yes` hint with a microphone glyph while
 an engine is listening, and nothing at all when none is. An operator who has just

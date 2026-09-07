@@ -86,10 +86,16 @@ export const CommandApprovalPrompt: React.FC<CommandApprovalPromptProps> = ({ re
           {isTool ? "Waiting on you to allow a tool" : "Waiting on you to run a command"}
         </span>
         <span className="flex-1" />
+        {/* The spoken vocabulary, written out.
+
+            It said "say yes" and kept the other two words in a tooltip, which
+            is a hint nobody hovers and nobody hears — the operator across the
+            room learns the words only if the row says them. All three answers
+            are live whenever this is showing. */}
         {listening && (
           <span className="flex items-center gap-1 text-ink-muted flex-shrink-0" title={'Say "yes", "always", or "no"'}>
             <Mic size={9} className="opacity-70" />
-            say yes
+            say <span className="text-ink-high">yes</span> · <span className="text-ink-high">always</span> · <span className="text-ink-high">no</span>
           </span>
         )}
       </div>
@@ -139,7 +145,10 @@ export const CommandApprovalPrompt: React.FC<CommandApprovalPromptProps> = ({ re
           onClick={onDeny}
           className="px-2.5 h-6 rounded-md text-2xs text-ink-muted font-semibold hover:bg-surface-hover hover:text-warning focus-visible:outline focus-visible:outline-1 focus-visible:outline-edge-popover transition-colors flex-shrink-0"
         >
-          Skip
+          {/* "Skip" named the wrong thing: it reads as "leave this for later",
+              and what it does is refuse. The spoken table's word is "no", and
+              the button should be the same decision under a name that says so. */}
+          Don't allow
         </button>
       </div>
     </div>

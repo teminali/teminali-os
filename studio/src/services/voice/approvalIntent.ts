@@ -175,11 +175,27 @@ const MAX_SPOKEN_ACTION = 60;
 export function describeApprovalRequest(request: SpokenApprovalRequest): string {
   const action = (request.action ?? "").trim().replace(/\s+/g, " ");
   const asker = (request.asker ?? "").trim() || "The agent";
+  /*
+    The third answer, said out loud.
 
-  if (!action) return `${asker} is asking for permission. Say yes to allow it, or no to refuse.`;
+    `alwaysLabel` was carried into this function and never spoken, so an
+    operator across the room was offered two answers when the table accepts
+    three — they could say "always", but nothing ever told them so, and the
+    button that would have taught them the word is the one they cannot reach.
+  */
+  const always = (request.alwaysLabel ?? "").trim().replace(/\s+/g, " ");
+  const answers = !always
+    // No scope to widen — this prompt genuinely has only two answers, and
+    // offering a third the gate would ignore is worse than offering none.
+    ? "Say yes to allow it, or no to refuse."
+    : always.length <= MAX_SPOKEN_ACTION
+      ? `Say yes to allow it, always to stop asking about ${always}, or no to refuse.`
+      : "Say yes to allow it, always to stop asking, or no to refuse.";
+
+  if (!action) return `${asker} is asking for permission. ${answers}`;
 
   if (action.length > MAX_SPOKEN_ACTION) {
-    return `${asker} wants to run a command — it is on screen. Say yes to allow it, or no to refuse.`;
+    return `${asker} wants to run a command — it is on screen. ${answers}`;
   }
-  return `${asker} wants to run ${action}. Say yes to allow it, or no to refuse.`;
+  return `${asker} wants to run ${action}. ${answers}`;
 }

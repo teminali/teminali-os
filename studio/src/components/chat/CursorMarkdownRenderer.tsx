@@ -351,7 +351,17 @@ export const CursorMarkdownRenderer: React.FC<CursorMarkdownRendererProps> = ({
             );
 
           case "rule":
-            return <hr key={index} className="my-4 border-0 h-px bg-edge" />;
+            /*
+              A thematic break is parsed and then thrown away.
+
+              Models emit `---` as a habit of markdown files, not as a thing
+              the reader asked for, and in a transcript it draws a full-width
+              line across the column that separates nothing — the message
+              blocks already carry their own separation. The parser still
+              recognises the rule so the dashes never reach the reader as a
+              stray paragraph; only the drawing is dropped.
+            */
+            return null;
 
           case "list": {
             const Tag = block.ordered ? "ol" : "ul";

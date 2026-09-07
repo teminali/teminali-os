@@ -131,6 +131,19 @@ test("the spoken question names the command and both answers", () => {
   assert.match(line, /no/i);
 });
 
+test("the third answer is spoken when there is a scope to widen", () => {
+  const line = describeApprovalRequest({ asker: "The assistant", action: "npm test", alwaysLabel: "npm" });
+  // "always" is in the table and was in the tooltip; until this it was in
+  // neither the sentence the operator hears nor anything they can reach.
+  assert.match(line, /always/i);
+  assert.match(line, /npm/);
+});
+
+test("no scope to widen means no third answer is offered", () => {
+  const line = describeApprovalRequest({ asker: "The assistant", action: "rm -rf build", alwaysLabel: null });
+  assert.ok(!/always/i.test(line), "offering an answer the gate would ignore is worse than offering none");
+});
+
 test("a long command is announced rather than recited", () => {
   const long = "find . -name '*.tmp' -newer package.json -print0 | xargs -0 rm -f && npm run build";
   const line = describeApprovalRequest({ asker: "Claude Code", action: long });

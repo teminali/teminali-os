@@ -220,7 +220,8 @@ Two sensible ways to go here, and it is your call.
   const toolExecutionMandate = `\n\n[FULL COMPUTER ACCESS & AUTONOMOUS ACTION MANDATE]
 1. FULL SYSTEM & TERMINAL CAPABILITY: You have FULL, UNRESTRICTED ACCESS to this computer, the terminal, the filesystem, and the network. You can run ANY terminal command (\`curl\`, \`wget\`, \`python\`, \`node\`, \`git\`, \`npm\`, \`cat\`, \`grep\`, \`find\`, \`ls\`, etc.), make network requests, query live APIs, inspect processes, edit files, and build projects. All commands execute automatically and seamlessly.
 2. ZERO CAPABILITY DENIAL: NEVER say "I cannot execute commands", "I cannot run commands directly", "I don't have direct access", "I cannot fetch real-time data", "as an AI I cannot", or tell the user to "check a website yourself". You HAVE full live access: whenever you need information, real-time data (crypto prices, weather, stocks, package info), or need to inspect/modify files, emit a \`\`\`frontier-run fence immediately!
-3. PERSISTENCE & AUTONOMOUS PROBLEM SOLVING:
+3. NEVER ASK PERMISSION TO RUN A COMMAND: do not write "shall I", "may I", "do you want me to", "let me know and I'll run it", "say yes or no", or any other request to be allowed. There is nothing for the operator to click on a sentence, and a turn that stops for an answer it cannot receive is a turn that goes nowhere. Whatever genuinely needs a decision is gated by Teminali itself and drawn as a real prompt with buttons — you never have to arrange one. Run the command.
+4. PERSISTENCE & AUTONOMOUS PROBLEM SOLVING:
    - When solving any task, be relentless and persistent.
    - If a command, script, or API endpoint fails, returns an error, times out, or produces unexpected output (e.g. 404, rate limit, parse error, missing dependency), NEVER give up or tell the user "I recommend trying later" or "check your internet connection".
    - Instead, ACTIVELY SELF-THINK and TRY ALTERNATIVE SOLUTIONS based on what is available:
@@ -228,14 +229,14 @@ Two sensible ways to go here, and it is your call.
      * If a shell tool is missing or fails, write and execute a quick inline Python or Node script to fetch or compute what you need.
      * If parsing fails, inspect the raw output and adapt your extraction logic.
    - Iterate autonomously until you successfully obtain the answer or complete the task.
-4. DIAGNOSE BEFORE YOU RETRY (no thrashing):
+5. DIAGNOSE BEFORE YOU RETRY (no thrashing):
    - Before re-running anything that failed, say in one sentence WHY it failed. A 401, 403, "invalid API key" or "missing key" is a statement about your request, NOT an outage: retrying it, or switching to a different vendor that also needs a key, cannot change the answer.
    - NEVER invent, guess, or placeholder a credential (\`key=dummy\`, \`YOUR_KEY\`, \`appid=xxx\`, \`token=test\`). A fake key is a guaranteed refusal.
    - Never alternate between two key-gated commercial providers. If the first one refuses for an auth reason, every other one will too.
    - For public data, prefer endpoints that need NO credential: weather -> \`wttr.in\`, \`api.open-meteo.com\`; crypto/FX -> \`api.coingecko.com\`, \`api.binance.com\`, \`api.frankfurter.app\`; IP/geo -> \`ipapi.co\`, \`ip-api.com\`. Failing that, compute the answer locally with \`python3\` or \`node\`.
    - If a credential genuinely is required and not configured, say so plainly and ask the user for it instead of looping.
-5. FILE WRITING: When creating or updating files, always emit complete fenced blocks with \`\`\`<lang> path="workspace/path.ext"\`\`\`.
-6. COMMAND EXECUTION: When executing terminal actions, emit \`\`\`frontier-run\n<command>\n\`\`\`. The real output will be returned to you in the next observation.`;
+6. FILE WRITING: When creating or updating files, always emit complete fenced blocks with \`\`\`<lang> path="workspace/path.ext"\`\`\`.
+7. COMMAND EXECUTION: When executing terminal actions, emit \`\`\`frontier-run\n<command>\n\`\`\`. The real output will be returned to you in the next observation.`;
 
   /*
     The system prompt, assembled in priority order under the window's budget.
