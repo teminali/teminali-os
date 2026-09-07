@@ -5657,6 +5657,42 @@ regardless, so a Python TTS sidecar means roughly 1.2 GB of Node plus 1.06 GB of
 Python. Community ONNX and Rust ports exist and are unverified.
 
 
+### 6.25 A turn that never ends (`turnTaking.ts`, `conversation.ts`, 2026-09-07)
+
+Observed live: the orb captioned every word and sent none of them. Ten separate
+"hello"s accumulated into one growing caption — `state: "hearing"`,
+`level: 0.17`, `badge: "Listening to you…"` — so the microphone and the
+recogniser were both working. What never happened was the *endpoint*.
+
+`speech-end` is the only event that commits a turn. `commitTurn` is what clears
+`this.transcript`, and the transcript is what the orb captions, so a caption
+that only grows is proof that no turn was ever committed. Everything that can
+produce a `speech-end` — the audio graph's frame pump, `isVoicedFrame`, the
+`Endpointer`'s silence window — sits *upstream* of `VoiceEngine`, and when any
+of it stalls the engine is not told. `hearing` was therefore a latch with no
+exit, which is the same defect `awaitingFinal` already had a fallback for
+(§`armFinalFallback`): no latch without a way out.
+
+So an utterance now has a ceiling. `endpointStall()` in `turnTaking.ts` is
+pure — `VoiceEngine` is DOM-bound and cannot be constructed in a test, the same
+reason `isVoicedFrame` lives in `voiceActivity.ts` — and the 500 ms ticker that
+already drives the auto-send countdown asks it once per tick while the state is
+`hearing`. Past `MAX_UTTERANCE_MS` (15 s, well past any conversational turn)
+`forceEndpoint()` commits whatever text exists, or returns the microphone to
+resting if there is none.
+
+It also names the cause, because the two failures are not the same repair: no
+frame for `FRAME_STALL_MS` (2 s) means the audio graph stopped delivering and
+the turn detector was never asked anything, while frames still arriving means it
+was asked and kept answering "holding". An unknown `lastFrameAt` reads as a
+stalled pump, not a recent frame — blaming the detector for a graph that never
+started would send the next investigation the wrong way.
+
+This is a bound, not a diagnosis. The root cause of the observed stall is still
+open; what changed is that it can no longer strand a conversation, and that the
+next occurrence writes down which half of the pipeline went quiet.
+
+
 ## 7. The agent command loop (`services/agentCommands.ts`, `services/commandThrashing.ts`)
 
 ### 7.1 Diagnose before retrying (2026-09-05)

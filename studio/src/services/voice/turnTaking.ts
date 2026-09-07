@@ -337,3 +337,45 @@ export class Endpointer {
     this.pacing = relaxed > this.config.minSilenceMs ? relaxed : 0;
   }
 }
+
+/* ── The endpointer's own way out ──────────────────────────────────────── */
+
+/** Why a turn had to be ended without a `speech-end`. */
+export type StallCause = "frame-pump" | "endpointer";
+
+export interface StallCheck {
+  /** How long the turn has been open, ms. */
+  overranMs: number;
+  cause: StallCause;
+}
+
+/**
+ * Has an open utterance outlived every reason to still be open?
+ *
+ * `speech-end` is the only event that commits a turn, and everything that
+ * produces one — the frame pump, the VAD, the silence window — sits upstream
+ * of the `Endpointer`. When any of them stalls there is no event at all, so
+ * "hearing" becomes a latch with no exit: the recogniser keeps appending and
+ * several separate attempts pile into one caption that is never sent.
+ *
+ * The cause is worth naming because the two failures are not the same repair.
+ * No frame for `frameStallMs` means the audio graph stopped delivering and the
+ * turn detector was never asked anything; frames still arriving means it was
+ * asked and kept saying "holding".
+ *
+ * Returns null while the turn is within its bound, or was never open.
+ */
+export function endpointStall(opts: {
+  turnStartedAt: number;
+  lastFrameAt: number;
+  now: number;
+  maxUtteranceMs: number;
+  frameStallMs: number;
+}): StallCheck | null {
+  const { turnStartedAt, lastFrameAt, now, maxUtteranceMs, frameStallMs } = opts;
+  if (turnStartedAt <= 0) return null;
+  const overranMs = now - turnStartedAt;
+  if (overranMs < maxUtteranceMs) return null;
+  const sinceFrame = lastFrameAt > 0 ? now - lastFrameAt : Infinity;
+  return { overranMs, cause: sinceFrame >= frameStallMs ? "frame-pump" : "endpointer" };
+}

@@ -20,7 +20,8 @@
 
 import { AudioGraph, encodeWav, type AudioFrame } from "./audioGraph";
 import { speakableText, paceFor } from "./speakable";
-import { Endpointer, DEFAULT_ENDPOINTER } from "./turnTaking";
+import { Endpointer, DEFAULT_ENDPOINTER, endpointStall } from "./turnTaking";
+import type { StallCheck } from "./turnTaking";
 import { ProsodyTracker } from "./prosody";
 import {
   applyClassifier,
@@ -226,6 +227,29 @@ export class VoiceEngine {
    */
   public static readonly ONE_SHOT_FINAL_TIMEOUT_MS = 12000;
 
+  /**
+   * The longest a single utterance may run before we call it over ourselves.
+   *
+   * `speech-end` is the only thing that commits a turn, and everything that
+   * produces it — the frame pump, the VAD, the endpointer's silence window —
+   * sits upstream of this class. When any of them stalls, `hearing` is a latch
+   * with no way out: the recogniser keeps appending, so ten separate attempts
+   * pile into one growing caption and none of them is ever sent. That is the
+   * failure this bound exists for, and it is the same argument that gave
+   * `awaitingFinal` its fallback — no latch without an exit.
+   *
+   * 15s is well past any conversational turn and still short enough that the
+   * operator reads it as a delay rather than a hang.
+   */
+  public static readonly MAX_UTTERANCE_MS = 15000;
+
+  /**
+   * How long without an audio frame means the graph, not the speaker, went
+   * quiet. The pump runs at `fps` (20ms at 50fps); two seconds of nothing is
+   * not a pause.
+   */
+  public static readonly FRAME_STALL_MS = 2000;
+
   private autoSendTimer: number | null = null;
   private autoSendDeadline: number | null = null;
   private tickTimer: number | null = null;
@@ -237,6 +261,8 @@ export class VoiceEngine {
   private greeting = false;
   private greetingYieldRun = 0;
   private turnStartedAt = 0;
+  /** When the last audio frame arrived; 0 before the graph has produced one. */
+  private lastFrameAt = 0;
   /**
    * Whether the recogniser emits partial text mid-utterance. whisper.cpp does
    * not — it transcribes the whole turn in one pass — so the commit has to wait
@@ -600,6 +626,7 @@ export class VoiceEngine {
     if (this.state !== "speaking") {
       this.level = frame.level;
     }
+    this.lastFrameAt = frame.at;
     if (frame.voiced || this.state === "speaking" || this.state === "thinking" || this.state === "sending") {
       this.lastActivityAt = Date.now();
     }
@@ -827,6 +854,33 @@ export class VoiceEngine {
       }
       this.emit();
     }, afterMs);
+  }
+
+  /**
+   * End the turn without a `speech-end`, because none is coming.
+   *
+   * Deliberately not a copy of the endpointer path: there is no flush-and-wait
+   * here, because the reason we are in this method is that something upstream
+   * stopped answering and waiting on it again would only re-arm the hang. If
+   * there is text, it is a turn; if there is not, the microphone goes back to
+   * resting rather than staying lit over nothing.
+   */
+  private forceEndpoint(stall: StallCheck): void {
+    console.warn(
+      `[voice] utterance ceiling: ${Math.round(stall.overranMs / 1000)}s in "hearing" with no endpoint; ` +
+        (stall.cause === "frame-pump"
+          ? "the audio graph has produced no frame — the frame pump stalled."
+          : "frames are still arriving — the VAD or the silence window did not close the turn."),
+    );
+    this.prosody.reset();
+    this.endpointer.reset();
+    if (this.transcript.trim()) {
+      void this.commitTurn();
+      return;
+    }
+    this.transcript = "";
+    this.setState(this.restingState());
+    this.emit();
   }
 
   private clearFinalFallback(): void {
@@ -2252,6 +2306,17 @@ export class VoiceEngine {
     // Drives the auto-send countdown in the HUD and checks 1-minute inactivity sleep.
     this.tickTimer = window.setInterval(() => {
       if (this.autoSendDeadline) this.emit();
+
+      if (this.state === "hearing") {
+        const stall = endpointStall({
+          turnStartedAt: this.turnStartedAt,
+          lastFrameAt: this.lastFrameAt,
+          now: Date.now(),
+          maxUtteranceMs: VoiceEngine.MAX_UTTERANCE_MS,
+          frameStallMs: VoiceEngine.FRAME_STALL_MS,
+        });
+        if (stall) this.forceEndpoint(stall);
+      }
 
       if (
         this.mode === "conversation" &&
