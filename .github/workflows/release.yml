@@ -255,7 +255,21 @@ jobs:
           # a single digit that replaces the 9. `1` is fastest-LZMA: a bigger
           # .exe, and a Windows build that exists. Raise it once a real run has
           # reported a real time.
+          #
+          # MEASURED, v0.0.5 (2026-09-07): this was in effect and it did not
+          # help. The job signed `resources\elevate.exe` at 11:00:01 and was
+          # killed by the 60-minute cap at 11:58:13 without printing another
+          # line — the same place, to the line, that v0.0.2 stopped. So the
+          # compression LEVEL is not the cause, and the paragraph above is a
+          # hypothesis that has now been tested and failed. Kept because
+          # level 1 costs nothing and the real cause is still open.
           ELECTRON_BUILDER_COMPRESSION_LEVEL: ${{ matrix.os == 'windows-latest' && '1' || '' }}
+          # Because the last two failures were diagnosed from silence, and were
+          # diagnosed wrong. This prints the 7za command line, the signtool
+          # invocation and makensis's own output, so the next hang says which
+          # process it is sitting in rather than leaving it to be inferred.
+          # Windows only: it is noisy, and the other two runners finish.
+          DEBUG: ${{ matrix.os == 'windows-latest' && 'electron-builder' || '' }}
         # bash on every runner, including Windows, which defaults to PowerShell
         # and cannot parse the guard below — that is a build this workflow has
         # already lost once. Git Bash ships on the Windows image.

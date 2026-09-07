@@ -339,6 +339,22 @@ nsis:
   # is not known: it was still inside this step 35 minutes in, which is why
   # this went in beside it rather than after it.
   differentialPackage: false
+  # Deflate, not LZMA, for the payload archive.
+  #
+  # `differentialPackage: false` above is what makes this reachable at all —
+  # `NsisTarget.js:78` picks the format as `!isBuildDifferentialAware &&
+  # useZip ? "zip" : "7z"`, so the two only work as a pair. What it buys is the
+  # difference between LZMA and Deflate over a 573 MB payload on a two-core
+  # runner, which is the one number that separates this platform from the two
+  # that finish.
+  #
+  # It is a guess with a mechanism, not a diagnosis: v0.0.5 proved the
+  # compression LEVEL was not the problem (level 1 was in effect and the step
+  # still ran 58 minutes to its cap), and nothing yet proves the compression
+  # METHOD is. That is what DEBUG=electron-builder on the Windows runner is
+  # for — it prints the 7za command line and the signtool invocation, so the
+  # next hang names itself instead of being inferred from silence.
+  useZip: true
   oneClick: false
   perMachine: false
   allowToChangeInstallationDirectory: true
