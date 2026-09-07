@@ -145,6 +145,29 @@ artifacts (`gh run download <run-id>`). Verify runs first and takes ~2 minutes;
 a Windows job that is still in `Package and publish` ten minutes later has
 failed, whatever it says.
 
+## Second missing dependency: ffmpeg is not bundled anywhere
+
+Found on the first real Windows install, 2026-09-07: the export dialog refuses
+with *"ffmpeg was not found. winget install Gyan.FFmpeg"*.
+
+This is **not** caused by the sidecar trim, and it is not Windows-specific.
+`electron-builder.yml` has no ffmpeg entry for any platform — the app searches
+known install locations (`electron/mediaAccess.cjs#fixedFfmpegDirs`, which
+already covers Chocolatey, Scoop and both winget directories) and tells the
+operator to install it. It works on the developers' Macs because Homebrew put
+it there years ago. **Every fresh install, on every OS, cannot export or record
+until the user installs ffmpeg by hand.**
+
+The operator's workaround is one line in PowerShell — `winget install
+Gyan.FFmpeg`, then restart the app so the new PATH is picked up — but a
+customer should never see this.
+
+The fix is the same shape as the sidecar one, and cheaper: a Windows ffmpeg
+static build is roughly 80-120 MB against the sidecar's 573 MB, so bundling it
+outright would not reintroduce the packaging failure this document is about.
+Bundle it, or fetch it in the same wizard step. Do not ship another installer
+without deciding which.
+
 ## Open, and not started
 
 - Nothing is signed, on any platform. SmartScreen shows "Windows protected your
