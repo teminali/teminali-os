@@ -21,6 +21,8 @@
 import { AudioGraph, encodeWav, type AudioFrame } from "./audioGraph";
 import { speakableText, paceFor } from "./speakable";
 import { Endpointer, DEFAULT_ENDPOINTER, endpointStall } from "./turnTaking";
+import { explainRun } from "./coRunner";
+import type { RunProgress } from "./progressNarration";
 import type { StallCheck } from "./turnTaking";
 import { ProsodyTracker } from "./prosody";
 import {
@@ -86,6 +88,12 @@ export interface VoiceHost {
    * built from what the run has actually done. Null when nothing is running.
    */
   progressSummary?: () => string | null;
+  /**
+   * The run in flight, for the voice lane's own agent to answer questions
+   * from. Null when nothing is running. `progressSummary` is the rules-only
+   * one-liner; this is the material behind it — see `coRunner.ts`.
+   */
+  runProgress?: () => RunProgress | null;
 }
 
 export interface VoiceSnapshot {
@@ -214,6 +222,12 @@ export class VoiceEngine {
   private lastAckSpokenAt = 0;
   private lastUserTurnAt = 0;
   private hasSpokenInSession = false;
+  /**
+   * The last thing actually said out loud, so "say that again" has something
+   * to say again. Not the last *reply* — an interjection is what the operator
+   * most often misses, because it arrives while they are talking.
+   */
+  private lastSpoken = "";
   private lastActivityAt = Date.now();
   private isGoingToSleep = false;
   public static readonly INACTIVITY_SLEEP_MS = 60000; // 1 minute sweet spot
@@ -1174,6 +1188,36 @@ export class VoiceEngine {
       return;
     }
 
+    /*
+      "Stop talking" is not "stop".
+
+      The voice goes quiet and the run carries on untouched — no `callInterrupt`,
+      no state change beyond giving the microphone back. This is the whole
+      difference the operator asked for: silence should cost the narration, not
+      the work it was narrating.
+    */
+    if (intent.intent === "hush") {
+      this.dropSpeech();
+      this.graph.setDucked(false);
+      this.level = 0;
+      this.narration = null;
+      this.assistantTurnEndedAt = Date.now();
+      this.setState(this.restingState());
+      this.emit();
+      return;
+    }
+
+    // "Say that again." Costs nothing and asks nothing of the run.
+    if (intent.intent === "repeat") {
+      const again = this.lastSpoken.trim();
+      // Whatever was being said when the question arrived is abandoned on
+      // purpose: the operator asked for the *previous* thing, and stacking the
+      // repeat behind the sentence they already missed would bury it again.
+      this.suspendedSpeech = null;
+      this.speakInterjection(again || "I haven't said anything yet.");
+      return;
+    }
+
     if (intent.intent === "acknowledge") {
       if (wasSpeaking) {
         // "yes, go on" — agreement with what was being said. Finish saying it.
@@ -1200,6 +1244,38 @@ export class VoiceEngine {
       const summary = this.host.progressSummary?.() ?? "Still working on it. I'll tell you as soon as it's done.";
       this.speakInterjection(summary);
       return;
+    }
+
+    /*
+      A question about the work in flight, answered beside it rather than
+      through it.
+
+      Handing this to the chat would cancel the run the question is about, so
+      the voice lane answers it from the run's own digest on the local model —
+      see `coRunner.ts`. The chat agent is never told the question was asked and
+      keeps working throughout.
+
+      Asynchronous, unlike every other intent here: the answer costs a model
+      round trip. The microphone goes back to resting immediately so the
+      operator is never locked out while waiting, and a failed or slow call
+      falls back to the same rules the status intent uses.
+    */
+    if (intent.intent === "explain") {
+      const run = this.host.runProgress?.() ?? null;
+      if (run) {
+        const resume = this.suspendedSpeech ?? [];
+        this.suspendedSpeech = null;
+        this.speechQueue = [...resume, ...this.speechQueue];
+        this.setState(this.restingState());
+        this.emit();
+        void explainRun(withoutWakeWord || heard, run, { complete: this.host.complete }).then(
+          ({ text }) => this.speakInterjection(text),
+        );
+        return;
+      }
+      // Nothing is running after all — the classifier saw `busy` and the run
+      // ended while the sentence was being spoken. Let it fall through to the
+      // chat, which is where a question with no run belongs.
     }
 
     // A question about the room rather than about the work. Answered from the
@@ -1811,6 +1887,7 @@ export class VoiceEngine {
     }
 
     this.hasSpokenInSession = true;
+    this.lastSpoken = spoken.trim();
     // Split by paragraphs or coherent thoughts so playback streams seamlessly
     // without introducing 1-second network/synthesis dead-air pauses between every short sentence.
     const rawBlocks = spoken.split(/\n\n+/);
@@ -2017,6 +2094,7 @@ export class VoiceEngine {
   /** Say one line now, ahead of anything queued, then return to whatever the run is doing. */
   private speakInterjection(text: string): void {
     const clean = speakableText(text).trim();
+    if (clean) this.lastSpoken = clean;
     if (!clean || this.mode !== "conversation" || !this.settings.speakReplies || !this.providers?.tts) {
       this.setState(this.host.isBusy?.() ? "thinking" : this.mode === "conversation" ? "listening" : "idle");
       this.emit();

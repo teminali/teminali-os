@@ -5725,6 +5725,60 @@ original failure did not reproduce, so what changed here is that a next
 occurrence will say whether the model was ever offered the capability.
 
 
+### 6.27 The voice lane gets its own agent (`coRunner.ts`, 2026-09-07)
+
+Speaking during a run destroyed the run. `classifyTurnIntent` had four
+outcomes, and everything that was not praise, a status check or a stop fell
+through to `instruction` — which cancels the work and replaces it. So asking
+what the work was doing was the one certain way to stop it, and telling the
+assistant to be quiet was another: "stop talking" and "be quiet" were literally
+in `STOP_PHRASES`.
+
+Three intents now sit between "was that for me?" and "replace the run".
+
+**`hush`** is a split, not an addition. The speech-directed phrases moved out of
+the stop set: the voice goes silent, `callInterrupt` is never called, and the
+run carries on narrating nothing. Bare "stop", "cancel" and "wait" are
+unchanged — those are about the work, and §6.8 still holds.
+
+**`repeat`** re-says `lastSpoken`, which records interjections as well as
+replies because an interjection is what the operator most often misses — it
+arrives while they are talking. Whatever was mid-sentence is abandoned rather
+than queued behind: stacking the repeat behind the sentence they already missed
+would bury it twice.
+
+**`explain`** is the co-operating agent. A question about the run is answered
+from the run's own tool calls by the local model — `explainRun` in
+`coRunner.ts` — and the chat agent is never told it was asked. The two lanes
+divide the work: the chat does the job, the voice explains it, and only a real
+redirect crosses between them.
+
+Fast and reliable is the constraint, so the model is on a short leash. The
+rules gate decides *whether* to spend it, in no time at all; the digest is
+bounded to `MAX_CALLS` (12, most recent last) because a tool-call stream is
+unbounded and a local window is not; the answer is bounded by
+`ANSWER_TIMEOUT_MS` (6 s) and `MAX_SENTENCES` (3). Every failure — no model, a
+throw, a timeout, an empty answer — falls back to `summariseProgress`, the same
+rules the status intent already trusts. The call is asynchronous and the
+microphone returns to resting before it resolves, so a slow model never locks
+the operator out.
+
+`explain` is deliberately narrow, and the narrowness is the design. It fires
+only on an utterance that is both shaped like a question *and* pointing at the
+work: an imperative opener vetoes it, because "rename that file" is a task
+however often it says "that". Bare demonstratives need a lookahead — `this` also
+matches "who wrote this language", and answering that from a run digest would
+be worse than interrupting, because the operator would get a confident wrong
+answer instead of a visible mistake.
+
+Two things the tests caught and are worth not re-learning. `useVoice` builds its
+own `VoiceHost` proxy, so a new optional host method that is not forwarded there
+reaches the engine as `undefined` and silently takes its fallback — the same
+trap `progressSummary` fell into. And `"you"` is a filler (it is half of "thank
+you"), so `REPEAT_PHRASES` is matched against the raw words too: stripping it
+turns "what did you say" into "what did say", which is nothing at all.
+
+
 ## 7. The agent command loop (`services/agentCommands.ts`, `services/commandThrashing.ts`)
 
 ### 7.1 Diagnose before retrying (2026-09-05)

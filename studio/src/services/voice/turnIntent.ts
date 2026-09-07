@@ -15,12 +15,38 @@
  * Before this gate every directed utterance was an instruction, so "great,
  * carry on" cancelled the build it was praising.
  *
+ * Three more, because "do not interrupt the work" is a larger set than praise
+ * and a status check:
+ *
+ *   - "stop talking"               → hush: the *voice* stops, the run does not
+ *   - "say that again"             → repeat: re-say the last thing spoken
+ *   - "why did you edit that one?" → explain: answered from the run, locally
+ *
+ * `hush` is a split, not an addition. "stop talking", "be quiet" and "shut up"
+ * were in the stop set, so telling the assistant to be quiet cancelled the
+ * build it was narrating — the operator asked for silence and lost the work.
+ * Bare "stop", "cancel" and "wait" keep their old meaning: those are about the
+ * work, and §6.8's doctrine that a stop must land on the spot is unchanged.
+ *
+ * `explain` is deliberately narrow. It fires only on an utterance that is both
+ * shaped like a question *and* pointing at the work in flight — "that", "this",
+ * "it", "that step". A question about anything else is still an instruction and
+ * still reaches the chat, because swallowing "what is the capital of France"
+ * into a run digest would be worse than interrupting.
+ *
  * Everything here is rules. It runs synchronously on every committed turn, so
  * a model round-trip is not affordable, and the phrases involved are the most
  * formulaic words people say.
  */
 
-export type TurnIntent = "stop" | "acknowledge" | "status" | "instruction";
+export type TurnIntent =
+  | "stop"
+  | "hush"
+  | "repeat"
+  | "acknowledge"
+  | "status"
+  | "explain"
+  | "instruction";
 
 export interface TurnIntentContext {
   /** The chat engine is generating or an agent run is in flight. */
@@ -49,8 +75,38 @@ const STOP_PHRASES = [
   "wait", "wait wait", "wait wait wait", "hold on", "hang on", "hold up", "hold it",
   "never mind", "nevermind", "forget it", "forget that", "scratch that", "leave it",
   "that's enough", "thats enough", "enough", "enough enough", "pause", "pause that",
-  "quiet", "be quiet", "shut up", "hush", "shh", "no no", "no no no", "no stop", "no wait",
-  "acha", "achana nayo", "simama", "subiri", "ngoja", "nyamaza", "tosha", "wacha",
+  "no no", "no no no", "no stop", "no wait",
+  "acha", "achana nayo", "simama", "subiri", "ngoja", "tosha", "wacha",
+];
+
+/**
+ * Phrases that mean "stop *talking*" — the voice, not the work.
+ *
+ * Matched before the stop set, because "stop talking" opens with the word that
+ * cancels a run and means nothing of the kind. Silence is the whole request:
+ * an operator who wants the narration to end while a build finishes should get
+ * exactly that, and used to lose the build instead.
+ */
+const HUSH_PHRASES = [
+  "stop talking", "stop speaking", "stop narrating", "stop reading", "stop saying that",
+  "quiet", "be quiet", "keep quiet", "shut up", "hush", "shh", "shhh", "ssh",
+  "silence", "no more talking", "enough talking", "stop the talking", "less talking",
+  "don't talk", "dont talk", "do not talk", "don't speak", "dont speak",
+  "mute", "mute yourself", "stop the narration", "stop commentary",
+  "nyamaza", "acha kuongea", "usiseme", "usiongee", "kimya",
+];
+
+/**
+ * Phrases that mean "say that again". A repeat costs nothing and asks nothing
+ * of the run, so it is answered from what was last spoken.
+ */
+const REPEAT_PHRASES = [
+  "say that again", "say it again", "say again", "repeat", "repeat that", "repeat it",
+  "repeat please", "come again", "one more time", "again", "once more",
+  "what did you say", "what was that", "what did you just say", "sorry what",
+  "pardon", "pardon me", "i missed that", "i didn't hear", "i didnt hear",
+  "i didn't catch that", "i didnt catch that", "didn't catch that", "didnt catch that",
+  "rudia", "sema tena", "tena", "sikusikia",
 ];
 
 /**
@@ -91,6 +147,42 @@ const STATUS_PATTERNS: RegExp[] = [
   /\bimeisha\b/,
   /\bbado\b\??$/,
 ];
+
+/**
+ * Does this point at the work in flight rather than at the world?
+ *
+ * Deixis is the whole test. "Why that one?" only means anything if something
+ * is happening, and that is exactly the case `explain` is for; "why is the sky
+ * blue" names its own subject and belongs to the chat.
+ */
+const WORK_NOUN =
+  "one|thing|step|part|bit|file|command|test|tests|error|change|edit|script|output|result|line|folder|directory|function|check|build|run";
+
+/**
+ * Either a determiner pointing at a thing the run is handling — "that file",
+ * "this command" — or a bare pronoun used pronominally.
+ *
+ * The second half needs the lookahead. A bare `\bthis\b` also matches "who
+ * wrote this language", which is a question about the world wearing a
+ * demonstrative, and routing it to the run digest would answer it wrongly
+ * instead of merely interrupting. So the pronoun counts only where a noun does
+ * not follow it: at the end of the utterance, or before a verb.
+ */
+const WORK_DEIXIS = new RegExp(
+  `\\b(that|this|those|these|the)\\s+(${WORK_NOUN})\\b` +
+    `|\\b(that|this|it|those|these)\\b(?=\\s*$|\\s+(is|was|are|were|do|does|did|mean|means|meant|for|about|again|now|then|running|doing|going|${WORK_NOUN}))`,
+);
+
+/** An utterance shaped like a question, by opener or by punctuation. */
+const QUESTION_OPENERS =
+  /^(what|why|which|who|whose|where|when|how|is|are|was|were|do|does|did|can|could|should|would|will|nini|kwa\s?nini|vipi|lini|wapi|nani|gani|kwa\s?ajili)\b/;
+
+/**
+ * Verbs that open a new task. An imperative is an instruction however much it
+ * mentions "that": "rename that file" is work, not a question about work.
+ */
+const IMPERATIVE_OPENERS =
+  /^(add|create|make|write|build|change|rename|delete|remove|move|copy|fix|update|refactor|install|run|open|close|start|stop|deploy|commit|push|pull|revert|undo|redo|set|use|switch|show|give|send|generate|implement|replace|rewrite|test|check|try|put|take|call|find|search|look|go|let|do|apply|save|export|import|merge|split|clean|format|lint|upgrade|downgrade|enable|disable|configure|fanya|tengeneza|badilisha|ondoa|weka|andika)\b/;
 
 function normalise(text: string): string[] {
   return text
@@ -142,6 +234,20 @@ export function classifyTurnIntent(text: string, context: TurnIntentContext): Tu
   const joined = words.join(" ");
   const engaged = context.busy || context.speaking;
 
+  // Before the stop set, because every one of these opens with a word that
+  // would otherwise cancel the run. Silence is the whole request.
+  if (consumedBy(core, HUSH_PHRASES) || (core.length === 0 && consumedBy(words, HUSH_PHRASES))) {
+    return { intent: "hush", reason: "Asked for quiet, not for the work to end." };
+  }
+
+  // "say that again" — free, and asks nothing of the run.
+  // Matched against the raw words as well as the core: "you" is a filler (it
+  // is half of "thank you"), and stripping it turns "what did you say" into
+  // "what did say", which is nothing at all.
+  if (consumedBy(words, REPEAT_PHRASES) || consumedBy(core, REPEAT_PHRASES)) {
+    return { intent: "repeat", reason: "Asked to hear it again." };
+  }
+
   // A bare stop is a stop whether or not anything is running; "stop the
   // server" is not, because something follows the verb.
   if (consumedBy(core, STOP_PHRASES) || (core.length === 0 && consumedBy(words, STOP_PHRASES))) {
@@ -168,6 +274,28 @@ export function classifyTurnIntent(text: string, context: TurnIntentContext): Tu
   // empty core caused by attention words like "hey" or "temy" is not praise.
   if ((core.length > 0 && consumedBy(core, ACK_PHRASES)) || (core.length === 0 && consumedBy(words, ACK_PHRASES))) {
     return { intent: "acknowledge", reason: "Encouragement — carrying on." };
+  }
+
+  /*
+    A question about the work in flight.
+
+    Both tests have to pass. The question shape alone would swallow "what is
+    the capital of France"; the deixis alone would swallow "rename that file".
+    An imperative opener vetoes it outright, because a sentence that starts
+    with a verb is a task however many times it says "that".
+
+    What survives is the case the operator actually described: the run is
+    narrating, one item of it is unclear, and the question is about that item.
+    It is answered from the run rather than sent to the chat, because sending
+    it would replace the very work the question is about.
+  */
+  const coreJoined = core.join(" ");
+  if (
+    !IMPERATIVE_OPENERS.test(coreJoined) &&
+    (QUESTION_OPENERS.test(coreJoined) || /\?\s*$/.test(text.trim())) &&
+    WORK_DEIXIS.test(joined)
+  ) {
+    return { intent: "explain", reason: "Asked about something the run is doing." };
   }
 
   return { intent: "instruction", reason: "Reads as a new instruction." };

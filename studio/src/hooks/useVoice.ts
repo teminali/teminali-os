@@ -98,6 +98,7 @@ export function useVoice(host: VoiceHost): UseVoiceResult {
         // silently sees `undefined` and takes its fallback: this one was
         // missing, so "how's it going?" got the canned line, never the run.
         progressSummary: () => hostRef.current.progressSummary?.() ?? null,
+        runProgress: () => hostRef.current.runProgress?.() ?? null,
       }),
     [],
   );

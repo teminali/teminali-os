@@ -655,6 +655,10 @@ export const StudioChat: React.FC<{
     // "How's it going?" mid-run is answered from what the run has actually
     // done, without stopping it.
     progressSummary: () => (runRef.current ? summariseProgress(runRef.current) : null),
+    // The material behind that summary, for the voice lane's own agent: a
+    // question about the run is answered from this instead of being sent to
+    // the chat, which would have cancelled the run it was asking about.
+    runProgress: () => runRef.current ?? null,
     // The addressing tiebreak and the transcript polish both run on the same
     // local engine as the chat, so neither costs anything or leaves the machine.
     complete: async (prompt, signal) => {

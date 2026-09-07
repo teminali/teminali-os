@@ -54,7 +54,9 @@ test("a bare stop cancels; a stop with an object is an instruction", () => {
   assert.equal(classifyTurnIntent("stop", busy).intent, "stop");
   assert.equal(classifyTurnIntent("okay wait, hold on", talking).intent, "stop");
   assert.equal(classifyTurnIntent("no no no stop", busy).intent, "stop");
-  assert.equal(classifyTurnIntent("Temy, stop talking", talking).intent, "stop");
+  // "stop talking" deliberately no longer cancels: it asks for quiet, and the
+  // run it was narrating carries on. See the `hush` intent in turnIntent.ts.
+  assert.equal(classifyTurnIntent("Temy, stop talking", talking).intent, "hush");
   assert.equal(classifyTurnIntent("stop the dev server and restart it", busy).intent, "instruction");
   assert.equal(classifyTurnIntent("stop", idle).intent, "stop");
 });
