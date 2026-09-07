@@ -194,7 +194,10 @@ export const VoiceSettingsPanel: React.FC<VoiceSettingsPanelProps> = ({
           hint={
             hasProfile
               ? "Speech that does not match your enrolled profile is ignored."
-              : "Record a voice profile below to switch this on."
+              // On by default, but the gate also tests `hasProfile`, so it does
+              // nothing until there is a voiceprint to compare against. Saying
+              // "switch this on" over a toggle already showing on read as a bug.
+              : "Waiting on a voice profile — record one below and this starts working."
           }
         >
           <Toggle

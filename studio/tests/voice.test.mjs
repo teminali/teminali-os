@@ -8,6 +8,7 @@ import {
 import { scoreAddressing, stripWakeWord, parseClassifier, applyClassifier, classifierPrompt, CLASSIFIER_NONSENSE } from "../src/services/voice/addressing.ts";
 import { completenessScore, Endpointer } from "../src/services/voice/turnTaking.ts";
 import { speakableText, paceFor, PACE_SHORT_WORDS, PACE_LONG_WORDS, PACE_LONG_BOOST } from "../src/services/voice/speakable.ts";
+import { DEFAULT_VOICE_SETTINGS } from "../src/services/voice/types.ts";
 import { normaliseAddress } from "../src/utils/address.ts";
 import { segment } from "../src/utils/segment.ts";
 
@@ -453,4 +454,40 @@ test("the prompt offers exactly the four words the parser reads", () => {
   for (const word of ["NONSENSE", "ASSISTANT", "PERSON", "UNCLEAR"]) {
     assert.ok(prompt.includes(word), `the prompt must offer ${word}`);
   }
+});
+
+/* ── Defaults that gate the loopback path ─────────────────────────────────── */
+
+/*
+  These two are the product's answer to speaker audio reaching the microphone
+  as an operator prompt, and the answer only works if it is on. They shipped
+  off, which meant a fresh install had no protection against a video's dialogue
+  being committed as a turn. Pinned here because a default is easy to flip back
+  by accident and nothing else would notice.
+*/
+test("the addressing gates are on by default", () => {
+  assert.equal(DEFAULT_VOICE_SETTINGS.requireWakeWord, true);
+  assert.equal(DEFAULT_VOICE_SETTINGS.requireSpeakerMatch, true);
+});
+
+test("requiring the wake word rejects speech that does not name the assistant", () => {
+  const context = {
+    requireWakeWord: true, requireSpeakerMatch: false, hasProfile: false,
+    speakerMatch: null, wakeWords: DEFAULT_VOICE_SETTINGS.wakeWords,
+    followUpWindow: false, conversationOpen: true,
+  };
+  // A film's line: real speech, correctly heard, addressed to nobody here.
+  const heard = scoreAddressing("subscribe to the channel and hit the bell", context);
+  assert.equal(heard.verdict.directed, false);
+});
+
+test("speaker match is inert until a profile is enrolled", () => {
+  const base = {
+    requireWakeWord: false, requireSpeakerMatch: true,
+    wakeWords: DEFAULT_VOICE_SETTINGS.wakeWords, followUpWindow: false, conversationOpen: true,
+  };
+  // No profile: the gate must not reject, or a fresh install with the default
+  // on would answer nobody at all.
+  const withoutProfile = scoreAddressing("temy what branch am i on", { ...base, hasProfile: false, speakerMatch: null });
+  assert.equal(withoutProfile.verdict.directed, true);
 });

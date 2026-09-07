@@ -527,6 +527,19 @@ the local tier. Push-to-talk dictation and
 hands-free conversation with barge-in. Nothing reaches the chat unreviewed — every
 utterance passes a repair pass the operator sees before it sends.
 
+**Two gates are on by default: "Require my name" and "Only respond to my
+voice."** Anything your Mac plays through the speakers reaches the microphone
+as speech that is real, correctly transcribed and addressed to nobody in the
+room — a prompt-injection path, not just noise. While *this app* is making
+sound the assistant already needs naming; another app's audio is invisible to
+it, and there is no cheap way to detect that (measured: `pmset` assertions go
+stale, and CoreAudio reports the output device running even in silence). So
+the name is required to open an exchange — not every turn in one — and speech
+that does not match your enrolled voiceprint is ignored once you have recorded
+one. Both are in Voice settings and both can be turned off. On macOS, Control
+Center's **Mic Mode → Voice Isolation** handles the acoustic side and is worth
+switching on alongside them.
+
 Hands-free conversation behaves like a colleague over a working agent, not a
 push-button: "keep going" and "how's it going?" do not cancel a run — the first
 is acknowledged, the second is answered from what the run has actually done;
@@ -935,7 +948,7 @@ ollama serve              # local models on 127.0.0.1:11434
 
 ```bash
 npm run typecheck   # tsc --noEmit
-npm test            # 1667 tests, 0 failures
+npm test            # 1672 tests, 0 failures
 npm run eval:local  # the local lane against the real model — a score, not a pass/fail; needs Ollama
 npm run build       # tsc && vite build
 npm run verify:core # all three

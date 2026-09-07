@@ -409,8 +409,29 @@ export const DEFAULT_VOICE_SETTINGS: VoiceSettings = {
   speakReplies: true,
   confirmBeforeSend: false,
   autoSendAfterMs: 0,
-  requireSpeakerMatch: false,
-  requireWakeWord: false,
+  /*
+    Both default ON, and the operator can turn either off.
+
+    The reason is the loopback path, which is a prompt-injection path and not
+    merely noise: anything the Mac plays through the speakers reaches the
+    microphone as speech that is real, correctly transcribed, and addressed to
+    nobody in this room. A film's dialogue arrived as an operator prompt and
+    was answered (2026-09-05). `selfAudio.ts` already raises the bar to a wake
+    word while *this app* is audible, but it cannot see Spotify or a Safari
+    tab, and no cheap signal for "the Mac is making sound" exists — `pmset`
+    assertions go stale and CoreAudio's `kAudioDevicePropertyDeviceIsRunning-
+    Somewhere` reports true in silence, both measured 2026-09-07.
+
+    So the defaults carry the weight instead. `requireWakeWord` is what
+    actually protects a fresh install: it needs no enrolment and works against
+    every source, and `followUpTrusted` means the name is needed to *open* an
+    exchange, not to continue one. `requireSpeakerMatch` is inert until a
+    profile exists — the gate at addressing.ts:197 also tests `hasProfile` —
+    so switching it on by default costs nothing and starts working the moment
+    the operator enrols.
+  */
+  requireSpeakerMatch: true,
+  requireWakeWord: true,
   /*
     "temi" is here because that is what recognition actually returns. Measured
     on this machine with whisper large-v3-turbo: "Temy" comes back as "Temi"

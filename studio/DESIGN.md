@@ -3954,8 +3954,9 @@ Two tiers: the browser engine (always available) and **VibeVoice** run locally
 through a sidecar (see `studio/docs/VOICE_SIDECAR.md`). Two modes:
 push-to-talk dictation, and hands-free conversation with barge-in.
 
-**The default is `conversation`, with `requireWakeWord` off** (changed
-2026-09-05; the 2026-09-03 default had it on). The assistant listens
+**The default is `conversation`, with `requireWakeWord` back on** (2026-09-07;
+it was on 2026-09-03, off 2026-09-05, and is on again for the loopback reason
+in §6.14). The assistant listens
 continuously and speaks every reply. Opening a hands-free session is itself the
 address: in `addressing.ts` an ordinary sentence of two or more words scores as
 directed without a model call, a lone stray word ("okay") does not unless it
@@ -4847,14 +4848,33 @@ her the recipe was wrong" matched nothing in the list.
 
 Tests: `tests/voice-addressing-window.test.mjs` (10).
 
-**The defaults stay open.** `requireSpeakerMatch` and `requireWakeWord` both
-remain `false` in `DEFAULT_VOICE_SETTINGS`. This was put to the operator
-directly when the gates above landed, and the answer was to leave them off:
-§6.13 and this section stop the reported failure without asking anyone to
-enrol or to say a name before every turn, and turning speaker match on by
-default would degrade the assistant for anyone with no profile while promoting
-a matcher that §6.1 says must never pose as verification. Both remain
-available as the operator's own hard rules.
+**The defaults were open, and are now closed (2026-09-07).**
+`requireSpeakerMatch` and `requireWakeWord` are both `true` in
+`DEFAULT_VOICE_SETTINGS`. This reverses a decision the same operator made when
+the gates above landed — the answer then was to leave them off — and the
+reversal is theirs too, asked for in these words: *"i want when video or audio
+plays on my computer the voice assistant to never hear it… and the voice
+assistant speech recognition would only hear me"*, then *"make those settings
+default… user can change but they have to be default"*.
+
+What changed in between is the measurement. §6.13's gate covers audio **this
+app** plays and cannot see Spotify or a Safari tab, and there turns out to be
+no cheap way to teach it: `pmset -g assertions` carried a stale `audio-out`
+assertion for 52 minutes with nothing playing, and CoreAudio's
+`kAudioDevicePropertyDeviceIsRunningSomewhere` returns **true in silence**
+because the output device stays open (both measured 2026-09-07 on macOS 26.1,
+the second with a compiled Swift probe). The only honest signal left is a
+ScreenCaptureKit loopback tap behind a Screen Recording permission. So until
+that exists the defaults carry the weight.
+
+The objection in the old text still stands and is answered rather than
+dismissed: **speaker match must not pose as verification** (§6.1). It does not
+here, because the gate at `addressing.ts:197` also tests `hasProfile`, so the
+default is **inert until the operator enrols** and degrades nobody who has not.
+`requireWakeWord` is what actually protects a fresh install, and
+`followUpTrusted` means the name opens an exchange rather than every turn in
+it. Pinned by three tests in `tests/voice.test.mjs`, including one asserting
+the no-profile case still answers.
 
 ### 6.15 The endpointer learns the speaker's pacing (2026-09-05)
 
@@ -5008,7 +5028,10 @@ three watches, because the app can only report the noise it makes itself.
 Against that, and against another person in the room, the answer is
 `requireSpeakerMatch` ("Only respond to my voice" in voice settings), which
 needs an enrolled voiceprint and is honest in `speakerProfile.ts` about being a
-weak verifier.
+weak verifier — **and `requireWakeWord`, which needs nothing and is what
+actually covers a fresh install.** Both default on since 2026-09-07; see §6.14
+for why, and for the two system-audio signals that were measured and found
+useless.
 
 
 ### 6.18 A permission prompt can be answered out loud (`approvalIntent.ts`, `hooks/useSpokenApproval.ts`, 2026-09-06)
