@@ -1518,6 +1518,60 @@ an accepted truncation is unrecoverable work.
 Eval **51/51** over 17 cases, three runs each, up from 48/48 over 16. Tested in
 `tests/live-edit.test.mjs` (10).
 
+### A fetched page is markup until it is read (`services/readablePage.ts`, `services/agentCommands.ts`, 2026-09-07)
+
+The local lane could fetch a web page and learn nothing from it. Asked to read a
+named URL, the model does the right thing without prompting — the eval's
+`web-fetch-url` case scored 3/3 the first time it ran — but `curl` returns an
+HTML document, and `runAgentCommands` kept only the head of it. That pass was
+hollow: the lane ran a correct command and was handed the `<head>`.
+
+Measured on `https://nodejs.org/en/about/previous-releases`:
+
+| | chars | "LTS" found |
+| --- | ---: | ---: |
+| raw document | 295,973 | — |
+| raw, first 4,000 chars (what the model saw) | 4,000 | **0** |
+| after `htmlToText` | 5,683 | 8, first at offset 481 |
+
+So the fix is in the pipeline, not the prompt. `looksLikeHtml` decides on the
+first 200 chars whether output opens as an HTML *document*; only then does
+`htmlToText` strip `<script>`, `<style>` and `<noscript>` bodies whole, turn
+block ends into newlines, decode entities and squeeze. Output that merely
+*contains* markup — a JSON string, an XML feed, a grep hit in a template — is
+passed through byte for byte, because rewriting what the operator asked for is
+the same class of mistake as overwriting a file the model had seen one line of.
+
+Two consequences worth stating plainly rather than discovering later:
+
+1. **The read ceiling had to become content-aware.** The decision to stop
+   reading is made while the command streams, long before there is anything to
+   strip, so an HTML document accumulates to `HTML_CEILING_CHARS` (512,000) and
+   everything else still stops at the caller's `maxOutputChars`. That bound is
+   what keeps a fetch from becoming a memory bug.
+2. **It is a large improvement, not a complete one.** The lane's real allowance
+   is `toolResultChars` — 2,621 chars on an 8k window, 10,485 on 32k. On 32k the
+   whole page now arrives. On 8k the prose arrives but the release table (first
+   version number at offset 5,010) still falls outside the cut. Closing that
+   means dropping site chrome — this page spends its first 481 chars on nav
+   links — which is a heuristic that earns its place against a measurement, not
+   a guess bolted on now.
+
+This costs **zero prompt tokens**: measured, the eval's prompt stayed at 2,189
+tokens across the change. That is the point of fixing it here. The window, not
+the tool count, is this lane's constraint, and the `ask` block is already
+dropped on a player turn.
+
+**There is no credential-free web search from this machine.** Measured
+2026-09-07: `html.duckduckgo.com` and `lite.duckduckgo.com` return 403 to curl;
+`api.duckduckgo.com` returns 200 with 0 bytes for a real query;
+`searx.be/search?format=json` returns an HTML block page; `s.jina.ai` returns
+401. The eval's `web-search-open` case is therefore a known gap left red on
+purpose — closing it needs an operator-supplied API key, which is a product
+decision. `r.jina.ai` (read a URL, no key) does work and is the fallback if
+local stripping proves insufficient.
+
+
 ### The browser panel is a view, not a frame (`electron/browserView.cjs`, `services/browserView.ts`, `panels/BrowserPane.tsx`)
 
 The panel used to be an `<iframe>` in the shell's own renderer, and that

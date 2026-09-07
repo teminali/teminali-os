@@ -315,6 +315,63 @@ const CASES = [
       return surgical.length ? null : `commands=${commands(text).join(" | ") || "none"}`;
     },
   },
+  {
+    /*
+      The URL is in the prompt, so there is nothing to search for and nothing
+      to recall: the only honest reply reaches for the network. This grades the
+      failure [LIVE DATA] was written against, in the shape that block does not
+      name — an arbitrary page rather than one of its listed API hosts.
+
+      It scored 3/3 the first time it was run, and that pass was hollow: the
+      model's half already worked, and the *pipeline* was the broken half. A
+      `curl` of this page returns 295,973 chars of HTML, of which the runner
+      kept the first few thousand — measured to contain zero occurrences of
+      "LTS" and no version number, i.e. the `<head>`. The case stays as the
+      regression test for the model's half; the pipeline's half is fixed in
+      `readablePage.ts` and tested in `tests/readable-page.test.mjs`, because
+      the eval grades a turn and cannot see what a command returned.
+    */
+    name: "web-fetch-url",
+    history: [],
+    prompt: "read https://nodejs.org/en/about/previous-releases and tell me which Node version is the current LTS",
+    expect: (text) => {
+      if (commands(text).some((c) => /nodejs\.org/.test(c))) return null;
+      const refused = says(text, ["I cannot", "I can't", "I don't have access", "I'm unable", "check a website", "visit the"]);
+      if (refused.length) return `refused: "${refused[0]}"`;
+      return `did not fetch the page; commands=${commands(text).join(" | ") || "none"}`;
+    },
+  },
+  {
+    /*
+      KNOWN GAP, deliberately left red, and the grader is not to be loosened to
+      make it green. No URL, no listed API host, and no single repo to
+      interrogate — the shape [LIVE DATA] does not cover.
+
+      The reason it cannot pass is not the model: there is no credential-free
+      web search reachable from this machine. All measured 2026-09-07 —
+      `html.duckduckgo.com` and `lite.duckduckgo.com` return **403** to curl;
+      `api.duckduckgo.com` (Instant Answer) returns 200 with **0 bytes** for a
+      real query; `searx.be/search?format=json` returns an HTML block page, not
+      JSON; `s.jina.ai` returns **401**, key required. Do not re-test these
+      without a reason.
+
+      So the model's two passing runs were hollow in the same way `web-fetch-url`
+      was — a search-shaped host whose output is an error page. Closing this
+      needs an operator-supplied API key, which is a product decision, not a
+      prompt fix. `r.jina.ai` (read a URL, no key) does work, and is the fallback
+      worth considering if local stripping ever proves insufficient.
+    */
+    name: "web-search-open",
+    history: [],
+    prompt: "search the web for recent blog posts about running local LLMs on Apple silicon and tell me what the top few say",
+    expect: (text) => {
+      const ran = commands(text);
+      if (ran.some((c) => /duckduckgo|bing\.com|google\.com\/search|searx|search\.brave|r\.jina\.ai|api\.search/i.test(c))) return null;
+      const refused = says(text, ["I cannot", "I can't", "I don't have access", "I'm unable", "check a website", "browse the"]);
+      if (refused.length) return `refused: "${refused[0]}"`;
+      return `no search; commands=${ran.join(" | ") || "none"}`;
+    },
+  },
 ].filter((c) => !ONLY || c.name.includes(ONLY));
 
 /* ── The turn ──────────────────────────────────────────────────────────────── */

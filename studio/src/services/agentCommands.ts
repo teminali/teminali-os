@@ -2,6 +2,7 @@
 // Parsing, safety classification, and execution live together so the rules a
 // command is judged by cannot drift from the code that runs it.
 import type { ToolCall } from "../types";
+import { htmlToText, looksLikeHtml } from "./readablePage.ts";
 
 export type CommandRisk = "auto" | "confirm" | "blocked";
 
@@ -279,6 +280,15 @@ const DEFAULT_MAX_COMMANDS = 4;
 // real allowance from contextBudget.ts — a share of the model's window, not a
 // constant — and this figure is what a 10k window would be given.
 const DEFAULT_MAX_OUTPUT_CHARS = 4_000;
+/*
+  How much of an HTML document is worth reading before it is reduced to text.
+  A fetched page is mostly markup — measured, nodejs.org/en/about/previous-releases
+  decodes to 295,973 chars and reduces to 5,683 once stripped — so the answer is
+  always past `DEFAULT_MAX_OUTPUT_CHARS` in the raw bytes, and within reach of
+  the lane's real allowance after. This ceiling exists only so `htmlToText` has a body to work with; it is
+  still a bound, because an unbounded read is how a fetch becomes a memory bug.
+*/
+const HTML_CEILING_CHARS = 512_000;
 
 /**
  * Executes the commands a model explicitly requested and returns what actually
@@ -335,10 +345,24 @@ export async function runAgentCommands(
       const exit = await options.execute(request.command, {
         signal: options.signal,
         onOutput: (chunk) => {
-          if (output.length < maxOutputChars) output += chunk.data;
+          /*
+            The ceiling has to be content-aware, because the decision to stop
+            reading is made long before there is anything to strip. An HTML
+            document is read up to `HTML_CEILING_CHARS`; everything else still
+            stops at `maxOutputChars`, which is what keeps `cat /dev/urandom`
+            from becoming a memory bug.
+          */
+          const ceiling = looksLikeHtml(output) ? Math.max(maxOutputChars, HTML_CEILING_CHARS) : maxOutputChars;
+          if (output.length < ceiling) output += chunk.data;
         },
       });
-      const trimmed = output.length > maxOutputChars ? `${output.slice(0, maxOutputChars)}\n…` : output;
+      /*
+        Markup is stripped before the cut, never after. Cutting first hands the
+        model the `<head>` — doctype, bundler hashes, `<link rel=...>` — which is
+        exactly the 4,000 chars that made a successful fetch useless.
+      */
+      const readable = looksLikeHtml(output) ? htmlToText(output) : output;
+      const trimmed = readable.length > maxOutputChars ? `${readable.slice(0, maxOutputChars)}\n…` : readable;
       /*
         `result` means the same thing in every lane: what came back.
 
@@ -361,7 +385,7 @@ export async function runAgentCommands(
         executed: true,
         code: exit.code,
         output: trimmed,
-        truncated: exit.truncated || output.length > maxOutputChars,
+        truncated: exit.truncated || readable.length > maxOutputChars,
       });
     } catch (error) {
       const note = error instanceof Error ? error.message : "The command could not be executed.";
