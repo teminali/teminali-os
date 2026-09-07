@@ -40,6 +40,8 @@ export interface AgentTurnOptions {
   model?: string | null;
   permission?: string;
   signal?: AbortSignal;
+  /** Run through Frontier Max online Gemini tier via Claude Code */
+  frontierMax?: boolean;
 }
 
 /** One selectable model, and how much we actually know about it. */
@@ -236,6 +238,7 @@ export class AgentCliService {
         sessionId,
         model: options.model ?? null,
         permission: options.permission,
+        frontierMax: options.frontierMax ?? false,
       }),
     });
     await GatewayClient.expectOk(response);
@@ -381,9 +384,9 @@ export class AgentCliService {
       // under a turn means the same thing whichever engine produced it.
       tokensCount: promptTokens + outputTokens,
       durationSec: (durationMs || wallMs) / 1000,
-      engineUsed: options.engine === "claude" ? "Claude Code" : "Codex",
-      mode: "auto",
-      routeReason: reasoning ? "agent_cli_with_reasoning" : "agent_cli",
+      engineUsed: options.frontierMax ? "Frontier Max (Gemini)" : options.engine === "claude" ? "Claude Code" : "Codex",
+      mode: options.frontierMax ? "max" : "auto",
+      routeReason: options.frontierMax ? "frontier_max_gemini" : (reasoning ? "agent_cli_with_reasoning" : "agent_cli"),
       telemetry: {
         requestId: sessionId ?? "agent",
         model: model ?? options.engine,

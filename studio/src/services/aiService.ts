@@ -235,16 +235,45 @@ export class AIService {
   ): Promise<void> {
     try {
       if (engine === "frontier") {
-        /*
-          Video prompts used to be intercepted here and answered by one
-          hardcoded call to the Cut running as a separate process on port 3888
-          — every prompt matching /video|timeline|silence|beat|caption|track/
-          got the same silence-split, reported as "completed and verified"
-          whatever had been asked for. The editor's stores are in THIS renderer
-          now, so the engine gets the real tools instead and the intercept is
-          gone. MCPRemoteSyncService still speaks to a remote Cut, which is a
-          different thing and still a supported one.
-        */
+        if (options.mode === "max") {
+          const turn = await AgentCliService.streamTurn(
+            {
+              engine: "claude",
+              prompt: userPrompt,
+              sessionId: options.agentSessionId ?? null,
+              model: options.agentModel ?? "gemini-2.5-flash",
+              permission: options.agentPermission ?? "acceptEdits",
+              signal: options.signal,
+              frontierMax: true,
+            },
+            {
+              ...callbacks,
+              onPermission: (request) => {
+                void (async () => {
+                  const approve = options.approveCommand;
+                  const approved = approve
+                    ? await approve({
+                        command: describePermission(request),
+                        risk: "confirm",
+                        reason: `Frontier Max (Claude Code) is asking to use ${request.toolName}.`,
+                      })
+                    : false;
+                  await AgentCliService.answerPermission({
+                    runId: request.runId,
+                    id: request.id,
+                    behavior: approved ? "allow" : "deny",
+                    remember: false,
+                  });
+                })();
+              },
+              onWorkspace: options.onWorkspace,
+              onEdit: options.onEdit,
+            },
+          );
+          options.onAgentSession?.(turn.sessionId);
+          return;
+        }
+
         await FrontierEngine.streamLocal(
           userPrompt,
           history,

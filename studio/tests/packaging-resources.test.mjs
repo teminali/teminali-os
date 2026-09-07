@@ -191,10 +191,30 @@ test("no platform ships the web half of transformers.js", () => {
     blocks.push({ platform, patterns });
   }
 
-  assert.equal(
-    blocks.length, 3,
-    `expected the sidecar's dependencies to be pruned in three platform blocks, found ${blocks.length} — ` +
+  /*
+    Two, not three, and Windows is the one missing.
+
+    The rule this test exists for is "no platform ships what it cannot load",
+    and a platform that ships none of the sidecar's dependencies at all cannot
+    break it. Windows is that platform as of the customer build: packing the
+    573 MB into an NSIS archive is the step that has never once finished, so
+    the deps are dropped there entirely and `speech-local.js` degrades. See the
+    comment on `win:` in electron-builder.yml, and the wizard-download plan it
+    points at — when that lands, Windows gets a block again and this goes back
+    to three.
+
+    Two is a floor, not a target: a NEW platform that ships the deps unpruned
+    still has to add its own block, and the pattern check below still runs over
+    every block that exists.
+  */
+  assert.ok(
+    blocks.length >= 2,
+    `expected the sidecar's dependencies to be pruned in every platform block that ships them, found ${blocks.length} — ` +
     "a new target must prune them too, or it ships 91 MB it cannot load",
+  );
+  assert.ok(
+    !blocks.some((block) => block.platform === "win"),
+    "win has a sidecar block again — restore its pruning patterns and raise the floor above",
   );
 
   // Every one of these was proven droppable by deleting it and running a real

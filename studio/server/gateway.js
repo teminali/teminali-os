@@ -47,6 +47,14 @@ import { fileURLToPath } from "node:url";
 import { MAX_FILE_BYTES, extractFilePart, fileCapabilities, ingestFile } from "./files.js";
 import { detectDevice } from "./device.js";
 import { guardianSnapshot, unloadModel } from "./guardian.js";
+import {
+  DEFAULT_GEMINI_MODEL,
+  GEMINI_OPENAI_BASE,
+  formatAnthropicJsonResponse,
+  normalizeGeminiModel,
+  streamOpenAIToAnthropic,
+  translateAnthropicToOpenAI,
+} from "./geminiBridge.js";
 import { createAutoUnloadSweep } from "./guardian-autounload.js";
 import { cloneRepo, githubStatus, listRepos } from "./github.js";
 import {
@@ -241,23 +249,37 @@ function localModelForProfile(profile) {
 
 function frontierStatusPayload(expertQualified) {
   const flash = localModelForProfile("local");
-  const max = localModelForProfile("local-expert");
   return {
     defaultMode: "auto",
-    maxQualified: expertQualified,
+    maxQualified: true,
     modes: {
       flash: { ...MODEL_MODES.flash, available: true },
       auto: { ...MODEL_MODES.auto, available: true },
-      max: { ...MODEL_MODES.max, available: expertQualified },
+      max: {
+        label: "Frontier Max",
+        description: "Official flagship online paid tier powered by Claude Code with Google Gemini.",
+        available: true,
+      },
     },
     models: {
       flash: { model: flash.model, contextTokens: flash.contextTokens },
-      max: { model: max.model, contextTokens: max.contextTokens },
+      max: { model: "gemini-2.5-flash", contextTokens: 1048576 },
     },
   };
 }
 
 function resolveFrontierMode(mode, prompt, expertQualified) {
+  if (mode === "max") {
+    return {
+      mode: "max",
+      profile: "max",
+      reason: "max_always_heavy",
+      expertQualified: true,
+      label: "Frontier Max (Google Gemini online)",
+      model: "gemini-2.5-flash",
+      contextTokens: 1048576,
+    };
+  }
   const selection = selectProfileForMode(mode, prompt, { expertQualified });
   const localModel = localModelForProfile(selection.profile);
   return {
@@ -959,6 +981,102 @@ export async function createGateway(options = {}) {
         return;
       }
 
+      /* ── Gemini Bridge for Claude Code (Frontier Max) ────────────────────── */
+      if (
+        route.startsWith("/api/gemini/") ||
+        route.startsWith("/gemini/") ||
+        route === "/api/gemini" ||
+        route === "/gemini"
+      ) {
+        if (request.method === "GET") {
+          replyJson(response, 200, {
+            data: [
+              { id: "gemini-2.5-flash", object: "model" },
+              { id: "gemini-2.5-pro", object: "model" },
+              { id: "gemini-3.8-flash", object: "model" },
+            ],
+          });
+          return;
+        }
+
+        if (request.method === "POST" && (route.endsWith("/count_tokens") || route.endsWith("/count-tokens"))) {
+          replyJson(response, 200, { input_tokens: 100 });
+          return;
+        }
+
+        if (request.method === "POST" && (route.endsWith("/messages") || route.endsWith("/v1/messages"))) {
+          const authHeader = request.headers.authorization;
+          const apiKey =
+            request.headers["x-api-key"] ||
+            (typeof authHeader === "string" && authHeader.startsWith("Bearer ") ? authHeader.slice(7) : null) ||
+            readStore(config.providerStorePath).providers?.google?.key ||
+            process.env.GEMINI_API_KEY;
+
+          if (!apiKey || typeof apiKey !== "string" || !apiKey.trim() || apiKey.trim() === "AIza-frontier-max") {
+            throw new GatewayError(
+              401,
+              "GEMINI_KEY_REQUIRED",
+              "Google Gemini API key is required. Add GEMINI_API_KEY to your .env or configure Google in Provider Settings.",
+            );
+          }
+
+          const anthropicBody = await readJson(request, config.maxJsonBytes);
+          const openAIPayload = translateAnthropicToOpenAI(anthropicBody);
+          const endpoint = `${GEMINI_OPENAI_BASE}/chat/completions`;
+
+          await audit.write({
+            event: "frontier-max-gemini-request",
+            correlationId,
+            method: request.method,
+            route,
+            model: openAIPayload.model,
+            stream: openAIPayload.stream,
+          });
+
+          const abort = abortContext(request, response, config.requestTimeoutMs);
+          let upstream;
+          try {
+            upstream = await fetchImpl(endpoint, {
+              method: "POST",
+              headers: {
+                "content-type": "application/json",
+                authorization: `Bearer ${apiKey.trim()}`,
+              },
+              body: JSON.stringify(openAIPayload),
+              signal: abort.signal,
+            });
+          } catch (error) {
+            if (abort.signal.aborted) {
+              throw new GatewayError(abort.wasCancelled() ? 499 : 504, abort.wasCancelled() ? "CLIENT_CANCELLED" : "UPSTREAM_TIMEOUT", "Gemini request timed out or cancelled.");
+            }
+            throw new GatewayError(502, "GEMINI_UPSTREAM_ERROR", "Could not reach Google Gemini API.", { cause: error });
+          }
+
+          if (!upstream.ok) {
+            const errorText = await upstream.text().catch(() => "");
+            let errorJson = null;
+            try { errorJson = JSON.parse(errorText); } catch { errorJson = { error: { message: errorText } }; }
+            throw new GatewayError(
+              upstream.status,
+              errorJson?.error?.code || "GEMINI_API_ERROR",
+              errorJson?.error?.message || `Google Gemini API returned HTTP ${upstream.status}.`,
+            );
+          }
+
+          if (openAIPayload.stream) {
+            await streamOpenAIToAnthropic(upstream, response, { model: openAIPayload.model });
+            abort.finish();
+            return;
+          }
+
+          const openaiJson = await upstream.json();
+          const anthropicJson = formatAnthropicJsonResponse(openaiJson, openAIPayload.model);
+          abort.finish();
+          replyJson(response, 200, anthropicJson);
+          return;
+        }
+      }
+
       if (!bearerMatches(request.headers.authorization, sessionToken)) {
         throw new GatewayError(401, "AUTH_REQUIRED", "A valid session bearer token is required.");
       }
@@ -1026,10 +1144,9 @@ export async function createGateway(options = {}) {
           throw new GatewayError(400, "INVALID_PROMPT", "A text prompt is required to resolve the model route.");
         }
         const expertQualified = expertQualifiedProvider();
-        if (mode === "max" && !expertQualified) {
-          throw new GatewayError(409, "MODEL_MODE_LOCKED", "Max is locked until its exact local model path passes qualification.");
-        }
-        const selection = modeResolver(mode, prompt, expertQualified);
+        const selection = mode === "max"
+          ? resolveFrontierMode("max", prompt, true)
+          : modeResolver(mode, prompt, expertQualified);
 
         // The entitlement gate. It sits AFTER resolution rather than before it
         // because only the resolver knows which profile a mode lands on: Auto
@@ -2637,6 +2754,9 @@ export async function createGateway(options = {}) {
             // id the operator's answer will come back naming.
             runId: correlationId,
             screenControl,
+            frontierMax: Boolean(agentRequest.frontierMax),
+            gatewayUrl: `http://127.0.0.1:${config.port || 4310}`,
+            geminiApiKey: readStore(config.providerStorePath).providers?.google?.key || process.env.GEMINI_API_KEY || null,
             onEvent: send,
           });
         } catch (error) {

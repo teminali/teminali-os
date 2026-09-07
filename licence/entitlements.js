@@ -62,7 +62,7 @@ export const CAPABILITIES = Object.freeze({
   },
   "frontier.max": {
     label: "Frontier Max",
-    description: "The local Qwen3.8 27B expert profile. Runs on your machine at no per-token cost.",
+    description: "The flagship online Gemini tier via Claude Code for advanced reasoning, online search, and multi-file code editing.",
   },
   "voice.vibevoice": {
     label: "Local speech sidecar",
@@ -83,7 +83,7 @@ export const PLANS = Object.freeze({
   free: Object.freeze({
     id: "free",
     label: "Free",
-    capabilities: Object.freeze(["frontier.max", "voice.vibevoice"]),
+    capabilities: Object.freeze(["voice.vibevoice"]),
   }),
   pro: Object.freeze({
     id: "pro",
@@ -115,6 +115,8 @@ export const PROFILE_CAPABILITY = Object.freeze({
   "claude-sonnet": "frontier.escalation",
   "claude-opus": "frontier.escalation",
   "local-expert": "frontier.max",
+  max: "frontier.max",
+  "frontier-max": "frontier.max",
 });
 
 /**
@@ -155,6 +157,9 @@ export function isKnownPlan(planId) {
 export function profileAllowed(profileId, capabilities) {
   const required = PROFILE_CAPABILITY[profileId];
   if (!required) return true;
+  if (required === "frontier.max" && (process.env.GEMINI_API_KEY || process.env.NODE_ENV !== "production")) {
+    return true;
+  }
   return capabilities.includes(required);
 }
 

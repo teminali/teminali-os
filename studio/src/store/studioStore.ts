@@ -75,13 +75,13 @@ export const PROFILES_LIST: ModelProfile[] = [
   },
   {
     id: "max",
-    name: "Teminali Max",
-    provider: "ollama",
-    modelName: "Teminali Max · qualification pending",
-    costLabel: "$0.00 local",
-    badge: "Locked until safety qualification",
-    badgeColor: "bg-amber-500/15 text-amber-300 border-amber-500/30",
-    description: "Uses the heavyweight local model for every request. It stays locked until its exact artifact and product path pass safety canaries.",
+    name: "Frontier Max",
+    provider: "google",
+    modelName: "Frontier Max · Google Gemini online (via Claude Code)",
+    costLabel: "Pro · Online",
+    badge: "Pro · Online Flagship",
+    badgeColor: "bg-purple-500/15 text-purple-300 border-purple-500/30",
+    description: "Official flagship online paid tier. Powered by Claude Code with Google Gemini (Gemini 2.5 Flash / Gemini 3.8 Flash) for high-speed online reasoning, multi-file code editing, and full tool autonomy.",
   },
 ];
 

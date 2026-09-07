@@ -583,6 +583,16 @@ export function runAgentTurn(options) {
     prompt, cwd: workingDirectory, sessionId, model, permission: mode, approval, screen, workspace, camera,
   });
 
+  const runEnv = { ...env };
+  if (options.frontierMax) {
+    const base = options.gatewayUrl || "http://127.0.0.1:4310";
+    runEnv.ANTHROPIC_BASE_URL = `${base}/api/gemini`;
+    const key = options.geminiApiKey || runEnv.GEMINI_API_KEY || "AIza-frontier-max";
+    runEnv.ANTHROPIC_API_KEY = key;
+    runEnv.ANTHROPIC_AUTH_TOKEN = key;
+    runEnv.ANTHROPIC_MODEL = model || "gemini-2.5-flash";
+  }
+
   return new Promise((resolvePromise) => {
     const startedAt = Date.now();
     const state = { sessionId };
@@ -595,7 +605,7 @@ export function runAgentTurn(options) {
 
     const child = spawnCommand(binary, args, {
       cwd: workingDirectory,
-      env,
+      env: runEnv,
       // stdin is closed rather than inherited: both CLIs block on a pipe they
       // are never going to be written to.
       stdio: ["ignore", "pipe", "pipe"],
