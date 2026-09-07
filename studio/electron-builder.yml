@@ -287,29 +287,26 @@ win:
   # a .exe.blockmap too, so Windows carries the identical re-run trap; it has
   # simply never been observed, because no Windows job has ever finished.
   artifactName: Teminali-OS-Setup-${version}-Windows-${arch}.${ext}
-  # The speech sidecar's dependencies, pruned to Windows and ${arch}. See the
-  # macOS entry for what each pattern is for.
-  extraResources:
-    - from: voice-runtime/node_modules
-      to: voice-runtime/node_modules
-      filter:
-        - "**/*"
-        - "!.bin/**"
-        - "!**/.cache/**"
-        - "!**/*.map"
-        - "!**/*.md"
-        - "!**/*.d.ts"
-        # The web half of transformers.js — see the macOS entry.
-        - "!**/onnxruntime-web/**"
-        - "!**/transformers/dist/transformers.web*"
-        - "!**/transformers/dist/*.wasm"
-        - "!**/onnxruntime-node/bin/**/darwin/**"
-        - "!**/onnxruntime-node/bin/**/linux/**"
-        - "!**/onnxruntime-node/bin/**/win32/*/**"
-        - "**/onnxruntime-node/bin/**/win32/${arch}/**"
-        # Last, so the re-include above cannot bring it back: a later pattern
-        # wins, and the root copy has the same bin/ layout as the nested one.
-        - "!onnxruntime-node/**"
+  # THE SIDECAR IS NOT PACKED ON WINDOWS. Deliberate, and load-bearing.
+  #
+  # `voice-runtime/node_modules` is 573 MB after filtering, and packing it into
+  # the NSIS archive is the step that has never finished on this platform: not
+  # in 0.0.2 (2h31m), not in 0.0.3, and not in 0.0.5, which was killed by the
+  # 60-minute cap 58 minutes after the last line it printed. macOS and Linux
+  # pack the identical payload in about four minutes and two minutes; Windows
+  # is the only target that goes through LZMA.
+  #
+  # Without it the app runs and local speech degrades rather than breaks —
+  # `server/speech-local.js:105` imports the lexicon with `.catch(() => null)`
+  # and carries on, warning that transcripts will not be vocabulary-repaired,
+  # and the local recogniser is already optional (`whisper.cpp is not
+  # installed` is a supported state, not a crash).
+  #
+  # This is the stop-gap, not the answer. The answer is fetching the sidecar in
+  # the installer wizard — `inetc::get`, the way electron-builder's own
+  # `webPackage.nsh` does it — so Windows gets the feature back without the
+  # packaging cost. Until that exists, this is what a Windows build being
+  # downloadable at all costs.
 
 # The assisted (multi-page) installer, with its own welcome and finish pages.
 # build/installer.nsh holds the pages; scripts/installer-art.sh draws the two
