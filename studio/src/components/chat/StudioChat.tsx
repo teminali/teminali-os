@@ -64,6 +64,24 @@ import { dispatchPlayerCommand, type PlayerCommand } from "../../services/player
  * back to be read aloud.
  */
 
+/**
+ * What to call the machine the turns run on.
+ *
+ * It was the literal string "This Mac", in both places it appears, and the
+ * first Windows customer to open the app was told their PC was a Mac — under a
+ * tooltip promising the work happens on *this* machine, which is exactly the
+ * claim the wrong noun undermines. There is no platform helper in `src/` to
+ * borrow, and the renderer cannot read `process.platform`, so the user agent
+ * answers it: it is the same string `voice/providers/webSpeech.ts` already
+ * tests for Electron. Anything unrecognised gets the neutral noun rather than a
+ * guess.
+ */
+const MACHINE_LABEL = (() => {
+  const agent = typeof navigator === "undefined" ? "" : navigator.userAgent;
+  if (/Mac OS X|Macintosh/i.test(agent)) return "This Mac";
+  if (/Windows/i.test(agent)) return "This PC";
+  return "This machine";
+})();
 
 export const StudioChat: React.FC<{
   /** The one screen assistant, created by the shell. */
@@ -821,7 +839,7 @@ export const StudioChat: React.FC<{
               title="Open a different repository"
               onSelect={onOpenWorkspace}
             />
-            <Picker label="This Mac" icon={<Laptop size={14} />} title="Turns run locally on this machine" />
+            <Picker label={MACHINE_LABEL} icon={<Laptop size={14} />} title="Turns run locally on this machine" />
           </div>
 
 
@@ -958,7 +976,7 @@ export const StudioChat: React.FC<{
               title="Turns run locally on this machine"
             >
               <Laptop size={11} />
-              This Mac
+              {MACHINE_LABEL}
             </div>
           </div>
         </>
