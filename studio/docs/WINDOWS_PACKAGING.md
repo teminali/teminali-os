@@ -56,6 +56,23 @@ Run `34113974769`, job `101716968926` (v0.0.5), the last two lines of
 Both (3) and (4) are still committed on `master`. They are cheap and probably
 right in direction; they are simply not enough on their own.
 
+## The cause, proven
+
+Run `34122224708`, branch `win-trim-clean` — the sidecar dropped from the
+Windows package and **nothing else changed**:
+
+```
+Windows ✓ 2m59s   Teminali-OS-Setup-0.0.5-Windows-x64.exe, 157 MB
+```
+
+Same runner, same workflow, same commit base. Against 1h00m15s for
+`differentialPackage: false` alone (run `34116921025`) and a run to the cap for
+`useZip` on top of it (run `34119836026`), both on the full payload.
+
+So it is the payload, not the codec, not the level, not the signing, and not
+the differential machinery. The wizard-download design below is therefore the
+whole fix, not a workaround for something still undiagnosed.
+
 ## What the payload actually is
 
 `studio/voice-runtime/node_modules` is **1.7 GB** raw, of which **1.0 GB** is
