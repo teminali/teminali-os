@@ -454,3 +454,85 @@ test("the shared narrator reads this lane's calls as truthfully as a CLI's", asy
     "Tests failed — looking at that.",
   ]);
 });
+
+/*
+  Multi-line commands in a run fence.
+
+  Measured before this block existed: the four-line `python3 - <<'EDIT'` form
+  that [TO CHANGE A FILE YOU HAVE NOT SEEN IN FULL] originally taught parsed as
+  five commands — `python3` on a stdin that never closes, three python
+  statements handed to the shell, and the bare terminator — five approval
+  prompts, nothing edited. The prompt was rewritten to a one-line `python3 -c`
+  to dodge this function; these tests are what let it stop dodging.
+*/
+const fenceOf = (...lines) => ["```frontier-run", ...lines, "```"].join("\n");
+
+test("a heredoc is one command, not one command per line", () => {
+  const requests = parseAgentCommands(fenceOf(
+    "python3 - <<'EDIT'",
+    "import pathlib",
+    "p = pathlib.Path('server/config.js')",
+    "p.write_text(p.read_text().replace('3000', '4310'))",
+    "EDIT",
+  ));
+  assert.equal(requests.length, 1);
+  assert.match(requests[0].command, /^python3 - <<'EDIT'\n/);
+  assert.match(requests[0].command, /replace\('3000', '4310'\)/);
+  assert.ok(requests[0].command.endsWith("EDIT"));
+});
+
+test("heredoc delimiters are matched quoted, bare, and tab-indented", () => {
+  const quoted = parseAgentCommands(fenceOf("cat <<\"END\"", "hello", "END"));
+  assert.equal(quoted.length, 1);
+
+  const bare = parseAgentCommands(fenceOf("cat <<END", "hello", "END", "git status"));
+  assert.equal(bare.length, 2);
+  assert.equal(bare[1].command, "git status");
+
+  // `<<-` strips leading tabs from the terminator, so an indented one closes.
+  const dashed = parseAgentCommands(fenceOf("cat <<-END", "\thello", "\tEND", "git status"));
+  assert.equal(dashed.length, 2);
+  assert.equal(dashed[1].command, "git status");
+});
+
+test("a herestring and a quoted << open nothing", () => {
+  const here = parseAgentCommands(fenceOf("grep foo <<< \"$bar\"", "git status"));
+  assert.equal(here.length, 2, "<<< is a herestring, not a heredoc");
+
+  const quoted = parseAgentCommands(fenceOf("echo \"a << b\"", "git status"));
+  assert.equal(quoted.length, 2, "<< inside quotes is text");
+});
+
+test("a trailing backslash and an unclosed quote continue the command", () => {
+  const wrapped = parseAgentCommands(fenceOf("grep -rn \\", "  needle src", "git status"));
+  assert.equal(wrapped.length, 2);
+  assert.equal(wrapped[0].command, "grep -rn \\\n  needle src");
+
+  const multiline = parseAgentCommands(fenceOf("python3 -c \"", "print('hi')", "\"", "git status"));
+  assert.equal(multiline.length, 2);
+  assert.match(multiline[0].command, /print\('hi'\)/);
+  assert.equal(multiline[1].command, "git status");
+});
+
+test("ordinary fences are unchanged by heredoc awareness", () => {
+  const requests = parseAgentCommands(fenceOf("git status", "# a comment", "", "npm test"));
+  assert.deepEqual(requests.map((r) => r.command), ["git status", "npm test"]);
+  assert.ok(requests.every((r) => r.risk === "auto"));
+});
+
+test("a multi-line command is classified by its riskiest line", () => {
+  // `segments` splits on newlines, so a body cannot smuggle a command past the
+  // classifier by being data. Conservative on purpose.
+  const [request] = parseAgentCommands(fenceOf("cat <<'EOF'", "rm -rf /", "EOF"));
+  assert.equal(request.risk, "blocked");
+
+  const [safe] = parseAgentCommands(fenceOf("cat <<'EOF'", "just some text", "EOF"));
+  assert.equal(safe.risk, "confirm", "writing a heredoc is not read-only");
+});
+
+test("an unterminated heredoc stays one command rather than shredding", () => {
+  // One approval for one broken command beats three fragments that each run.
+  const requests = parseAgentCommands(fenceOf("python3 - <<'EDIT'", "import os", "print(os.getcwd())"));
+  assert.equal(requests.length, 1);
+  assert.match(requests[0].command, /print\(os\.getcwd\(\)\)$/);
+});

@@ -210,6 +210,140 @@ export function classifyCommand(command: string): { risk: CommandRisk; reason: s
   return { risk: "auto", reason: "read-only inspection or verification" };
 }
 
+/*
+  A fence is one command per line — except when it is not.
+
+  A heredoc, a trailing backslash and an unclosed quote each continue a command
+  onto the next line, and splitting them does not merely lose the command: it
+  runs the pieces. Measured on this repo 2026-09-07, a four-line
+  `python3 - <<'EDIT'` edit parsed as **five** commands — a bare `python3`
+  reading a stdin that never closes, three python statements handed to the
+  shell, and the terminator — each raising its own approval prompt, with
+  nothing edited at the end of it. That is why [TO CHANGE A FILE YOU HAVE NOT
+  SEEN IN FULL] had to teach a one-line `python3 -c` form: the prompt was
+  working around this function.
+
+  Quote and heredoc state is tracked by scanning, not by regex, because `<<`
+  inside a quoted string opens nothing and a `#` comment ends the scan. `<<<`
+  is a herestring and stays on its line.
+
+  Heredoc *bodies* are still classified as commands by `classifyCommand`,
+  which splits on newlines: content that would be blocked as a command is
+  blocked when it is written as data too. That is deliberate — a body is an
+  obvious place to hide one — and it is the conservative side of the trade.
+*/
+interface LineScan {
+  /** The quote left open at the end of the line, if any. */
+  openQuote: "'" | '"' | null;
+  /** A trailing unescaped backslash: the command continues on the next line. */
+  continues: boolean;
+  /** Heredocs opened on this line, in the order their bodies arrive. */
+  heredocs: { delim: string; dashed: boolean }[];
+}
+
+function scanLine(line: string, carried: "'" | '"' | null): LineScan {
+  let quote = carried;
+  let continues = false;
+  const heredocs: { delim: string; dashed: boolean }[] = [];
+  let i = 0;
+
+  while (i < line.length) {
+    const ch = line[i];
+
+    if (quote === "'") {
+      if (ch === "'") quote = null;
+      i += 1;
+      continue;
+    }
+    if (quote === '"') {
+      if (ch === "\\" && i + 1 < line.length) { i += 2; continue; }
+      if (ch === '"') quote = null;
+      i += 1;
+      continue;
+    }
+
+    if (ch === "\\") {
+      if (i === line.length - 1) { continues = true; break; }
+      i += 2;
+      continue;
+    }
+    if (ch === "'" || ch === '"') { quote = ch; i += 1; continue; }
+    // A `#` at a word boundary comments out the rest of the line.
+    if (ch === "#" && (i === 0 || /\s/.test(line[i - 1]))) break;
+
+    if (ch === "<") {
+      // The whole run decides: `<` redirects, `<<` opens a heredoc, `<<<` is a
+      // herestring. Advancing one at a time would read the tail of a `<<<` as
+      // a heredoc opener.
+      let run = 0;
+      while (line[i + run] === "<") run += 1;
+      if (run !== 2) { i += run; continue; }
+      let j = i + 2;
+      let dashed = false;
+      if (line[j] === "-") { dashed = true; j += 1; }
+      while (line[j] === " " || line[j] === "\t") j += 1;
+      let delim: string | null = null;
+      if (line[j] === "'" || line[j] === '"') {
+        const closing = line.indexOf(line[j], j + 1);
+        if (closing > 0) { delim = line.slice(j + 1, closing); j = closing + 1; }
+      } else {
+        const word = /^[A-Za-z_][A-Za-z0-9_]*/.exec(line.slice(j));
+        if (word) { delim = word[0]; j += word[0].length; }
+      }
+      if (delim) { heredocs.push({ delim, dashed }); i = j; continue; }
+    }
+    i += 1;
+  }
+
+  return { openQuote: quote, continues, heredocs };
+}
+
+/**
+ * Groups a fence body into the commands a shell would actually run, keeping
+ * every multi-line construct whole. An unterminated one at the end of the
+ * fence stays joined rather than being torn apart: one approval for one
+ * broken command is safer, and truer to what was asked, than N fragments that
+ * each run.
+ */
+export function fenceCommands(body: string): string[] {
+  const lines = body.split("\n");
+  const commands: string[] = [];
+  let i = 0;
+
+  while (i < lines.length) {
+    const parts = [lines[i]];
+    let scan = scanLine(lines[i], null);
+    let pending = [...scan.heredocs];
+    let quote = scan.openQuote;
+    let continues = scan.continues;
+    i += 1;
+
+    while (i < lines.length && (pending.length > 0 || quote || continues)) {
+      const line = lines[i];
+      parts.push(line);
+      i += 1;
+
+      if (pending.length > 0) {
+        const doc = pending[0];
+        if ((doc.dashed ? line.replace(/^\t+/, "") : line) === doc.delim) pending.shift();
+        continue;
+      }
+
+      scan = scanLine(line, quote);
+      quote = scan.openQuote;
+      continues = scan.continues;
+      if (scan.heredocs.length) pending = [...scan.heredocs];
+    }
+
+    const command = parts.join("\n").trim();
+    // A comment-only line is not a command; a heredoc body starting with `#`
+    // is already inside `parts` and never reaches this test.
+    if (command && !command.startsWith("#")) commands.push(command);
+  }
+
+  return commands;
+}
+
 /**
  * Extracts the commands a model explicitly asked to run.
  * Returns them in order, each already classified.
@@ -220,9 +354,7 @@ export function parseAgentCommands(text: string): AgentCommandRequest[] {
   RUN_FENCE.lastIndex = 0;
 
   while ((match = RUN_FENCE.exec(text)) !== null) {
-    for (const line of match[1].split("\n")) {
-      const command = line.trim();
-      if (!command || command.startsWith("#")) continue;
+    for (const command of fenceCommands(match[1])) {
       const { risk, reason } = classifyCommand(command);
       requests.push({ command, risk, reason });
     }

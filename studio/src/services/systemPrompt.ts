@@ -128,12 +128,19 @@ You have live network access through \`\`\`frontier-run. Real-time data — pric
     different value from the eval's fixture, so `edit-long-file` cannot be
     passed by copying it.
 
-    It is one line because `parseAgentCommands` splits a fence on newlines with
-    no heredoc awareness (agentCommands.ts:222), so the `python3 - <<'EDIT'`
-    form this block first showed would have been executed as five separate
-    commands: a bare `python3` reading EOF, then three shell syntax errors, and
-    nothing edited. The eval caught it — `edit-long-file` failed the run that
-    used a heredoc, which is the right verdict for a command that cannot run.
+    It was one line because `parseAgentCommands` split a fence on newlines with
+    no heredoc awareness, so the `python3 - <<'EDIT'` form this block first
+    showed would have been executed as five separate commands: a bare `python3`
+    reading EOF, then three shell syntax errors, and nothing edited. The eval
+    caught it — `edit-long-file` failed the run that used a heredoc, which is
+    the right verdict for a command that cannot run.
+
+    That parser bug is fixed (`fenceCommands`, agentCommands.ts), so a heredoc
+    now survives as one command and this example no longer HAS to be one line.
+    It stays one line anyway: the shape is what the model copies, the one-liner
+    measured 2/3 on `edit-long-file`, and a longer example costs characters in
+    a budget where 188 of them evicted a whole section. Change it only against
+    the eval.
   */
   const editInPlaceInstruction = `\n\n[TO CHANGE A FILE YOU HAVE NOT SEEN IN FULL]
 A path block replaces the file entirely, so one holding a fragment deletes every line you left out. Creating the file, or hold all of it? Path block. Otherwise edit in place, one command on one line:

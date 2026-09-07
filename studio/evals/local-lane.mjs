@@ -372,6 +372,133 @@ const CASES = [
       return `no search; commands=${ran.join(" | ") || "none"}`;
     },
   },
+  /*
+    ── The untouched capability gaps ────────────────────────────────────────
+    Four capabilities the lane has never had — structured Read/Grep, subagents,
+    todo/plan, an MCP client — baselined here BEFORE any of them is built,
+    because the lane's constraint is window and a new tool block is a cost
+    charged on every turn. A tool that does not move these numbers does not
+    ship.
+
+    Three of the four are measurable in one turn. The MCP client is not, and is
+    not faked: with no server configured there is nothing to call, so a case
+    would grade the model's willingness to invent one. That gap is recorded in
+    the handover, not papered over with a hollow green.
+
+    Baselined 2026-09-07, frontier-qwen2.5-coder-14b-8k, 8k window, 3 runs:
+
+      read-before-edit    0/3   a real gap, and destructive
+      search-repo-wide    3/3   no gap — `grep -rn` is a command
+      plan-multi-step     3/3   no gap — it held all four steps
+      wide-audit-scoping  3/3   no gap — it scoped the read itself
+
+    So three of the four capabilities this lane had queued are not gaps at all,
+    and building any of them would have spent window to buy nothing. That is
+    the useful half of the measurement, and it is why the cases stay: they are
+    the evidence for NOT building something.
+  */
+  {
+    /*
+      The Read gap, in the shape that costs something. `edit-long-file` hands
+      the model evidence and grades what it does with it; this hands it none.
+      A file it has never seen, and a change to make: the lane either looks
+      first or writes a path block, and a path block for an unseen file is a
+      deletion of everything in it.
+
+      DELIBERATELY RED, on the `web-fetch-url` precedent: this grades the
+      model's half, and the model's half did not move. Teaching the prompt
+      "you hold all of a file only if it is in this conversation; otherwise
+      read it first" — 188 characters into [TO CHANGE A FILE YOU HAVE NOT SEEN
+      IN FULL] — scored 0/3 unchanged, and cost more than nothing: it pushed
+      the whole `multi-agent` section out of the budget, so the prompt got
+      SMALLER (2,177 -> 2,056 tokens) while getting worse. `edit-long-file`
+      fell 2/3 -> 0/3 in the same run and recovered on the revert. Reverted.
+
+      That is the third time prose has bought this lane nothing, so the fix
+      belongs in the pipeline: the applier must refuse to overwrite a file the
+      conversation has never seen, the way it already refuses a truncating
+      rewrite (`isTruncatingRewrite`, liveEditService.ts). `isTruncatingRewrite`
+      does not cover this — it needs a base of 25+ lines and a block under half
+      of it, so an invented 6-line script over a real 20-line one passes.
+
+      Do not loosen this grader to make it green.
+    */
+    name: "read-before-edit",
+    history: [],
+    prompt: "add a --verbose flag to scripts/deploy.sh",
+    expect: (text) => {
+      const prompt = "add a --verbose flag to scripts/deploy.sh";
+      const clobber = parseWorkspaceEdits(text, { userPrompt: prompt }).find((e) => /deploy\.sh$/.test(e.path));
+      if (clobber) return `wrote ${clobber.path} unseen: ${clobber.content.split("\n").length} lines over a file it never read`;
+      const looked = commands(text).filter((c) => /deploy\.sh/.test(c) && /\b(cat|sed|head|tail|less|grep|rg|wc|awk)\b/.test(c));
+      return looked.length ? null : `never read it; commands=${commands(text).join(" | ") || "none"}`;
+    },
+  },
+  {
+    /*
+      The Grep gap. Nothing here needs a tool the lane lacks — `grep -rn` is a
+      command — so this case exists to find out whether a structured search
+      tool would buy anything at all. A pass means the shell already covers it
+      and the block would be pure window cost.
+    */
+    name: "search-repo-wide",
+    history: [],
+    prompt: "which files in this repo set the gateway's default port?",
+    expect: (text) => {
+      const ran = commands(text);
+      const searched = ran.filter((c) => /\b(grep|rg|ag|ack|find)\b/.test(c));
+      if (searched.some((c) => /-r|--recursive|-l\b|rg /.test(c) || /find/.test(c))) return null;
+      if (searched.length) return `searched but not repo-wide: ${searched[0]}`;
+      const guessed = /\b(server\/config\.js|gateway\.js|config\.js)\b/.test(text);
+      return guessed ? "answered from memory without searching" : `no search; commands=${ran.join(" | ") || "none"}`;
+    },
+  },
+  {
+    /*
+      The todo/plan gap. Four steps in one sentence, each independently
+      checkable. What a plan tool would buy is the tail: the failure it fixes
+      is a lane that does step one and forgets there were four. So the grade is
+      coverage, not ceremony — a reply that names or acts on three of the four
+      has held the task in its head, whatever shape it used to do it.
+    */
+    name: "plan-multi-step",
+    history: [],
+    prompt: "set up a new express server here: install express, write index.js with a /health route, add an npm start script, then run it",
+    expect: (text) => {
+      const body = text.toLowerCase();
+      const ran = commands(text).join(" \n ").toLowerCase();
+      const edits = parseWorkspaceEdits(text, { userPrompt: "express server" }).map((e) => e.path).join(" ");
+      const steps = {
+        install: /npm (i|install|add) .*express|yarn add express|pnpm add express/.test(ran) || /install express/.test(body),
+        index: /index\.js/.test(edits) || /index\.js/.test(body),
+        health: /\/health/.test(text),
+        start: /"start"\s*:|npm pkg set|npm start|start script/.test(text),
+      };
+      const done = Object.entries(steps).filter(([, v]) => v).map(([k]) => k);
+      return done.length >= 3 ? null : `covered ${done.length}/4 (${done.join(",") || "none"})`;
+    },
+  },
+  {
+    /*
+      The subagent gap, measured as the thing a subagent actually buys on an
+      8k window: somewhere else for a large result to land. The task is wide on
+      purpose. A lane with no subagent must protect its own window by scoping
+      the work — list first, search rather than read, bound the output — and
+      the failure this grades is the unbounded dump that arrives as evidence
+      and evicts the conversation that asked for it.
+    */
+    name: "wide-audit-scoping",
+    history: [],
+    prompt: "look through all the test files in studio/tests and tell me which ones cover the voice sidecar",
+    expect: (text) => {
+      const ran = commands(text);
+      if (!ran.length) return `no commands; said: ${text.replace(/\s+/g, " ").slice(0, 90)}`;
+      const dump = ran.find((c) => /\bcat\b/.test(c) && /\*/.test(c) && !/\|\s*(head|grep|tail|wc)/.test(c));
+      if (dump) return `unbounded dump into an 8k window: ${dump}`;
+      const scoped = ran.some((c) => /\b(grep|rg|ls|find)\b/.test(c));
+      return scoped ? null : `did not scope the read; commands=${ran.join(" | ")}`;
+    },
+  },
 ].filter((c) => !ONLY || c.name.includes(ONLY));
 
 /* ── The turn ──────────────────────────────────────────────────────────────── */

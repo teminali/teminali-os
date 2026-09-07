@@ -1618,6 +1618,85 @@ Still **zero prompt tokens**: the eval's prompt is 2,189 before and after, and
 `web-fetch-url` stays 3/3.
 
 
+### Three capabilities measured, and deliberately not built (`evals/local-lane.mjs`, 2026-09-07)
+
+The lane had four capability gaps queued: structured Read/Write/Edit/Grep,
+subagents, todo/plan, and an MCP client. Each was baselined before anything was
+built, as CLAUDE.md requires. Three of them turned out not to be gaps
+(frontier-qwen2.5-coder-14b-8k, 8k window, 3 runs a case):
+
+| case | score | what it means |
+| --- | --- | --- |
+| `search-repo-wide` | 3/3 | `grep -rn` is already a command; a search tool buys nothing |
+| `plan-multi-step` | 3/3 | it held all four steps of a four-step task |
+| `wide-audit-scoping` | 3/3 | it scoped a deliberately wide read without being told to |
+| `read-before-edit` | **0/3** | it overwrote an unseen file with an invention, every run |
+
+So three tool blocks were not written. On a lane whose constraint is window,
+that is the finding: a block costs characters on every turn, and `assemblePrompt`
+pays for it by dropping another section. This was measured in the same session —
+adding 188 characters to one block evicted the entire `multi-agent` section and
+made the prompt *smaller* (2,177 -> 2,056 tokens) and the lane worse
+(`edit-long-file` 2/3 -> 0/3, recovered on revert).
+
+The MCP client is not baselined and is not claimed either way: with no server
+configured there is nothing to call, so a case would only grade the model's
+willingness to invent one.
+
+`read-before-edit` stays red on purpose, as `web-search-open` does. It grades
+the model's half, and prose did not move it; the fix belongs in the applier,
+which already refuses a truncating rewrite but not a same-size invention —
+`isTruncatingRewrite` needs a 25-line base and a block under half of it, so an
+invented 6-line script over a real 20-line one is still committed today.
+
+### A fence is not always one command per line (`services/agentCommands.ts`, 2026-09-07)
+
+`parseAgentCommands` split a run fence on newlines and classified each line as
+its own command. A heredoc therefore did not merely fail — it *ran*. Measured
+on this repo before the fix, a four-line edit
+
+```frontier-run
+python3 - <<'EDIT'
+import pathlib
+p = pathlib.Path('server/config.js')
+p.write_text(p.read_text().replace('3000', '4310'))
+EDIT
+```
+
+parsed as **five** commands: a bare `python3` reading a stdin that would never
+close, three python statements handed to the shell, and the terminator. Five
+approval prompts, and nothing edited.
+
+This is why [TO CHANGE A FILE YOU HAVE NOT SEEN IN FULL] teaches a cramped
+one-line `python3 -c` form. The prompt was working around a parser bug, and
+paying prompt characters to do it — the comment at `systemPrompt.ts` recorded
+the workaround and named `agentCommands.ts:222` as the cause, for three
+sessions, without the cause being fixed.
+
+`fenceCommands` now groups a fence the way a shell would. Three constructs
+continue a command onto the next line: a heredoc (`<<`, `<<-`, quoted or bare
+delimiter), a trailing unescaped backslash, and an unclosed quote. State is
+tracked by scanning the line, not by regex, so `<<` inside a quoted string
+opens nothing, a `#` at a word boundary ends the scan, and `<<<` stays a
+herestring — the run of `<` is counted, because advancing one character at a
+time reads the tail of a `<<<` as a heredoc opener.
+
+Two properties worth keeping:
+
+- **A multi-line command is still classified by its riskiest line.** `segments`
+  already splits on `\n`, so a heredoc *body* is classified as a command too. A
+  body holding `rm -rf /` is blocked. That is deliberate and conservative: a
+  body is an obvious place to hide one, and refusing to write a suspicious
+  string costs a turn.
+- **An unterminated construct stays joined** rather than being torn apart. One
+  approval for one broken command is safer, and truer to what was asked, than N
+  fragments that each run. Fences only reach this function closed
+  (`closedFenceEnd`, `frontierEngine.ts:452`), so this is the rare case.
+
+`edit-long-file` measured 2/3 after the change, unchanged from before it: the
+model on this lane does not reach for a heredoc on its own, so the fix does not
+move the score. It removes a way to lose the operator's file when it does.
+
 ### The browser panel is a view, not a frame (`electron/browserView.cjs`, `services/browserView.ts`, `panels/BrowserPane.tsx`)
 
 The panel used to be an `<iframe>` in the shell's own renderer, and that
