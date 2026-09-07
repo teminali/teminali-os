@@ -317,6 +317,28 @@ win:
 # 150×57 — the script sets both, and a PNG or an alpha channel here renders as
 # a black rectangle rather than failing the build.
 nsis:
+  # Paying for delta updates this application cannot use.
+  #
+  # `isBuildDifferentialAware` is true by default, and it does two expensive
+  # things to the app-64.7z that no other platform pays for. It hands the
+  # archiver `configureDifferentialAwareArchiveOptions`, which forces
+  # `-ms=off` — every one of the 1,027 shipped files compressed on its own,
+  # with a 1 MB dictionary — and it then walks the finished archive to build a
+  # block map. macOS and Linux packaged the identical payload in 3m38s and
+  # 2m26s; Windows has never finished it at all, in any release.
+  #
+  # The whole point of that work is downloading only the changed blocks, and
+  # this updater does not: `server/updates.js` replaces the entire .dmg / .exe
+  # rather than patching in place. So it is spending the one platform-specific
+  # cost we have on a capability nothing reads. False makes the archive solid
+  # again and skips the block map (`NsisTarget.js` lines 66, 87 and 308).
+  #
+  # The other half of the same fix is `ELECTRON_BUILDER_COMPRESSION_LEVEL=1`
+  # in the release workflow, which was already there for v0.0.5 — the first
+  # Windows build ever to carry it. Whether level 1 alone would have finished
+  # is not known: it was still inside this step 35 minutes in, which is why
+  # this went in beside it rather than after it.
+  differentialPackage: false
   oneClick: false
   perMachine: false
   allowToChangeInstallationDirectory: true
