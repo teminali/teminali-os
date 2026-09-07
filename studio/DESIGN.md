@@ -1758,6 +1758,32 @@ what the model writes, and the applier changes only what reaches disk. Tested in
 a `.ts` extension, which Vite resolves and `node --test` does not, so nothing had
 ever unit-tested the applier.
 
+### An agent's thread belongs to the chat, not to the mount (`utils/chatSessions.ts`, `store/studioStore.ts`, `components/chat/StudioChat.tsx`, 2026-09-07)
+
+An agent CLI keeps its own resumable session, and the chat hands its id back on
+the next turn so the agent sees one continuous conversation rather than a series
+of one-shots that have each forgotten the last.
+
+That id lived in a `useRef`. A ref dies with the mount, so the thread was lost
+by anything that remounted the chat column, by switching to another chat and
+back, and by restarting the app — the operator's conversation continued and the
+agent's did not. It now lives on the `ChatSession` itself, which is persisted,
+so the two end together.
+
+Persisting it introduced a mismatch the ref could not have: a stored id can
+outlive the agent that made it. `agentSessionKey` — `engine:model` — is stored
+beside the id, and `resumableAgentSession` offers the id back only when that key
+still matches the agent selected now. A Codex thread cannot be resumed by Claude
+Code; resuming the wrong one fails the turn outright, while starting fresh only
+costs the agent its memory, so every uncertain case resolves to null: no agent
+selected, no such chat, no thread yet, or a thread belonging to another agent.
+Forgetting a thread clears the key with it, so a stale key can never match.
+
+The rule is pure and lives in `utils/chatSessions.ts` beside `applySessionSwitch`
+— the store and the component both call it, and `tests/chat-sessions.test.mjs`
+pins it, because none of the four ways of losing the thread were visible in the
+UI: the agent simply answered as though the conversation had just begun.
+
 ### The browser panel is a view, not a frame (`electron/browserView.cjs`, `services/browserView.ts`, `panels/BrowserPane.tsx`)
 
 The panel used to be an `<iframe>` in the shell's own renderer, and that

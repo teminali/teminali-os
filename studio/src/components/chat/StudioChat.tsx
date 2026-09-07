@@ -9,6 +9,7 @@ import { useRecorderDialogStore } from "../../store/recorderDialogStore";
 import { useVoice, type UseVoiceResult } from "../../hooks/useVoice";
 import { useAttachments } from "../../hooks/useAttachments";
 import { composePrompt } from "../../services/fileService";
+import { resumableAgentSession } from "../../utils/chatSessions";
 import { useCommandApproval } from "../../hooks/useCommandApproval";
 import { useAskOperator } from "../../hooks/useAskOperator";
 import { useSpokenApproval } from "../../hooks/useSpokenApproval";
@@ -107,10 +108,13 @@ export const StudioChat: React.FC<{
 
   const [input, setInput] = useState("");
   const abortRef = useRef<AbortController | null>(null);
-  // An agent CLI keeps its own resumable session. Holding it here makes the main
-  // conversation a continuous thread for the agent as well, not a series of
-  // one-shots that have each forgotten the last.
-  const agentSessionRef = useRef<string | null>(null);
+  // An agent CLI keeps its own resumable session. Holding it on the chat makes
+  // the conversation a continuous thread for the agent as well, not a series of
+  // one-shots that have each forgotten the last — and because the chat is
+  // persisted, that survives a remount, a switch away and back, and a restart.
+  const activeSessionId = useStudioStore((state) => state.activeSessionId);
+  const chatSessions = useStudioStore((state) => state.chatSessions);
+  const setAgentSession = useStudioStore((state) => state.setAgentSession);
   const scrollRef = useRef<HTMLDivElement>(null);
   const columnRef = useRef<HTMLElement>(null);
   const commandApproval = useCommandApproval();
@@ -126,12 +130,14 @@ export const StudioChat: React.FC<{
   // selected that is the agent, not the Frontier lane sitting behind it.
   const modelLabel = agentSelection?.label ?? profile.name;
 
-  // Switching agent — or leaving one — invalidates the session id: a Codex
-  // thread cannot be resumed by Claude Code, and resuming the wrong one fails
-  // rather than politely starting fresh.
-  useEffect(() => {
-    agentSessionRef.current = null;
-  }, [agentSelection?.engine, agentSelection?.model]);
+  // Which agent a stored thread belongs to. A Codex thread cannot be resumed by
+  // Claude Code, and resuming the wrong one fails rather than politely starting
+  // fresh, so the id is only offered back when the agent still matches.
+  const agentSessionKey = agentSelection ? `${agentSelection.engine}:${agentSelection.model}` : null;
+  const resumableAgentSessionId = useMemo(
+    () => resumableAgentSession(chatSessions, activeSessionId, agentSessionKey),
+    [chatSessions, activeSessionId, agentSessionKey],
+  );
 
   const messages = frontierMessages ?? [];
   const isEmpty = messages.length === 0;
@@ -508,9 +514,9 @@ export const StudioChat: React.FC<{
           // Only meaningful for the agent engines; the local engine ignores them.
           agentModel: agentSelection?.model ?? null,
           agentPermission: agentPermission ?? undefined,
-          agentSessionId: agentSessionRef.current,
+          agentSessionId: resumableAgentSessionId,
           onAgentSession: (sessionId) => {
-            agentSessionRef.current = sessionId;
+            setAgentSession(activeSessionId, sessionId, agentSessionKey);
           },
           skill: activeSkill
             ? {

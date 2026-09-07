@@ -43,3 +43,55 @@ export function applySessionSwitch<M, S extends StoredSession<M>>(
   const target = saved.find((session) => session.id === toId);
   return { sessions: saved, messages: target ? target.messages : [] };
 }
+
+/**
+ * A chat that has started an agent CLI thread, and which agent owns it.
+ *
+ * `agentSessionKey` is `engine:model`. It is stored beside the id because the
+ * id now outlives the mount that made it: before it was persisted, remounting
+ * cleared it and the mismatch could not arise, so nothing had to be written
+ * down. Persisted, it can — and resuming a Codex thread as Claude Code fails
+ * rather than politely starting fresh.
+ */
+export interface AgentThread {
+  id: string;
+  agentSessionId?: string | null;
+  agentSessionKey?: string | null;
+}
+
+/**
+ * The id to offer back to the agent for its next turn, or null to start fresh.
+ *
+ * Null whenever anything is uncertain: no agent selected, no such chat, no
+ * thread yet, or a thread belonging to a different agent. Starting fresh costs
+ * the agent its memory of the conversation; resuming the wrong thread fails
+ * the turn outright, so the tie goes to fresh.
+ */
+export function resumableAgentSession<S extends AgentThread>(
+  sessions: S[],
+  activeId: string,
+  key: string | null,
+): string | null {
+  if (!key) return null;
+  const session = sessions.find((entry) => entry.id === activeId);
+  if (!session || session.agentSessionKey !== key) return null;
+  return session.agentSessionId ?? null;
+}
+
+/**
+ * Records — or, with a null id, forgets — the agent thread belonging to one
+ * chat. Forgetting drops the key too, so a stale key can never outlive the id
+ * it described.
+ */
+export function rememberAgentSession<S extends AgentThread>(
+  sessions: S[],
+  activeId: string,
+  agentSessionId: string | null,
+  key: string | null,
+): S[] {
+  return sessions.map((session) =>
+    session.id === activeId
+      ? { ...session, agentSessionId, agentSessionKey: agentSessionId ? key : null }
+      : session,
+  );
+}

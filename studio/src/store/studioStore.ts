@@ -1,6 +1,6 @@
 import { create } from "zustand";
 import { persist, createJSONStorage } from "zustand/middleware";
-import { applySessionSwitch } from "../utils/chatSessions";
+import { applySessionSwitch, rememberAgentSession } from "../utils/chatSessions";
 import { settleRestoredTurns } from "../services/interruption";
 import { ModelProfileId, ModelProfile, SpecialistSkill, EditorTab, FileItem, ChatMessage, ToolCall } from "../types";
 import { purgeOllamaMemory } from "../services/aiService";
@@ -33,6 +33,22 @@ export interface ChatSession {
   workspace: string;
   timestamp: string;
   messages: ChatMessage[];
+  /**
+   * The agent CLI's own resumable thread for this chat, if one has been
+   * started. Held here rather than in the component so it survives a remount,
+   * a switch to another chat and back, and a restart of the app — the chat is
+   * one continuous thread for the agent for as long as it is one for the
+   * operator.
+   */
+  agentSessionId?: string | null;
+  /**
+   * Which agent that id belongs to, as `engine:model`. A Codex thread cannot
+   * be resumed by Claude Code, and resuming the wrong one fails rather than
+   * politely starting fresh, so the id is only offered back when this matches
+   * the agent selected now. Before the id was persisted a remount cleared it;
+   * now it outlives the mount, so the check has to be written down.
+   */
+  agentSessionKey?: string | null;
 }
 
 
@@ -292,6 +308,13 @@ interface StudioState {
   chatSessions: ChatSession[];
   activeSessionId: string;
   switchSession: (sessionId: string) => void;
+  /**
+   * Records — or clears — the agent CLI thread belonging to a chat.
+   *
+   * `key` is `engine:model` for the agent that owns the id; passing a null id
+   * forgets the thread, which is what switching agents does.
+   */
+  setAgentSession: (sessionId: string, agentSessionId: string | null, key: string | null) => void;
   /** Start a new conversation in the current workspace and switch to it. */
   newChatSession: () => void;
   /**
@@ -634,6 +657,12 @@ export const useStudioStore = create<StudioState>()(
       activeSessionId: "session-1",
       sessionHistory: [],
       sessionHistoryIndex: -1,
+
+      setAgentSession: (sessionId, agentSessionId, key) => {
+        set((state) => ({
+          chatSessions: rememberAgentSession(state.chatSessions, sessionId, agentSessionId, key),
+        }));
+      },
 
       switchSession: (sessionId) => {
         const state = get();
