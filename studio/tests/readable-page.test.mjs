@@ -87,3 +87,106 @@ test("a non-HTML command output is passed through byte for byte", async () => {
   });
   assert.equal(executed[0].output, json);
 });
+
+/*
+  Chrome, and the measurement behind it.
+
+  Stripping tags was only half the job: what came back was the whole *site* —
+  top nav, sidebar, footer, cookie line — with the page somewhere inside it. On
+  a corpus of six real pages fetched 2026-09-07 (nodejs.org, MDN, Wikipedia,
+  docs.python.org, github.com, blog.rust-lang.org), the offset at which the
+  answer appeared moved:
+
+    node    1,590 -> 1,208      mdn     2,421 ->   304
+    wiki    4,446 -> 1,441      pydocs  8,048 -> 7,290
+    github  4,080 -> 1,865      rust      211 ->    92
+
+  Against `toolResultChars` on an 8k window (2,621), that is five of six pages
+  carrying their answer into the model's window, up from three. The sixth is not
+  a chrome failure: docs.python.org genuinely spends 7,290 chars of prose before
+  the sentence in question, which no amount of stripping moves.
+
+  Fixtures below are padded past MIN_ROOT_CHARS, because a root thinner than
+  that is deliberately not believed.
+*/
+const filler = "The page's own words, repeated so the content root clears the floor. ".repeat(5);
+
+const withLandmarks = `<!DOCTYPE html><html><head><title>Releases — Example</title></head><body>`
+  + `<header><a href="/">Example</a><nav>Learn Download Blog Docs</nav></header>`
+  + `<aside><nav>Change page About Governance Branding</nav></aside>`
+  + `<main><h1>Releases</h1><p>${filler}</p><p>v24 is the current LTS.</p></main>`
+  + `<footer><nav>Cookie Policy Trademark Bylaws</nav><p>Copyright &copy; 2026.</p></footer>`
+  + `</body></html>`;
+
+test("readable page returns the page, not the site around it", () => {
+  const text = htmlToText(withLandmarks);
+  assert.match(text, /v24 is the current LTS\./, "the answer was dropped with the chrome");
+  for (const furniture of ["Learn Download Blog", "Change page", "Cookie Policy", "Copyright"]) {
+    assert.equal(text.includes(furniture), false, `${furniture} survived`);
+  }
+});
+
+test("readable page recovers the title that the chrome rules drop", () => {
+  // The h1 sits inside the <header> this file deletes, so <title> is the only
+  // thing left saying what the page is. Dropping both would be a regression.
+  const inHeader = `<!DOCTYPE html><html><head><title>Announcing Rust 1.83.0</title></head><body>`
+    + `<article><header><h1>Announcing Rust 1.83.0</h1></header><p>${filler}</p></article></body></html>`;
+  assert.match(htmlToText(inHeader), /^Announcing Rust 1\.83\.0\n/);
+});
+
+test("readable page does not say the title twice", () => {
+  const text = htmlToText(withLandmarks);
+  assert.equal(text.indexOf("Releases — Example"), 0);
+  assert.equal(text.indexOf("Releases — Example", 1), -1, "the title was repeated");
+});
+
+test("an attribute value is not part of the page's words", () => {
+  // A `>` inside a quoted attribute used to end the tag match early and spill
+  // the rest of the value into the text. Wikipedia's data-mw payloads carry
+  // whole templates, so this leaked 1,274 chars of wikitext before the article.
+  const leaky = `<!DOCTYPE html><html><head><title>T</title></head><body><main>`
+    + `<div data-mw='{"wt":"{{cite web | url=https://x/tags?after=v0>NOT_PROSE}}"}'>`
+    + `<p>${filler}</p></div></main></body></html>`;
+  const text = htmlToText(leaky);
+  assert.equal(text.includes("NOT_PROSE"), false, "an attribute value reached the model as text");
+  assert.equal(text.includes("cite web"), false, "an attribute value reached the model as text");
+  assert.match(text, /The page's own words/);
+});
+
+test("a nested element does not end its parent early", () => {
+  // Balanced matching is the whole point: a non-greedy regex would stop at the
+  // inner </nav> and leave the outer nav's tail behind as text.
+  const nested = `<!DOCTYPE html><html><head><title>T</title></head><body>`
+    + `<nav>Outer start<nav>Inner links</nav>Outer tail</nav>`
+    + `<main><p>${filler}</p></main></body></html>`;
+  const text = htmlToText(nested);
+  assert.equal(text.includes("Outer tail"), false, "the outer nav ended at the inner close");
+  assert.equal(text.includes("Inner links"), false);
+});
+
+test("every article is kept, so an index does not collapse to its first entry", () => {
+  const index = `<!DOCTYPE html><html><head><title>T</title></head><body>`
+    + `<article><p>First post. ${filler}</p></article>`
+    + `<article><p>Second post.</p></article></body></html>`;
+  const text = htmlToText(index);
+  assert.match(text, /First post\./);
+  assert.match(text, /Second post\./);
+});
+
+test("an empty content root is not believed", () => {
+  // A client-rendered page ships an empty <main>. Trusting it would turn a thin
+  // result into an empty one, so the whole document is used instead.
+  const clientRendered = `<!DOCTYPE html><html><head><title>T</title></head><body>`
+    + `<main id="root"></main><div id="fallback"><p>${filler}</p></div></body></html>`;
+  assert.match(htmlToText(clientRendered), /The page's own words/);
+});
+
+test("numeric entities decode, in the body and in the title", () => {
+  const numeric = `<!DOCTYPE html><html><head><title>json &#8212; JSON encoder</title></head>`
+    + `<body><main><p>${filler}</p><p>A &#160;gap, a &#x2014; dash, and &#99999999; left alone.</p>`
+    + `</main></body></html>`;
+  const text = htmlToText(numeric);
+  assert.match(text, /^json — JSON encoder\n/);
+  assert.match(text, /a — dash/);
+  assert.match(text, /&#99999999; left alone/, "a number that is not a character was decoded anyway");
+});

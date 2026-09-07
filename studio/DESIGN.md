@@ -1549,13 +1549,12 @@ Two consequences worth stating plainly rather than discovering later:
    strip, so an HTML document accumulates to `HTML_CEILING_CHARS` (512,000) and
    everything else still stops at the caller's `maxOutputChars`. That bound is
    what keeps a fetch from becoming a memory bug.
-2. **It is a large improvement, not a complete one.** The lane's real allowance
+2. **It was a large improvement, not a complete one.** The lane's real allowance
    is `toolResultChars` — 2,621 chars on an 8k window, 10,485 on 32k. On 32k the
-   whole page now arrives. On 8k the prose arrives but the release table (first
-   version number at offset 5,010) still falls outside the cut. Closing that
-   means dropping site chrome — this page spends its first 481 chars on nav
-   links — which is a heuristic that earns its place against a measurement, not
-   a guess bolted on now.
+   whole page arrived even then; on 8k the prose arrived and the site's furniture
+   ate the budget ahead of it. Dropping that chrome is the next section, and it
+   was built the way this one asks for — against a measurement, on a corpus, not
+   as a guess bolted on here.
 
 This costs **zero prompt tokens**: measured, the eval's prompt stayed at 2,189
 tokens across the change. That is the point of fixing it here. The window, not
@@ -1570,6 +1569,53 @@ dropped on a player turn.
 purpose — closing it needs an operator-supplied API key, which is a product
 decision. `r.jina.ai` (read a URL, no key) does work and is the fallback if
 local stripping proves insufficient.
+
+
+### The page is not the site (`services/readablePage.ts`, 2026-09-07)
+
+Stripping tags was half the job. What came back was the whole *site* — top nav,
+sidebar, footer, cookie line — with the page somewhere inside it, and on an 8k
+window the lane's 2,621-char allowance was spent on furniture before the answer
+began. Three rules, each measured against a corpus of six real pages fetched
+2026-09-07, rather than against the one page that started this:
+
+1. **Take the page's own word for where it is.** `<main>`, then `<article>` —
+   every match, so an index of posts does not collapse to its first entry — then
+   `role="main"` for documents that predate the element. A root thinner than 200
+   chars is not believed: a client-rendered page ships an empty `<main>`, and
+   trusting it would turn a thin result into an empty one, so the whole document
+   is used instead.
+2. **Drop the furniture.** `<nav>`, `<aside>`, `<footer>` and `<header>`, each
+   matched to its *balancing* close tag — these nest, and a non-greedy regex
+   ends the outer element inside the inner one. `<header>` is on the list only
+   because the `<title>` is prepended separately; the two rules are a pair, and
+   dropping `header` without the prepend would lose the heading.
+3. **An attribute value is not prose.** `<[^>]+>` ends at the first `>`, so a tag
+   carrying one inside a quoted attribute ended early and spilled the rest of the
+   value out as if it were the page's own words. Wikipedia's `data-mw` payloads
+   hold whole templates: 1,274 chars of raw wikitext arrived ahead of the lead
+   paragraph. A quoted run may not contain `<`, so an unbalanced quote fails near
+   where it started instead of swallowing the document, and the old catch-all
+   still runs behind it.
+
+The offset at which the answer appears, before and after:
+
+| page | before | after | against a 2,621-char cut |
+| --- | ---: | ---: | --- |
+| nodejs.org release list | 1,590 | 1,208 | fits, both |
+| MDN `Array.prototype.map` | 2,421 | 304 | fits, both |
+| Wikipedia "Node.js" | 4,446 | **1,441** | now fits |
+| docs.python.org `json` | 8,048 | 7,290 | still outside |
+| github.com `nodejs/node` | 4,080 | **1,865** | now fits |
+| blog.rust-lang.org 1.83.0 | 211 | 92 | fits, both |
+
+Five of six now carry the answer into the model's window, up from three. The
+sixth is not a chrome failure and is not one to chase: that page genuinely spends
+7,290 chars of prose before the sentence asked about, which no amount of
+stripping moves — the window is the limit there, not the reader.
+
+Still **zero prompt tokens**: the eval's prompt is 2,189 before and after, and
+`web-fetch-url` stays 3/3.
 
 
 ### The browser panel is a view, not a frame (`electron/browserView.cjs`, `services/browserView.ts`, `panels/BrowserPane.tsx`)
