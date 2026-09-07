@@ -1774,6 +1774,57 @@ already narrowed to avoid. `loadWorthNaming` holds the rule and
 Only the local lane has a cold start; an agent CLI reports zero and the field is
 dropped like every other unmeasured one.
 
+### The lane the operator is talking to can look at the screen (`services/screenToolCalls.ts`, `services/systemPrompt.ts`, `services/frontierEngine.ts`, 2026-09-07)
+
+The screen assistant was reachable two ways: by an agent CLI, over the run-token
+bridge in `server/gateway.js`, and by the operator's own clicks. It was not
+reachable by the Studio chat's local lane — the lane the operator is usually
+talking to. So "what's this error on my screen?" went to something that cannot
+see the screen, and was answered by guessing, or by a shell command hunting for
+a log that may not exist.
+
+`screen` is the fifth fence in the family, shaped like `ask`, `player`,
+`video-tool` and `frontier-run`: an explicit opt-in tag, a forgiving list for a
+half-remembered one, execution through an injected capability, and the real
+observation handed back before the model answers again. It has one action,
+`look`. There is no acting counterpart — a local model that can click is a
+different decision from one that can look, and the ladder in §5 is where that
+decision belongs.
+
+**Measured, as CLAUDE.md requires** (frontier-qwen2.5-coder-14b-8k, 8k window,
+2 runs a case):
+
+| | passes | note |
+| --- | --- | --- |
+| baseline, 23 cases | 43/46 | five sections already dropping on a player turn |
+| with the block, 25 cases | 46/50 | `screen-look` 2/2, `screen-not-for-repo` 2/2 |
+
+The percentage fell from 93% to 92% and that is not a regression: the two extra
+failures are `read-before-edit`, red by design (below), and `wide-audit-scoping`,
+which the same run settled at **5/5** on a re-measure. The number that matters is
+that **the 23 existing cases were byte-identical in prompt tokens** — 2186 for
+`wide-audit-scoping` in both runs. The block costs them nothing because it is
+opt-in: `canSeeScreen` is false unless the host actually has an eye, so a
+machine without Accessibility never hears about a fence whose every call would
+fail, and never pays window for it.
+
+`screen-not-for-repo` is the case that guards the cost. The block that buys the
+win is the same block that can hijack every turn, so a sentence of it is spent
+on what *not* to look at, and the eval grades a repository question going to
+`frontier-run` rather than to a screenshot.
+
+What reaches the model is `summariseScreen`, not the assistant's own
+`observationBlock`: that one is written for a 120-element inventory, and this
+lane has 8k. The summary keeps the frontmost application, the window title, the
+scene description and the first twelve *named* controls — an element with
+neither a label nor a value tells the model nothing and costs it a line. When
+the list is cut it says so, because a model told "12 elements" while looking at
+a summary of 300 will report an absence it never observed, which is the same
+invention this capability exists to remove.
+
+One look a turn, and one per reply. The display does not change enough between
+two replies in the same turn to be worth a second screenshot's window.
+
 ### An agent's thread belongs to the chat, not to the mount (`utils/chatSessions.ts`, `store/studioStore.ts`, `components/chat/StudioChat.tsx`, 2026-09-07)
 
 An agent CLI keeps its own resumable session, and the chat hands its id back on
@@ -2071,11 +2122,10 @@ number they can be asked for rather than a knife. Pinned in
 
 **The local-lane eval** (`evals/local-lane.mjs`, `npm run eval:local`). "Better
 results" has no completion date without a fixed set and a number, so the lane
-has one: sixteen turns — play, pause, louder, what's playing, what's on the
-timeline, disk space, git branch, a live price with and without a file open in
-the player, hello, your name, write a file, rotate a clip by id, ask for a
-choice with and without the player, and *don't* ask for something measurable —
-each graded by the code's own
+has one: twenty-five turns, from play/pause/louder and what's on the timeline
+through disk space, a git branch and a live price, to writing a file, editing a
+long one, fetching a page, asking the operator for a choice, *not* asking for
+something measurable, and looking at the screen — each graded by the code's own
 parsers, so a fence the harness accepts is one the engine would have run. The
 prompt is `composeSystemPrompt` (`services/systemPrompt.ts`), the function the
 engine calls, pulled out of the engine for exactly this reason: a copy would

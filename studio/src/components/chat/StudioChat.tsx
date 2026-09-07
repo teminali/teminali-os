@@ -10,6 +10,7 @@ import { useVoice, type UseVoiceResult } from "../../hooks/useVoice";
 import { useAttachments } from "../../hooks/useAttachments";
 import { composePrompt } from "../../services/fileService";
 import { resumableAgentSession } from "../../utils/chatSessions";
+import { summariseScreen } from "../../services/screenToolCalls";
 import { useCommandApproval } from "../../hooks/useCommandApproval";
 import { useAskOperator } from "../../hooks/useAskOperator";
 import { useSpokenApproval } from "../../hooks/useSpokenApproval";
@@ -528,6 +529,18 @@ export const StudioChat: React.FC<{
             : null,
           approveCommand: commandApproval.approveCommand,
           askOperator: askOperator.askOperator,
+          /*
+            The screen, for the lane the operator is actually talking to.
+
+            Offered only when this machine has an eye: `canSee` is false until
+            Accessibility is granted, and with it false the engine never
+            advertises the fence, so the prompt does not pay window for a
+            capability whose every call would fail. The summary is deliberately
+            short — see `summariseScreen`.
+          */
+          lookAtScreen: assistant.canSee
+            ? async (question: string) => summariseScreen(await assistant.look(true), question)
+            : undefined,
           /*
             The agent driving the workspace from the chat, not only from a
             panel tab.

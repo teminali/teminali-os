@@ -81,6 +81,10 @@ export interface UseAssistantResult {
   phase: AssistantPhase;
   settings: AssistantSettings;
   capabilities: AssistantCapabilities | null;
+  /** True when this machine actually has an eye — supported and trusted. */
+  canSee: boolean;
+  /** Observes the display, reusing a look that is recent enough to still be true. */
+  look: (force?: boolean) => Promise<Observation>;
   turn: AssistantTurn | null;
   observation: Observation | null;
   /** True when the panel or overlay should be on screen. */
@@ -612,7 +616,15 @@ export function useAssistant(): UseAssistantResult {
     if (voice && voice.state === "idle") setPhase("idle");
   }, [phase]);
 
+  /*
+    Whether there is an eye at all. The chat lane's screen block is advertised
+    on this, so a machine that has not granted Accessibility never hears about
+    a fence whose every call would fail — and never pays its window for one.
+  */
+  const canSee = Boolean(capabilities?.supported && capabilities.accessibilityTrusted);
+
   return {
+    canSee,
     phase,
     settings,
     capabilities,
@@ -633,5 +645,9 @@ export function useAssistant(): UseAssistantResult {
     refreshCapabilities,
     requestPermissions,
     point,
+    // Exposed so the chat lane can look too. The screen was reachable by an
+    // agent CLI and by the operator's own clicks, but not by the lane they are
+    // usually talking to — see services/screenToolCalls.ts.
+    look,
   };
 }

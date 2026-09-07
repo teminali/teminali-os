@@ -30,6 +30,13 @@ export interface SystemPromptInput {
    * before this existed — the same contract the editor and player blocks keep.
    */
   canAsk?: boolean;
+  /**
+   * Whether the host can observe the display for this lane. False for a
+   * headless caller, the arena, and a machine where the screen assistant has
+   * not been granted Accessibility — telling a model about an eye it does not
+   * have buys nothing and costs window.
+   */
+  canSeeScreen?: boolean;
   /** The lane's system-prompt allowance from contextBudget.ts. */
   budgetChars: number;
 }
@@ -188,6 +195,19 @@ git branch --show-current
     whoever trims the editor catalogue, which is 4,062 characters — 43% of this
     budget — and is the section actually crowding this one out.
   */
+  /*
+    The screen, for the lane the operator is actually talking to.
+
+    Deliberately the shortest tool block in this file. The eval's baseline
+    showed five sections already dropping on a player turn, so every character
+    here is taken from something else — and the two sentences that earn their
+    place are "you can look" and "looking is for the screen, not the repo". The
+    second is the one the eval grades: a lane that answers a repo question by
+    screenshotting has been made worse, not better.
+  */
+  const screenInstruction = !input.canSeeScreen ? "" : `\n\n[THE SCREEN]
+You can see the operator's display. Emit a \`\`\`screen fence holding {"action":"look","question":"what you need to know"}; a real observation is returned to you before you answer again. Use it for what is ON SCREEN — an error in another app, a window the operator is pointing at, "this", "here", "what am I looking at". Never use it to answer a question about the repository or the filesystem: those are \`\`\`frontier-run. Looking observes and changes nothing; you cannot click or type.`;
+
   const askInstruction = !input.canAsk ? "" : `\n\n[ASK THE OPERATOR]
 When a choice is genuinely the operator's — a preference, a trade-off, a direction you cannot measure — put it to them in an \`\`\`ask fence instead of guessing, and instead of listing options in prose. One JSON object, or an array of up to 4 of them for a stepped set: {"question":"...","header":"Short chip","options":[{"label":"...","description":"..."}],"multiSelect":false}. Two to four options, each a real alternative; their answer is returned to you before you answer again, and it is then settled — never ask it twice.
 NEVER ask for anything you can find out. A branch, a file's contents, a version, a price: run the command. A question you could have answered yourself spends the operator's attention and tells them you did not look.
@@ -252,6 +272,7 @@ Two sensible ways to go here, and it is your call.
       { name: "live-data", text: liveDataInstruction },
       { name: "step-explanation", text: stepExplanationInstruction },
       { name: "ask", text: askInstruction },
+      { name: "screen", text: screenInstruction },
       { name: "conversational", text: conversationalInstruction },
       { name: "tool-execution-mandate", text: toolExecutionMandate },
       { name: "completeness", text: CompletenessEngine.mandate() },

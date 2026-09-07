@@ -25,6 +25,7 @@ import { parseVideoToolCalls } from "../src/services/videoToolCalls.ts";
 import { buildCommandEvidence, parseAgentCommands } from "../src/services/agentCommands.ts";
 import { parseWorkspaceEdits } from "../src/services/liveEditProtocol.ts";
 import { askQuestionsFrom, parseAskToolCalls } from "../src/services/askToolCalls.ts";
+import { parseScreenToolCalls } from "../src/services/screenToolCalls.ts";
 
 const { videoToolSummaries } = await import("./.build/tool-manifest.mjs");
 
@@ -504,6 +505,40 @@ const CASES = [
       return scoped ? null : `did not scope the read; commands=${ran.join(" | ")}`;
     },
   },
+  {
+    /*
+      The screen gap. The assistant can see the display from an agent CLI and
+      from the operator's own clicks, but not from the lane the operator is
+      usually talking to — so "what's this error on my screen?" was answered by
+      a lane that cannot see it. This case grades the win.
+    */
+    name: "screen-look",
+    canSeeScreen: true,
+    history: [],
+    prompt: "there's an error dialog on my screen — what does it say?",
+    expect: (text) => {
+      if (parseScreenToolCalls(text).length === 0) {
+        return `no screen fence; commands=${commands(text).join(" | ") || "none"}`;
+      }
+      return null;
+    },
+  },
+  {
+    /*
+      And the cost. A lane that answers a repository question by screenshotting
+      has been made worse, not better — the block that buys the case above is
+      the same block that can hijack every turn. This is its regression test,
+      and it is why the instruction spends a sentence on what NOT to look at.
+    */
+    name: "screen-not-for-repo",
+    canSeeScreen: true,
+    history: [],
+    prompt: "which files in this repo set the gateway's default port?",
+    expect: (text) => {
+      if (parseScreenToolCalls(text).length > 0) return "looked at the screen to answer a repo question";
+      return commands(text).length ? null : `no command either; said: ${text.replace(/\s+/g, " ").slice(0, 90)}`;
+    },
+  },
 ].filter((c) => !ONLY || c.name.includes(ONLY));
 
 /* ── The turn ──────────────────────────────────────────────────────────────── */
@@ -522,6 +557,9 @@ function systemFor(c) {
     freshConversation: c.history.length === 0,
     // The host the eval stands in for has a picker on screen; a case opts out.
     canAsk: c.canAsk !== false,
+    // The screen block is opt-in per case: only a host with Accessibility
+    // granted has an eye, and most cases stand in for one that does not.
+    canSeeScreen: c.canSeeScreen === true,
     budgetChars: UNBUDGETED ? Number.MAX_SAFE_INTEGER : budget.systemPromptChars,
   });
 }

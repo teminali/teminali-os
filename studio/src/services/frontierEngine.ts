@@ -14,6 +14,7 @@ import { budgetFor, fitHistory } from "./contextBudget";
 import { composeSystemPrompt } from "./systemPrompt";
 import { CompletenessEngine } from "./completenessEngine";
 import { DiligenceEngine } from "./diligenceEngine";
+import { parseScreenToolCalls, screenToolCall } from "./screenToolCalls";
 import { parseWorkspaceEdits } from "./liveEditProtocol";
 import { GatewayClient, GatewayError } from "./gatewayClient";
 import { RuntimeTelemetryService } from "./runtimeTelemetryService";
@@ -97,6 +98,16 @@ export interface EngineCapabilities {
    * keep, because a headless caller has nobody to ask.
    */
   askOperator?: AskExecutor;
+  /**
+   * Observes the operator's display and returns what is on it.
+   *
+   * Absent — a headless caller, the arena, a machine without Accessibility —
+   * the prompt never advertises the fence and the lane behaves as it did
+   * before, the same contract every other block here keeps. Read-only by
+   * construction: there is no acting counterpart, because a local model that
+   * can click is a different decision from one that can look.
+   */
+  lookAtScreen?: (question: string) => Promise<string>;
 }
 
 /** One line of the editor tool catalogue, already flattened by the host. */
@@ -260,6 +271,7 @@ async function streamFromOllama(
   if (capabilities.runVideoTool) stopTags.push("video-tool");
   if (capabilities.runPlayer) stopTags.push("player-tool");
   if (capabilities.askOperator) stopTags.push("ask");
+  if (capabilities.lookAtScreen) stopTags.push("screen");
   let groundedPrompt = userPrompt;
   if (attachedImages.length > 0) {
     const visionToolId = `tool-vision-${id}`;
@@ -372,6 +384,7 @@ CRITICAL VISUAL DESIGN RULES:
     origin,
     freshConversation: isFreshConversation,
     canAsk: Boolean(capabilities.askOperator),
+    canSeeScreen: Boolean(capabilities.lookAtScreen),
     budgetChars: budget.systemPromptChars,
   });
 
@@ -507,6 +520,9 @@ CRITICAL VISUAL DESIGN RULES:
     let playerTurns = 0;
     /** Questions put to the operator this exchange. */
     let askTurns = 0;
+    // One look a turn. The display does not change enough between two replies
+    // in the same turn to be worth a second screenshot's window.
+    let looked = false;
     let correctionTurns = 0;
     let deniedFeedback = 0;
     /** Times this exchange has been told it is retrying its way around a wall. */
@@ -663,6 +679,39 @@ CRITICAL VISUAL DESIGN RULES:
             // correction one — the same as a command's output.
             investigated = true;
           }
+        }
+      }
+
+      /*
+        The screen, once a turn.
+
+        A look is an observation like a command's output — evidence the model
+        could not have measured — so it buys an investigation turn. One per
+        turn and one per reply (`parseScreenToolCalls` keeps only the first):
+        a second screenshot is of the same display a moment later, and it costs
+        a window that the eval showed is already dropping five sections.
+
+        A look that fails still returns a sentence. Returning nothing would
+        leave the model to answer a question about a screen it never saw
+        without knowing that it never saw it — which is the invention this
+        whole capability exists to remove.
+      */
+      if (capabilities.lookAtScreen && !looked) {
+        const [look] = parseScreenToolCalls(turnText);
+        if (look) {
+          const call = screenToolCall(look);
+          callbacks.onToolCall?.(call);
+          let seen: string;
+          try {
+            seen = await capabilities.lookAtScreen(look.question ?? "");
+          } catch (err) {
+            seen = `The screen could not be read: ${err instanceof Error ? err.message : String(err)}`;
+          }
+          callbacks.onToolCall?.({ ...call, status: "completed", result: seen });
+          const evidence = `[SCREEN]\n${seen}`;
+          observation = observation ? `${observation}\n\n${evidence}` : evidence;
+          looked = true;
+          investigated = true;
         }
       }
 

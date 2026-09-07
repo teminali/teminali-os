@@ -56,6 +56,11 @@ export interface StreamRequestOptions {
    * a host with no picker on screen must not advertise one.
    */
   askOperator?: AskExecutor;
+  /**
+   * Observes the operator's display. Absent on a host without an eye, and the
+   * engine gates the prompt block on it — see services/screenToolCalls.ts.
+   */
+  lookAtScreen?: (question: string) => Promise<string>;
   /** Claude Code / Codex only: the CLI session to resume, so a tab is a thread. */
   agentSessionId?: string | null;
   /** Claude Code / Codex only: how much the CLI may do without asking. */
@@ -109,8 +114,15 @@ export interface StreamRequestOptions {
  * it: the arena runs the same engine in a sandbox, and a module-level singleton
  * could only ever point at one place.
  */
-function studioCapabilities(workingDirectory?: string, askOperator?: AskExecutor): EngineCapabilities {
+function studioCapabilities(
+  workingDirectory?: string,
+  askOperator?: AskExecutor,
+  lookAtScreen?: (question: string) => Promise<string>,
+): EngineCapabilities {
   return {
+    // Same gate as the picker below: only a host with an eye learns the fence
+    // exists, so nothing pays window for a capability it does not have.
+    ...(lookAtScreen ? { lookAtScreen } : {}),
     // Only present when the host mounted a picker; the engine gates the prompt
     // block on it, so a headless caller never learns the fence exists.
     ...(askOperator ? { askOperator } : {}),
@@ -242,7 +254,7 @@ export class AIService {
           options.signal,
           options.skill,
           options.approveCommand,
-          studioCapabilities(options.workingDirectory, options.askOperator),
+          studioCapabilities(options.workingDirectory, options.askOperator, options.lookAtScreen),
           options.origin ?? "text",
         );
         return;

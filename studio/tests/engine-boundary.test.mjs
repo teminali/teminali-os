@@ -68,7 +68,10 @@ test("the host adapter supplies capabilities and owns host integrations", async 
   // shape it supplies them in. It became a factory so the benchmark arena can
   // hand the same engine a sandbox directory to work in; a module-level
   // singleton could only ever point at one place.
-  assert.match(adapter, /function studioCapabilities\([^)]*\): EngineCapabilities/);
+  // `[\s\S]` rather than `.`: the parameter list is multi-line once the host
+  // supplies more than a couple of capabilities, and the claim being pinned is
+  // that the adapter builds them — not how the signature is wrapped.
+  assert.match(adapter, /function studioCapabilities\([\s\S]*?\): EngineCapabilities/);
   assert.match(adapter, /runCommand: \(command, options\) =>\s*TerminalService\.run/);
   // The editor is a host integration too, and since P2 it is the one that
   // matters: the engine is handed an executor, and only the host imports the
