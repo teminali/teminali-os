@@ -210,7 +210,7 @@ async function transcode({ root, relativePath, start, method, signal, request, l
 
   const { spawn } = require("child_process");
   const args = transcodeArgs({ input: resolved.path, start, plan });
-  const child = spawn(tools.ffmpeg, args, { stdio: ["ignore", "pipe", "pipe"] });
+  const child = spawn(tools.ffmpeg, args, { stdio: ["ignore", "pipe", "pipe"], windowsHide: true });
   const id = ++encoderId;
   encoders.set(id, child);
 

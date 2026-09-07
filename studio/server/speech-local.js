@@ -306,7 +306,7 @@ async function ensureServer(status) {
     "--port", String(SERVER_PORT),
     "-t", threads,
     "-bs", "5", "-bo", "5",
-  ], { stdio: ["ignore", "ignore", "pipe"], env: withBinPaths(process.env) });
+  ], { stdio: ["ignore", "ignore", "pipe"], env: withBinPaths(process.env), windowsHide: true });
   const entry = { child, model: status.model, dead: false, url: `http://127.0.0.1:${SERVER_PORT}/inference` };
   child.on("exit", () => { entry.dead = true; if (server === entry) server = null; });
   child.stderr?.on("data", () => undefined);
@@ -367,6 +367,7 @@ export async function transcribeLocal(buffer, { language = "auto", maxSegmentCha
       // cheaper and more predictable than asking whisper to cope.
       await run(status.ffmpeg, ["-y", "-i", inputPath, "-ar", "16000", "-ac", "1", "-c:a", "pcm_s16le", wavPath], {
         timeout: 30_000,
+        windowsHide: true,
       });
     } else {
       throw Object.assign(new Error("ffmpeg is required to transcribe compressed audio. `brew install ffmpeg`."), {
@@ -428,7 +429,7 @@ export async function transcribeLocal(buffer, { language = "auto", maxSegmentCha
         ...(maxSegmentChars > 0 ? ["-ml", String(maxSegmentChars)] : []),
         "-t", String(Math.max(2, Math.min(8, os.cpus().length - 2))),
       ],
-      { timeout: TRANSCRIBE_TIMEOUT_MS, maxBuffer: 16 * 1024 * 1024 },
+      { timeout: TRANSCRIBE_TIMEOUT_MS, maxBuffer: 16 * 1024 * 1024, windowsHide: true },
     );
 
     const raw = await readFile(`${outputBase}.json`, "utf8");
@@ -636,7 +637,7 @@ export async function speakLocal(text, { language = "en-US", voice = null, rate 
     if (chosen) args.push("-v", chosen);
     args.push(text);
 
-    await run(status.binary, args, { timeout: SPEAK_TIMEOUT_MS });
+    await run(status.binary, args, { timeout: SPEAK_TIMEOUT_MS, windowsHide: true });
     return { body: await readFile(outputPath), contentType: "audio/wav", voice: chosen };
   } finally {
     await rm(directory, { recursive: true, force: true }).catch(() => undefined);

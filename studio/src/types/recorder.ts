@@ -160,6 +160,28 @@ export interface TakeManifest {
   samples: CursorSample[];
 }
 
+export type LiveStreamService = "youtube" | "twitch" | "facebook" | "custom";
+
+export interface LiveStreamConfig {
+  enabled: boolean;
+  service: LiveStreamService;
+  rtmpUrl: string;
+  streamKey: string;
+  bitrateKbps: number;
+  saveLocal: boolean;
+}
+
+export type LiveStreamState = "idle" | "connecting" | "live" | "reconnecting" | "error" | "ended";
+
+export interface LiveStreamStatus {
+  active: boolean;
+  status: LiveStreamState;
+  error?: string;
+  bytesSent?: number;
+  durationMs?: number;
+  fps?: number;
+}
+
 /** Stop, pause or mark, arriving from the floating bar or a global shortcut. */
 export interface RecorderCommand {
   action?: "stop" | "pause" | "mark";
@@ -182,6 +204,10 @@ export interface RecorderBarState {
   markCount: number;
   /** The watchdog's message while a take is recording nothing. */
   fault: string | null;
+  /** True when broadcasting to a live streaming destination like YouTube. */
+  isLive?: boolean;
+  /** Real-time status of the live stream connection. */
+  liveStatus?: LiveStreamState | null;
 }
 
 export interface RecorderBridge {
@@ -195,10 +221,15 @@ export interface RecorderBridge {
     streams: ("screen" | "camera")[];
     displayId: number | null;
     hideWindow: boolean;
+    live?: LiveStreamConfig;
   }) => Promise<BeginResult>;
   chunk: (
     sessionId: string,
     stream: "screen" | "camera",
+    bytes: Uint8Array,
+  ) => Promise<{ ok: boolean; error?: string; bytes?: number }>;
+  liveChunk: (
+    sessionId: string,
     bytes: Uint8Array,
   ) => Promise<{ ok: boolean; error?: string; bytes?: number }>;
   pause: (sessionId: string, paused: boolean) => Promise<{ ok: boolean }>;
@@ -223,6 +254,10 @@ export interface RecorderBridge {
 
   publishState: (state: RecorderBarState) => Promise<boolean>;
   barCommand: (action: "stop" | "pause" | "mark") => Promise<boolean>;
+  testLiveConnection: (options: {
+    rtmpUrl: string;
+    streamKey: string;
+  }) => Promise<{ ok: boolean; message?: string; error?: string }>;
 
   /** Returns an unsubscribe function. */
   onCommand: (listener: (command: RecorderCommand) => void) => () => void;
@@ -230,4 +265,6 @@ export interface RecorderBridge {
   onState: (listener: (state: RecorderBarState) => void) => () => void;
   /** How far through the remux. Returns an unsubscribe function. */
   onConvert: (listener: (progress: RecorderConvertProgress) => void) => () => void;
+  /** Live stream status updates. Returns an unsubscribe function. */
+  onLiveStatus: (listener: (status: LiveStreamStatus) => void) => () => void;
 }

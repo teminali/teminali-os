@@ -31,6 +31,7 @@ import { create } from 'zustand';
 import { useUiStore } from './uiStore';
 import type {
   RecorderSource, RecorderPermissions, RecorderConvertProgress,
+  LiveStreamService, LiveStreamConfig, LiveStreamStatus,
 } from '../../types/recorder';
 import {
   startCapture, stopCapture, pauseCapture, cancelCapture, listDevices, isRecording,
@@ -77,6 +78,16 @@ export interface StickySettings {
   detachNarration: boolean;
   cameraSizePct: number;
   cameraCorner: AssembleOptions['cameraCorner'];
+
+  /* ── Live Streaming ─────────────────────────────────────────────
+     Third-party RTMP broadcasting (YouTube Live, Twitch, etc.).
+     Persisted here so stream key and server endpoint remain ready. */
+  liveEnabled: boolean;
+  liveService: LiveStreamService;
+  liveCustomUrl: string;
+  liveStreamKey: string;
+  liveBitrateKbps: number;
+  liveSaveLocal: boolean;
 
   /* ── The auto edit ──────────────────────────────────────────────
      What the build INTERPRETS, as opposed to what the capture
@@ -150,6 +161,12 @@ const DEFAULT_STICKY: StickySettings = {
   detachNarration: true,
   cameraSizePct: RAW_ASSEMBLE.cameraSizePct,
   cameraCorner: RAW_ASSEMBLE.cameraCorner,
+  liveEnabled: false,
+  liveService: 'youtube',
+  liveCustomUrl: 'rtmp://a.rtmp.youtube.com/live2',
+  liveStreamKey: '',
+  liveBitrateKbps: 4500,
+  liveSaveLocal: true,
   /*
     From `TUTORIAL_ASSEMBLE`, so the auto edit is ON out of the box.
     That is the product: a take that arrives already cut is the whole
@@ -242,6 +259,9 @@ interface RecorderState {
    * has a take to talk about and does not need a bar.
    */
   convert: RecorderConvertProgress | null;
+  liveStatus: LiveStreamStatus | null;
+  testingConnection: boolean;
+  testConnectionResult: { ok: boolean; message?: string; error?: string } | null;
 
   open: () => void;
   close: () => void;
@@ -252,6 +272,7 @@ interface RecorderState {
   requestPermission: (kind: 'camera' | 'microphone' | 'screen' | 'accessibility') => Promise<void>;
   /** Clear the stale grant and restart, so macOS asks again. */
   repairScreenPermission: () => Promise<void>;
+  testLiveConnection: () => Promise<void>;
 
   selectSource: (id: string) => void;
   set: <K extends keyof StickySettings>(key: K, value: StickySettings[K]) => void;
@@ -283,7 +304,12 @@ const FAULT_TOAST = 'recorder-fault';
 
 /** Push what the floating bar shows. Called on every tick and phase change. */
 function publish(state: {
-  phase: RecorderPhase; elapsedMs: number; markCount: number; fault?: string | null;
+  phase: RecorderPhase;
+  elapsedMs: number;
+  markCount: number;
+  fault?: string | null;
+  isLive?: boolean;
+  liveStatus?: LiveStreamStatus['status'] | null;
 }): void {
   void bridge()?.publishState({
     phase: state.phase,
@@ -292,6 +318,8 @@ function publish(state: {
     /* The bar is the only thing on screen while the window is hidden, so
        a take that is recording nothing has to be visible THERE. */
     fault: state.fault ?? null,
+    isLive: state.isLive,
+    liveStatus: state.liveStatus,
   });
 }
 
@@ -320,11 +348,15 @@ export const useRecorderStore = create<RecorderState>((set, get) => ({
   error: null,
   warnings: [],
   convert: null,
+  liveStatus: null,
+  testingConnection: false,
+  testConnectionResult: null,
 
   open: () => {
     set({
       isOpen: true, phase: 'setup', take: null, error: null,
       warnings: [], elapsedMs: 0, markCount: 0, fault: null, convert: null,
+      liveStatus: null, testingConnection: false, testConnectionResult: null,
     });
     void get().refreshPermissions();
     void get().refreshSources();
@@ -469,6 +501,29 @@ export const useRecorderStore = create<RecorderState>((set, get) => ({
     if (result.ok) window.setTimeout(() => void api.relaunch(), 1200);
   },
 
+  testLiveConnection: async () => {
+    const api = bridge();
+    if (!api) return;
+    const s = get().settings;
+    set({ testingConnection: true, testConnectionResult: null });
+    try {
+      const result = await api.testLiveConnection({
+        rtmpUrl: s.liveCustomUrl,
+        streamKey: s.liveStreamKey,
+      });
+      set({ testingConnection: false, testConnectionResult: result });
+      useUiStore.getState().pushToast({
+        kind: result.ok ? 'success' : 'error',
+        title: result.ok ? 'Connection Verified' : 'Connection Failed',
+        detail: result.ok ? (result.message || 'Ready to stream') : (result.error || 'Check stream key and network'),
+        ttl: result.ok ? 3000 : 8000,
+      });
+    } catch (err) {
+      const error = (err as Error).message || 'Connection test failed';
+      set({ testingConnection: false, testConnectionResult: { ok: false, error } });
+    }
+  },
+
   selectSource: (id) => set({ selectedSourceId: id }),
 
   set: (key, value) =>
@@ -529,6 +584,17 @@ export const useRecorderStore = create<RecorderState>((set, get) => ({
        the last tick was in flight. */
     if (get().phase !== 'countdown' && state.settings.countdownSec > 0) return;
 
+    const liveConfig: LiveStreamConfig | undefined = state.settings.liveEnabled
+      ? {
+        enabled: true,
+        service: state.settings.liveService,
+        rtmpUrl: state.settings.liveCustomUrl || 'rtmp://a.rtmp.youtube.com/live2',
+        streamKey: state.settings.liveStreamKey,
+        bitrateKbps: state.settings.liveBitrateKbps || 4500,
+        saveLocal: state.settings.liveSaveLocal ?? true,
+      }
+      : undefined;
+
     const settings: CaptureSettings = {
       sourceId: source.id,
       sourceKind: source.kind,
@@ -537,10 +603,14 @@ export const useRecorderStore = create<RecorderState>((set, get) => ({
       maxWidth: state.settings.maxWidth,
       cameraDeviceId: state.settings.cameraDeviceId,
       cameraHeight: state.settings.cameraHeight,
+      mirrorCamera: state.settings.mirrorCamera,
+      cameraCorner: state.settings.cameraCorner,
+      cameraSizePct: state.settings.cameraSizePct,
       micDeviceId: state.settings.micDeviceId,
       systemAudio: state.settings.systemAudio,
       assistantVoice: state.settings.assistantVoice,
       hideWindow: state.settings.hideWindow,
+      live: liveConfig,
     };
 
     // Whatever the last take said, this one has not said it yet.
@@ -591,8 +661,17 @@ export const useRecorderStore = create<RecorderState>((set, get) => ({
       warnings: outcome.warnings,
       shortcuts: outcome.shortcuts,
       error: null,
+      liveStatus: state.settings.liveEnabled
+        ? { active: true, status: 'connecting', durationMs: 0, fps: state.settings.fps }
+        : null,
     });
-    publish({ phase: 'recording', elapsedMs: 0, markCount: 0 });
+    publish({
+      phase: 'recording',
+      elapsedMs: 0,
+      markCount: 0,
+      isLive: state.settings.liveEnabled,
+      liveStatus: state.settings.liveEnabled ? 'connecting' : null,
+    });
 
     /*
       A wall clock rather than a counter of ticks. `setInterval` drifts,
@@ -614,7 +693,14 @@ export const useRecorderStore = create<RecorderState>((set, get) => ({
 
       const elapsedMs = Math.round(performance.now() - startedAt - pausedTotal);
       set({ elapsedMs });
-      publish({ phase: 'recording', elapsedMs, markCount: current.markCount, fault: current.fault });
+      publish({
+        phase: 'recording',
+        elapsedMs,
+        markCount: current.markCount,
+        fault: current.fault,
+        isLive: current.settings.liveEnabled,
+        liveStatus: current.liveStatus?.status ?? (current.settings.liveEnabled ? 'live' : null),
+      });
     }, 200);
   },
 
@@ -839,6 +925,28 @@ if (typeof window !== 'undefined' && window.teminali?.recorder) {
     if (action === 'stop') void store.stop();
     else if (action === 'pause') void store.togglePause();
     else if (action === 'mark') store.noteMark();
+  });
+
+  window.teminali.recorder.onLiveStatus?.((status) => {
+    useRecorderStore.setState({ liveStatus: status });
+    const store = useRecorderStore.getState();
+    publish({
+      phase: store.phase,
+      elapsedMs: store.elapsedMs,
+      markCount: store.markCount,
+      fault: store.fault,
+      isLive: store.settings.liveEnabled,
+      liveStatus: status.status,
+    });
+    if (status.status === 'error' && status.error) {
+      useUiStore.getState().pushToast({
+        id: 'live-stream-error',
+        kind: 'error',
+        title: 'Live stream error',
+        detail: status.error,
+        ttl: 8000,
+      });
+    }
   });
 }
 

@@ -66,6 +66,7 @@ export { WaveSine as AudioLines } from '@phosphor-icons/react';
 export { SealCheck as BadgeCheck } from '@phosphor-icons/react';
 export { SquaresFour as Blocks } from '@phosphor-icons/react';
 export { TextB as Bold } from '@phosphor-icons/react';
+export { Radio } from '@phosphor-icons/react';
 export { Camera } from '@phosphor-icons/react';
 export { TextAa as CaseUpper } from '@phosphor-icons/react';
 export { Check } from '@phosphor-icons/react';

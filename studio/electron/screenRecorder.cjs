@@ -46,6 +46,7 @@ const {
 const fs = require("fs");
 const os = require("os");
 const path = require("path");
+const { pathToFileURL } = require("url");
 const { execFile, spawn } = require("child_process");
 
 const { findFfmpeg, ffmpegInstallHint } = require("./mediaAccess.cjs");
@@ -55,6 +56,7 @@ const { readProgress, aggregatePercent } = require("./convertProgress.cjs");
 const {
   startInputCapture, probeInputCapture, shutdownInputCapture,
 } = require("./inputEvents.cjs");
+const { createLiveStream, testLiveConnection } = require("./liveStreamer.cjs");
 
 /* ── Shapes shared with the renderer ─────────────────────────────────
 
@@ -242,7 +244,11 @@ function openBar(bounds) {
     on Windows 10 2004 and later. It is a no-op on Linux, where the bar
     will appear in a full-screen capture; the renderer says so.
   */
-  barWindow.setContentProtection(true);
+  try {
+    barWindow.setContentProtection(true);
+  } catch {
+    /* unsupported on some Windows VM / legacy builds */
+  }
 
   barWindow.once("ready-to-show", () => {
     if (barWindow && !barWindow.isDestroyed()) barWindow.showInactive();
@@ -290,7 +296,7 @@ function barIsHiddenFromCapture() {
 
 function runFfmpeg(bin, args) {
   return new Promise((resolve) => {
-    execFile(bin, args, { timeout: 20 * 60_000, maxBuffer: 4 * 1024 * 1024 }, (err, _out, stderr) => {
+    execFile(bin, args, { timeout: 20 * 60_000, maxBuffer: 4 * 1024 * 1024, windowsHide: true }, (err, _out, stderr) => {
       resolve({ ok: !err, stderr: (stderr || "").trim() });
     });
   });
@@ -317,6 +323,7 @@ function runFfmpegWatched(bin, args, onProgress) {
   return new Promise((resolve) => {
     const child = spawn(bin, ["-progress", "pipe:1", "-nostats", ...args], {
       stdio: ["ignore", "pipe", "pipe"],
+      windowsHide: true,
     });
 
     let carry = "";
@@ -457,15 +464,23 @@ async function closeStreams(session) {
     [...session.streams.values()].map(
       (out) =>
         new Promise((resolve) => {
-          if (out.closed) { resolve(); return; }
+          if (out.handle.destroyed || out.handle.writableEnded) {
+            resolve();
+            return;
+          }
           out.closed = true;
           out.handle.end(() => resolve());
+          setTimeout(resolve, 500);
         }),
     ),
   );
 }
 
 function teardown(session) {
+  if (session.liveStream) {
+    try { session.liveStream.stop(); } catch { /* ignore */ }
+    session.liveStream = null;
+  }
   if (session.sampler) clearInterval(session.sampler);
   session.sampler = null;
   if (session.input) session.input.stop();
@@ -474,20 +489,25 @@ function teardown(session) {
   closeBar();
   if (session.hidWindow) {
     const win = getMainWindow();
-    if (win && !win.isDestroyed()) { win.show(); win.focus(); }
+    if (win && !win.isDestroyed()) {
+      try { win.webContents.setBackgroundThrottling(true); } catch { /* ignore */ }
+      win.show();
+      win.focus();
+    }
   }
 }
 
 /**
  * A `file://` URL the renderer can hand to a `<video>` element.
- *
- * `encodeURI` rather than raw concatenation: "Teminali OS Recordings"
- * has spaces in it, and an unencoded space in a URL is where a media
- * element stops loading with no error at all.
+ * Handles Windows drive letters, spaces, UNC paths, and special characters cleanly.
  */
 function fileUrl(absolute) {
-  const normalised = absolute.replace(/\\/g, "/");
-  return `file://${encodeURI(normalised.startsWith("/") ? normalised : `/${normalised}`)}`;
+  try {
+    return pathToFileURL(path.resolve(absolute)).href;
+  } catch {
+    const normalised = absolute.replace(/\\/g, "/");
+    return `file://${encodeURI(normalised.startsWith("/") ? normalised : `/${normalised}`)}`;
+  }
 }
 
 /* ── IPC ────────────────────────────────────────────────────────── */
@@ -569,9 +589,25 @@ function initScreenRecorder(mainWindowGetter) {
       ok: true,
       deniedDespiteSettings: process.platform === "darwin" && screens === 0,
       sources: sources.map((source) => {
-        const display = source.display_id
-          ? displays.find((d) => String(d.id) === source.display_id)
-          : undefined;
+        let display = undefined;
+        if (source.id.startsWith("screen:")) {
+          if (source.display_id) {
+            display = displays.find((d) => String(d.id) === String(source.display_id));
+          }
+          if (!display) {
+            const parts = source.id.split(":");
+            const parsedId = parts[1];
+            if (parsedId) {
+              display = displays.find((d) => String(d.id) === parsedId);
+              if (!display && Number.isInteger(Number(parsedId))) {
+                display = displays[Number(parsedId)];
+              }
+            }
+          }
+          if (!display && displays.length === 1) {
+            display = displays[0];
+          }
+        }
         return {
           id: source.id,
           name: source.name,
@@ -666,6 +702,17 @@ function initScreenRecorder(mainWindowGetter) {
   });
 
   ipcMain.handle("recorder:requestPermission", async (_event, p) => {
+    if (process.platform === "win32") {
+      if (p.kind === "camera") {
+        await shell.openExternal("ms-settings:privacy-webcam").catch(() => {});
+        return { granted: false, opened: true };
+      }
+      if (p.kind === "microphone") {
+        await shell.openExternal("ms-settings:privacy-microphone").catch(() => {});
+        return { granted: false, opened: true };
+      }
+      return { granted: true, opened: false };
+    }
     if (process.platform !== "darwin") return { granted: true, opened: false };
 
     /*
@@ -783,9 +830,24 @@ function initScreenRecorder(mainWindowGetter) {
 
     const shortcuts = registerShortcuts(id);
 
+    let liveStream = null;
+    if (p.live && p.live.enabled) {
+      liveStream = createLiveStream(p.live, (status) => {
+        const win = getMainWindow();
+        if (win && !win.isDestroyed()) {
+          win.webContents.send("recorder:liveStatus", status);
+        }
+      });
+    }
+    session.liveStream = liveStream;
+
     if (p.hideWindow) {
       const win = getMainWindow();
-      if (win && !win.isDestroyed()) { win.hide(); session.hidWindow = true; }
+      if (win && !win.isDestroyed()) {
+        try { win.webContents.setBackgroundThrottling(false); } catch { /* ignore */ }
+        win.hide();
+        session.hidWindow = true;
+      }
     }
     openBar(session.bounds);
 
@@ -802,6 +864,7 @@ function initScreenRecorder(mainWindowGetter) {
         reason: "failed",
         message: "A single window was captured, so there is no frame to place a click in.",
       },
+      live: liveStream ? { active: true, service: p.live.service } : undefined,
     };
   });
 
@@ -815,9 +878,27 @@ function initScreenRecorder(mainWindowGetter) {
     }
     if (out.closed) return { ok: false, error: `The "${p.stream}" file is already closed.` };
 
-    out.handle.write(Buffer.from(p.bytes));
-    out.bytes += p.bytes.byteLength;
-    return { ok: true, bytes: out.bytes };
+    try {
+      out.handle.write(Buffer.from(p.bytes));
+      out.bytes += p.bytes.byteLength;
+      return { ok: true, bytes: out.bytes };
+    } catch (err) {
+      out.writeError = err.message;
+      out.closed = true;
+      return { ok: false, error: `Failed to write chunk to ${p.stream}: ${err.message}` };
+    }
+  });
+
+  ipcMain.handle("recorder:liveChunk", (_event, p) => {
+    const session = sessions.get(p.sessionId);
+    if (!session) return { ok: false, error: "That recording session is not open." };
+    if (!session.liveStream) return { ok: false, error: "No active live stream for this session." };
+    const ok = session.liveStream.write(p.bytes);
+    return { ok };
+  });
+
+  ipcMain.handle("recorder:testLiveConnection", async (_event, p) => {
+    return testLiveConnection(p);
   });
 
   ipcMain.handle("recorder:pause", (_event, p) => {
@@ -1052,7 +1133,7 @@ function initScreenRecorder(mainWindowGetter) {
 
   ipcMain.handle("recorder:reveal", async (_event, p) => {
     if (!p || !p.path) return false;
-    shell.showItemInFolder(p.path);
+    shell.showItemInFolder(path.resolve(p.path));
     return true;
   });
 }
@@ -1063,6 +1144,9 @@ function shutdownScreenRecorder() {
   shutdownInputCapture();
   closeBar();
   for (const session of sessions.values()) {
+    if (session.liveStream) {
+      try { session.liveStream.stop(); } catch { /* ignore */ }
+    }
     if (session.sampler) clearInterval(session.sampler);
     for (const out of session.streams.values()) {
       if (!out.closed) { out.closed = true; out.handle.end(); }

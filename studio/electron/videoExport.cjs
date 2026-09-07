@@ -18,6 +18,7 @@
 */
 
 const fs = require("node:fs");
+const os = require("node:os");
 const path = require("node:path");
 const { spawn, execFile, execFileSync } = require("node:child_process");
 const { app, dialog, ipcMain, powerSaveBlocker } = require("electron");
@@ -25,6 +26,26 @@ const { app, dialog, ipcMain, powerSaveBlocker } = require("electron");
 const { findFfmpeg, ffmpegInstallHint } = require("./mediaAccess.cjs");
 const { pickHardwareEncoder, parseEncoders } = require("./hardwareEncoder.cjs");
 const { encoderArgs, mixArgsFor } = require("./exportFilters.cjs");
+
+function getVideosPath() {
+  try {
+    return app.getPath("videos");
+  } catch {
+    try {
+      return app.getPath("documents");
+    } catch {
+      return os.tmpdir();
+    }
+  }
+}
+
+function getTempPath() {
+  try {
+    return app.getPath("temp");
+  } catch {
+    return os.tmpdir();
+  }
+}
 
 /* ── Encoder discovery ──────────────────────────────────────────── */
 
@@ -47,6 +68,7 @@ function availableEncoders(ff) {
   try {
     const stdout = execFileSync(ff, ["-hide_banner", "-encoders"], {
       encoding: "utf8", timeout: 5000, stdio: ["ignore", "pipe", "ignore"],
+      windowsHide: true,
     });
     encoderCache = parseEncoders(stdout);
   } catch {
@@ -130,13 +152,13 @@ function startExport(options, sender) {
   const opts = { ...options };
   if (!path.isAbsolute(opts.outputPath || "")) {
     opts.outputPath = path.join(
-      app.getPath("videos"),
+      getVideosPath(),
       path.basename(opts.outputPath || "") || "Teminali_Export.mp4",
     );
   }
 
   const id = `exp_${Date.now().toString(36)}_${++counter}`;
-  const workDir = fs.mkdtempSync(path.join(app.getPath("temp"), "teminali-export-"));
+  const workDir = fs.mkdtempSync(path.join(getTempPath(), "teminali-export-"));
   const videoPath = path.join(workDir, opts.codec === "prores" ? "video.mov" : "video.mp4");
 
   const speedFlags = opts.superSpeed
@@ -151,7 +173,7 @@ function startExport(options, sender) {
     "-r", String(opts.fps), videoPath,
   ];
 
-  const proc = spawn(ff, args, { stdio: ["pipe", "ignore", "pipe"] });
+  const proc = spawn(ff, args, { stdio: ["pipe", "ignore", "pipe"], windowsHide: true });
 
   const session = {
     id, proc, workDir, videoPath, outputPath: opts.outputPath, options: opts,
@@ -232,7 +254,7 @@ function probeSource(ff, source) {
   return new Promise((resolve) => {
     execFile(
       ff, ["-nostdin", "-v", "error", "-i", source, "-map", "0:a:0", "-t", "0.01", "-f", "null", "-"],
-      { timeout: 30_000, maxBuffer: 512 * 1024 },
+      { timeout: 30_000, maxBuffer: 512 * 1024, windowsHide: true },
       (error, _stdout, stderr) => {
         const text = String(stderr || "").trim();
         if (!error && !text) return resolve({ ok: true, hasAudio: true });
@@ -276,7 +298,7 @@ async function buildAudioMix(clips, outPath) {
   // `usable`, not `clips` — the filter input indices number the filtered array.
   const args = mixArgsFor(usable, outPath);
   const wrote = await new Promise((resolve) => {
-    execFile(ff, args, { timeout: 900_000, maxBuffer: 16 * 1024 * 1024 }, (error) => {
+    execFile(ff, args, { timeout: 900_000, maxBuffer: 16 * 1024 * 1024, windowsHide: true }, (error) => {
       resolve(!error && fs.existsSync(outPath));
     });
   });
@@ -356,7 +378,7 @@ async function finishExport(sessionId, audioClips) {
       findFfmpeg(),
       ["-y", "-i", session.videoPath, "-i", mix.path, "-c", "copy",
         "-map", "0:v:0", "-map", "1:a:0", "-t", expectedSeconds.toFixed(6), session.outputPath],
-      { timeout: 600_000 },
+      { timeout: 600_000, windowsHide: true },
       (error) => resolve(!error && fs.existsSync(session.outputPath)),
     );
   });
@@ -389,7 +411,7 @@ async function chooseExportPath(suggestedName, codec) {
   const extension = codec === "prores" ? "mov" : "mp4";
   const result = await dialog.showSaveDialog({
     title: "Export Video",
-    defaultPath: path.join(app.getPath("videos"), suggestedName || `Teminali_Export.${extension}`),
+    defaultPath: path.join(getVideosPath(), suggestedName || `Teminali_Export.${extension}`),
     filters: [{ name: codec === "prores" ? "QuickTime Movie" : "MPEG-4 Video", extensions: [extension] }],
     properties: ["createDirectory"],
   });

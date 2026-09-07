@@ -99,7 +99,7 @@ function spawnPointer(binary, command, args, { timeoutMs, spawnImpl, signal }) {
   return new Promise((resolvePromise, rejectPromise) => {
     let child;
     try {
-      child = spawnImpl(binary, [command, ...args], { stdio: ["ignore", "pipe", "pipe"] });
+      child = spawnImpl(binary, [command, ...args], { stdio: ["ignore", "pipe", "pipe"], windowsHide: true });
     } catch (error) {
       rejectPromise(new PointerError("POINTER_HELPER_MISSING", error.message));
       return;

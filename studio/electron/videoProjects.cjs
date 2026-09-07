@@ -25,6 +25,30 @@ const path = require("node:path");
 /** Kept in step with `VIDEO_PROJECT_FILE` by `tests/video-project-format.test.mjs`. */
 const PROJECT_FILE = "project.json";
 
+function atomicWriteFileSync(targetPath, data, encoding = "utf8") {
+  const temporary = `${targetPath}.${process.pid}.${Date.now().toString(36)}.tmp`;
+  try {
+    fs.writeFileSync(temporary, data, encoding);
+    try {
+      fs.renameSync(temporary, targetPath);
+    } catch (renameErr) {
+      if (process.platform === "win32") {
+        try {
+          fs.copyFileSync(temporary, targetPath);
+          try { fs.unlinkSync(temporary); } catch { /* best effort */ }
+        } catch {
+          throw renameErr;
+        }
+      } else {
+        throw renameErr;
+      }
+    }
+  } catch (err) {
+    try { fs.unlinkSync(temporary); } catch { /* best effort */ }
+    throw err;
+  }
+}
+
 function initVideoProjects(mainWindowGetter) {
   const target = () => {
     try {
@@ -93,12 +117,9 @@ function initVideoProjects(mainWindowGetter) {
     }
 
     const file = path.join(dir, PROJECT_FILE);
-    const temporary = `${file}.${process.pid}.tmp`;
     try {
-      fs.writeFileSync(temporary, p.json, "utf8");
-      fs.renameSync(temporary, file);
+      atomicWriteFileSync(file, p.json, "utf8");
     } catch (err) {
-      try { fs.unlinkSync(temporary); } catch { /* nothing to clean up */ }
       return { ok: false, error: err.message };
     }
     return { ok: true, dir, path: file, name: path.basename(dir) };
@@ -119,7 +140,7 @@ function initVideoProjects(mainWindowGetter) {
 
   ipcMain.handle("videoProject:reveal", async (_event, p) => {
     if (!p || !p.path) return false;
-    shell.showItemInFolder(p.path);
+    shell.showItemInFolder(path.resolve(p.path));
     return true;
   });
 
@@ -132,10 +153,8 @@ function initVideoProjects(mainWindowGetter) {
     if (!p || typeof p.json !== "string") return { ok: false, error: "JSON payload required." };
     try {
       const file = getAutoSavePath();
-      const temporary = `${file}.${process.pid}.tmp`;
       const payload = JSON.stringify({ json: p.json, dir: p.dir || null, savedAt: Date.now() });
-      fs.writeFileSync(temporary, payload, "utf8");
-      fs.renameSync(temporary, file);
+      atomicWriteFileSync(file, payload, "utf8");
       return { ok: true };
     } catch (err) {
       return { ok: false, error: err.message };

@@ -29,6 +29,7 @@ function searchPathsFor(platform, env, home) {
     const appData = env.APPDATA || path.join(home, "AppData", "Roaming");
     const localAppData = env.LOCALAPPDATA || path.join(home, "AppData", "Local");
     const programFiles = env.ProgramFiles || "C:\\Program Files";
+    const programFilesX86 = env["ProgramFiles(x86)"] || "C:\\Program Files (x86)";
     return [
       path.join(appData, "npm"), // `npm install -g` shims.
       path.join(home, ".local", "bin"), // Claude Code's native installer.
@@ -37,6 +38,11 @@ function searchPathsFor(platform, env, home) {
       path.join(programFiles, "nodejs"),
       path.join(programFiles, "Git", "cmd"),
       path.join(programFiles, "GitHub CLI"),
+      path.join(programFiles, "ffmpeg", "bin"),
+      path.join(programFilesX86, "ffmpeg", "bin"),
+      path.join(localAppData, "Programs", "ffmpeg", "bin"),
+      "C:\\ProgramData\\chocolatey\\bin",
+      path.join(home, "scoop", "shims"),
     ];
   }
   if (platform === "linux") {

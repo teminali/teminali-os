@@ -36,6 +36,8 @@ export const RecorderBar: React.FC = () => {
     elapsedMs: 0,
     markCount: 0,
     fault: null,
+    isLive: false,
+    liveStatus: null,
   });
   /* Local, so pressing Mark acknowledges instantly rather than waiting
      for the next state push from the other window. Cleared on a timer
@@ -87,6 +89,27 @@ export const RecorderBar: React.FC = () => {
         }`}
         aria-hidden="true"
       />
+
+      {state.isLive && (
+        <span
+          className={`px-1.5 py-0.5 rounded text-[10px] font-bold tracking-wide uppercase flex-shrink-0 shadow-sm ${
+            state.liveStatus === 'error'
+              ? 'bg-spectrum-red/80 text-white border border-spectrum-red'
+              : state.liveStatus === 'connecting'
+                ? 'bg-spectrum-amber text-black animate-pulse'
+                : 'bg-spectrum-red text-white animate-pulse'
+          }`}
+          title={
+            state.liveStatus === 'error'
+              ? 'Live stream error (local recording intact)'
+              : state.liveStatus === 'connecting'
+                ? 'Connecting to live destination...'
+                : 'Broadcasting live'
+          }
+        >
+          {state.liveStatus === 'error' ? 'LIVE ERR' : state.liveStatus === 'connecting' ? 'CONNECTING' : 'LIVE'}
+        </span>
+      )}
 
       {/* `tabular-nums`, not the ported `.tabular`: that class is scoped to
           `.video-workspace`, which this window does not have. A timer whose

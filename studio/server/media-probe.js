@@ -21,7 +21,7 @@
 import { spawn } from "node:child_process";
 import { access } from "node:fs/promises";
 import { constants } from "node:fs";
-import { basename, extname, join } from "node:path";
+import { basename, delimiter, extname, join } from "node:path";
 
 /** Containers Chromium demuxes on its own. Anything else needs ffmpeg even when the codecs are fine. */
 export const NATIVE_CONTAINERS = new Set([
@@ -45,17 +45,38 @@ const binaries = new Map();
 /** An executable by name, from the PATH or a Homebrew prefix; null when absent. Cached per process. */
 export async function findBinary(name, { env = process.env } = {}) {
   if (binaries.has(name)) return binaries.get(name);
-  const dirs = [...String(env.PATH || "").split(":").filter(Boolean), ...HOMEBREW_BINS];
+  const pathKey = Object.keys(env).find((k) => k.toUpperCase() === "PATH") || "PATH";
+  const pathVal = env[pathKey] || "";
+  const pathDirs = String(pathVal).split(delimiter).filter(Boolean);
+  const fixedDirs = process.platform === "win32"
+    ? [
+        join(env.ProgramFiles || "C:\\Program Files", "ffmpeg", "bin"),
+        join(env["ProgramFiles(x86)"] || "C:\\Program Files (x86)", "ffmpeg", "bin"),
+        join(env.LOCALAPPDATA || "", "Programs", "ffmpeg", "bin"),
+        "C:\\ffmpeg\\bin",
+        "C:\\ProgramData\\chocolatey\\bin",
+      ].filter(Boolean)
+    : HOMEBREW_BINS;
+  const dirs = [...pathDirs, ...fixedDirs];
+  const extensions = process.platform === "win32"
+    ? (env.PATHEXT ? env.PATHEXT.split(";").filter(Boolean) : [".exe", ".cmd", ".bat"])
+    : [""];
   let found = null;
   for (const dir of dirs) {
-    const candidate = join(dir, name);
-    try {
-      await access(candidate, constants.X_OK);
-      found = candidate;
-      break;
-    } catch {
-      /* not here */
+    const candidateBase = join(dir, name);
+    const candidateList = process.platform === "win32" && !extname(candidateBase)
+      ? [candidateBase, ...extensions.map((ext) => candidateBase + ext.toLowerCase())]
+      : [candidateBase];
+    for (const candidate of candidateList) {
+      try {
+        await access(candidate, constants.X_OK);
+        found = candidate;
+        break;
+      } catch {
+        /* not here */
+      }
     }
+    if (found) break;
   }
   binaries.set(name, found);
   return found;
@@ -74,7 +95,7 @@ export function resetBinaryCache() {
 
 function run(binary, args, { maxBytes = 8 * 1024 * 1024, timeoutMs = 20_000 } = {}) {
   return new Promise((resolve, reject) => {
-    const child = spawn(binary, args, { stdio: ["ignore", "pipe", "pipe"] });
+    const child = spawn(binary, args, { stdio: ["ignore", "pipe", "pipe"], windowsHide: true });
     const out = [];
     const err = [];
     let size = 0;

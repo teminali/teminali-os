@@ -46,7 +46,7 @@ import { planSound, type SoundSource } from './capturePlan';
 
 import type {
   CursorSample, InputEvent, InputCaptureStatus, RecorderConvertProgress,
-  RecordingResult, SpeechCue,
+  RecordingResult, SpeechCue, LiveStreamConfig,
 } from '../../types/recorder';
 
 /* ── What the user chose ────────────────────────────────────────── */
@@ -63,6 +63,9 @@ export interface CaptureSettings {
   cameraDeviceId: string | null;
   /** Long edge of the camera capture. */
   cameraHeight: 720 | 1080;
+  mirrorCamera?: boolean;
+  cameraCorner?: 'top-left' | 'top-right' | 'bottom-left' | 'bottom-right';
+  cameraSizePct?: number;
   micDeviceId: string | null;
   /** Ask for the machine's own output as well. Only Windows reliably gives it. */
   systemAudio: boolean;
@@ -72,6 +75,8 @@ export interface CaptureSettings {
    */
   assistantVoice: boolean;
   hideWindow: boolean;
+  /** Live streaming configuration (YouTube, Twitch, RTMP). */
+  live?: LiveStreamConfig;
 }
 
 export interface DeviceOption {
@@ -392,11 +397,168 @@ async function acquireScreen(settings: CaptureSettings): Promise<{
 function mixAudio(tracks: MediaStreamTrack[]): { track: MediaStreamTrack; context: AudioContext } {
   const context = new AudioContext();
   if (context.state === 'suspended') void context.resume();
+  context.onstatechange = () => {
+    if (context.state === 'suspended') void context.resume();
+  };
   const destination = context.createMediaStreamDestination();
   for (const track of tracks) {
     context.createMediaStreamSource(new MediaStream([track])).connect(destination);
   }
   return { track: destination.stream.getAudioTracks()[0], context };
+}
+
+/** Real-time live compositor for overlaying camera PIP onto screen capture. */
+interface CompositorOptions {
+  fps: number;
+  corner?: 'top-left' | 'top-right' | 'bottom-left' | 'bottom-right';
+  sizePct?: number;
+  mirror?: boolean;
+}
+
+function createLiveCompositor(
+  screenTrack: MediaStreamTrack,
+  cameraTrack: MediaStreamTrack,
+  options: CompositorOptions,
+): { track: MediaStreamTrack; stop: () => void } | null {
+  if (typeof document === 'undefined') return null;
+  try {
+    const canvas = document.createElement('canvas');
+    if (!canvas.captureStream) return null;
+    const screenSettings = screenTrack.getSettings?.() || {};
+    canvas.width = screenSettings.width || 1920;
+    canvas.height = screenSettings.height || 1080;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return null;
+
+    const screenEl = document.createElement('video');
+    screenEl.muted = true;
+    screenEl.playsInline = true;
+    screenEl.srcObject = new MediaStream([screenTrack]);
+    void screenEl.play?.().catch(() => {});
+
+    const cameraEl = document.createElement('video');
+    cameraEl.muted = true;
+    cameraEl.playsInline = true;
+    cameraEl.srcObject = new MediaStream([cameraTrack]);
+    void cameraEl.play?.().catch(() => {});
+
+    let active = true;
+    let animId: number | null = null;
+    let intervalId: any = null;
+    const targetFps = options.fps || 30;
+    const intervalMs = Math.round(1000 / targetFps);
+    let lastRenderTime = performance.now();
+
+    const render = () => {
+      if (!active) return;
+      lastRenderTime = performance.now();
+      try {
+        if (screenEl.videoWidth > 0 && canvas.width !== screenEl.videoWidth) {
+          canvas.width = screenEl.videoWidth;
+          canvas.height = screenEl.videoHeight;
+        }
+        ctx.drawImage(screenEl, 0, 0, canvas.width, canvas.height);
+
+        if (cameraEl.videoWidth > 0 && cameraEl.videoHeight > 0) {
+          const sizePct = (options.sizePct ?? 20) / 100;
+          const pipW = Math.round(canvas.width * sizePct);
+          const camAspect = Math.max(0.1, cameraEl.videoWidth / cameraEl.videoHeight);
+          const pipH = Math.round(pipW / camAspect);
+          const margin = Math.round(canvas.width * 0.02);
+
+          let x = canvas.width - pipW - margin;
+          let y = canvas.height - pipH - margin;
+          const corner = options.corner ?? 'bottom-right';
+          if (corner === 'top-left') {
+            x = margin;
+            y = margin;
+          } else if (corner === 'top-right') {
+            x = canvas.width - pipW - margin;
+            y = margin;
+          } else if (corner === 'bottom-left') {
+            x = margin;
+            y = canvas.height - pipH - margin;
+          }
+
+          ctx.save();
+          const radius = Math.min(16, pipH / 4);
+          ctx.beginPath();
+          if (typeof ctx.roundRect === 'function') {
+            ctx.roundRect(x, y, pipW, pipH, radius);
+          } else {
+            ctx.rect(x, y, pipW, pipH);
+          }
+          ctx.clip();
+
+          if (options.mirror) {
+            ctx.translate(x + pipW, y);
+            ctx.scale(-1, 1);
+            ctx.drawImage(cameraEl, 0, 0, pipW, pipH);
+          } else {
+            ctx.drawImage(cameraEl, x, y, pipW, pipH);
+          }
+          ctx.restore();
+
+          ctx.save();
+          ctx.strokeStyle = 'rgba(255, 255, 255, 0.25)';
+          ctx.lineWidth = 2;
+          ctx.beginPath();
+          if (typeof ctx.roundRect === 'function') {
+            ctx.roundRect(x, y, pipW, pipH, radius);
+          } else {
+            ctx.rect(x, y, pipW, pipH);
+          }
+          ctx.stroke();
+          ctx.restore();
+        }
+      } catch {
+        /* ignore frame glitch */
+      }
+    };
+
+    /* Hybrid loop: requestAnimationFrame handles vsync rendering when visible;
+       an interval timer acts as a watchdog to ensure frames keep rendering at full
+       framerate even if Chromium throttles rAF when the main window is hidden. */
+    const loop = () => {
+      if (!active) return;
+      render();
+      animId = requestAnimationFrame(loop);
+    };
+    animId = requestAnimationFrame(loop);
+
+    intervalId = setInterval(() => {
+      if (!active) return;
+      const now = performance.now();
+      if (now - lastRenderTime >= intervalMs * 1.1) {
+        render();
+      }
+    }, intervalMs);
+
+    const stream = canvas.captureStream(targetFps);
+    const track = stream.getVideoTracks()[0];
+    if (!track) {
+      active = false;
+      if (animId !== null && typeof cancelAnimationFrame === 'function') cancelAnimationFrame(animId);
+      if (intervalId !== null) clearInterval(intervalId);
+      return null;
+    }
+
+    return {
+      track,
+      stop: () => {
+        active = false;
+        if (animId !== null && typeof cancelAnimationFrame === 'function') cancelAnimationFrame(animId);
+        if (intervalId !== null) clearInterval(intervalId);
+        track.stop();
+        screenEl.pause?.();
+        screenEl.srcObject = null;
+        cameraEl.pause?.();
+        cameraEl.srcObject = null;
+      },
+    };
+  } catch {
+    return null;
+  }
 }
 
 /**
@@ -493,6 +655,11 @@ interface Session {
   speechCues: SpeechCue[];
   speechRecognition: SpeechRecognitionLike | null;
   startedWallTime: number;
+  liveStream: {
+    recorder: MediaRecorder;
+    compositorCleanup?: () => void;
+    tail: Promise<unknown>;
+  } | null;
   onMouseMove?: (e: MouseEvent) => void;
   onClick?: (e: MouseEvent) => void;
 }
@@ -861,13 +1028,15 @@ export async function startCapture(
       window.addEventListener('mousemove', onMouseMove);
       window.addEventListener('click', onClick);
     } else if (api) {
-      const streams: ('screen' | 'camera')[] = cameraTracks.length > 0
-        ? ['screen', 'camera']
-        : ['screen'];
+      const saveLocal = settings.live?.enabled ? settings.live.saveLocal : true;
+      const streams: ('screen' | 'camera')[] = saveLocal
+        ? (cameraTracks.length > 0 ? ['screen', 'camera'] : ['screen'])
+        : [];
       const begun = await api.begin({
         streams,
         displayId: settings.sourceKind === 'screen' ? settings.displayId : null,
         hideWindow: settings.hideWindow,
+        live: settings.live,
       });
       if (!begun.ok) {
         bail();
@@ -957,8 +1126,73 @@ export async function startCapture(
       return entry;
     };
 
-    built.push(make('screen', screenTracks));
-    if (cameraTracks.length > 0) built.push(make('camera', cameraTracks));
+    const saveLocal = settings.live?.enabled ? settings.live.saveLocal : true;
+    if (saveLocal) {
+      built.push(make('screen', screenTracks));
+      if (cameraTracks.length > 0) built.push(make('camera', cameraTracks));
+    }
+
+    let liveStreamInfo: {
+      recorder: MediaRecorder;
+      compositorCleanup?: () => void;
+      tail: Promise<unknown>;
+    } | null = null;
+    if (settings.live?.enabled && !isWeb && api) {
+      let liveVideoTrack: MediaStreamTrack = screen.video;
+      let compositorCleanup: (() => void) | undefined;
+
+      if (cameraVideo) {
+        const comp = createLiveCompositor(screen.video, cameraVideo, {
+          fps: settings.fps,
+          corner: settings.cameraCorner,
+          sizePct: settings.cameraSizePct,
+          mirror: settings.mirrorCamera,
+        });
+        if (comp) {
+          liveVideoTrack = comp.track;
+          compositorCleanup = comp.stop;
+        }
+      }
+
+      const liveAudioParts = [mic, assistant, screen.systemAudio].filter((t): t is MediaStreamTrack => t !== null);
+      let liveAudioTrack: MediaStreamTrack | null = null;
+      if (liveAudioParts.length === 1) {
+        liveAudioTrack = liveAudioParts[0];
+      } else if (liveAudioParts.length > 1) {
+        const mixed = mixAudio(liveAudioParts);
+        audioContexts.push(mixed.context);
+        liveAudioTrack = mixed.track;
+      }
+
+      const liveTracks: MediaStreamTrack[] = [liveVideoTrack, ...(liveAudioTrack ? [liveAudioTrack] : [])];
+      try {
+        const liveRecorder = new MediaRecorder(new MediaStream(liveTracks), {
+          mimeType: mime,
+          videoBitsPerSecond: (settings.live.bitrateKbps || 4500) * 1000,
+          audioBitsPerSecond: 160_000,
+        });
+
+        let liveTail: Promise<unknown> = Promise.resolve();
+
+        liveRecorder.ondataavailable = (event) => {
+          if (!event.data || event.data.size === 0) return;
+          const blob = event.data;
+          liveTail = liveTail.then(async () => {
+            const buf = await blob.arrayBuffer();
+            await api.liveChunk(sessionId, new Uint8Array(buf));
+          }).catch(() => {});
+        };
+
+        liveRecorder.start(1000);
+        liveStreamInfo = {
+          recorder: liveRecorder,
+          compositorCleanup,
+          tail: liveTail,
+        };
+      } catch (err) {
+        warnings.push(`Could not start live stream encoder: ${(err as Error).message}`);
+      }
+    }
 
     session = {
       id: sessionId,
@@ -985,13 +1219,14 @@ export async function startCapture(
       speechCues,
       speechRecognition,
       startedWallTime: startWallTime,
+      liveStream: liveStreamInfo,
       onMouseMove,
       onClick,
     };
 
     for (const entry of built) entry.recorder.start(TIMESLICE_MS);
 
-    const started = session;
+    const started = session!;
     /* Chunk counts as of the previous check, per recorder, in order. */
     const seen = built.map(() => 0);
     started.watchdog = window.setInterval(() => {
@@ -1052,6 +1287,12 @@ export async function pauseCapture(paused: boolean): Promise<void> {
   for (const entry of session.recorders) {
     if (paused) entry.recorder.pause();
     else entry.recorder.resume();
+  }
+  if (session.liveStream) {
+    try {
+      if (paused && session.liveStream.recorder.state === 'recording') session.liveStream.recorder.pause();
+      else if (!paused && session.liveStream.recorder.state === 'paused') session.liveStream.recorder.resume();
+    } catch { /* ignore */ }
   }
   session.phase = paused ? 'paused' : 'recording';
   /*
@@ -1133,6 +1374,16 @@ export async function stopCapture(): Promise<
   }
   current.phase = 'finishing';
   if (current.watchdog !== null) { window.clearInterval(current.watchdog); current.watchdog = null; }
+
+  if (current.liveStream) {
+    try {
+      await current.liveStream.tail;
+      if (current.liveStream.recorder.state === 'paused') current.liveStream.recorder.resume();
+      if (current.liveStream.recorder.state !== 'inactive') current.liveStream.recorder.stop();
+    } catch { /* ignore */ }
+    current.liveStream.compositorCleanup?.();
+    current.liveStream = null;
+  }
 
   for (const entry of current.recorders) {
     if (entry.recorder.state === 'paused') entry.recorder.resume();
@@ -1255,6 +1506,14 @@ export async function cancelCapture(discard: boolean): Promise<void> {
   if (current.watchdog !== null) { window.clearInterval(current.watchdog); current.watchdog = null; }
 
   if (current.isWeb) releaseWebListeners(current);
+
+  if (current.liveStream) {
+    try {
+      if (current.liveStream.recorder.state !== 'inactive') current.liveStream.recorder.stop();
+    } catch { /* ignore */ }
+    current.liveStream.compositorCleanup?.();
+    current.liveStream = null;
+  }
 
   for (const entry of current.recorders) {
     if (entry.recorder.state !== 'inactive') {

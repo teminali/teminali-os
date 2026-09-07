@@ -85,14 +85,19 @@ function fixedFfmpegDirs() {
   const env = process.env;
   if (process.platform === "win32") {
     const programFiles = env.ProgramFiles || "C:\\Program Files";
+    const programFilesX86 = env["ProgramFiles(x86)"] || "C:\\Program Files (x86)";
+    const localAppData = env.LOCALAPPDATA || "";
     const home = env.USERPROFILE || "";
     return [
       "C:\\ffmpeg\\bin",
       path.join(programFiles, "ffmpeg", "bin"),
+      path.join(programFilesX86, "ffmpeg", "bin"),
+      localAppData ? path.join(localAppData, "Programs", "ffmpeg", "bin") : null,
       // Chocolatey shims, then Scoop's, then winget's.
       path.join(env.ChocolateyInstall || "C:\\ProgramData\\chocolatey", "bin"),
       home ? path.join(home, "scoop", "shims") : null,
-      env.LOCALAPPDATA ? path.join(env.LOCALAPPDATA, "Microsoft", "WinGet", "Links") : null,
+      localAppData ? path.join(localAppData, "Microsoft", "WinGet", "Links") : null,
+      localAppData ? path.join(localAppData, "Microsoft", "WinGet", "Packages") : null,
     ].filter(Boolean);
   }
   if (process.platform === "darwin") {
@@ -189,7 +194,7 @@ function processWithFfmpeg(options = {}) {
   args.push(outPath);
 
   return new Promise((resolve) => {
-    execFile(binary, args, { timeout: 15 * 60_000, maxBuffer: 1024 * 1024 }, (err, _out, stderr) => {
+    execFile(binary, args, { timeout: 15 * 60_000, maxBuffer: 1024 * 1024, windowsHide: true }, (err, _out, stderr) => {
       const text = (stderr || "").trim();
       if (err || !fs.existsSync(outPath)) {
         resolve({

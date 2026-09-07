@@ -32,9 +32,12 @@ import React from 'react';
 import { SliderRow, ToggleRow, SegmentedControl } from '../ui/Controls';
 import { previewCamera, previewMicrophone } from '../../engine/screenCapture';
 import type { DeviceOption } from '../../engine/screenCapture';
-import type { StickySettings } from '../../store/recorderStore';
-import type { RecorderPermissions } from '../../../types/recorder';
-import { Camera, Mic, MicOff, VideoOff, Monitor, Film, AlertTriangle } from '../ui/icons';
+import { useRecorderStore, type StickySettings } from '../../store/recorderStore';
+import type { RecorderPermissions, LiveStreamService } from '../../../types/recorder';
+import {
+  Camera, Mic, MicOff, VideoOff, Monitor, Film, AlertTriangle,
+  Broadcast, Eye, EyeOff, CheckCircle2, Loader2,
+} from '../ui/icons';
 import { cursorHint } from '../../engine/platformCopy';
 
 interface Props {
@@ -218,8 +221,83 @@ export const CaptureOptions: React.FC<Props> = ({
       />
     </Group>
 
+    <Group title="Live stream" icon={Broadcast}>
+      <ToggleRow
+        label="Go live (YouTube, Twitch, RTMP)"
+        checked={settings.liveEnabled}
+        onChange={(v) => onChange('liveEnabled', v)}
+        hint="Stream directly to a third-party platform"
+      />
+
+      {settings.liveEnabled && (
+        <div className="space-y-3 pt-1">
+          <Row label="Destination">
+            <SegmentedControl
+              value={settings.liveService}
+              options={[
+                { value: 'youtube', label: 'YouTube' },
+                { value: 'twitch', label: 'Twitch' },
+                { value: 'facebook', label: 'FB Live' },
+                { value: 'custom', label: 'Custom' },
+              ]}
+              onChange={(v) => {
+                const s = v as LiveStreamService;
+                onChange('liveService', s);
+                if (s === 'youtube') onChange('liveCustomUrl', 'rtmp://a.rtmp.youtube.com/live2');
+                else if (s === 'twitch') onChange('liveCustomUrl', 'rtmp://live.twitch.tv/app');
+                else if (s === 'facebook') onChange('liveCustomUrl', 'rtmps://live-api-s.facebook.com:443/rtmp/');
+              }}
+            />
+          </Row>
+
+          <Row label="Stream URL">
+            <input
+              type="text"
+              value={settings.liveCustomUrl}
+              onChange={(e) => onChange('liveCustomUrl', e.target.value)}
+              placeholder="rtmp://a.rtmp.youtube.com/live2"
+              className="pro-input w-full h-7 px-2 text-ui-xs font-mono outline-none"
+            />
+          </Row>
+
+          <Row label="Stream key">
+            <StreamKeyInput
+              value={settings.liveStreamKey}
+              onChange={(k) => onChange('liveStreamKey', k)}
+              placeholder={
+                settings.liveService === 'youtube'
+                  ? 'Paste key from YouTube Studio'
+                  : 'Paste stream key'
+              }
+            />
+          </Row>
+
+          <Row label="Target bitrate">
+            <SegmentedControl
+              value={String(settings.liveBitrateKbps) as '2500' | '4500' | '8000'}
+              options={[
+                { value: '2500', label: '720p · 2.5M' },
+                { value: '4500', label: '1080p · 4.5M' },
+                { value: '8000', label: '1440p · 8M' },
+              ]}
+              onChange={(v) => onChange('liveBitrateKbps', Number(v))}
+            />
+          </Row>
+
+          <ToggleRow
+            label="Record locally while streaming"
+            checked={settings.liveSaveLocal}
+            onChange={(v) => onChange('liveSaveLocal', v)}
+            hint="Saves clips to disk so you can edit the take after broadcasting"
+          />
+
+          <LiveTestButton />
+        </div>
+      )}
+    </Group>
+
     {/*
-      The fourth group is the only one that does not describe the file
+      The fifth group is the only one that does not describe the file
       being written. Everything above changes what is RECORDED and is
       therefore final the moment the take stops; everything here changes
       what the build makes of it, and can be turned off and the take
@@ -464,3 +542,69 @@ const PermissionNote: React.FC<{ text: string; action: string; onAction: () => v
     </div>
   </div>
 );
+
+const StreamKeyInput: React.FC<{
+  value: string;
+  placeholder?: string;
+  onChange: (value: string) => void;
+}> = ({ value, placeholder, onChange }) => {
+  const [show, setShow] = React.useState(false);
+  return (
+    <div className="relative flex items-center">
+      <input
+        type={show ? 'text' : 'password'}
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        placeholder={placeholder}
+        className="pro-input w-full h-7 pl-2 pr-7 text-ui-xs font-mono outline-none"
+      />
+      <button
+        type="button"
+        onClick={() => setShow((s) => !s)}
+        className="absolute right-1.5 text-spectrum-textMuted hover:text-spectrum-text transition-colors p-0.5"
+        title={show ? 'Hide key' : 'Reveal key'}
+        aria-label={show ? 'Hide key' : 'Reveal key'}
+      >
+        {show ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
+      </button>
+    </div>
+  );
+};
+
+const LiveTestButton: React.FC = () => {
+  const store = useRecorderStore();
+  const hasKey = Boolean(store.settings.liveStreamKey.trim());
+
+  return (
+    <div className="space-y-1 pt-1">
+      <button
+        type="button"
+        disabled={!hasKey || store.testingConnection}
+        onClick={() => void store.testLiveConnection()}
+        className="pro-btn-filled w-full h-7 px-2 text-ui-xs gap-1.5 flex items-center justify-center font-medium disabled:opacity-40"
+      >
+        {store.testingConnection ? (
+          <>
+            <Loader2 className="w-3 h-3 animate-spin text-spectrum-accent" />
+            Testing RTMP handshake...
+          </>
+        ) : store.testConnectionResult?.ok ? (
+          <>
+            <CheckCircle2 className="w-3 h-3 text-spectrum-green" />
+            Connection verified ✓
+          </>
+        ) : (
+          <>
+            <Broadcast className="w-3 h-3" />
+            Test stream connection
+          </>
+        )}
+      </button>
+      {store.testConnectionResult && !store.testConnectionResult.ok && (
+        <p className="text-micro text-spectrum-red px-1 truncate" title={store.testConnectionResult.error}>
+          {store.testConnectionResult.error}
+        </p>
+      )}
+    </div>
+  );
+};

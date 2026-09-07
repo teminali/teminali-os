@@ -33,7 +33,7 @@ import { formatDuration, formatFileSize } from '../../utils/time';
 import type { RecorderConvertProgress } from '../../../types/recorder';
 import {
   Record, Pause, Play, Square, Loader2, AlertTriangle, CheckCircle2, X,
-  FolderOpen, CursorClick, Camera, Monitor, Mic, Trash2, Sliders, Film,
+  FolderOpen, CursorClick, Camera, Monitor, Mic, Trash2, Sliders, Film, Broadcast,
 } from '../ui/icons';
 
 /** The options rail's own width, matching the Cut's. */
@@ -258,6 +258,16 @@ const SetupFooter: React.FC<{
               <Mic className="w-3.5 h-3.5" />
               {store.settings.micDeviceId ? 'Mic on' : 'Silent'}
             </span>
+            {store.settings.liveEnabled && (
+              <span className="flex items-center gap-1.5 text-spectrum-red font-medium">
+                <Broadcast className="w-3.5 h-3.5" weight="fill" />
+                <span>
+                  Live: {store.settings.liveService === 'youtube' ? 'YouTube'
+                    : store.settings.liveService === 'twitch' ? 'Twitch'
+                      : store.settings.liveService === 'facebook' ? 'Facebook' : 'RTMP'}
+                </span>
+              </span>
+            )}
           </span>
         )}
       </div>
@@ -282,10 +292,23 @@ const SetupFooter: React.FC<{
         data-recorder="start"
         onClick={() => void store.begin()}
         disabled={!selected}
-        className="btn-primary h-8 px-4 text-ui gap-2 flex-shrink-0"
+        className={`h-8 px-4 text-ui gap-2 flex-shrink-0 font-medium ${
+          store.settings.liveEnabled
+            ? 'bg-spectrum-red hover:bg-spectrum-red/90 text-white rounded-squircle-sm shadow-sm transition-all'
+            : 'btn-primary'
+        }`}
       >
-        <Record className="w-3.5 h-3.5" weight="fill" />
-        Start recording
+        {store.settings.liveEnabled ? (
+          <>
+            <Broadcast className="w-3.5 h-3.5 animate-pulse" weight="fill" />
+            {store.settings.liveSaveLocal ? 'Record & Go Live' : 'Go Live'}
+          </>
+        ) : (
+          <>
+            <Record className="w-3.5 h-3.5" weight="fill" />
+            Start recording
+          </>
+        )}
       </button>
     </div>
   );
@@ -367,17 +390,21 @@ const Converting: React.FC<{ progress: RecorderConvertProgress | null }> = ({ pr
 };
 
 const Countdown: React.FC<{ seconds: number }> = ({ seconds }) => {
-  const discard = useRecorderStore((s) => s.discard);
+  const store = useRecorderStore();
+  const discard = store.discard;
+  const isLive = store.settings.liveEnabled;
   return (
     <div className="flex-1 flex flex-col items-center justify-center gap-4">
       <span
         key={seconds}
-        className="text-spectrum-text font-semibold tabular animate-scale-in"
+        className={`font-semibold tabular animate-scale-in ${isLive ? 'text-spectrum-red' : 'text-spectrum-text'}`}
         style={{ fontSize: 128, lineHeight: 1 }}
       >
         {seconds}
       </span>
-      <p className="text-ui-lg text-spectrum-textDim">Get your window in front</p>
+      <p className="text-ui-lg text-spectrum-textDim">
+        {isLive ? 'Going live — get your window in front' : 'Get your window in front'}
+      </p>
       <button
         type="button"
         onClick={() => void discard()}
@@ -401,9 +428,44 @@ const SHORTCUT_MEANING: Record<string, string> = {
 const Running: React.FC = () => {
   const store = useRecorderStore();
   const paused = store.phase === 'paused';
+  const isLive = store.settings.liveEnabled;
 
   return (
     <div className="flex-1 flex flex-col items-center justify-center gap-5 px-4">
+      {isLive && (
+        <div
+          className={`flex items-center gap-2 px-3 py-1 rounded-full border ${
+            store.liveStatus?.status === 'error'
+              ? 'bg-spectrum-red/20 border-spectrum-red text-spectrum-red'
+              : store.liveStatus?.status === 'connecting'
+                ? 'bg-spectrum-amber/15 border-spectrum-amber/40 text-spectrum-amber'
+                : 'bg-spectrum-red/15 border-spectrum-red/30 text-spectrum-red'
+          }`}
+        >
+          <span
+            className={`w-2 h-2 rounded-full ${
+              store.liveStatus?.status === 'error'
+                ? 'bg-spectrum-red'
+                : store.liveStatus?.status === 'connecting'
+                  ? 'bg-spectrum-amber animate-pulse'
+                  : 'bg-spectrum-red animate-pulse'
+            }`}
+          />
+          <span className="text-ui-xs font-semibold uppercase tracking-wider">
+            {store.liveStatus?.status === 'error'
+              ? 'LIVE ERROR'
+              : store.liveStatus?.status === 'connecting'
+                ? 'CONNECTING'
+                : `LIVE ${store.settings.liveService.toUpperCase()}`}
+          </span>
+          {store.liveStatus?.status && (
+            <span className="text-micro text-spectrum-textMuted capitalize">
+              · {store.liveStatus.status === 'live' ? 'Streaming' : store.liveStatus.status === 'error' ? (store.liveStatus.error ?? 'Disconnected') : store.liveStatus.status}
+            </span>
+          )}
+        </div>
+      )}
+
       <div className="flex items-center gap-3">
         <span
           className={`w-3 h-3 rounded-full bg-spectrum-red ${paused ? 'opacity-40' : 'animate-pulse'}`}
@@ -415,7 +477,7 @@ const Running: React.FC = () => {
       </div>
 
       <p className="text-ui-sm text-spectrum-textDim">
-        {paused ? 'Paused' : 'Recording'}
+        {paused ? 'Paused' : isLive ? 'Broadcasting live' : 'Recording'}
         {store.markCount > 0 ? ` · ${store.markCount} marked` : ''}
       </p>
 
@@ -483,6 +545,14 @@ const Review: React.FC<{ stacked: boolean; onOpened?: () => void }> = ({ stacked
                 className="w-full h-full object-contain"
                 aria-label="The screen take"
               />
+            ) : (store.settings.liveEnabled && !store.settings.liveSaveLocal) ? (
+              <div className="w-full h-full flex flex-col items-center justify-center gap-2 text-center p-6">
+                <Broadcast className="w-8 h-8 text-spectrum-accent" />
+                <span className="text-ui font-medium text-spectrum-text">Broadcast Completed</span>
+                <span className="text-micro text-spectrum-textMuted max-w-sm">
+                  Streamed live to {store.settings.liveService === 'youtube' ? 'YouTube Live' : store.settings.liveService === 'twitch' ? 'Twitch' : store.settings.liveService === 'facebook' ? 'Facebook Live' : 'RTMP'}. Local recording was turned off in capture options.
+                </span>
+              </div>
             ) : (
               <div className="w-full h-full flex items-center justify-center text-ui-sm text-spectrum-textDim">
                 No screen file was written.
@@ -523,19 +593,21 @@ const Review: React.FC<{ stacked: boolean; onOpened?: () => void }> = ({ stacked
           <div className="flex items-center gap-2">
             {take.screen ? (
               <CheckCircle2 className="w-4 h-4 text-spectrum-green flex-shrink-0" weight="fill" />
+            ) : (store.settings.liveEnabled && !store.settings.liveSaveLocal) ? (
+              <CheckCircle2 className="w-4 h-4 text-spectrum-accent flex-shrink-0" weight="fill" />
             ) : (
               <AlertTriangle className="w-4 h-4 text-spectrum-red flex-shrink-0" weight="fill" />
             )}
             <span className="text-ui font-medium text-spectrum-text">
-              {take.screen ? 'Take saved' : 'The screen was not recorded'}
+              {take.screen ? 'Take saved' : (store.settings.liveEnabled && !store.settings.liveSaveLocal) ? 'Stream broadcast' : 'The screen was not recorded'}
             </span>
           </div>
 
           {!take.screen && (
             <p className="text-ui-sm text-spectrum-textMuted leading-relaxed">
-              Nothing was written for the display, so there is no take to open.
-              {take.camera ? ' The camera file is on disk and can be imported by hand.' : ''}
-              {' '}Record again, and if it happens twice the notes below are the place to look.
+              {(store.settings.liveEnabled && !store.settings.liveSaveLocal)
+                ? `Your live stream ran for ${formatDuration(take.durationMs)}. Enable "Record locally while streaming" if you'd like to save future broadcasts on the timeline.`
+                : `Nothing was written for the display, so there is no take to open.${take.camera ? ' The camera file is on disk and can be imported by hand.' : ''} Record again, and if it happens twice the notes below are the place to look.`}
             </p>
           )}
 

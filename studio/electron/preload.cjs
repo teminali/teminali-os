@@ -151,6 +151,8 @@ contextBridge.exposeInMainWorld("teminali", {
     begin: (options) => ipcRenderer.invoke("recorder:begin", options),
     chunk: (sessionId, stream, bytes) =>
       ipcRenderer.invoke("recorder:chunk", { sessionId, stream, bytes }),
+    liveChunk: (sessionId, bytes) =>
+      ipcRenderer.invoke("recorder:liveChunk", { sessionId, bytes }),
     pause: (sessionId, paused) => ipcRenderer.invoke("recorder:pause", { sessionId, paused }),
     finish: (sessionId, copyable) => ipcRenderer.invoke("recorder:finish", { sessionId, copyable }),
     cancel: (sessionId, discard) => ipcRenderer.invoke("recorder:cancel", { sessionId, discard }),
@@ -162,6 +164,8 @@ contextBridge.exposeInMainWorld("teminali", {
 
     publishState: (state) => ipcRenderer.invoke("recorder:publishState", state),
     barCommand: (action) => ipcRenderer.invoke("recorder:barCommand", { action }),
+    testLiveConnection: (options) =>
+      ipcRenderer.invoke("recorder:testLiveConnection", options),
 
     /** Stop/pause/mark, from the floating bar or a global shortcut. */
     onCommand: (listener) => {
@@ -180,6 +184,12 @@ contextBridge.exposeInMainWorld("teminali", {
       const handler = (_event, progress) => listener(progress);
       ipcRenderer.on("recorder:convert", handler);
       return () => ipcRenderer.removeListener("recorder:convert", handler);
+    },
+    /** Live stream status updates. */
+    onLiveStatus: (listener) => {
+      const handler = (_event, status) => listener(status);
+      ipcRenderer.on("recorder:liveStatus", handler);
+      return () => ipcRenderer.removeListener("recorder:liveStatus", handler);
     },
   },
 
