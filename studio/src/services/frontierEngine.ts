@@ -17,7 +17,6 @@ import { DiligenceEngine } from "./diligenceEngine";
 import { parseScreenToolCalls, screenToolCall } from "./screenToolCalls";
 import { parseWorkspaceEdits } from "./liveEditProtocol";
 import { GatewayClient, GatewayError } from "./gatewayClient";
-import { RuntimeTelemetryService } from "./runtimeTelemetryService";
 import { VISION_MODEL } from "./attachmentPolicy";
 import {
   buildCommandEvidence,
@@ -411,8 +410,9 @@ CRITICAL VISUAL DESIGN RULES:
   // The gateway's audit ingest is metadata-only and allowlisted (see
   // `server/validation.js#validateClientAuditEvent`): an event name from its
   // vocabulary, a provider, and sizes or timings. The model, mode and route
-  // reason stay in `RuntimeTelemetryService`; sent here they were rejected
-  // with 400 on every local turn, and `recordAudit` swallows that.
+  // reason ride the turn's own `InferenceTelemetry` to `onComplete` instead;
+  // sent here they were rejected with 400 on every local turn, and
+  // `recordAudit` swallows that.
   await GatewayClient.recordAudit({ event: "prompt", provider: "ollama" });
 
   const controller = new AbortController();
@@ -884,7 +884,6 @@ CRITICAL VISUAL DESIGN RULES:
       dropped: system.dropped,
     },
   };
-  RuntimeTelemetryService.record(telemetry);
   await GatewayClient.recordAudit({
     event: "model_call",
     provider: "ollama",
@@ -1016,7 +1015,6 @@ async function streamFromAnthropic(
     outputTokensPerSec: outputTokens > 0 ? Number((outputTokens / (totalDurationMs / 1000)).toFixed(2)) : null,
     source: "anthropic",
   };
-  RuntimeTelemetryService.record(telemetry);
   await GatewayClient.recordAudit({
     event: "model_call",
     provider: "anthropic",

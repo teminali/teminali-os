@@ -29,6 +29,12 @@ export interface TelemetrySource {
    */
   loadSec?: number;
   costLabel?: string;
+  /**
+   * System-prompt sections the model's window could not afford this turn, from
+   * `InferenceTelemetry.contextBudget.dropped`. Empty or absent on a turn that
+   * fitted, and on every lane that manages its own context.
+   */
+  droppedSections?: string[];
 }
 
 /**
@@ -44,6 +50,35 @@ export function loadWorthNaming(durationSec?: number, loadSec?: number): boolean
   if (typeof loadSec !== "number" || typeof durationSec !== "number") return false;
   if (loadSec < 1 || durationSec <= 0) return false;
   return loadSec >= durationSec * 0.2;
+}
+
+/**
+ * Sections whose loss costs style, not capability.
+ *
+ * `systemPrompt.ts` ranks these last *on purpose* — the visual contract alone
+ * was costing every "play that song" turn 1,858 characters — so their being
+ * dropped is the budget working, not a fault. Naming them on the turns they
+ * fall off would put a warning under most short replies, which is the same
+ * mistake `loadWorthNaming` exists to avoid: a row that cries every turn is a
+ * row nobody reads.
+ */
+const AFFORDABLE_SECTIONS = new Set(["completeness", "multi-agent", "house-style"]);
+
+/**
+ * Which dropped sections changed what the model could *do*.
+ *
+ * The rest of the ranking is capability: `screen` is the eye, `ask` is the
+ * question, `tool-execution-mandate` is the instruction to act rather than
+ * offer. Losing one of those silently is how a turn comes back saying "could
+ * you describe the error or provide a screenshot?" from a machine that can see
+ * the screen perfectly well — a failure that cost a session to not explain,
+ * because the only record of it was computed and thrown away.
+ *
+ * Returned in the order the budget reported them, which is priority order.
+ */
+export function droppedWorthNaming(dropped?: string[]): string[] {
+  if (!dropped || dropped.length === 0) return [];
+  return dropped.filter((name) => !AFFORDABLE_SECTIONS.has(name));
 }
 
 /**
@@ -75,5 +110,9 @@ export function telemetry(message: TelemetrySource): string[] {
     );
   }
   if (message.costLabel) fields.push(message.costLabel);
+  // Last, because it is the exception rather than a reading: a turn that
+  // fitted says nothing here at all.
+  const lost = droppedWorthNaming(message.droppedSections);
+  if (lost.length > 0) fields.push(`${lost.join(", ")} dropped`);
   return fields;
 }

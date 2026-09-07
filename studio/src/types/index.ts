@@ -85,6 +85,12 @@ export interface ChatMessage {
    * to change what `durationSec` means — see `utils/messageTelemetry.ts`.
    */
   loadSec?: number;
+  /**
+   * System-prompt sections this turn's window could not afford. The row names
+   * only the ones whose loss changed what the model could do — see
+   * `droppedWorthNaming` in `utils/messageTelemetry.ts`.
+   */
+  droppedSections?: string[];
   engineUsed?: string;
   mode?: ModelModeId;
   routeReason?: string;

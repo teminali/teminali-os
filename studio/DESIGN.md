@@ -5693,6 +5693,38 @@ open; what changed is that it can no longer strand a conversation, and that the
 next occurrence writes down which half of the pipeline went quiet.
 
 
+### 6.26 The prompt said what it could not afford, and told nobody (2026-09-07)
+
+`assemblePrompt` drops a section it cannot fit and carries on, and
+`frontierEngine.ts` writes the list of what went into
+`InferenceTelemetry.contextBudget.dropped`. Nothing read it. Nothing read
+`RuntimeTelemetryService` either — `record()` was called on both lanes and its
+`subscribe()` and `getLatest()` had no callers at all, while the same
+`telemetry` object was already being handed to `onComplete` directly. It was a
+second transport for data that had one, so it is deleted.
+
+The dropped list is not redundant, and it is now on the reply's telemetry row.
+A turn given without `screen`, `ask` or `tool-execution-mandate` is a different
+turn — the model is not refusing, it was never told it could — and the only
+record of that was being computed and discarded. It cost a session to not
+explain a chat turn that answered "could you describe the error or provide a
+screenshot?" on a machine whose eye works.
+
+`droppedWorthNaming` decides what to say, on `loadWorthNaming`'s principle that
+a row crying every turn is a row nobody reads. `completeness`, `multi-agent`
+and `house-style` are ranked last *on purpose* — the visual contract alone cost
+every "play that song" turn 1,858 characters — so their falling off is the
+budget working and is never named. Everything else in the ranking grants a
+capability, and its loss is named in the priority order the budget reported.
+
+Not a fix for §6.25's sibling mystery: the screen tool was re-measured live
+this session through `AIService.streamMessage` with the UI's own option set and
+it **works** — the fence is emitted, `lookAtScreen` is called once, the real
+`AssistantService.observe` returns 21 elements and a true description. The
+original failure did not reproduce, so what changed here is that a next
+occurrence will say whether the model was ever offered the capability.
+
+
 ## 7. The agent command loop (`services/agentCommands.ts`, `services/commandThrashing.ts`)
 
 ### 7.1 Diagnose before retrying (2026-09-05)

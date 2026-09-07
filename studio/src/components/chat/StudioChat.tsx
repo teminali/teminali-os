@@ -459,6 +459,11 @@ export const StudioChat: React.FC<{
               tokensCount: data.tokensCount,
               durationSec: data.durationSec,
               loadSec: Number((data.telemetry.loadDurationMs / 1000).toFixed(2)),
+              // What the window could not afford. Carried onto the message so
+              // the row can say it: a reply given without the sections that
+              // grant a capability is a different reply, and until now the
+              // only record of that was discarded. See `droppedWorthNaming`.
+              droppedSections: data.telemetry.contextBudget?.dropped ?? [],
               engineUsed: data.engineUsed,
             }));
             setStreaming(false);

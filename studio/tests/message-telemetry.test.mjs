@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { telemetry, loadWorthNaming } from "../src/utils/messageTelemetry.ts";
+import { telemetry, loadWorthNaming, droppedWorthNaming } from "../src/utils/messageTelemetry.ts";
 
 /**
  * The row under a reply, on hover. It was five flex children with a gap
@@ -65,4 +65,39 @@ test("a load nobody measured is not named", () => {
   assert.equal(loadWorthNaming(12.4, undefined), false);
   assert.equal(loadWorthNaming(undefined, 8.1), false);
   assert.equal(loadWorthNaming(0, 8.1), false);
+});
+
+/* ── What the window could not afford ──────────────────────────────────── */
+
+test("a turn that fitted says nothing about dropped sections", () => {
+  assert.deepEqual(droppedWorthNaming(undefined), []);
+  assert.deepEqual(droppedWorthNaming([]), []);
+});
+
+test("the sections ranked last on purpose are not a warning", () => {
+  // `systemPrompt.ts` puts these at the bottom precisely so they are the first
+  // to go; naming them would put a notice under most short replies.
+  assert.deepEqual(droppedWorthNaming(["house-style", "multi-agent", "completeness"]), []);
+});
+
+test("losing a capability is named", () => {
+  assert.deepEqual(droppedWorthNaming(["tool-execution-mandate"]), ["tool-execution-mandate"]);
+  assert.deepEqual(droppedWorthNaming(["screen", "ask"]), ["screen", "ask"]);
+});
+
+test("the affordable losses are filtered out of a mixed drop", () => {
+  assert.deepEqual(
+    droppedWorthNaming(["screen", "house-style", "doctrine", "completeness"]),
+    ["screen", "doctrine"],
+  );
+});
+
+test("priority order is preserved, because that is how the budget reported it", () => {
+  assert.deepEqual(droppedWorthNaming(["doctrine", "ask", "screen"]), ["doctrine", "ask", "screen"]);
+});
+
+test("the row names the loss after the cost, and only when there is one", () => {
+  const base = { timestamp: "12:56", engineUsed: "Frontier Flash", costLabel: "$0.0000 local" };
+  assert.equal(telemetry({ ...base, droppedSections: ["house-style"] }).length, 3);
+  assert.deepEqual(telemetry({ ...base, droppedSections: ["screen", "ask"] }).at(-1), "screen, ask dropped");
 });
