@@ -162,6 +162,23 @@ The operator's workaround is one line in PowerShell — `winget install
 Gyan.FFmpeg`, then restart the app so the new PATH is picked up — but a
 customer should never see this.
 
+### The rule this broke
+
+**A customer must never be shown a shell command.** The dialog printed
+`winget install Gyan.FFmpeg` in red and stopped there, which is a developer's
+note left in a product. Whatever the app needs, it either ships with it, or
+fetches it with a progress bar and a button — a missing dependency is the
+application's problem to solve, not a task to delegate to the person who bought
+it. The same rule applies to the sidecar work above: if the wizard's download
+fails, the recovery is a button that retries, never an instruction.
+
+**Before bundling, pick the licence.** The Gyan build named in that error is
+**GPL**. Shipping GPL binaries inside a product that is sold carries
+obligations — an offer of source, and care about coupling. An **LGPL** build is
+the usual answer for commercial distribution. This is the operator's decision
+and it must be made before a binary goes into the installer, not after it has
+shipped to customers.
+
 The fix is the same shape as the sidecar one, and cheaper: a Windows ffmpeg
 static build is roughly 80-120 MB against the sidecar's 573 MB, so bundling it
 outright would not reintroduce the packaging failure this document is about.
