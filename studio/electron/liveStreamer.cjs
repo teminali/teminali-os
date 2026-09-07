@@ -53,18 +53,29 @@ function displayServiceName(service) {
  */
 function testLiveConnection({ service = "youtube", rtmpUrl, streamKey }) {
   return new Promise((resolve) => {
+    /*
+      The argument is judged before the machine is.
+
+      These two checks were the other way round, which made the answer to "is
+      this stream key any good?" depend on whether FFmpeg happened to be
+      installed: an empty key came back as "FFmpeg is not installed" on a bare
+      machine and as "stream key is required" on a stocked one. It failed in CI
+      for exactly that reason and passed on the author's Mac. An empty key is
+      empty either way, and it is also the one of the two the operator can fix
+      without leaving the field they are already in.
+    */
+    const key = (streamKey || "").trim();
+    if (!key) {
+      resolve({ ok: false, error: "Stream key is required to test the connection." });
+      return;
+    }
+
     const bin = findFfmpeg();
     if (!bin) {
       resolve({
         ok: false,
         error: `FFmpeg is not installed (${ffmpegInstallHint()}). Install FFmpeg to enable live streaming.`,
       });
-      return;
-    }
-
-    const key = (streamKey || "").trim();
-    if (!key) {
-      resolve({ ok: false, error: "Stream key is required to test the connection." });
       return;
     }
 
