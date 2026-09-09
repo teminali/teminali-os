@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { mkdtempSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { randomUUID } from "node:crypto";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -98,6 +98,89 @@ test("neither agent defaults to its most permissive mode", () => {
     );
     assert.ok(agent.permissions.includes(agent.defaultPermission));
   }
+});
+
+/**
+ * A fake agent that records the argv it was handed and exits.
+ *
+ * The file is the binary, so what it writes down is the production argument
+ * list verbatim — which is the only way to assert on flags that are built for
+ * a real CLI without running one. `argsFor` stays unexported: the contract
+ * worth testing is what reaches the process, not what a helper returns.
+ */
+function argvRecorder() {
+  const id = randomUUID();
+  const file = join(root, `argv-${id}.mjs`);
+  const out = join(root, `argv-${id}.json`);
+  writeFileSync(
+    file,
+    `#!${process.execPath}\n`
+      + `import { writeFileSync } from "node:fs";\n`
+      + `writeFileSync(${JSON.stringify(out)}, JSON.stringify(process.argv.slice(2)));\n`
+      + `process.exit(0);\n`,
+    { mode: 0o755 },
+  );
+  return { file, read: () => JSON.parse(readFileSync(out, "utf8")) };
+}
+
+test("neither agent ships an effort or a thinking default of its own", () => {
+  for (const [engine, agent] of Object.entries(AGENTS)) {
+    // Null means "pass no flag", which leaves whatever the operator configured
+    // in ~/.claude or ~/.codex/config.toml in force. Picking one for them here
+    // would override a config file they wrote, silently, on every turn.
+    assert.equal(agent.defaultEffort, null, `${engine} must not choose an effort for the operator`);
+    assert.equal(agent.defaultThinking, null, `${engine} must not choose a reasoning level for the operator`);
+    assert.ok(agent.efforts.length > 0, `${engine} must offer at least one effort level`);
+  }
+});
+
+test("the two CLIs take the same knob by different names", async () => {
+  const claude = argvRecorder();
+  await runAgentTurn({ engine: "claude", prompt: "test", root, bin: claude.file, effort: "high", onEvent: () => {} });
+  const claudeArgs = claude.read();
+  assert.equal(claudeArgs[claudeArgs.indexOf("--effort") + 1], "high");
+
+  const codex = argvRecorder();
+  await runAgentTurn({
+    engine: "codex", prompt: "test", root, bin: codex.file,
+    effort: "high", thinking: "concise", onEvent: () => {},
+  });
+  const codexArgs = codex.read();
+  // Codex has no flag for either; both are TOML config overrides, and the
+  // value is quoted because `-c` parses it as TOML before falling back.
+  assert.ok(codexArgs.includes('model_reasoning_effort="high"'));
+  assert.ok(codexArgs.includes('model_reasoning_summary="concise"'));
+  // Order-sensitive: every `-c` must precede the subcommand, or Codex reads it
+  // as an argument to `exec` and the turn dies on a usage error.
+  assert.ok(codexArgs.lastIndexOf("-c") < codexArgs.indexOf("exec"));
+});
+
+test("a level belonging to the other CLI is dropped rather than passed on", async () => {
+  // Both CLIs fail the whole turn on a level they do not recognise, so a stale
+  // value — from a persisted store, or a CLI since downgraded — must become a
+  // normal turn at the operator's own setting, not a dead one.
+  const claude = argvRecorder();
+  await runAgentTurn({ engine: "claude", prompt: "test", root, bin: claude.file, effort: "minimal", onEvent: () => {} });
+  assert.equal(claude.read().includes("--effort"), false, "`minimal` is Codex's word, not Claude Code's");
+
+  const codex = argvRecorder();
+  await runAgentTurn({
+    engine: "codex", prompt: "test", root, bin: codex.file,
+    effort: "max", thinking: "verbose", onEvent: () => {},
+  });
+  const codexArgs = codex.read();
+  assert.equal(codexArgs.some((arg) => String(arg).startsWith("model_reasoning_effort")), false);
+  assert.equal(codexArgs.some((arg) => String(arg).startsWith("model_reasoning_summary")), false);
+});
+
+test("saying nothing about effort passes no flag at all", async () => {
+  const claude = argvRecorder();
+  await runAgentTurn({ engine: "claude", prompt: "test", root, bin: claude.file, onEvent: () => {} });
+  assert.equal(claude.read().includes("--effort"), false);
+
+  const codex = argvRecorder();
+  await runAgentTurn({ engine: "codex", prompt: "test", root, bin: codex.file, onEvent: () => {} });
+  assert.equal(codex.read().some((arg) => String(arg).startsWith("model_reasoning")), false);
 });
 
 /* ── Claude normalisation ────────────────────────────────────────────────── */

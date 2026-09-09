@@ -28,6 +28,19 @@ export interface AgentDescriptor {
   version: string | null;
   permissions: string[];
   defaultPermission: string;
+  /**
+   * How hard this CLI can be told to work, weakest first, in its own
+   * vocabulary — the two do not share one. Null default means "say nothing and
+   * let the operator's own CLI config stand". Read from the gateway rather
+   * than hard-coded here so the picker can never offer a level the installed
+   * binary would reject. See server/agent-cli.js `AGENTS`.
+   */
+  efforts: string[];
+  defaultEffort: string | null;
+  /** How much reasoning comes back on the stream. Empty when the CLI has no
+   *  such knob — Claude Code's effort level is its thinking budget. */
+  thinking: string[];
+  defaultThinking: string | null;
 }
 
 export interface AgentTurnOptions {
@@ -35,11 +48,26 @@ export interface AgentTurnOptions {
   prompt: string;
   /** Workspace-relative. Empty means the workspace root. */
   cwd?: string;
+  /**
+   * Attached images, as base64 data URLs.
+   *
+   * Neither CLI can be handed bytes: the prompt is argv. The gateway writes
+   * these to disk inside the agent's own working directory and then either
+   * passes the files to `codex exec --image=` or names their paths to Claude
+   * Code, which reads them with its Read tool. See server/agent-attachments.js.
+   */
+  images?: string[];
   /** Resume the CLI's own session. Null starts a fresh one. */
   sessionId?: string | null;
   model?: string | null;
   permission?: string;
+  /** One of the engine's own `efforts`. Null leaves the CLI's setting alone. */
+  effort?: string | null;
+  /** One of the engine's own `thinking` values, where it has any. */
+  thinking?: string | null;
   signal?: AbortSignal;
+  /** Run through Frontier Max online Gemini tier via Claude Code */
+  frontierMax?: boolean;
 }
 
 /** One selectable model, and how much we actually know about it. */
@@ -233,9 +261,13 @@ export class AgentCliService {
         engine: options.engine,
         prompt: options.prompt,
         cwd: options.cwd ?? "",
+        images: options.images ?? [],
         sessionId,
         model: options.model ?? null,
         permission: options.permission,
+        effort: options.effort ?? null,
+        thinking: options.thinking ?? null,
+        frontierMax: options.frontierMax ?? false,
       }),
     });
     await GatewayClient.expectOk(response);
@@ -360,6 +392,16 @@ export class AgentCliService {
       throw failure;
     }
 
+    const actionMatch = text.match(/<workspace-action\s+action=["']([^"']+)["']\s+path=["']([^"']+)["']\s*\/?>/i);
+    if (actionMatch) {
+      const [, action, targetPath] = actionMatch;
+      callbacks.onWorkspace?.({
+        type: "workspace",
+        action: action as any,
+        path: targetPath,
+      });
+    }
+
     const wallMs = performance.now() - startedAt;
     const usage = totals.usage;
     const outputTokens = usage?.outputTokens ?? 0;
@@ -381,9 +423,9 @@ export class AgentCliService {
       // under a turn means the same thing whichever engine produced it.
       tokensCount: promptTokens + outputTokens,
       durationSec: (durationMs || wallMs) / 1000,
-      engineUsed: options.engine === "claude" ? "Claude Code" : "Codex",
-      mode: "auto",
-      routeReason: reasoning ? "agent_cli_with_reasoning" : "agent_cli",
+      engineUsed: options.frontierMax ? "Frontier Max (Gemini)" : options.engine === "claude" ? "Claude Code" : "Codex",
+      mode: options.frontierMax ? "max" : "auto",
+      routeReason: options.frontierMax ? "frontier_max_gemini" : (reasoning ? "agent_cli_with_reasoning" : "agent_cli"),
       telemetry: {
         requestId: sessionId ?? "agent",
         model: model ?? options.engine,

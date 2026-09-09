@@ -26,3 +26,4 @@ export { createRoster, probeAll, resolve } from "./providers";
 export { resolveProviders, type ResolvedProviders } from "./resolution";
 export { AudioGraph, encodeWav } from "./audioGraph";
 export { VoiceDirector, type VoiceDirectorOptions } from "./voiceDirector";
+export { VoiceTextSync, type VoiceTextSyncOptions } from "./voiceTextSync";

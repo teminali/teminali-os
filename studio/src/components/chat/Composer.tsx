@@ -484,7 +484,7 @@ export const Composer: React.FC<ComposerProps> = ({
               />
             )}
 
-            <div className="relative flex-shrink-0">
+            <div className="relative z-30 flex-shrink-0">
               <button
                 type="button"
                 onClick={() => {
@@ -505,8 +505,11 @@ export const Composer: React.FC<ComposerProps> = ({
 
             {/* Live transcript lands in the field as it is spoken, so dictation
                 and typing are visibly the same input. */}
-            {voice.state === "hearing" && voice.transcript && (
-              <span className="text-2xs text-ink-faint truncate max-w-[180px]">{voice.transcript}</span>
+            {(voice.state === "hearing" || voice.state === "deciding") && voice.transcript && (
+              <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-2xs bg-primary/10 text-primary border border-primary/20 truncate max-w-[220px] animate-pulse">
+                <span className="w-1.5 h-1.5 rounded-full bg-primary" />
+                {voice.transcript}
+              </span>
             )}
 
             {streaming ? (
