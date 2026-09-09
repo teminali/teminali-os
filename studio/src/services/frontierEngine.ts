@@ -219,6 +219,32 @@ function stripImagePrefix(dataUrl: string): string {
   return comma >= 0 ? dataUrl.slice(comma + 1) : dataUrl;
 }
 
+/**
+ * A content block the gateway's Gemini bridge understands.
+ *
+ * The bridge speaks the Anthropic Messages shape and translates it — see
+ * `server/geminiBridge.js`, which turns an `image` block into the `image_url`
+ * data URL Gemini wants. Sending blocks is therefore the whole of what this
+ * lane needs to see an attachment; nothing new had to be taught to the server.
+ */
+type ContentBlock =
+  | { type: "text"; text: string }
+  | { type: "image"; source: { type: "base64"; media_type: string; data: string } };
+
+function imageBlock(dataUrl: string): ContentBlock {
+  const match = /^data:([^;,]+);base64,/i.exec(dataUrl);
+  return {
+    type: "image",
+    source: {
+      type: "base64",
+      // A data URL without a declared type is almost always a PNG, and a wrong
+      // guess is a rejected block rather than a wrong answer.
+      media_type: match ? match[1].toLowerCase() : "image/png",
+      data: stripImagePrefix(dataUrl),
+    },
+  };
+}
+
 async function unloadOllamaModel(model: string): Promise<boolean> {
   try {
     // keep_alive must be 0 to evict the model. Any positive duration extends
@@ -1036,6 +1062,251 @@ async function streamFromAnthropic(
   });
 }
 
+async function streamFromGemini(
+  userPrompt: string,
+  history: ChatMessage[],
+  callbacks: StreamCallbacks,
+  options: {
+    mode?: "max" | "gemini";
+    signal?: AbortSignal;
+    model?: string;
+    origin?: TurnOrigin;
+    /** Attached images as base64 data URLs; sent as Anthropic image blocks. */
+    images?: string[];
+    onWorkspace?: (event: any) => void;
+    workingDirectory?: string;
+    capabilities?: EngineCapabilities;
+    approveCommand?: (request: AgentCommandRequest) => Promise<boolean>;
+    workspaceProjects?: {
+      current?: { name: string; path: string; kind?: string };
+      recent?: Array<{ name: string; path: string; kind?: string }>;
+    };
+  } = {},
+): Promise<void> {
+  const id = requestId();
+  const started = performance.now();
+  const startedAt = new Date().toISOString();
+  let firstTokenAt: number | null = null;
+  let accumulated = "";
+  let totalInputTokens = 0;
+  let totalOutputTokens = 0;
+  const isVoice = options.origin === "voice";
+  const modelToUse = options.model || (isVoice ? "gemini-2.5-flash" : "gemini-3.8-flash");
+
+  // Use injected workspace state to ground the model
+  const projects = options.workspaceProjects;
+  const currentPath = projects?.current?.path || options.workingDirectory || "Not set";
+  const currentName = projects?.current?.name || currentPath.split("/").filter(Boolean).pop() || "Workspace";
+  const recentList = (projects?.recent || [])
+    .map((p) => `- ${p.name} (${p.path}) [${p.kind || "code"}]`)
+    .join("\n");
+
+  const commandInstructions = options.capabilities?.runCommand
+    ? `\n\nCommand Execution Rules:
+You have live, direct terminal and filesystem access inside Teminali OS via \`\`\`frontier-run code fences.
+When the operator asks a question or gives an instruction that requires inspecting files, checking folder sizes, disk space, listing files, running tests, or measuring system state (e.g. "tell me the total size of all the files on my desktop folder"):
+1. NEVER say "I cannot run commands", "I lack terminal execution access", or tell the user to run commands themselves.
+2. Emit the exact command immediately in a \`\`\`frontier-run fence:
+\`\`\`frontier-run
+<command>
+\`\`\`
+3. The system executes the command automatically and returns the real command output in an observation turn before you deliver your spoken response.
+4. After receiving the output, synthesize and state the answer directly in natural spoken dialogue without code fences.`
+    : "";
+
+  const system = isVoice
+    ? `Your name is Temy, the real-time voice assistant inside Teminali OS. You are speaking directly with the operator.
+
+Spoken Dialogue Rules:
+1. Speak naturally, clearly, and concisely (1 to 3 short sentences).
+2. NEVER use markdown formatting in spoken dialogue (no asterisks **, no headers #, no bullet points -).
+3. Do not output raw URLs or large blocks of code; summarize clearly instead.
+4. When the user asks to switch workspace, change project, open a folder, or open a file, emit:
+   <workspace-action action="open-project" path="<absolute-path>" />
+   <workspace-action action="open-folder" path="<path>" />
+   <workspace-action action="open-file" path="<path>" />
+   <workspace-action action="reveal" path="<path>" />
+   followed by a friendly, 1-sentence spoken confirmation explaining what was done.
+5. Answer immediately without filler greetings or preamble unless greeted.
+${commandInstructions}
+
+Current Workspace: ${currentName} (${currentPath})
+Recent Workspaces:
+${recentList || "None"}`
+    : `Your name is Temy, the assistant inside Teminali Code. If asked who or what you are, you are Temy. Be concise, direct, helpful, and never claim commands ran without evidence.
+${commandInstructions}
+
+Current Workspace: ${currentName} (${currentPath})
+Recent Workspaces:
+${recentList || "None"}
+
+You have the ability to switch workspaces and open folders/files in Teminali Code!
+When the user asks to switch workspace, change project, open a folder, or open a file:
+- Match the user's intent to the corresponding workspace from Recent Workspaces (even if speech-to-text slightly misrecognized or colloquial, e.g. "D4K Video Unloader Plus" refers to "4K Video Downloader+").
+- To switch workspace or open a project, emit:
+  <workspace-action action="open-project" path="<absolute-path>" />
+- To open a folder as a gallery, emit:
+  <workspace-action action="open-folder" path="<path>" />
+- To open a file in an editor tab, emit:
+  <workspace-action action="open-file" path="<path>" />
+- To reveal a file/folder in the sidebar, emit:
+  <workspace-action action="reveal" path="<path>" />
+Always include a natural, friendly confirmation message explaining what you did.`;
+
+  const attachedImages = options.images ?? [];
+  const messages: Array<{ role: "assistant" | "user"; content: string | ContentBlock[] }> = [
+    ...history.filter((message) => message.role !== "system").slice(-8).map((message) => ({
+      role: message.role === "assistant" ? ("assistant" as const) : ("user" as const),
+      content: message.content,
+    })),
+    // Blocks only when there is something to put in them: a plain string is
+    // what every other turn sends, and the bridge unwraps a lone text block
+    // back to one anyway.
+    attachedImages.length > 0
+      ? {
+          role: "user" as const,
+          content: [
+            { type: "text" as const, text: userPrompt || "Look at the attached image(s)." },
+            ...attachedImages.map(imageBlock),
+          ],
+        }
+      : { role: "user" as const, content: userPrompt },
+  ];
+
+  const MAX_AGENT_TURNS = 5;
+
+  for (let turn = 0; turn < MAX_AGENT_TURNS; turn++) {
+    if (options.signal?.aborted) break;
+
+    const response = await GatewayClient.request("/api/gemini/v1/messages", {
+      method: "POST",
+      signal: options.signal,
+      body: JSON.stringify({
+        model: modelToUse,
+        max_tokens: 4096,
+        stream: true,
+        system,
+        messages,
+      }),
+    });
+    await GatewayClient.expectOk(response);
+    if (!response.body) throw new GatewayError("Gemini returned no response stream.", "EMPTY_STREAM", 502);
+
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = "";
+    let turnText = "";
+
+    try {
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        const events = buffer.split("\n\n");
+        buffer = events.pop() || "";
+        for (const event of events) {
+          const dataLine = event.split("\n").find((line) => line.startsWith("data:"));
+          if (!dataLine) continue;
+          let data: any;
+          try {
+            data = JSON.parse(dataLine.slice(5).trim());
+          } catch {
+            continue;
+          }
+          if (data.error?.message) throw new GatewayError(data.error.message, "GEMINI_ERROR", 502);
+          if (data.message?.usage?.input_tokens) totalInputTokens = data.message.usage.input_tokens;
+          if (data.usage?.output_tokens) totalOutputTokens += data.usage.output_tokens;
+          if (data.delta?.text) {
+            if (firstTokenAt === null) firstTokenAt = performance.now();
+            turnText += data.delta.text;
+            accumulated += data.delta.text;
+            callbacks.onToken(data.delta.text);
+          }
+        }
+      }
+    } finally {
+      await reader.cancel().catch(() => {});
+    }
+
+    if (!turnText.trim() && turn === 0) {
+      throw new GatewayError("Gemini completed without model output.", "EMPTY_MODEL_OUTPUT", 502);
+    }
+
+    // Check if turnText contains executable commands
+    if (options.capabilities?.runCommand && hasExecutableCommands(turnText)) {
+      const executions = await runAgentCommands(turnText, {
+        execute: options.capabilities.runCommand,
+        signal: options.signal,
+        onToolCall: callbacks.onToolCall,
+        approve: options.approveCommand,
+        maxOutputChars: 4000,
+      });
+      const observation = buildCommandEvidence(executions);
+      messages.push({ role: "assistant", content: turnText });
+      messages.push({ role: "user", content: observation });
+      callbacks.onToken("\n\n");
+      accumulated += "\n\n";
+      // Continue next turn so Gemini can answer based on command evidence
+      continue;
+    }
+
+    // No commands to run, turn complete
+    break;
+  }
+
+  // Execute any workspace action emitted by the model
+  const actionMatch = accumulated.match(/<workspace-action\s+action=["']([^"']+)["']\s+path=["']([^"']+)["']\s*\/?>/i);
+  if (actionMatch) {
+    const [, action, targetPath] = actionMatch;
+    if (action === "open-project") {
+      const match = projects?.recent?.find(
+        (p) => p.path === targetPath || p.name.toLowerCase() === targetPath.toLowerCase(),
+      ) || { path: targetPath, name: targetPath.split("/").filter(Boolean).pop() || targetPath, kind: "code" };
+      options.onWorkspace?.({
+        type: "workspace",
+        action: "open-project",
+        path: match.path,
+        name: match.name,
+        kind: (match.kind as any) || "code",
+      });
+    } else if (action === "open-folder") {
+      options.onWorkspace?.({ type: "workspace", action: "open-folder", path: targetPath });
+    } else if (action === "open-file") {
+      options.onWorkspace?.({ type: "workspace", action: "open-file", path: targetPath });
+    } else if (action === "reveal") {
+      options.onWorkspace?.({ type: "workspace", action: "reveal", path: targetPath });
+    }
+  }
+
+  const totalDurationMs = performance.now() - started;
+  const isMax = options.mode === "max";
+  const engineUsed = isVoice ? "Gemini Voice Assistant" : isMax ? "Frontier Max (Gemini)" : "Gemini Flash";
+  callbacks.onComplete({
+    fullText: accumulated,
+    costUsd: 0.0005,
+    costLabel: isMax ? "Included" : "Free (BYOK)",
+    tokensCount: totalInputTokens + totalOutputTokens,
+    durationSec: Number((totalDurationMs / 1000).toFixed(2)),
+    engineUsed,
+    mode: isMax ? "max" : "gemini",
+    routeReason: isVoice ? "voice_assistant_gemini" : isMax ? "frontier_max_gemini" : "gemini_flash_byok",
+    telemetry: {
+      requestId: id,
+      model: modelToUse,
+      startedAt,
+      completedAt: new Date().toISOString(),
+      totalDurationMs: Number(totalDurationMs.toFixed(2)),
+      loadDurationMs: 0,
+      timeToFirstTokenMs: firstTokenAt === null ? null : Number((firstTokenAt - started).toFixed(2)),
+      promptTokens: totalInputTokens,
+      outputTokens: totalOutputTokens,
+      promptTokensPerSec: null,
+      outputTokensPerSec: totalOutputTokens > 0 ? Number((totalOutputTokens / (totalDurationMs / 1000)).toFixed(2)) : null,
+      source: "anthropic",
+    },
+  });
+}
+
 export async function purgeOllamaMemory(): Promise<void> {
   let unloaded = 0;
   for (const model of [FLASH_MODEL, MAX_MODEL]) {
@@ -1105,6 +1376,7 @@ async function streamFlashDigest(prompt: string, options: DigestStreamOptions): 
 export const FrontierEngine = {
   streamLocal: streamFromOllama,
   streamAnthropic: streamFromAnthropic,
+  streamGemini: streamFromGemini,
   streamDigest: streamFlashDigest,
   describeImages,
   purgeMemory: purgeOllamaMemory,

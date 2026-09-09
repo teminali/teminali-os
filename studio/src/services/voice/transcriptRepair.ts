@@ -5,16 +5,83 @@
 export const BLANK_AUDIO_PATTERN =
   /^\s*[\(\[][^()\[\]]{1,120}[\)\]]\s*$|\[[^\]]*(?:blank[_\s-]*audio|silence|music|clicking|typing|keyboard|applause|laughter|giggle|chuckle|cough|sigh|snort|groan|gasp|throat[_\s-]*clearing|whispering|inaudible|noise|background[_\s-]*noise|ambient|sound|tone|beep|static|screaming|cheering)[^\]]*\]|\([^)]*(?:blank[_\s-]*audio|silence|music|clicking|typing|keyboard|applause|laughter|cough|sigh|inaudible|noise|ambient|sound|tone|beep|static|screaming|cheering|gentle|upbeat|muffled)[^)]*\)|\*[^*]*(?:blank[_\s-]*audio|silence|music|clicking|typing|keyboard|applause|laughter)[^*]*\*|[♪♫♬♩]/gi;
 
+export const WHISPER_SUBTITLE_PATTERN =
+  /(?:субтитры\s+(?:создавал|делал|готовил|переводил)|редактор\s+субтитров|перевод\s+субтитров)[^.!?\n]*|\b(?:subtitles\s+by|captions\s+by|transcription\s+by|translated\s+by|amara\.org|dimatorzok|beadaptive\.net|mooji\.org)\b[^.!?\n]*|\b(?:thanks\s+for\s+watching|thank\s+you\s+for\s+watching|please\s+subscribe|like\s+and\s+subscribe)\b[.!?]*/gi;
+
+export function stripForeignScriptHallucinations(text: string): string {
+  const latinCount = (text.match(/[\p{Script=Latin}]/gu) || []).length;
+  const cyrillicCount = (text.match(/[\p{Script=Cyrillic}]/gu) || []).length;
+  if (latinCount > 0 && cyrillicCount > 0) {
+    return text.replace(/[\p{Script=Cyrillic}\s]+/gu, " ").replace(/\s{2,}/g, " ").trim();
+  }
+  return text;
+}
+
+export function stripTrailingHallucinatedThankYou(text: string): string {
+  const match = text.match(/^(.*\b(?:hello|hi|hey|what|how|where|when|why|can|could|please|tell|show)\b.*)\s+[–—,.-]?\s*(?:thank\s+you|thanks)[.!?]*$/i);
+  if (match) {
+    return match[1].trim();
+  }
+  return text;
+}
+
+export function deduplicateRepeatedPhrases(text: string): string {
+  if (!text) return "";
+  let current = text.trim();
+  const normalize = (s: string) => s.trim().toLowerCase().replace(/[.,?!:;—–-]+$/g, "");
+
+  // 1. Check for whole or sub-phrase repetitions (e.g. "Hey, how are you? Hey, how are you?")
+  let changed = true;
+  let iterations = 0;
+  while (changed && iterations < 5) {
+    changed = false;
+    iterations++;
+    const half = Math.floor(current.length / 2);
+    for (let len = half; len >= 3; len--) {
+      const part1 = current.slice(0, len).trim();
+      const remainder = current.slice(len).trim();
+      if (part1 && remainder && normalize(part1) === normalize(remainder)) {
+        current = part1;
+        changed = true;
+        break;
+      }
+    }
+  }
+
+  // 2. Check for sentence-level consecutive duplicates:
+  // e.g. "How are you doing? How are you doing? Tell me about your day."
+  const sentences = current.split(/(?<=[.!?])\s+/);
+  if (sentences.length > 1) {
+    const deduped: string[] = [];
+    for (const s of sentences) {
+      if (deduped.length === 0 || normalize(deduped[deduped.length - 1]) !== normalize(s)) {
+        deduped.push(s);
+      }
+    }
+    current = deduped.join(" ");
+  }
+
+  return current;
+}
+
 export function cleanTranscript(text: string): string {
   if (!text) return "";
-  let cleaned = text.replace(BLANK_AUDIO_PATTERN, " ").replace(/\s{2,}/g, " ").trim();
+  let cleaned = text
+    .replace(BLANK_AUDIO_PATTERN, " ")
+    .replace(WHISPER_SUBTITLE_PATTERN, " ")
+    .replace(/\s{2,}/g, " ")
+    .trim();
+  // Strip foreign hallucinations if mixed with Latin text
+  cleaned = stripForeignScriptHallucinations(cleaned);
+  // Strip trailing "thank you" hallucinated by Whisper on silence
+  cleaned = stripTrailingHallucinatedThankYou(cleaned);
   // If the entire text was parenthesized or bracketed (e.g. "(upbeat music)", "[keyboard clicking]")
   if (/^\s*[\(\[][^()\[\]]+[\)\]]\s*$/.test(cleaned)) {
     return "";
   }
   // Strip strings that consist solely of standalone punctuation
   cleaned = cleaned.replace(/^[.\s,;!?:—–-]+$/, "").trim();
-  return cleaned;
+  return deduplicateRepeatedPhrases(cleaned);
 }
 
 export function isNonSpeechOrBlank(text: string): boolean {

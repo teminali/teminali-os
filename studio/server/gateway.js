@@ -18,6 +18,7 @@ import { searchMachine } from "./machine-search.js";
 import { forgetVoiceStatus, readBounded, speak, transcribe, voiceStatus } from "./voice.js";
 import { act, assistantCapabilities, observe, requestAccessibility } from "./assistant.js";
 import { AGENTS, AGENT_LIMITS, agentAvailability, isAgentEngine, runAgentTurn } from "./agent-cli.js";
+import { AGENT_IMAGE_ERRORS, validateAgentImages } from "./agent-attachments.js";
 import { emitToRun, requestApproval, requestCameraFrame, resolveApproval, resolveCameraFrame, runAuthorises, runHasEnded } from "./permission-bridge.js";
 import { agentModels, recordResolution } from "./agent-models.js";
 import { appendUsage, summariseUsage, usageRecord } from "./usage-ledger.js";
@@ -47,7 +48,16 @@ import { fileURLToPath } from "node:url";
 import { MAX_FILE_BYTES, extractFilePart, fileCapabilities, ingestFile } from "./files.js";
 import { detectDevice } from "./device.js";
 import { guardianSnapshot, unloadModel } from "./guardian.js";
+import {
+  DEFAULT_GEMINI_MODEL,
+  GEMINI_OPENAI_BASE,
+  formatAnthropicJsonResponse,
+  normalizeGeminiModel,
+  streamOpenAIToAnthropic,
+  translateAnthropicToOpenAI,
+} from "./geminiBridge.js";
 import { createAutoUnloadSweep } from "./guardian-autounload.js";
+import { createRealtimeVoiceSupervisor } from "./realtime-voice.js";
 import { cloneRepo, githubStatus, listRepos } from "./github.js";
 import {
   assessStorage,
@@ -959,6 +969,184 @@ export async function createGateway(options = {}) {
         return;
       }
 
+      /* ── Gemini Bridge for Claude Code (Frontier Max) ────────────────────── */
+      if (
+        route.startsWith("/api/gemini/") ||
+        route.startsWith("/gemini/") ||
+        route === "/api/gemini" ||
+        route === "/gemini"
+      ) {
+        if (request.method === "GET") {
+          replyJson(response, 200, {
+            data: [
+              { id: "gemini-2.5-flash", object: "model" },
+              { id: "gemini-2.5-pro", object: "model" },
+              { id: "gemini-3.8-flash", object: "model" },
+            ],
+          });
+          return;
+        }
+
+        if (request.method === "POST" && (route.endsWith("/count_tokens") || route.endsWith("/count-tokens"))) {
+          replyJson(response, 200, { input_tokens: 100 });
+          return;
+        }
+
+        if (request.method === "POST" && (route.endsWith("/messages") || route.endsWith("/v1/messages"))) {
+          const authHeader = request.headers.authorization;
+          const providerStore = readStore(config.providerStorePath);
+          const googleSaved = providerStore.providers?.google;
+
+          const isLikelyGoogleKey = (candidate) => {
+            if (!candidate || typeof candidate !== "string") return false;
+            const trimmed = candidate.trim();
+            if (!trimmed || trimmed === "AIza-frontier-max") return false;
+            if (trimmed === sessionToken || bearerMatches(trimmed, sessionToken)) return false;
+            return trimmed.startsWith("AIza") || trimmed.startsWith("AQ.") || trimmed.startsWith("AI");
+          };
+
+          const explicitKey = request.headers["x-gemini-api-key"] || request.headers["x-api-key"];
+          const bearerCandidate =
+            typeof authHeader === "string" && authHeader.startsWith("Bearer ")
+              ? authHeader.slice(7).trim()
+              : null;
+
+          const incomingKey = [explicitKey, bearerCandidate].find(isLikelyGoogleKey) || null;
+
+          // Primary key resolution: caller-provided -> saved in provider store -> environment variable
+          let primaryKey =
+            incomingKey ||
+            (isLikelyGoogleKey(googleSaved?.key) ? googleSaved.key : null) ||
+            (isLikelyGoogleKey(process.env.GEMINI_API_KEY) ? process.env.GEMINI_API_KEY : null);
+
+          // Backup key resolution: saved backup -> env backup -> fallback between store and env
+          let backupKey =
+            (isLikelyGoogleKey(googleSaved?.backupKey) ? googleSaved.backupKey : null) ||
+            (isLikelyGoogleKey(process.env.GEMINI_API_KEY_BACKUP) ? process.env.GEMINI_API_KEY_BACKUP : null);
+
+          if (!backupKey) {
+            const storeKey = isLikelyGoogleKey(googleSaved?.key) ? googleSaved.key : null;
+            const envKey = isLikelyGoogleKey(process.env.GEMINI_API_KEY) ? process.env.GEMINI_API_KEY : null;
+            if (primaryKey === storeKey && envKey && envKey !== primaryKey) {
+              backupKey = envKey;
+            } else if (primaryKey === envKey && storeKey && storeKey !== primaryKey) {
+              backupKey = storeKey;
+            }
+          }
+
+          if (!primaryKey) {
+            throw new GatewayError(
+              401,
+              "GEMINI_KEY_REQUIRED",
+              "Google Gemini API key is required. Add GEMINI_API_KEY to your .env or configure Google in Provider Settings.",
+            );
+          }
+
+          const anthropicBody = await readJson(request, config.maxJsonBytes);
+          let openAIPayload = translateAnthropicToOpenAI(anthropicBody);
+          const endpoint = `${GEMINI_OPENAI_BASE}/chat/completions`;
+
+          await audit.write({
+            event: "frontier-max-gemini-request",
+            correlationId,
+            method: request.method,
+            route,
+            model: openAIPayload.model,
+            stream: openAIPayload.stream,
+          });
+
+          const abort = abortContext(request, response, config.requestTimeoutMs);
+          let activeKey = primaryKey.trim();
+
+          const callUpstream = async (keyToUse, payloadToUse) => {
+            return await fetchImpl(endpoint, {
+              method: "POST",
+              headers: {
+                "content-type": "application/json",
+                authorization: `Bearer ${keyToUse}`,
+              },
+              body: JSON.stringify(payloadToUse),
+              signal: abort.signal,
+            });
+          };
+
+          let upstream;
+          try {
+            upstream = await callUpstream(activeKey, openAIPayload);
+          } catch (error) {
+            if (abort.signal.aborted) {
+              throw new GatewayError(abort.wasCancelled() ? 499 : 504, abort.wasCancelled() ? "CLIENT_CANCELLED" : "UPSTREAM_TIMEOUT", "Gemini request timed out or cancelled.");
+            }
+            throw new GatewayError(502, "GEMINI_UPSTREAM_ERROR", "Could not reach Google Gemini API.", { cause: error });
+          }
+
+          // Failover to backup key on rate limits (429), capacity/service spikes (503), or auth errors (400/401/403)
+          const isFailoverEligible = (status) =>
+            status === 400 || status === 401 || status === 403 || status === 429 || status === 503;
+          if (!upstream.ok && isFailoverEligible(upstream.status) && backupKey && backupKey.trim() && backupKey.trim() !== activeKey) {
+            await audit.write({
+              event: "frontier-max-gemini-failover",
+              correlationId,
+              reason: `HTTP_${upstream.status}`,
+              model: openAIPayload.model,
+            });
+            activeKey = backupKey.trim();
+            try {
+              upstream = await callUpstream(activeKey, openAIPayload);
+            } catch (error) {
+              if (abort.signal.aborted) {
+                throw new GatewayError(abort.wasCancelled() ? 499 : 504, abort.wasCancelled() ? "CLIENT_CANCELLED" : "UPSTREAM_TIMEOUT", "Gemini backup request timed out or cancelled.");
+              }
+            }
+          }
+
+          // Model resilience: If requested model returns 429 (quota exhausted on preview model), UNAVAILABLE (503), or NOT_FOUND (404), fall back gracefully
+          if (!upstream.ok && (upstream.status === 429 || upstream.status === 503 || upstream.status === 404)) {
+            const fallbackCandidates = ["gemini-3.5-flash", "gemini-flash-latest", "gemini-3.6-flash", "gemini-3.8-flash"];
+            for (const candidate of fallbackCandidates) {
+              if (candidate === openAIPayload.model) continue;
+              await audit.write({
+                event: "frontier-max-model-fallback",
+                correlationId,
+                fromModel: openAIPayload.model,
+                toModel: candidate,
+              });
+              openAIPayload = { ...openAIPayload, model: candidate };
+              try {
+                upstream = await callUpstream(activeKey, openAIPayload);
+                if (upstream.ok) break;
+              } catch {
+                /* try next candidate */
+              }
+            }
+          }
+
+          if (!upstream.ok) {
+            const errorText = await upstream.text().catch(() => "");
+            let errorJson = null;
+            try { errorJson = JSON.parse(errorText); } catch { errorJson = { error: { message: errorText } }; }
+            const errObj = Array.isArray(errorJson) ? errorJson[0]?.error : errorJson?.error;
+            throw new GatewayError(
+              upstream.status,
+              errObj?.status || errObj?.code || "GEMINI_API_ERROR",
+              errObj?.message || `Google Gemini API returned HTTP ${upstream.status}.`,
+            );
+          }
+
+          if (openAIPayload.stream) {
+            await streamOpenAIToAnthropic(upstream, response, { model: openAIPayload.model });
+            abort.finish();
+            return;
+          }
+
+          const openaiJson = await upstream.json();
+          const anthropicJson = formatAnthropicJsonResponse(openaiJson, openAIPayload.model);
+          abort.finish();
+          replyJson(response, 200, anthropicJson);
+          return;
+        }
+      }
+
       if (!bearerMatches(request.headers.authorization, sessionToken)) {
         throw new GatewayError(401, "AUTH_REQUIRED", "A valid session bearer token is required.");
       }
@@ -1495,7 +1683,17 @@ export async function createGateway(options = {}) {
         } else {
           const validation = validateKey(providerId, keyRequest?.key);
           if (!validation.ok) throw new GatewayError(400, "INVALID_API_KEY", validation.message);
-          next = setProviderKey(store, providerId, validation.value);
+          let validatedBackupKey = undefined;
+          if (keyRequest?.backupKey !== undefined) {
+            if (keyRequest.backupKey === null || keyRequest.backupKey === "") {
+              validatedBackupKey = null;
+            } else {
+              const backupValidation = validateKey(providerId, keyRequest.backupKey);
+              if (!backupValidation.ok) throw new GatewayError(400, "INVALID_BACKUP_KEY", `Backup key: ${backupValidation.message}`);
+              validatedBackupKey = backupValidation.value;
+            }
+          }
+          next = setProviderKey(store, providerId, validation.value, validatedBackupKey);
         }
         writeStore(config.providerStorePath, next);
 
@@ -2070,6 +2268,16 @@ export async function createGateway(options = {}) {
          substitute, while the sidecar has neither.
          ------------------------------------------------------------------ */
 
+      /* The realtime pipeline's own status. Separate from /api/voice/status
+         because that route describes engines the gateway calls per request,
+         while this one describes a supervised process with a lifecycle: it is
+         how the renderer learns the socket address, and how an operator sees
+         why voice is silent when it is. */
+      if (request.method === "GET" && route === "/api/voice/realtime/status") {
+        replyJson(response, 200, realtimeVoice.status());
+        return;
+      }
+
       if (request.method === "GET" && route === "/api/voice/status") {
         replyJson(response, 200, await voiceStatus(config, { allowVibeVoice: await voiceTierEntitled() }));
         return;
@@ -2542,7 +2750,7 @@ export async function createGateway(options = {}) {
       }
 
       if (request.method === "POST" && route === "/api/agents/run") {
-        const agentRequest = await readJson(request, config.maxJsonBytes);
+        const agentRequest = await readJson(request, config.maxAgentJsonBytes ?? config.maxJsonBytes);
         const engine = agentRequest?.engine;
         if (!isAgentEngine(engine)) {
           throw new GatewayError(400, "UNKNOWN_AGENT", "Engine must be one of: " + Object.keys(AGENTS).join(", ") + ".");
@@ -2558,6 +2766,23 @@ export async function createGateway(options = {}) {
         }
         if (agentRequest.sessionId !== undefined && agentRequest.sessionId !== null && typeof agentRequest.sessionId !== "string") {
           throw new GatewayError(400, "INVALID_AGENT_SESSION", "The session id must be a string.");
+        }
+        /*
+          The attached images, refused here or not at all.
+
+          Checked before the 200 and the NDJSON header go out: past that point
+          the only way to report a bad request is an `error` event inside a
+          stream the client has already committed to reading, which is a worse
+          answer than a status code. `runAgentTurn` validates them again when it
+          writes them to disk — it is exported, and callable without this route.
+        */
+        if (agentRequest.images !== undefined) {
+          try {
+            validateAgentImages(agentRequest.images);
+          } catch (error) {
+            const code = error instanceof Error ? error.message : "INVALID_AGENT_IMAGES";
+            throw new GatewayError(400, code, AGENT_IMAGE_ERRORS[code] ?? AGENT_IMAGE_ERRORS.INVALID_AGENT_IMAGES);
+          }
         }
 
         const abort = new AbortController();
@@ -2628,15 +2853,25 @@ export async function createGateway(options = {}) {
             prompt: agentRequest.prompt,
             root: config.workspaceRoot,
             cwd: agentRequest.cwd || "",
+            images: agentRequest.images || [],
             sessionId: agentRequest.sessionId || null,
             model: requestedModel,
             permission: agentRequest.permission,
+            // Unvalidated here on purpose, exactly as `permission` is:
+            // `runAgentTurn` holds each agent's own vocabulary and drops a
+            // level it does not know, so a second allowlist here would be a
+            // copy of that one, free to drift from it.
+            effort: agentRequest.effort ?? null,
+            thinking: agentRequest.thinking ?? null,
             signal: abort.signal,
             // The correlation id is already unique per request and already
             // travels to the client on the response header, so it is the run
             // id the operator's answer will come back naming.
             runId: correlationId,
             screenControl,
+            frontierMax: Boolean(agentRequest.frontierMax),
+            gatewayUrl: `http://127.0.0.1:${config.port || 4310}`,
+            geminiApiKey: readStore(config.providerStorePath).providers?.google?.key || process.env.GEMINI_API_KEY || null,
             onEvent: send,
           });
         } catch (error) {
@@ -2842,6 +3077,15 @@ export async function createGateway(options = {}) {
     onEvent: (event) => audit.write({ ...event, correlationId: null }),
   });
 
+  /* The realtime voice pipeline. Supervised here rather than in the renderer
+     because it must outlive any one window and be killed when the gateway
+     goes, and because the renderer has no business spawning processes. Its
+     failures are reported, never thrown: see realtime-voice.js. */
+  const realtimeVoice = createRealtimeVoiceSupervisor({
+    config,
+    log: (message) => process.stdout.write(`${message}\n`),
+  });
+
   return {
     server,
     config,
@@ -2849,6 +3093,7 @@ export async function createGateway(options = {}) {
     tokenFingerprint,
     health,
     autoUnload,
+    realtimeVoice,
     async listen() {
       await new Promise((resolve, reject) => {
         server.once("error", reject);
@@ -2858,10 +3103,15 @@ export async function createGateway(options = {}) {
         });
       });
       autoUnload.start();
+      // Deliberately not awaited: weights take tens of seconds to load and the
+      // gateway must answer immediately. Readiness is polled and reported by
+      // /api/voice/realtime/status, which is what the renderer waits on.
+      void realtimeVoice.start();
       return server.address();
     },
     async close() {
       autoUnload.stop();
+      await realtimeVoice.stop();
       if (server.listening) await new Promise((resolve, reject) => server.close((error) => (error ? reject(error) : resolve())));
       await audit.flush();
     },

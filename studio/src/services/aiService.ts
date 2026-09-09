@@ -10,6 +10,7 @@
 import { GatewayError } from "./gatewayClient";
 import { AgentCliService, type AgentStreamCallbacks, type PermissionRequest } from "./agentCliService";
 import { TerminalService } from "./terminalService";
+import { WorkspaceService } from "./workspaceService";
 import { FrontierEngine, type EngineCapabilities, type StreamCallbacks, type VideoToolSummary } from "./frontierEngine";
 import { executeTool, getToolManifest } from "../video/mcp/toolRegistry";
 import { dispatchPlayerCommand, type PlayerCommand, type PlayerSnapshot } from "./playerControl";
@@ -65,6 +66,9 @@ export interface StreamRequestOptions {
   agentSessionId?: string | null;
   /** Claude Code / Codex only: how much the CLI may do without asking. */
   agentPermission?: string;
+  /** The two CLI knobs beside the permission. Null leaves the CLI's own on. */
+  agentEffort?: string | null;
+  agentThinking?: string | null;
   /** Claude Code / Codex only: the `--model` value. Null lets the CLI choose. */
   agentModel?: string | null;
   /**
@@ -235,16 +239,37 @@ export class AIService {
   ): Promise<void> {
     try {
       if (engine === "frontier") {
-        /*
-          Video prompts used to be intercepted here and answered by one
-          hardcoded call to the Cut running as a separate process on port 3888
-          — every prompt matching /video|timeline|silence|beat|caption|track/
-          got the same silence-split, reported as "completed and verified"
-          whatever had been asked for. The editor's stores are in THIS renderer
-          now, so the engine gets the real tools instead and the intercept is
-          gone. MCPRemoteSyncService still speaks to a remote Cut, which is a
-          different thing and still a supported one.
-        */
+        const isVoiceTurn = options.origin === "voice";
+        if (options.mode === "max" || options.mode === "gemini" || isVoiceTurn) {
+          const projects = await WorkspaceService.listProjects().catch(() => null);
+          await FrontierEngine.streamGemini(
+            userPrompt,
+            history,
+            callbacks,
+            {
+              mode: options.mode === "max" ? "max" : "gemini",
+              signal: options.signal,
+              images: attachedImages,
+              model: options.agentModel ?? (isVoiceTurn ? "gemini-2.5-flash" : "gemini-3.8-flash"),
+              origin: options.origin,
+              capabilities: studioCapabilities(options.workingDirectory, options.askOperator, options.lookAtScreen),
+              approveCommand: options.approveCommand,
+              workingDirectory: options.workingDirectory,
+              workspaceProjects: projects ? {
+                current: projects.current,
+                recent: projects.recent,
+              } : undefined,
+              onWorkspace: (event) => {
+                if (event.action === "open-project") {
+                  void WorkspaceService.openProject(event.path).catch(console.error);
+                }
+                options.onWorkspace?.(event);
+              },
+            },
+          );
+          return;
+        }
+
         await FrontierEngine.streamLocal(
           userPrompt,
           history,
@@ -285,9 +310,14 @@ export class AIService {
           {
             engine,
             prompt: userPrompt,
+            // Both CLIs are processes, so an attachment reaches them as a file
+            // the gateway writes beside them rather than as bytes in the body.
+            images: attachedImages,
             sessionId: options.agentSessionId ?? null,
             model: options.agentModel ?? null,
             permission: options.agentPermission,
+            effort: options.agentEffort ?? null,
+            thinking: options.agentThinking ?? null,
             signal: options.signal,
           },
           {

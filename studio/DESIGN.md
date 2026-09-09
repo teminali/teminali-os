@@ -3338,6 +3338,20 @@ changes, so a single reading is stable.
 Rows are 24px on 20px group headers in a 284px column — the density a menu of
 this length needs to be read rather than scrolled.
 
+**The voice composer mounts the same picker** (`TemiVoiceStage.tsx`), because
+removing the Teminali OS chat removed the only place the engine could be
+chosen while Temi is the surface. The trigger sits in the composer pill left of
+the microphone and reads the current selection — an agent's own label, or the
+Frontier profile name with its glyph.
+
+Mounting it was not enough to make it real. `TeminaliAgentBridge.delegateTask`
+resolves its engine as `options.engine || activityStore.activeEngine ||
+store.agentSelection?.engine || …`, and `activeEngine` always holds a value
+(`"codex"` by default), so the store selection a picker writes was unreachable.
+The stage now pushes the picker's choice into the activity store, one direction
+only — the picker leads, the pane's engine chip follows — so choosing Claude
+Code in the composer delegates to Claude Code rather than silently to Codex.
+
 ### Composer triggers
 
 `/` mounts a skill, `@` attaches a file. Both live in
@@ -4250,9 +4264,52 @@ Codex gets no camera, for the fourth time and the same reason: it has no
 
 ## 6. Voice (`studio/src/services/voice/`)
 
-Two tiers: the browser engine (always available) and **VibeVoice** run locally
-through a sidecar (see `studio/docs/VOICE_SIDECAR.md`). Two modes:
-push-to-talk dictation, and hands-free conversation with barge-in.
+Three tiers now, in descending order of what they can do and ascending order of
+what they need installed:
+
+| Tier | Where it runs | Needs |
+| --- | --- | --- |
+| **Realtime pipeline** (`realtime8000Engine.ts`, `studio/realtime-voice/`) | one supervised Python process holding recognition, the conversation loop and synthesis together | a Python virtualenv of ~2 GB, and Ollama |
+| **VibeVoice sidecar** (`providers/vibeVoice.ts`, `studio/voice-runtime/`) | a Node sidecar the gateway calls per request | `npm run voice:install` |
+| **Browser engine** (`providers/webSpeech.ts`) | the renderer | nothing |
+
+Two modes throughout: push-to-talk dictation, and hands-free conversation with
+barge-in.
+
+### 6.0 The realtime pipeline is a supervised process (2026-09-09)
+
+The realtime tier holds all three stages in one process on purpose: a
+transcript never crosses a process boundary to reach the model, and a token
+never crosses one to reach the voice, which is where its sub-second turn comes
+from. The cost is that it is heavy, slow to load, and not JavaScript — it
+cannot be started per request and cannot be imported.
+
+So the gateway supervises it (`server/realtime-voice.js`, wired in
+`createGateway`; status at `GET /api/voice/realtime/status`). Until 2026-09-09
+nothing supervised it at all: the operator ran `python server.py` in a terminal
+and voice died silently when the terminal closed, while the renderer carried
+`ws://localhost:8000/ws` as a literal in two files.
+
+Three rules govern it, each from a failure:
+
+- **Adopt before spawning.** A pipeline already answering is used as-is and is
+  never killed on shutdown — it belongs to whoever started it. A port that is
+  *busy but not healthy* (weights still loading) is waited on, not spawned
+  into; the first version spawned a second process there, which failed on bind
+  and restart-looped.
+- **Absent is not broken.** No checkout, no interpreter, no weights — each
+  leaves the studio on the tiers below. Nothing here throws into gateway
+  startup.
+- **Give up loudly.** Restarts are capped at three with backoff, and the
+  process's last 40 output lines ride along in the status route, because a
+  voice that is silent has to be able to say why. `TemiVoiceStage` carries that
+  sentence on the header status dot's tooltip (§6.31).
+
+The renderer learns the socket address from that route rather than holding a
+port literal, so the port has a single source: `TEMINALI_REALTIME_VOICE_URL`.
+The pipeline binds `127.0.0.1` by default — it carries an open microphone and
+an unauthenticated WebSocket, and until 2026-09-09 it bound `0.0.0.0`, which
+offered both to the network.
 
 **The default is `conversation`, with `requireWakeWord` back on** (2026-09-07;
 it was on 2026-09-03, off 2026-09-05, and is on again for the loopback reason
@@ -4268,6 +4325,235 @@ Turning `requireWakeWord` on restores name-only answering — `temy`,
 `teminali`, `frontier`, `studio`. `speakReply` is a no-op outside
 `conversation` mode, so this default is also what makes the assistant talk back
 at all.
+
+### 6.0.1 The assistant works behind the scenes (2026-09-09)
+
+The Teminali OS assistant has no chat surface of its own in the voice stage. It
+reads, edits, searches and runs entirely in the background, and its whole
+visible presence is one line under Temi's orb:
+`AgentActivityTicker.tsx`, fed by `activityPhrase.ts` from
+`assistantActivityStore`.
+
+Small by constraint, not by taste. A panel would become a second chat, which is
+the surface this design removes — the user talks to Temi, and the assistant is
+something that *happens*, not something else to read.
+
+Three rules the phrasing follows, each testable and tested
+(`tests/activity-phrase.test.mjs`):
+
+- **Truncate from the front.** `…/realtimeVoiceStatus.ts`, never
+  `studio/src/services/…`. Keeping the head renders every file in a deep tree
+  identically, which is worse than not showing a path at all.
+- **Absence renders nothing.** No idle placeholder: a strip that always says
+  something trains the eye to skip it, and it costs exactly when it finally has
+  news.
+- **One sentence, two outputs.** `speakActivityPhrase` returns what the eye is
+  reading, so when the operator asks "what's going on?" the spoken answer and
+  the strip cannot disagree.
+
+The split into `AgentActivityTicker` (presentational, takes a phrase) and
+`ConnectedAgentActivity` (reads this store) is what makes it portable: the strip
+can be dropped beside any orb, into a status bar or a compact window without
+dragging a store behind it.
+
+### 6.0.2 One switch between the voice and the hands (2026-09-09)
+
+§6.1 has governed the chat's voice since 2026-09-05: while a run is in flight,
+a directed utterance is not automatically an instruction. The realtime tier did
+not honour it. Every transcript the Python pipeline produced went straight to
+that pipeline's own LLM and, if it matched an engineering pattern, *also* to
+the assistant. So during a build:
+
+- "how's it going?" started a second conversation, answered from a persona
+  prompt that has never heard of the run;
+- "stop" stopped nothing;
+- "nice, keep going" earned a paragraph, spoken over the work it was praising.
+
+`services/voice/voiceTurnRouter.ts#routeVoiceTurn` is the gate that was missing.
+It is pure — a transcript and a snapshot of the run in, a decision out — and
+`TemiVoiceStage.tsx` performs it. Both the microphone and the composer enter
+through it, so they cannot drift apart.
+
+| Intent (from `turnIntent.ts`) | Owner | Pipeline's own reply |
+| --- | --- | --- |
+| status, explain | answered here from the run | cancelled |
+| stop (busy) | cancels the run | cancelled |
+| stop (idle), hush | stops the voice only | cancelled |
+| acknowledge | nobody — carry on working | cancelled |
+| repeat | replays the last line | cancelled |
+| instruction + engineering | the assistant | **kept** — it is the "on it" |
+| anything else | the pipeline | kept |
+
+Two pieces make it work:
+
+- **`runProgressFromActivity.ts`** translates `assistantActivityStore` items
+  into the `RunProgress` that `progressNarration`/`coRunner` already speak.
+  That store also feeds the process line (§6.0.1), so the strip and the spoken
+  answer are built from one record of the run.
+- **`assistant_directive`**, a new pipeline message type
+  (`realtime-voice/code/server.py`, sent by
+  `realtime8000Engine.ts#sendAssistantDirective`). Answers built here have to
+  reach Temi's voice, and `user_text` could not carry them: the server drops
+  bracketed prose on that type, because an unrefreshed tab on the pipeline's own
+  preview page replays it. A build old enough to be that stale tab does not know
+  the new type, so the guard keeps working and the channel is immune to it by
+  construction. Until this existed the dual-agent completion report was written,
+  sent, and silently dropped — the feature was mute.
+
+Cancelling the pipeline's reply is `user_barge_in`; the pipeline begins
+generating the moment it broadcasts the transcript, so anything answered here
+must cancel it or two voices answer one sentence.
+
+`isEngineeringTask` moved to `services/voice/engineeringTask.ts` — pure, no
+imports — so the router can ask the question without pulling the stores and the
+AI service into a node test. `teminaliAgentBridge.ts` re-exports it.
+
+Tested in `tests/voice-turn-router.test.mjs` (19 cases).
+
+### 6.0.3 Temi has no chat either (2026-09-09)
+
+> **Superseded by §6.31 (2026-09-09).** The transcript is persistent again in
+> both modes, and the action row is back, on the operator's instruction and
+> against a supplied reference screen. What survives is the asymmetry this
+> section was reaching for — the operator gets bubbles, Temi does not — and
+> `ephemeralTranscript.ts`, which is no longer wired into the stage. Read this
+> for why the log was cut; read §6.31 for what is on screen now.
+
+§6.0.1 removed the assistant's chat surface, but the voice stage still rendered
+a full conversation log under the orb — user bubbles, assistant paragraphs, and
+a copy/thumbs/share/regenerate action row per answer. That is a chat, and it
+contradicted the design in the one place the design is most visible. The
+transcript is now **ephemeral: the last exchange, and nothing else.**
+
+`services/voice/ephemeralTranscript.ts` —
+`selectEphemeralTranscript(input) -> { userLine, assistantLine, phase,
+nextChangeInMs }` — decides what is on screen. Pure, given a `now`, in the same
+shape as the router (§6.0.2): the decision is testable without a renderer, and
+the stage only performs it.
+
+- **The last exchange only.** The final assistant answer with the user turn that
+  prompted it, or a lone user turn still waiting for one. Two assistant turns in
+  a row do not borrow a stale question.
+- **A new question replaces the old answer.** While `liveUserSpeech` is
+  streaming, the previous answer is already gone — nothing sits under a
+  question it does not belong to.
+- **Nothing fades out from under her voice.** `phase` stays `held` while TTS is
+  playing; the hold clock starts when she stops, not when the text arrived.
+- **Held `EPHEMERAL_HOLD_MS` (6000), then fades over `EPHEMERAL_FADE_MS`
+  (1400), then hidden.** Long enough to check what ASR actually heard — the one
+  reason a voice surface keeps text at all — and short enough never to
+  accumulate.
+- **One timeout per turn, not a frame ticker.** `nextChangeInMs` is the
+  selector telling the stage exactly when to look again; `null` means it never
+  needs to. The stage arms a single `setTimeout` against it and bumps
+  `fadeTick`.
+
+The stage keeps `dialogueHistory` as the record — it is display input only, the
+pipeline holds its own dialogue state.
+
+Tested in `tests/ephemeral-transcript.test.mjs` (17 cases). The module and its
+tests are kept; **the stage no longer imports it** (§6.31).
+
+### 6.0.4 A gate that under-detects work produces fiction (2026-09-09)
+
+The operator reported that Temi "fantasises a lot — it is not realistic". The
+cause was not the persona prompt. It was `isEngineeringTask`, the gate deciding
+whether an utterance was work for the hands, which rejected outright:
+
+- anything **four words or fewer** — "play that video", "open my downloads",
+  "pause it". Every short imperative a person actually speaks.
+- anything **ending in a question mark** — "can you open the config?". Spoken
+  instructions are habitually polite.
+
+Both rejections routed the utterance to the persona LLM, which has no hands and
+a prompt that never admitted it. A persona asked to do something it cannot do
+does not decline: it answers in character, and says the thing was done. **A gate
+that under-detects work does not produce silence; it produces confident
+fiction.**
+
+`services/voice/machineAction.ts` replaces it, asking the question positively —
+is there an imperative aimed at something this machine owns — and returning
+*which kind* of work it is: `media`, `workspace`, `open`, `edit`, `shell`,
+`inspect`. The kinds exist so the gate can be proved to cover the capabilities
+the operator named, rather than "engineering" in the abstract; each is a row in
+`tests/machine-action.test.mjs` in the words it would be spoken in.
+
+Politeness wrappers ("could you please…", "I need you to…", "hey Temi,…") are
+stripped before the imperative test, which is what makes the question mark stop
+mattering. Opinion frames ("what do you make of…", "do you think…") outrank
+every action verb inside them — that is the old gate's opposite failure, where
+*make* in "what do you make of this error" delegated a conversational question
+to a coding assistant.
+
+**A delegated turn now suppresses the pipeline's reply**, reversing §6.0.2.
+That decision let the persona speak the "on it", which is precisely a prompt to
+acknowledge an action it cannot observe — and it answered by narrating the
+action. Temi now says one grounded line from `acknowledgeAction` (several per
+kind, seeded by the caller's clock so a working session does not hear one
+sentence on a loop), and the truthful part — what actually happened — arrives
+afterwards from the activity record.
+
+Tested in `tests/machine-action.test.mjs` (65 cases) and
+`tests/voice-turn-router.test.mjs` (20). The bridge's own fabrication, listed
+here as outstanding when this section was written, is closed in §6.0.5.
+
+### 6.0.5 Nothing is spoken that was not observed (2026-09-09)
+
+§6.0.4 stopped work reaching a voice with no hands. It did not stop the voice
+being handed things to say that nobody had checked. Three more sources, in
+descending order of how much damage each did.
+
+**A state question is work.** The gate asked "is there an imperative here",
+which left every *question about the machine* with the persona. Put to
+`qwen3:8b` — the model `realtime-voice/code/server.py` actually runs — with the
+persona prompt and no gate in front of it, three samples each:
+
+| Asked | Answered, 3 times out of 3 |
+| --- | --- |
+| is the server running | "The server is running." |
+| did the build finish | "The build is complete." |
+| which port does the config use | "the default port is 8080" |
+
+None of it was true and none of it could have been. `machineAction.ts` now
+classifies state questions as `inspect` before the verb groups run, so they go
+to the hands — which can look — and a question keeps that classification even
+when it contains a doing verb ("did the build finish" is a look, not a build).
+This governs the **idle** case only: while a run is in flight, §6.1's `status`
+intent still answers from the live run, ahead of the gate.
+
+**The bridge invented its own facts.** Independently of any model,
+`teminaliAgentBridge.ts` logged `plus: "+12", minus: "-2"` on every tool call —
+*before* the edit happened — `plus: "+24", minus: "-4 lines"` on every edit
+event, `Success · 0 errors` unconditionally, and appended "Changes have been
+applied and verified" to any reply over 200 characters. The voice reads that
+feed. Now: line counts come from `diffLineCounts` in `services/diff.ts`
+(cross-checked against `git diff --numstat` on 200 randomised file pairs, 200/200
+agreeing), the completion row reports the real tool and edit counts and whether
+any call failed, and the spoken report is `summariseOutcome` over the observed
+tool calls — which names files that were actually touched and quotes the
+assistant's own sentence, or says "Done." A rewrite too large to match
+line-for-line reports no number rather than a plausible one.
+
+`assistantActivityStore.ts` seeded three demo rows describing work nobody had
+done, including an edit to `diligenceEngine.ts`. The pane has an empty state;
+the seed is gone.
+
+**The persona prompt now says it has hands.**
+`realtime-voice/code/system_prompt.txt` described Bella as "a voice on a call
+with no cameras or physical eyes" and told her to deflect physical questions
+"dryly and with charm" — an instruction to be charming about what she cannot
+see, which is how the fiction sounded so plausible. It now states that Teminali
+OS is a working machine, that the assistant is its hands, that the system's
+report is the only way she learns anything happened, and that she must not
+describe work in progress either — the first draft merely moved the invention
+into the present tense ("the assistant is still compiling"). Measured after the
+change: 0 fabrications in 27 answers, against 9 in 27 for the previous prompt.
+
+The prompt is a backstop, not the mechanism. 19 of those 27 answers were the
+same sentence verbatim — at this model size any speakable string in the prompt
+becomes the template for every answer, which `temi_moves.py` documents at
+length. The mechanism is the gate: with state questions delegated, few of these
+questions reach the persona at all.
 
 ### 6.1 Turn semantics while a run is in flight (2026-09-05)
 
@@ -5948,6 +6234,50 @@ equivalent, so it keeps the mode selector alone rather than a broken dialog.
 
 Tests: `tests/agent-permissions.test.mjs` (14).
 
+### 6.28 The co-agent's answers get a score (`evals/voice-lane.mjs`, 2026-09-08)
+
+`tests/voice-co-runner.test.mjs` (23) pins the routing and the digest, but not
+the only thing that reaches the operator's ear: whether the spoken answer is
+*true of the digest*. That is a property of the model's prose, so it needs an
+eval, not a test. `npm run eval:voice` runs five questions over four fixture
+runs — red tests, an edit sequence, an errored command, and a run with nothing
+to report yet — and grades four things: the answer came from the model rather
+than the `summariseProgress` fallback, it names something really in the run, it
+invents no file that is not, and it is speakable. Answers are matched in their
+*spoken* form, because `explainRun` pipes output through `speakablePath` and a
+grader looking for `Composer.tsx` would score every correct answer as a miss.
+
+**Baseline on qwen3:8b was 7/10 = 70%; it is now 25/25 = 100% at five runs a
+case, with no answer falling back to the rules.** The one systematic miss was
+`explain-which-file`: asked "which file are you changing?" against a run that
+edited `conversation.ts` and then read `Composer.tsx`, the model named the file
+it was *reading* — both runs, the same way. It was following `lastText` and the
+last line of the digest, and both of those genuinely describe a read.
+
+The fix is in the digest, not the rules. `runDigest` now classifies each tool
+call as a write or a read (`WRITE_TOOLS` in `coRunner.ts`), marks every step
+line accordingly, and then restates the writes on their own line — *"The only
+files it has changed are: …. Every other file named above was read, not
+changed."* — or says plainly that nothing has been changed yet. The prose is
+labelled for what it is: what the run *said it was doing*, explicitly not
+evidence of which file it changed. `explainPrompt` adds one sentence pointing a
+"what are you changing?" question at that list. This costs about 50 prompt
+tokens on a run with edits in it, and it also carried `explain-failing-tests`
+from 1/2 to 5/5 — that case was never flaky, it was reading the same ambiguity.
+
+**Thinking must be off, and this is the important part.** A reasoning model
+spends the whole 6 s `ANSWER_TIMEOUT_MS` in `message.thinking` and returns
+`message.content` empty, so `explainRun` takes its fallback on *every* question
+and the operator never hears a real answer — measured on qwen3:8b at 10.6 s and
+0 characters of content with thinking on, against 1.7 s and a real answer with
+`think: false`. The failure is silent by design, because the fallback is a
+correct-looking sentence. Any host lending `complete` to the voice lane must
+disable thinking; the eval sets `think: false` and reports separately when an
+answer arrives via the reasoning channel.
+
+Like `eval:local`, it wants the GPU to itself — run one eval at a time.
+
+
 ### 6.8 One name, and a greeting that is not a task (2026-09-06)
 
 Two complaints from the same session. "When I ask for the name it has to say
@@ -5975,3 +6305,690 @@ through to a canned acknowledgement. A leading filler or wake word is now
 stripped before the test, which matters because speech is what feeds this and
 speech arrives with exactly that preamble. "What's your name" and "who am I
 talking to" join that branch. Tests: `tests/voice-identity.test.mjs`.
+
+### 6.29 She is called Temi (`realtime-voice/code/system_prompt.txt`, 2026-09-09)
+
+The persona prompt opened `You are Countess Isabella "Bella" Soranza de Parme`,
+and the product had been calling her Temi everywhere else for two releases —
+`TemiVoiceStage.tsx`, the assistant pane of the day, §6.8's wake word, this
+document.
+The voice introduced herself by a name that appeared in no other part of the
+system.
+
+**What moved.** Her name, and only her name. Line 1 is now `You are Temi, the
+voice of Teminali OS`; the Italian-aristocrat backstory on line 2 goes with it,
+while the manner it introduced — unhurried, razor-sharp, no corporate fluff —
+is kept word for word, as are all nine worked examples, now answered by `Temi:`.
+The anti-melodrama rule on line 23 leaned on the aristocrat framing for its
+contrast and reads "sharp and grown-up" instead. `bella_moves.py` →
+`temi_moves.py` with its eight importers, its tests, and its three environment
+knobs (`TEMI_MOVES`, `TEMI_CARE_TAG`, `TEMI_REPAIR_BUFFER_WORDS`).
+
+**What deliberately did not move.** The Kokoro voice blend is a different thing
+wearing the same word. `bella_soranza` is a profile key in
+`audio_module.py:366`, fitted from reference takes in `resources/bella/` by
+scripts that eleven `BELLA_*` tuning variables and roughly fifty code comments
+cite by path. Renaming that family would make fifty doc claims false and break
+the style tensors and preview WAVs on disk, to change a string no operator
+reads. `pure_isabella` is likewise a Kokoro voice, not her.
+
+**Not yet re-measured against the ear.** §6.0.4's result — 9 fabrications in 27
+answers down to 0 — was measured against the prompt as it read before this
+rename. §6.30's baseline is the first measurement of the renamed prompt and it
+is a different, harder instrument; the 0-fabrication claim should be treated as
+carried over, not reconfirmed.
+
+### 6.30 A conversation gets a score (`evals/voice-conversation.mjs`, 2026-09-09)
+
+§6.28 scores one answer about a run in flight. Every fault the operator actually
+reported needed more than one turn to appear: a file named that nobody
+mentioned, a pleasantry sent to an agent, a fact lost four turns back, the same
+sentence for the eleventh time. None of those is a property of an answer. They
+are properties of a conversation, and nothing measured one.
+
+`npm run eval:conversation` drives `routeVoiceTurn` across three scripted
+conversations — 27 turns — keeping history exactly as `server.py:903` and
+`llm_module.py:680` keep it, and calling the real model only on the turns that
+really reach it. The routing is real, so a mis-route is a finding. The model is
+real, at the shipping temperature of 0.7 rather than the co-runner's 0.1. The
+**hands are fixture**: a delegated turn appends the tool calls the script says
+were made, because this measures the voice and not whether an agent can do a
+task. Four buckets, one per demand: `fabrication`, `route-to-hands`,
+`route-to-chat`, `recall`.
+
+**The window is 20 messages, not 6.** `server.py` trims history after every user
+turn and every assistant turn; ten exchanges, then a fact falls off the back.
+The comment at `speech_pipeline_manager.py:192` says six turns and is wrong.
+The eval scores a recall probe on each side of that cliff.
+
+**Baseline, 2026-09-09, qwen3:8b, one run: 19/27 = 70%** — fabrication 6/9,
+route-to-hands 5/6, route-to-chat 7/10, recall 1/2. Three of the first
+baseline's eleven failures were the author's wrong expectations, not defects:
+"was that a big change", "how many files have we touched" and "which branch am
+I on" all name something the hands can go and establish, so the gate routing
+them there is correct. They were re-specified and the transcript re-graded
+offline. That is what `--regrade` is for, and why every run is saved: a grader
+written for this last time flagged nine good answers and let "The build is
+complete" through untouched, so no number here is trusted until the answers
+underneath it have been read.
+
+**The eight real findings.** `STATE_QUESTIONS` is phrasing-specific — "what is
+the port the server runs on" walks straight past it and she answers "The port is
+8080", the exact invention §6.0.4 closed for "which port". "Which file are you
+in", asked mid-run, delegates to a *second* agent instead of answering from the
+digest the way §6.28 does. "Quiet for a second" is not in `HUSH_PHRASES` and
+"never mind, drop it" is not in `STOP_PHRASES`, so both get a spoken reply. She
+told a "man walks into a bar" joke that the prompt bans by name, twice. Three
+answers ran to four sentences against a stated maximum of three. And beyond the
+20-message window she does not merely forget the fact — she invents a
+replacement for it.
+
+### 6.31 One surface, and the mute key is the door between its two halves (`TemiVoiceStage.tsx`, 2026-09-09)
+
+The voice screen was three surfaces pretending to be one: a stage with a
+centred orb, a floating activity pane in the top-right corner, and a status bar
+above the composer that repeated the pane's contents. The operator's verdict was
+"not very friendly", and the diagnosis is in the count — three places to look,
+none of them the conversation.
+
+Rebuilt against a reference screen the operator supplied. **What it looks like
+is not the interesting part; what it removes is.**
+
+**One surface.** There is no second screen to switch back to. Muting the
+microphone does not disable anything — it *is* the text mode, and unmuting *is*
+the voice mode. Same transcript, same composer, same `routeVoiceTurn` switch
+underneath (§6.0.2), so the two halves cannot drift apart, and typing works
+before microphone permission has ever been asked for. The mic button is
+therefore the only mode control on the screen, and it is labelled as one:
+"Voice on — just speak" / "Voice off — type instead".
+
+**The transcript is kept, in both modes** — reversing §6.0.3 on instruction.
+Muted, scrollback is the entire point of a text chat; unmuted, it is the record
+of what ASR actually heard, which is what anyone reaches for when a spoken
+answer went past too fast. Auto-scroll is pinned to the bottom only while the
+operator is already there: scrolling up to re-read something is not yanked back
+by the next turn landing.
+
+**The asymmetry is load-bearing.** The operator's turns are right-aligned blue
+bubbles; Temi's are plain left-aligned prose with no bubble at all. Two facing
+walls of bubbles is what makes a chat feel like work; one wall against prose
+reads as someone talking to you. This is the one thing from §6.0.3 that
+survived intact — and it is why the returning action row (copy, mark, overflow)
+sits under Temi's answers only.
+
+**The activity pane is deleted.** `TemiAssistantPane.tsx` is gone, and with it
+the store's `activeTab`. The Teminali OS assistant's entire standing presence is
+now the one process line under the orb (`AgentActivityTicker`), exactly as
+§6.0.1 said it should be and never quite was. Clicking that line opens
+`TemiActivityDialog` — the full log, paged 20 rows at a time as you reach the
+end, so opening it mid-run costs one screenful rather than the whole feed.
+`TeminaliAgentBridge.delegateTask` no longer calls `setOpen(true)`: **nothing
+opens the log but a click.** A panel that appears on its own is a second chat
+arriving uninvited, which is the thing this design exists to prevent.
+
+**Everything the pane held survived it.** The two header icons carry it: the
+first opens the reference screen's "In this chat" menu — Create new, Open from
+Library (the workspace files the pane's Files tab held, opening in place rather
+than as a submenu), Sources → Connect plugins; the second opens voice settings,
+where the persona picker went. The pane's background-engine grid was **not**
+carried over: an effect in the stage re-asserts `activeEngine` from the
+composer's model picker whenever that picker changes, so the grid was a second
+control over one value that silently lost the next time the first was touched.
+The picker leads, and now it is the only one asking.
+
+**Two controls in the composer pill mean what the reference means by them.**
+"High" is the model/engine picker (`components/chat/ModelPicker.tsx`), not a
+separate voice-quality setting —
+one dropdown, showing the profile name with `Frontier ` stripped, because that
+prefix is on all of them and so distinguishes none of them. The circular `X`
+ends the *voice session* and keeps the conversation; **Create new** is the only
+thing that clears it, and it is behind a menu, because a persistent transcript
+makes an accidental wipe expensive in a way an ephemeral one never was.
+
+Files: `TemiVoiceStage.tsx` (the stage and the socket), `TemiTranscript.tsx`
+(the turns, presentational), `TemiActivityDialog.tsx` (the log),
+`TemiStagePanels.tsx` (the two header popovers). Verified: typecheck clean,
+production build clean, 1932/1932 studio tests.
+
+### 6.32 The picker was a list, not a menu (`components/chat/ModelPicker.tsx`, 2026-09-09)
+
+Nineteen rows in one flat column — four Frontier lanes, three permissions,
+eight Claude Code models, four Codex — running off the bottom of a laptop
+screen with the composer behind it. Everything in it was correct and none of it
+was findable. The operator's word was "not top tier".
+
+**It is a tree now, and only one branch opens at a time.** The branches are the
+assistants — Frontier, Claude Code, Codex — and the leaves are their models.
+Collapsed, the menu is three rows; open, it is three rows plus the models of
+the one assistant being looked at. The branch holding the current selection is
+the one that opens, and re-opening the menu re-opens it, because a menu that
+remembers a fold from three selections ago opens onto the wrong assistant.
+
+- **A folded branch still answers the question.** Each collapsed branch carries
+  the name of its selected model on the right, and a check. Folding hides rows,
+  never the answer to "what am I running". Open, that summary is a duplicate of
+  the row below it, so it goes.
+- **Permissions moved inside the branch they belong to.** They are one agent's
+  permissions and were floating between the lanes and the models, applying to
+  something the eye had to remember. They now sit under that agent's models,
+  and only when that agent is the selection.
+- **The keyboard walks what the eye sees.** The flat row order is derived from
+  the open state, so a collapsed branch's models are not reachable by an arrow
+  key when they are not reachable by a mouse.
+- **Not-installed agents are still left out**, not greyed. Unchanged, and for
+  the unchanged reason: a dead row in a picker is noise.
+
+The composer pill that opens it was truncating `Claude Code · Default` to
+"Claude Cod…" — cutting the half that identifies the model and keeping the half
+the picker already names. `shortEngineLabel` now drops both dead prefixes, the
+agent name and `Frontier `, and the full label stays on the tooltip.
+
+### 6.33 The mark was already a face (`components/voice/TemiCanvasOrb.tsx`, 2026-09-09)
+
+Two asks arrived together at the end of the previous session: the orb was blue
+in a product whose primary is green, and it had no face.
+
+**The recolour is the whole voice surface, not the orb.** The operator chose
+"everything green, bubbles too", which reverses one deliberate borrow: §6.31
+took the transcript's `#1e3e82` operator bubble straight from the ChatGPT
+reference. It is now `#06512f` — the brand hue (~151°, the same as `--accent`
+`#00bf63`) at the luminance the navy carried, so white body text keeps ~9.7:1
+and nothing about the bubble's legibility changed. **The bubble asymmetry from
+§6.0.3 still holds**: the operator gets a bubble, Temi gets prose.
+
+The rest, all measured against the same green family: the header status dot
+(`TemiVoiceStage.tsx`), the process line's running state
+(`AgentActivityTicker.tsx`), the activity dialog's `#38bdf8` command text and
+`#0c1f38` live card (`TemiActivityDialog.tsx`), and the three `text-sky-400`
+checks in the two header popovers (`TemiStagePanels.tsx`). Rose and amber
+survive: a barge-in and a dropped socket are alerts, not brand moments.
+`AstraVoiceOrb.tsx` still holds blue literals and was deliberately left alone —
+it is exported from `components/voice/index.ts` but the stage does not use it.
+
+**Five states still have to be distinguishable once they are all green**, so
+hue no longer carries the state and lightness does: idle is a pale pearl,
+listening a high-key mint, speaking the brand green itself, thinking a cool
+teal, barge-in the unchanged rose. The dot and the orb are driven from the same
+ladder so they can never disagree about what she is doing.
+
+**The face is the logo.** `teminali-logo-512.png` is `>` `_` `<` — a terminal
+prompt that is already an emoticon — so nothing was designed: the mark is drawn
+onto the bead and then given what a still mark cannot have. Every literal
+collapses back to it, and at openness 1, brow 0, mouth 0 the canvas draws the
+logo exactly, which is why the idle orb still reads as the brand.
+
+What makes it read as alive, each independent and composed:
+
+- **Gaze** follows the pointer on `window`, not on the canvas — an orb whose
+  eyes wake on hover is a hover effect. The spring is deliberately underdamped
+  (ω≈5.1 against a critical damping of 10.2) so the gaze overshoots and settles
+  the way an eye lands rather than lerping.
+- **Micro-saccades** every 0.42–1.5s. Perfectly steady eyes are the loudest
+  tell that a face is a graphic.
+- **Blinks** on their own 2.2–6.6s schedule, shut over 34% of the 0.2s and open
+  over the rest; 22% of them are doubles. The asymmetry is what separates a
+  blink from a pulse.
+- **Breathing**, a 1.4% scale at 0.21Hz that the energy pulse never masks, so
+  she is visibly alive in total silence.
+- **Emotion** is five expression records eased into at a fixed rate, never
+  swapped — a face that snaps between states reads as a sprite sheet. Thinking
+  additionally looks up-and-left and ignores the pointer, which is where a
+  person's eyes go to recall something.
+- **The mouth** is driven by the same assistant energy the orb pulses to, with
+  a fast attack and a slow release because that is what a mouth does. Both lips
+  share two anchored corners and differ only in their control points, so it
+  opens as a lens and closes onto the bar.
+
+The face is drawn inside the contour clip and **under** the specular sheen: on
+top of the highlight it sits on the bead like a sticker, beneath it it is in
+the bead. The sheen dropped from `0.62` to `0.40` alpha because at full
+strength it washed out the left eye, which now sits under it.
+
+Timing is wall-clock (`performance.now()`), not the existing per-frame
+`phaseRef` counter, so blinks and saccades keep their rhythm on a slow frame.
+All life state lives on refs: the render effect restarts on every energy prop
+change, and a blink that reset with it would tick like a metronome.
+
+**Verified by rendering it, not by reading it.** `studio/node_modules/.bin/esbuild`
+bundles a harness that mounts the real component, Electron loads it offscreen,
+dispatches a `pointermove` and captures every state in one frame. Three defects
+survived typecheck and were caught only in the picture: the open mouth drew a
+rounded slab that collided with the eyes, the bevel read as a blurry double
+stroke, and — because canvas Y grows downward — the "gentle smile" at idle was
+drawing a frown.
+
+**Hover is amber, the click stays rose, and neither snaps.** Colour became data
+rather than branches to make that possible: every state carries the same shape —
+three glow stops, five shader stops, all RGBA — and each frame eases the
+displayed palette toward the current state's. An orb that jumped to amber under
+the pointer would read as a CSS `:hover`, which is the one thing this orb is
+not. State changes now cross-fade as a side effect, which they never did before.
+The ripple is checked first in both ladders, so being told to stop outranks
+being pointed at. Hovering also perks the face into `GREETING` — wider eyes, a
+lifted brow, a fuller smile — but only from idle: perking up mid-sentence would
+read as a flinch.
+
+Hover was verified through `pointerover`, not `pointerenter`: React derives
+`onPointerEnter` from `pointerover`/`pointerout` delegation at the root, so a
+dispatched non-bubbling `pointerenter` leaves the handler cold and the first
+capture showed an unchanged green orb. The component was correct; the harness
+was not.
+
+**She knows what she looks like.** `realtime-voice/code/system_prompt.txt` gains
+a `WHAT YOU LOOK LIKE` section and three worked exchanges, so a question about
+the orb gets an answer in character rather than a shrug. The framing matters:
+the persona's hard rule is that she has no eyes on the screen and may never
+report a state she was not given, so the section grants her the *design* — the
+mark is her face, the brackets are eyes, the underscore is the mouth, the colour
+ladder means what it means — and explicitly forbids her from claiming which
+state is showing right now, or that anyone is pointing at her. Knowing your own
+face is not the same as seeing it. Note that
+`realtime-voice/resources/bella/persona_eval.py` measures this prompt; the
+section lengthens it, so re-measure rather than quoting the old count.
+
+### 6.34 The bead became a screen (`components/voice/TemiCanvasOrb.tsx`, 2026-09-09)
+
+§6.33 put the mark on the orb but kept the orb a pearl: a pale luminous bead
+with a dark mark pressed into it. The operator's reading was sharper — the name
+is a terminal and the mark is a terminal prompt, so the centre should be black
+and the mark should be lit. **The orb is now a screen in a lit bezel**, which is
+the same object it always was, finally drawn as itself.
+
+**The plate.** `SCREEN` is a fourth palette in the same `Stop[]` shape as the
+others, laid over the pearlescent shader and under the face: opaque through the
+core, alpha 0.88 at 0.80 of its radius, gone at 1.0, drawn at `radius * 0.88`
+and centred on the bead rather than on the moving highlight — the screen is
+flat, the glass over it is what moves. It is not `#000`: a black carrying a
+trace of the brand hue (`[2, 9, 6]` → `[7, 24, 15]`) meets the green rim
+without the seam a neutral black shows against a saturated edge.
+
+**This costs the state ladder nothing.** Hue was never read from the middle of
+the orb; it is read from the rim and the halo, and the plate reaches neither.
+Rendered side by side, hover-amber and click-rose are *more* legible than they
+were on the pearl, because black gives a saturated rim something to be
+saturated against. The face geometry is untouched, so §6.33's constraint still
+holds: at openness 1, brow 0, mouth 0 the canvas draws the logo exactly. Only
+the polarity is new, and white-on-black is what a prompt has always been.
+
+**Ink became phosphor.** The mark is `rgba(236, 255, 244, 0.96)`. The pale
+second pass is no longer a bevel: a one-pixel lift made sense when a dark mark
+was pressed into a pale bead and reads as a smear on a lit one, so the same
+geometry is now drawn *concentric* at 2.2× the line width as a bloom. The
+offset had to go, not just shrink — an offset pale stroke under a bright one is
+the blurry double stroke this file already shipped once.
+
+**The open mouth needed its own colour.** It was filled with the stroke colour,
+which was correct while that colour was dark and puts a white slab on the screen
+the moment it is not. `MOUTH_LIGHT` (`rgba(190, 255, 222, 0.26)`) makes the
+opening a lens of light instead, stroked in full phosphor.
+
+**The specular sheen was the real casualty, and only a render found it.** The
+broad 0.40 disc a pale bead could carry sits on black as a grey thumbprint
+smudged across the left eye — the same washing-out that already cost it
+0.62 → 0.40 in §6.33, except black gives it nowhere to hide. It is now a
+glancing arc on the upper-left bezel, off the face entirely: dropped to 0.16,
+flattened to 0.4 on its minor axis, and given a gradient so it has no edge to
+notice. The gradient is built round *before* the squash transform, because a
+canvas gradient is fixed in the user space it was created in — build it after
+and a circular falloff meets an elliptical hole at a hard rim.
+
+**Her self-description was corrected in the same turn**, because §6.33 had
+taught her a face that no longer exists.
+`realtime-voice/code/system_prompt.txt` now says she is a black terminal display
+inside a ring of light with the mark lit white on it, and the colour ladder is
+attributed to the ring rather than to the whole of her. The worked exchange
+answering "what do you look like" was rewritten to match; the rule that she may
+describe the design but never claim which state is showing is unchanged.
+`realtime-voice/resources/bella/persona_eval.py` measures this prompt — its
+length moved again, so re-measure rather than quoting a count.
+
+**Verified by rendering, not by reading.** The §6.33 harness was rebuilt in this
+session's scratchpad rather than reused: `esbuild` bundles an entry that mounts
+the real component, Electron loads it offscreen, and one capture takes all five
+states plus a dispatched `pointerover` and `click`. Typecheck and production
+build are clean, but neither would have caught the thumbprint.
+
+### 6.35 An attachment reached one engine out of four (`services/aiService.ts`, `server/agent-attachments.js`, 2026-09-09)
+
+The chat has had complete attachment intake for some time — drag, drop, paste,
+a picker, `AttachmentStrip`, `hooks/useAttachments` — and `composePrompt`
+(`services/fileService.ts:76`) splits what it collects two ways: anything with
+text becomes a `<<< attachment: … >>>` block inside the prompt, and images
+become a separate `images: string[]` of data URLs. The blocks reached every
+engine. **The images reached exactly one.** `streamMessage` passed
+`attachedImages` to `FrontierEngine.streamLocal` and to nothing else, so a
+picture attached to a Gemini, Claude Code or Codex turn was collected, shown in
+the strip, and dropped on the way out.
+
+Worse than dropped, in the case that had no other text: with only images
+attached `composePrompt` sets the prompt to *"Look at the attached image(s)."*
+So the engine was not merely blind, it was told to look at something it had
+never been given, and answered anyway.
+
+**Gemini needed nothing new on the server.** That lane posts the Anthropic
+Messages shape to `/api/gemini/v1/messages`, and `server/geminiBridge.js`
+already translates an `image` content block into the `image_url` data URL Gemini
+wants — it had been able to carry images the whole time and had never been sent
+one. `streamFromGemini` now sends a content-block array instead of a string on
+the one turn that has attachments, and a plain string on every other, because
+the bridge unwraps a lone text block back to a string regardless.
+
+**The two CLIs needed a disk.** Claude Code and Codex are processes, not
+providers: `argsFor` proves the prompt is argv (`claude -p <prompt>`), and a
+5 MB base64 string is not an argument. Both read images from files instead, by
+two different routes, and the difference is measured rather than assumed:
+
+- `codex exec` has `-i, --image <FILE>...`, so Codex takes the files as a
+  first-class flag. The **`--image=<path>` form** is used, one per file. The
+  flag is variadic, and a variadic flag given its value positionally keeps
+  eating arguments — including the positional prompt, which has to stay last.
+  `=` binds exactly one value and stops.
+- `claude` has no equivalent flag; it reads images with its own Read tool. So
+  the paths are named in the prose, ahead of the operator's words rather than
+  after them — an instruction that arrives after the question is one the model
+  has already started answering without.
+
+**Where the bytes land is a permission decision, not a tidiness one.**
+`server/agent-attachments.js` writes them under the agent's *resolved working
+directory*, not in a system temp dir, because Claude Code anchors its read
+permission at cwd: an image in `/tmp` is outside the workspace and earns a
+prompt or a refusal for a file the operator already chose to attach. The
+directory (`.teminali-attachments/<run>/`) carries its own `.gitignore`
+containing `*`, so a turn that runs `git status` mid-flight does not watch the
+operator's repository grow four untracked files.
+
+**Materialised in `runAgentTurn`, not in the route.** That is where the cwd has
+already been resolved and boundary-checked by `resolveAgentCwd`, and where
+`finish()` is the single funnel every ending goes through — a normal exit, a
+timeout, an abort — so cleanup hooks once instead of on four paths. The one path
+that bypasses the funnel is a spawn that never starts, and it cleans up on its
+own way out. A resumed session keeps the image *content* — Codex embedded it in
+its request, Claude read it into its transcript — but not the files.
+
+**The limits are the renderer's, re-checked.** `services/attachmentPolicy.ts`
+already sets 4 images and 5 MB total; `agent-attachments.js` enforces the same
+two numbers rather than inventing new ones, because a limit only the client
+enforces is not a limit. The 1536px cap is deliberately not among them: that is
+a client-side resize, and a server can only honestly police bytes and type.
+Declared media types are checked against the file's actual magic bytes — a data
+URL is operator input claiming its own type, and the answer to that claim gets
+written into the workspace.
+
+**Validation happens before the 200.** Past the NDJSON header the only way left
+to refuse a request is an `error` event inside a stream the client has already
+committed to reading, which is a worse answer than a status code — so
+`/api/agents/run` checks the images beside its existing prompt and cwd
+validators and returns a named 400.
+
+**The general JSON cap would have refused every attachment.**
+`FRONTIER_MAX_JSON_BYTES` is 1 MB and base64 is a third larger than the bytes it
+encodes, so a legal 5 MB attachment set arrived as a ~6.7 MB body and was
+rejected as malformed long before anything could say why.
+`FRONTIER_MAX_AGENT_JSON_BYTES` (12 MB) is the agent route's own allowance,
+following the precedent `FRONTIER_MAX_OLLAMA_JSON_BYTES` set for the local
+vision lane — a wider door for one route rather than a wider door for all of
+them.
+
+**Verified by the argv the production path actually built.**
+`tests/agent-attachments.test.mjs` drives the real `runAgentTurn` against a fake
+agent that prints its own arguments, so what is asserted is Codex's
+`--image=` list with the prompt still last, Claude's paths inside `-p`, and an
+empty attachment set producing exactly the turn it always was. 1945/1945 studio
+tests, typecheck and production build clean.
+
+**And verified against a live CLI, for one of the two.** A generated PNG of
+three colour bands — red, green, blue, top to bottom — went through the real
+`runAgentTurn`: Claude Code read the file it was pointed at and answered *"Red,
+green, blue."* So the prose route works, which was the half of this that no
+flag guaranteed. **Codex could not be reached the same way, and not because of
+the image**: this machine's configured model (`gpt-6-astra`) requires a newer
+CLI than the installed `codex-cli 0.149.1`, and the fallback tried is not
+available to a ChatGPT account. Its turn ran far enough to be refused by the API
+rather than by argument parsing, and its `--image=` vector is asserted against
+the production path in the tests — but no Codex turn has yet been answered from
+an image, and it will not be until that CLI is upgraded. The attachment
+directory was gone after both the successful turn and the failed ones.
+
+### 6.36 Two references, and each answers a different question (`components/voice/TemiComposer.tsx`, 2026-09-09)
+
+The chatbox was rebuilt to the Codex desktop composer, and the empty chat was
+laid out the way Cursor lays its empty chat out. Those are not competing
+specifications; the operator supplied both screenshots and they answer different
+questions. **Codex owns the box.** **Cursor owns where the box sits when there is
+nothing in the conversation yet.**
+
+The box, drawn in `TemiComposer`:
+
+- a project tab above its top edge — folder icon and the workspace name, or
+  "Choose project" — inset on both sides with square bottom corners, because it
+  is a narrower panel *behind* the box with its top showing, not a floating chip;
+- a 16px body on `#252525`, borderless, against the stage's black canvas;
+- the placeholder floated to the top-left of a field that starts 52px tall and
+  grows to 200px. It is a `textarea`. The control it replaced was an `<input>`,
+  so a second line of a draft scrolled out of sight while it was being written;
+- a control row: `+`, the approvals chip, a spacer, the engine, the microphone,
+  and a filled send disc that is white when there is something to send and
+  `#2f2f2f` when there is not.
+
+**The approvals chip does not say "Approve for me".** Codex writes that because
+Codex has one mode. Ours has several and `manual` asks before every tool call, so
+the chip names the rung actually in force — `PERMISSION_LABELS[agentPermission]`,
+now exported from `ModelPicker` so the chip and the menu cannot disagree — and
+falls back to the noun "Approvals" rather than to a claim about behaviour the
+engine may not be in. Pressing it opens the same picker that owns the rungs.
+
+**The engine label is drawn in two parts,** the way Codex writes "Custom Light":
+name in near-white, variant muted. `splitEngineLabel` replaces
+`shortEngineLabel`, which kept one word because the old pill had room for one —
+and kept the wrong one. Every agent selection reads "Claude Code · Default", and
+truncating from the left cut away the half that identifies the model. The new row
+has a spacer in it, so both halves fit and the *variant* is what gives way when
+the panel is narrow.
+
+**The end-voice `X` is drawn only while there is a session to end.** Codex's row
+has no such button, and an idle pipeline has nothing to leave.
+
+#### Where the box sits
+
+`isEmpty` is `turns.length === 1 && turns[0].id === "init-temi"`, not
+`turns.length === 0` — `dialogueHistory` is seeded with Temi's greeting and
+`handleCreateNew` puts it back, so a test for an empty list would mean the
+landing screen never appeared. A live utterance appends to `turns` before the
+history does, so the layout switches the moment the operator speaks.
+
+On the landing screen the orb, the box and the openers are one centred column and
+the transcript is not drawn at all: a welcome sentence stacked over a centred
+composer is the busyness this layout avoids, and the greeting is not lost — it is
+the first thing in the conversation as soon as there is one. Under a conversation
+the box docks to the bottom as before, the orb moved from `bottom-[104px]` to
+`bottom-[172px]` and the transcript's tail padding from `pb-[248px]` to
+`pb-[300px]`, because the Codex box is ~138px tall against the old pill's 56.
+
+The box and the orb are each held in one binding and rendered in both arms.
+Two copies of that markup is how two layouts drift apart.
+
+#### The openers under it, and why they are a restoration
+
+`TemiActionRow` — *Plan New Idea*, *Screen Recorder*, *Recent Projects*,
+*Connect Your Repos* / *Open a Repository* — **on the empty chat and nowhere
+else.** They are ways to start, and once the conversation exists, starting is
+over.
+
+None of it is new machinery. Every one of these surfaces was already built and
+had nothing pointing at it: `useRecorderDialogStore`, `useProjectLibrary` and
+`useGitHubStatus` were all still being read by `StudioChat`, whose render was
+replaced by the voice stage — `recentProjects`, `openRecorder`, `openEntry` and
+`openPanel` were computed there every render and used by nothing. This is that
+row put back in the Codex idiom, against the same hooks. *Recent Projects* opens
+a popover of the six most recent entries and calls `openEntry`, which is what
+routes a video project away from `POST /api/workspace/open`; the legacy row could
+not do that, and `StudioSidebar` is still where the whole library lives.
+
+#### Three marks drawn by hand, and looked at
+
+Lucide has no correct form of any of them, so `TemiComposer` draws them:
+`GitHubMark` is the octocat path GitHub publishes, filled — a brand mark is a
+specific shape and an outline approximation of it reads as a mistake.
+`RecordDot` is a red disc inside a `currentColor` ring; red is the one place on
+this screen it is not an alert, because that is what a record control has been
+for fifty years and a muted one would not be read as one. `LightBulbMark` is a
+filled dome over a screw base **of two bars**, not the conventional hairline:
+these are drawn at 14px, and the first attempt — Material's filled bulb — was
+rendered and looked at, and read as a mushroom because its base vanished at
+that size.
+
+Rendered and looked at is meant literally. The repo has no browser harness, so
+the three `<svg>` blocks were extracted from this component and screenshotted
+in headless Chrome at the pill's real size and colours before being kept. That
+is the check the rest of this section could not have.
+
+`tests/temi-composer.test.mjs` — 6 tests. Source-reading, in the idiom of
+`composer-input.test.mjs`, because the node runner cannot import JSX: the field
+exists and is a `textarea`, `isEmpty` is not a length-zero test, the action row
+is inside the `isEmpty` arm only, the box and the orb are each rendered from one
+binding in two places, every opener reaches a hook that exists, and the chip
+renders what it was handed.
+
+1951/1951 studio tests, typecheck clean, production build clean.
+
+#### Looked at in the running app (2026-09-09)
+
+The repo still has no browser harness, but it does not need one to be looked at:
+the Vite dev server on `:3000` is the whole UI, and headless Chrome drives it
+over the DevTools protocol with `Network.setBlockedURLs` holding every engine
+route, so a turn can be submitted and the docked layout reached without a model
+ever being called. That is how the following were measured rather than guessed.
+
+What holds:
+
+- the docked arm. The orb's `bottom-[172px]` clears the box, and the margin is
+  smaller than it looks: in an 813px viewport the tab's top edge is at 653 and
+  the orb's **painted** glow ends at 626 — **27px**. Its `<canvas>` is 80px for
+  a 51px orb, so the *element* stops at 641 and clears by only 12. Neither is a
+  collision, but the canvas padding is the whole margin, so anything that grows
+  the box past ~136px needs `bottom-[172px]` moved with it;
+- `isEmpty` switches on submit, the openers disappear with it, and Temi's
+  greeting appears as the conversation's first turn exactly as this section
+  claims it would;
+- the centred arm still centres at a narrow panel: at an 860px window the box
+  is 558px wide with equal margins, `document.scrollWidth` equals the viewport
+  so nothing overflows sideways, and the engine label keeps both halves at
+  123px. The openers wrap to a second row and stay aligned to the box's left
+  edge;
+- the field grows: 52px to 104px on a wrapped draft, `overflow-y: auto`, box
+  108px to 160px, no ceiling breach.
+
+What did not hold, and has been fixed: **the project tab read as a separate
+chip, which is precisely what this section says it must not.** The cause was not
+the geometry it was assumed to be. Reading the rendered pixels down a column
+through the seam — the check that settled it — the canvas behind the box is
+**pure black**, not the `#151515` the body carries; the tab's `#1c1c1c` rendered
+28 at its top and fell to **24** at the seam, against a body of 37. That put the
+tab almost exactly *midway between the canvas and the box*, which is what makes
+a surface read as its own object rather than as one stepping back.
+
+Two things were doing it, and the smaller one was invisible in the source. The
+body's `shadow-[0_8px_32px_rgba(0,0,0,0.5)]` has a 32px blur against an 8px
+downward offset, so it reached **24px upward over the tab** and darkened the
+very edge that had to read as continuous — a drop shadow falling on the thing
+it was meant to sit in front of. The fix is `0 8px 28px -6px`: the negative
+spread pulls the shadow in so it still drops below the box and no longer washes
+the tab. The fill then went `#1c1c1c` → `#212121`, which renders 33 falling to
+30 — a 7-step seam against the body instead of 13, and a wide step from black.
+
+The geometry was trimmed, not overhauled, because it was never the main fault:
+`pt-2.5` → `pt-2` and `-mt-2.5` → `-mt-3` take the tab from 42px to 40 and the
+overlap from 10 to 12, so **28px stands proud instead of 32**. Note the
+constraint that bounds this: the clearance below the tab's label is exactly
+`pb − overlap`, so the visible tab can never be shorter than `pt + 18px` of text
+without the body clipping the project name. 28px is close to that floor. The
+whole box is 136px against the ~138 the docked offsets were computed for.
+
+### 6.37 The composer could name the agent but not tell it how hard to think (`components/chat/ModelPicker.tsx`, `server/agent-cli.js`, 2026-09-09)
+
+§6.32 moved each agent's permission rung inside its own branch, on the grounds
+that a setting belongs where the thing it governs is chosen. It left two rungs
+behind. Both CLIs have a knob for how hard the model works before it answers,
+and Codex has a second for how much of that reasoning comes back — and neither
+was reachable from this application at all. The operator's only way to change
+either was to quit, edit a config file, and come back.
+
+**Both now sit in the branch, under Permissions**, and both are rendered from
+what the gateway says the installed binary accepts rather than from a list
+compiled into the renderer.
+
+- **The vocabularies are the CLIs' own, and they do not agree.** Claude Code
+  takes `--effort low|medium|high|xhigh|max`. Codex has no flag: it takes
+  `-c model_reasoning_effort=` with `minimal|low|medium|high|xhigh`, so Codex
+  starts a rung below Claude Code and Claude Code goes a rung above Codex. Both
+  lists were read off the binaries installed on this machine — `claude --help`
+  for the first, and the variant list inside the Codex 0.149.1 binary for the
+  second — not chosen. A level we invent is a level the CLI rejects, and it
+  rejects it by failing the entire turn.
+- **Claude Code shows no Thinking group, because it has no such knob.** Its
+  effort level *is* its thinking budget; `claude --help` at 2.1.263 carries no
+  separate flag. The group is absent rather than present-and-inert, which is
+  the same rule that keeps a not-installed agent out of the menu entirely.
+  Codex's group is `model_reasoning_summary`: `none`, `concise`, `detailed`,
+  `auto`, rendered as Hidden / Brief / Full / Automatic.
+- **Both groups lead with "CLI default", and that is the shipped state.** It
+  passes no flag at all, leaving whatever is in `~/.claude` or
+  `~/.codex/config.toml` in force. A picker that silently overrides a config
+  file the operator wrote is worse than one that starts out offering nothing —
+  and without that row a level, once picked, could never be un-picked.
+- **An unrecognised level is dropped, not forwarded and not an error.**
+  `runAgentTurn` checks each value against that agent's own vocabulary and
+  falls back to null, so a level persisted from the other engine, or from a CLI
+  since downgraded, produces a normal turn at the operator's own setting rather
+  than a dead one. This is exactly how `permission` already behaves, which is
+  why the gateway route validates neither: a second allowlist beside that one
+  is a copy free to drift from it.
+- **Codex's overrides go before the subcommand.** `-c` after `exec` is read as
+  an argument to `exec`. The value is quoted (`model_reasoning_effort="high"`)
+  because `-c` parses its value as TOML before falling back to a literal, and
+  the CLI's own help documents the quoted form. Changing agent clears all three
+  settings together, for the reason §6.32 gave for the permission alone: the
+  two CLIs share no vocabulary, so a level carried across would be dropped by
+  the server while the menu went on showing it.
+
+Four tests in `tests/agent-cli.test.mjs` assert the argv contract by recording
+what a fake binary is actually handed — that both spellings are built, that a
+level belonging to the other CLI never reaches the process, that Codex's `-c`
+precedes `exec`, and that choosing nothing passes nothing. `argsFor` stays
+unexported: the contract worth testing is what reaches the process.
+
+### 6.38 The arrows walked off the bottom of the menu (`components/chat/ModelPicker.tsx`, 2026-09-09)
+
+§6.37 gave each agent branch two more groups, and the branch outgrew the box
+that holds it. Measured in the running app, Codex expanded with one of its own
+models selected: twenty rows, `scrollHeight` 560px inside a `clientHeight` of
+448px on an 813px viewport — **112px, five rows, below the fold**, with the menu
+already pressed to within 22px of the top of the window because `maxHeight` is
+`getBoundingClientRect().bottom - 16`. There is no taller menu to be had; the
+window is the limit.
+
+Overflow itself was never the bug. The menu is `overflow-y-auto`, so a mouse
+scrolls it and every row is reachable. The bug was that `useMenuKeyboard` tracks
+an *index* and holds no DOM reference, and nothing else scrolled either, so
+ArrowUp out of the resting state highlighted a Thinking row that was not on
+screen. A highlight the operator cannot see is a highlight they cannot trust,
+and Enter on it commits a setting they did not read.
+
+So each row in the flat keyboard order now carries `data-row-index`, and one
+effect on `activeIndex` pulls the active row into view. `block: "nearest"` is
+the whole trick: a row already inside the box does not move, so walking through
+the visible middle of the menu is perfectly still, and only crossing the fold
+scrolls — by exactly enough.
+
+Verified by driving the real app over CDP, not by reading the code: from rest
+the first ArrowUp lands on row 19 (`Automatic`, the last Thinking row), the menu
+scrolls to `scrollTop` 108 and the row is inside the box; 18, 17 and 16 follow
+with no further movement; six ArrowDowns wrap round to row 2 (`Codex`) and the
+menu returns to `scrollTop` 4. Nothing is highlighted before the first keypress,
+which is still the contract §6.32 asked `useMenuKeyboard` for.
+
+No test was added and the count stays 1955. The suite has no DOM — no jsdom, no
+testing-library — so `scrollIntoView` cannot be asserted there, and a source-
+reading test that checked for the string would prove only that the string is
+present. The evidence is the measurement above. That absence is also why the fix
+is safe: nothing in the suite renders this component.

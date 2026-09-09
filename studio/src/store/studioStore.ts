@@ -75,13 +75,23 @@ export const PROFILES_LIST: ModelProfile[] = [
   },
   {
     id: "max",
-    name: "Teminali Max",
-    provider: "ollama",
-    modelName: "Teminali Max · qualification pending",
-    costLabel: "$0.00 local",
-    badge: "Locked until safety qualification",
-    badgeColor: "bg-amber-500/15 text-amber-300 border-amber-500/30",
-    description: "Uses the heavyweight local model for every request. It stays locked until its exact artifact and product path pass safety canaries.",
+    name: "Frontier Max",
+    provider: "gemini",
+    modelName: "Frontier Max · Google Gemini 3.8 Flash",
+    costLabel: "Online (Included)",
+    badge: "Gemini 3.8 Flash",
+    badgeColor: "bg-purple-500/15 text-purple-300 border-purple-500/30",
+    description: "Online flagship model powered by Google Gemini 3.8 Flash via Claude Code with Teminali OS built-in key.",
+  },
+  {
+    id: "gemini",
+    name: "Gemini Flash (BYOK)",
+    provider: "gemini",
+    modelName: "Gemini Flash · Bring Your Own Key",
+    costLabel: "Free · Online (BYOK)",
+    badge: "Free (BYOK)",
+    badgeColor: "bg-emerald-500/15 text-emerald-300 border-emerald-500/30",
+    description: "Free online tier powered by Claude Code with your own free Google AI Studio key.",
   },
 ];
 
@@ -203,6 +213,19 @@ interface StudioState {
    */
   agentPermission: string | null;
   setAgentPermission: (permission: string | null) => void;
+  /**
+   * How hard the selected agent CLI works before answering, and how much of
+   * its reasoning comes back — the composer's copy of the two knobs its own
+   * CLI already has. Null on both means "say nothing on the command line",
+   * which leaves whatever the operator configured in `~/.claude` or
+   * `~/.codex/config.toml` in force. That is the reason the default is null
+   * and not "medium": a picker that quietly overrides a config file is worse
+   * than one that offers nothing.
+   */
+  agentEffort: string | null;
+  setAgentEffort: (effort: string | null) => void;
+  agentThinking: string | null;
+  setAgentThinking: (thinking: string | null) => void;
   /**
    * Text handed to the main composer by another surface.
    *
@@ -347,6 +370,8 @@ interface StudioState {
   openBrowserPreview: (urlOrPath?: string) => void;
   isSkillsModalOpen: boolean;
   setSkillsModalOpen: (open: boolean) => void;
+  isGeminiKeyModalOpen: boolean;
+  setGeminiKeyModalOpen: (open: boolean) => void;
   isDiffViewerOpen: boolean;
   isBenchmarkModalOpen: boolean;
   setBenchmarkModalOpen: (open: boolean) => void;
@@ -363,11 +388,19 @@ export const useStudioStore = create<StudioState>()(
       // Choosing a Frontier lane is also how you leave an agent.
       setProfile: (profile) => set({ currentProfile: profile, agentSelection: null }),
       agentSelection: null,
-      // Changing agent resets the permission: the two CLIs do not share a
-      // vocabulary, so carrying "acceptEdits" onto Codex would be meaningless.
-      setAgentSelection: (agentSelection) => set({ agentSelection, agentPermission: null }),
+      // Changing agent resets the permission, the effort and the thinking: the
+      // two CLIs share no vocabulary in any of the three, so carrying
+      // "acceptEdits" or "minimal" onto the other one would be meaningless —
+      // and the server would drop it, leaving the menu showing a level that is
+      // not in force.
+      setAgentSelection: (agentSelection) =>
+        set({ agentSelection, agentPermission: null, agentEffort: null, agentThinking: null }),
       agentPermission: null,
       setAgentPermission: (agentPermission) => set({ agentPermission }),
+      agentEffort: null,
+      setAgentEffort: (agentEffort) => set({ agentEffort }),
+      agentThinking: null,
+      setAgentThinking: (agentThinking) => set({ agentThinking }),
       chatDraft: null,
       setChatDraft: (chatDraft) => set({ chatDraft }),
       
@@ -885,7 +918,9 @@ export const useStudioStore = create<StudioState>()(
       },
       
       isSkillsModalOpen: false,
-      setSkillsModalOpen: (open) => set({ isSkillsModalOpen: open }),
+      setSkillsModalOpen: (open: boolean) => void set({ isSkillsModalOpen: open }),
+      isGeminiKeyModalOpen: false,
+      setGeminiKeyModalOpen: (open) => set({ isGeminiKeyModalOpen: open }),
       
       isDiffViewerOpen: false,
       isBenchmarkModalOpen: false,
@@ -934,6 +969,8 @@ export const useStudioStore = create<StudioState>()(
         currentProfile: state.currentProfile,
         agentSelection: state.agentSelection,
         agentPermission: state.agentPermission,
+        agentEffort: state.agentEffort,
+        agentThinking: state.agentThinking,
         tabs: state.tabs,
         activeTabId: state.activeTabId,
       }),

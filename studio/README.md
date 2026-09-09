@@ -56,7 +56,7 @@ route requires it. Roughly sixty routes across:
 | Terminal | `/api/terminal/exec` |
 | Agent CLIs | `/api/agents` · `/api/agents/models` · `/api/agents/run` · `/api/agents/permission` · `/api/agents/permission/resolve` |
 | Screen assistant | `/api/assistant/{capabilities,permissions,observe,act}` · `/api/assistant/agent/{observe,act}` (the chat pane's agent, on its run's token) |
-| Voice | `/api/voice/{status,transcribe,speak}` |
+| Voice | `/api/voice/{status,transcribe,speak}`, `/api/voice/realtime/status` |
 | Guardian | `/api/guardian/{snapshot,unload,governor,storage}` |
 | Benchmark arena | `/api/arena/{sandbox,measure,measure/stream,history,cleanup}` |
 | Usage, files, device | `/api/usage` · `/api/plan` · `/api/files/{capabilities,ingest}` · `/api/system/device` |
@@ -330,8 +330,15 @@ each directory from the marker file on every read, so the glyph is what the
 folder is right now rather than what it was when it was last opened. Clicking
 one opens it *by its kind*: a repository rebinds the workspace root every
 workspace and terminal route reads, and a video project loads into the editor
-without touching the root. The same list, capped at four, sits under the
-composer on the empty chat screen.
+without touching the root. The same list, capped at six, is behind **Recent
+Projects** in the row under the composer on the empty chat screen.
+
+That row — *Plan New Idea*, *Screen Recorder*, *Recent Projects*, *Connect Your
+Repos* (*Open a Repository* once GitHub is connected) — is drawn on the empty
+chat and nowhere else: they are ways to start, and once the conversation exists,
+starting is over. The composer itself follows the Codex desktop box, and on the
+empty chat it is centred on the canvas rather than docked to the bottom. See
+`DESIGN.md` §6.36.
 
 ### Engines
 
@@ -402,7 +409,12 @@ heavy lane on a 24 GB machine despite the smaller file.
 they are the CLIs already installed on the machine, spawned as real processes in
 the real workspace with their own auth, tools and resumable sessions, driven
 headless and normalised to one event shape. Neither may default to its most
-permissive permission rung. A turn ends when the agent process exits: the
+permissive permission rung. The model picker carries each agent's own three
+knobs inside its branch — permission, effort, and (Codex only) how much
+reasoning comes back — rendered from what the gateway reports the installed
+binary accepts, so the menu can never offer a level that CLI would reject. All
+three ship as "CLI default", which passes no flag and leaves `~/.claude` or
+`~/.codex/config.toml` in force. A turn ends when the agent process exits: the
 gateway gives its pipes 1.5 s to drain and then closes them itself, because a
 grandchild that inherited them — an MCP server the agent spawned and left
 running — would otherwise keep the turn "Working" for as long as it lived. The
@@ -415,6 +427,19 @@ opens in a tab, updates as it is written, and lists in the accept/reject dock
 above the composer, the same dock the chat pane uses. See
 `server/agent-edits.js` and `studio/DESIGN.md` §3 for how a `before` is
 recovered — and for the two cases where it is dropped rather than guessed.
+
+**Attachments reach every engine.** A file dropped, pasted or picked in the
+composer is split by `composePrompt` (`services/fileService.ts`): anything
+text-bearing is folded into the prompt inside an explicit `<<< attachment: … >>>`
+block, and images travel as images. Where they travel *to* differs by lane —
+Frontier inspects them locally with a vision model first, Gemini receives them
+as content blocks, and the two CLIs are handed real files, because their prompt
+is argv and bytes cannot ride in it. For those two the gateway writes the images
+under the agent's own working directory for the length of the turn, then removes
+them: Codex is given `--image=<path>` per file, and Claude Code, which has no
+such flag, is told the paths and reads them with its own Read tool. Four images
+and 5 MB per turn, enforced in the renderer and again on the server. See
+`studio/DESIGN.md` §6.35 and `server/agent-attachments.js`.
 
 **Hosted providers.** Anthropic, OpenAI and Google, each with a light lane for
 everyday turns and a heavy lane for hard ones. The flagship of each (Opus 5, o3,
@@ -526,6 +551,30 @@ independently, so a sidecar serving only synthesis still leaves recognition on
 the local tier. Push-to-talk dictation and
 hands-free conversation with barge-in. Nothing reaches the chat unreviewed — every
 utterance passes a repair pass the operator sees before it sends.
+
+In the voice stage, one assistant speaks and another works. Temi holds the
+conversation; the Teminali OS assistant does the engineering with no chat
+surface of its own, showing only a single process line under the orb. Every
+transcript passes through one switch first, so while a run is in flight
+"what's going on?" is answered from that run instead of starting a second
+conversation, "stop" lands on the run, "stop talking" stops only the voice, and
+praise is answered by carrying on. Spoken instructions reach the hands in the
+form people actually say them — "play that video", "open my downloads folder",
+"change workspace to teminaliCut", "create a folder called notes" — and Temi
+acknowledges without claiming the work is done; what actually happened is
+reported afterwards from the activity record. A question about the machine goes
+the same way: "is the server running", "did the build finish", "how many tests
+are passing" are looks for the hands, because a voice with no eyes asked such a
+question invents a plausible answer — measured, three times out of three, on the
+model the pipeline runs. Nothing spoken at the end of a run is asserted rather
+than observed: line counts are diffed, the tool count is counted, and a failed
+call is reported as one. Which assistant does that work — Frontier, Claude Code
+or Codex — is chosen from the picker in the voice composer, the same picker the
+chat used to own. Neither of them has a chat log: the stage
+shows the last exchange only, centred under the orb, held six seconds after she
+stops speaking and then faded out — long enough to check what was heard,
+never long enough to become a transcript to scroll. See
+[`DESIGN.md`](DESIGN.md) §6.0.1–§6.1.
 
 **Two gates are on by default: "Require my name" and "Only respond to my
 voice."** Anything your Mac plays through the speakers reaches the microphone
@@ -948,8 +997,10 @@ ollama serve              # local models on 127.0.0.1:11434
 
 ```bash
 npm run typecheck   # tsc --noEmit
-npm test            # 1775 tests, 0 failures
+npm test            # 1955 tests, 0 failures
 npm run eval:local  # the local lane against the real model — a score, not a pass/fail; needs Ollama
+npm run eval:voice  # the voice co-agent's spoken answers, same discipline; needs Ollama
+npm run eval:conversation  # Temi over a whole conversation: routing, fabrication, recall; needs Ollama
 npm run build       # tsc && vite build
 npm run verify:core # all three
 ```
@@ -1329,10 +1380,16 @@ Everything is optional; every default is loopback.
 | `FRONTIER_ALLOWED_ORIGINS` | `127.0.0.1`/`localhost` on ports 3000 and 3001 |
 | `OLLAMA_BASE_URL` | `http://127.0.0.1:11434` |
 | `TEMINALI_VOICE_URL` | `http://127.0.0.1:8321` |
+| `TEMINALI_REALTIME_VOICE_URL` | `http://127.0.0.1:8000` — the realtime voice pipeline; its WebSocket is derived from this |
+| `TEMINALI_REALTIME_VOICE_ROOT` | `studio/realtime-voice/` |
+| `TEMINALI_REALTIME_VOICE_PYTHON` | the checkout's `.venv` interpreter, found automatically |
+| `TEMINALI_REALTIME_VOICE_AUTOSTART` | on; set `0` to run the pipeline by hand |
+| `TEMINALI_REALTIME_VOICE_STARTUP_TIMEOUT_MS` | `300000` — weights load slowly on a cold cache |
 | `TEMINALI_ASR_ENGINE` | `auto` — `local` or `sidecar` pins which recogniser listens |
 | `TEMINALI_WHISPER_SERVER_PORT` | `8323` |
 | `TEMINALI_CUT_MCP_URL` | `http://127.0.0.1:3888` |
 | `FRONTIER_WORKSPACE_ROOT` | the repository root |
+| `FRONTIER_MAX_AGENT_JSON_BYTES` | `12582912` — `/api/agents/run` only, because an attached image arrives as base64 |
 | `TEMINALI_RELEASE_REPO` | `teminali/releases` — public; published releases are read from here |
 | `TEMINALI_SOURCE_REPO` | `teminali/teminali-os` — private; tags and the release workflow live here |
 | `TEMINALI_RUNTIME_MODE` | `local` (or `api`) |

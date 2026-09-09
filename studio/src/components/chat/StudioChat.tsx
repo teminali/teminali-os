@@ -36,6 +36,7 @@ import {
   speakableText,
   summariseProgress,
   VoiceDirector,
+  VoiceTextSync,
   type RunProgress,
   type SubmitOptions,
 } from "../../services/voice";
@@ -48,7 +49,7 @@ import { useProjectLibrary } from "../../hooks/useProjectLibrary";
 import { UsageService } from "../../services/usageService";
 import { AssistantHud } from "../assistant/AssistantHud";
 import { BrandGlyph } from "../ui/BrandGlyph";
-import { VoiceOrb } from "../voice";
+import { VoiceOrb, TemiVoiceStage } from "../voice";
 import type { UseAssistantResult } from "../../hooks/useAssistant";
 import type { ChatMessage } from "../../types";
 import { dispatchPlayerCommand, type PlayerCommand } from "../../services/playerControl";
@@ -112,6 +113,8 @@ export const StudioChat: React.FC<{
   const panelExpanded = usePanelStore((state) => state.isExpanded && state.isOpen);
   const agentSelection = useStudioStore((state) => state.agentSelection);
   const agentPermission = useStudioStore((state) => state.agentPermission);
+  const agentEffort = useStudioStore((state) => state.agentEffort);
+  const agentThinking = useStudioStore((state) => state.agentThinking);
   const chatDraft = useStudioStore((state) => state.chatDraft);
   const setChatDraft = useStudioStore((state) => state.setChatDraft);
 
@@ -168,6 +171,7 @@ export const StudioChat: React.FC<{
   const sendRef = useRef<(text: string, options?: SubmitOptions) => Promise<void>>(async () => {});
   const stopRef = useRef<() => void>(() => {});
   const voiceRef = useRef<UseVoiceResult | null>(null);
+  const voiceTextSyncRef = useRef<VoiceTextSync | null>(null);
   const spokenFor = useRef<string | null>(null);
 
   /*
@@ -315,6 +319,7 @@ export const StudioChat: React.FC<{
     cancelAsk();
     setStreaming(false);
     updateLastMessageInEngine("frontier", interruptTurn);
+    voiceTextSyncRef.current?.interrupt();
     voiceRef.current?.silence();
   }, [cancelApproval, cancelAsk, setStreaming, updateLastMessageInEngine]);
 
@@ -364,8 +369,35 @@ export const StudioChat: React.FC<{
         lastText: "",
       };
 
-      // Immediate verbal acknowledgment based on prompt intent (e.g. "On it.", "Looking into that now.")
+      // Spoken turn detection for synchronizing visual typing with voice audio
       const currentVoice = voiceRef.current;
+      const isVoiceTurn = Boolean(
+        options?.origin === "voice" ||
+        (currentVoice && currentVoice.settings.speakReplies && (currentVoice.mode === "conversation" || currentVoice.state !== "idle"))
+      );
+
+      if (!voiceTextSyncRef.current) {
+        voiceTextSyncRef.current = new VoiceTextSync({
+          onUpdate: (visibleText) => {
+            updateLastMessageInEngine("frontier", () => ({
+              content: visibleText,
+              tokensCount: Math.max(1, Math.ceil(visibleText.length / 4)),
+              isStreaming: true,
+            }));
+            if (runRef.current) runRef.current.lastText = visibleText;
+          },
+          onFinish: () => {
+            updateLastMessageInEngine("frontier", () => ({
+              isStreaming: false,
+            }));
+            setStreaming(false);
+          },
+          charsPerSec: 24,
+        });
+      }
+      voiceTextSyncRef.current.start(isVoiceTurn);
+
+      // Immediate verbal acknowledgment based on prompt intent (e.g. "On it.", "Looking into that now.")
       if (
         currentVoice &&
         currentVoice.settings.speakReplies &&
@@ -408,13 +440,16 @@ export const StudioChat: React.FC<{
             if (currentTurnId !== turnIdRef.current) return;
             accumulated += token;
             const textToDisplay = !isFreshConversation ? sanitizeOngoingAssist(accumulated) : accumulated;
+
+            // Stream tokens directly into the standard message block in real time
             updateLastMessageInEngine("frontier", () => ({
               content: textToDisplay,
               tokensCount: Math.max(1, Math.ceil(textToDisplay.length / 4)),
               isStreaming: true,
             }));
-
             if (runRef.current) runRef.current.lastText = textToDisplay;
+
+            voiceTextSyncRef.current?.pushTarget(textToDisplay);
 
             // Route tokens to real-time Voice Director agent to curate speech
             const currentVoice = voiceRef.current;
@@ -469,6 +504,8 @@ export const StudioChat: React.FC<{
             }
             const full = data.fullText || accumulated;
             const cleanFull = !isFreshConversation ? sanitizeOngoingAssist(full) : full;
+            voiceTextSyncRef.current?.pushTarget(cleanFull);
+            voiceTextSyncRef.current?.finish();
             updateLastMessageInEngine("frontier", () => ({
               content: cleanFull,
               isStreaming: false,
@@ -539,6 +576,8 @@ export const StudioChat: React.FC<{
           // Only meaningful for the agent engines; the local engine ignores them.
           agentModel: agentSelection?.model ?? null,
           agentPermission: agentPermission ?? undefined,
+          agentEffort,
+          agentThinking,
           agentSessionId: resumableAgentSessionId,
           onAgentSession: (sessionId) => {
             setAgentSession(activeSessionId, sessionId, agentSessionKey);
@@ -698,6 +737,9 @@ export const StudioChat: React.FC<{
       );
       return output;
     },
+    onSpeechProgress: (event) => {
+      voiceTextSyncRef.current?.onSpeechProgress(event);
+    },
   });
 
   // The assistant has no microphone of its own; this is the one. Lending it
@@ -735,6 +777,12 @@ export const StudioChat: React.FC<{
     }
   }, [isStreaming, messages]);
 
+  useEffect(() => {
+    if (voice.interrupted) {
+      voiceTextSyncRef.current?.interrupt();
+    }
+  }, [voice.interrupted]);
+
   /* ── Scrolling ─────────────────────────────────────────────────────────── */
 
   const pinnedRef = useRef(true);
@@ -742,7 +790,7 @@ export const StudioChat: React.FC<{
     const node = scrollRef.current;
     if (!node || !pinnedRef.current) return;
     node.scrollTop = node.scrollHeight;
-  }, [messages]);
+  }, [messages, voice.transcript]);
 
   const onScroll = () => {
     const node = scrollRef.current;
@@ -780,210 +828,52 @@ export const StudioChat: React.FC<{
     <main
       ref={columnRef}
       data-chat-column
-      className={`flex-1 min-w-[var(--chat-min-w)] flex-col bg-frame-mid ${
+      className={`flex-1 min-w-[var(--chat-min-w)] flex-col bg-black relative z-20 ${
         panelExpanded ? "hidden" : "flex"
       }`}
     >
-      {isEmpty ? (
-        /* Cursor's empty state is the pickers that say what the next turn runs
-           against, the composer, and a row of outline pills — and above them,
-           where Cursor leaves bare canvas, our mark.
+      <TemiVoiceStage
+        messages={messages}
+        voice={voice}
+        isStreaming={isStreaming}
+        onSend={async (text) => {
+          await send(text, { origin: "voice" });
+        }}
+        onStop={stop}
+        machineLabel={MACHINE_LABEL}
+        onOpenWorkspace={onOpenWorkspace}
+        onConnectGitHub={onConnectGitHub}
+      />
 
-           This is the one deliberate departure. Cursor can afford an anonymous
-           empty screen because you already know whose window you are in; a
-           product still earning that recognition cannot. It is still not an
-           illustration: a 52px mark and the name, one flat stack, no orb, no
-           headline, no gradient. The two ambient orbs that used to live here
-           are not coming back. */
-        <div className="flex-1 flex flex-col items-center justify-center gap-2.5 px-8">
-          <div className="relative z-10 flex flex-col items-center select-none overflow-visible pt-2 pb-1 mb-6">
-            <div className="relative p-4 overflow-visible flex items-center justify-center min-h-[105px]">
-              <VoiceOrb
-                size={68}
-                state={voice.state}
-                level={voice.level}
-                caption={voice.narration ?? voice.transcript ?? undefined}
-                badge={
-                  /*
-                    Nothing listens while idle, so "Say Hey Temy" was a
-                    promise the app could not keep: the operator says it, the
-                    microphone is not open, and the orb sits there. The wake
-                    word remains one of the signals that decides whether live
-                    speech was addressed to Temy (services/voice/addressing.ts)
-                    — that is a different thing, and it works. What is gone is
-                    the claim that it starts a conversation.
-                  */
-                  voice.state === "idle"
-                    ? "Tap to talk"
-                    : voice.state === "speaking"
-                      ? "Temy is speaking"
-                      : voice.state === "hearing"
-                        ? "Listening to you…"
-                        : "Listening…"
-                }
-                onClick={() => {
-                  if (voice.state === "idle") {
-                    void voice.startConversation();
-                  } else {
-                    void voice.stop();
-                  }
-                }}
-                title={voice.state === "idle" ? "Tap to start a voice conversation" : "Tap to end voice conversation"}
-              />
-            </div>
-          </div>
+      {/* Floating Review Dock when the background assistant applies edits to disk */}
+      <div className="absolute bottom-24 left-1/2 -translate-x-1/2 z-40 w-full max-w-[680px] px-4 pointer-events-auto">
+        <ChangeReviewDock />
+      </div>
 
-          <div className="w-full max-w-composerEmpty flex items-center gap-4 text-sm text-ink-muted pl-1">
-            <Picker
-              label={workspaceName || "Start from scratch"}
-              title="Open a different repository"
-              onSelect={onOpenWorkspace}
-            />
-            <Picker label={MACHINE_LABEL} icon={<Laptop size={14} />} title="Turns run locally on this machine" />
-          </div>
-
-
-
-          <div className="w-full flex justify-center">
-            <ChangeReviewDock />
-          </div>
-
-          <div className="w-full flex justify-center">
-            <Composer
-              value={input}
-              onChange={setInput}
-              onSubmit={() => void send(input)}
-              onStop={stop}
-              streaming={isStreaming}
-              modelName={modelLabel}
-              voice={voice}
-              attachments={attachments}
-              tall
-              autoFocus
-            />
-          </div>
-
-          <div className="w-full max-w-composerEmpty flex items-center gap-2 pl-1">
-            {/* The shortcut is ⇧⌘8 because that is the File menu accelerator
-                that opens this exact dialog. The pill it replaced advertised
-                ⇧Tab, which nothing in the app has ever bound. */}
-            <Pill
-              onClick={openRecorder}
-              shortcut="⇧⌘8"
-              /* The record dot, in `--danger` — the one red in the palette, and
-                 the same red the take's own controls use. It is what makes this
-                 pill readable as the recorder at a glance, next to a neighbour
-                 that is only words. */
-              icon={<Circle className="w-2.5 h-2.5 fill-current text-danger" />}
-            >
-              Record Screen
-            </Pill>
-            <Pill onClick={onConnectGitHub}>
-              {github?.connected ? "Open a Repository" : "Connect Your Repos"}
-            </Pill>
-          </div>
-
-          {/* Recent projects — one list, both kinds.
-
-              Here and nowhere else: this is the screen with room for it, and
-              the conversation view is already the answer to "which project am
-              I in". A code project and a video project sit side by side
-              because that is what the operator has been working on; the glyph
-              is the only thing that separates them, and the click is what
-              actually differs. */}
-          {recentProjects.length > 0 && (
-            <div className="w-full max-w-composerEmpty flex items-center gap-2 pl-1 flex-wrap">
-              {recentProjects.map((entry) => (
-                <Pill
-                  key={entry.path}
-                  onClick={() => {
-                    // The editor has to be on screen before the load runs: it
-                    // reports through the video pane's own toasts.
-                    if (entry.kind === "video") focusOrOpen({ kind: "video" });
-                    void openEntry(entry);
-                  }}
-                  icon={
-                    entry.kind === "video" ? (
-                      <Clapperboard size={13} strokeWidth={1.7} />
-                    ) : (
-                      <FolderGit2 size={13} strokeWidth={1.7} />
-                    )
-                  }
-                >
-                  <span className="max-w-[13ch] truncate">{entry.name}</span>
-                </Pill>
-              ))}
-            </div>
-          )}
+      {/* Background Agent Questions & Spoken Approvals */}
+      {askOperator.pending && (
+        <div className="absolute bottom-24 left-1/2 -translate-x-1/2 z-50 w-full max-w-composer">
+          <AskOperatorPrompt
+            questions={askOperator.pending}
+            onAnswer={askOperator.answer}
+            onDismiss={askOperator.dismiss}
+          />
         </div>
-      ) : (
-        <>
-          <div ref={scrollRef} onScroll={onScroll} className="flex-1 min-h-0 overflow-y-auto flex justify-center px-8 pt-7 pb-4">
-            <div className="w-full max-w-composer flex flex-col">
-              {messages.map((message, index) => (
-                <MessageBlock
-                  key={message.id}
-                  message={message}
-                  onRetry={message.role === "assistant" && index > 0
-                    ? () => void send(messages[index - 1].content)
-                    : undefined}
-                  onJumpToFile={(path, code) => {
-                    void openFileAtSnippet(path, code);
-                    focusOrOpen({ kind: "file", path, label: path.split("/").pop() });
-                  }}
-                  onRun={() => openPanel({ kind: "terminal" })}
-                  onStop={stop}
-                />
-              ))}
-              {askOperator.pending && (
-                <AskOperatorPrompt
-                  questions={askOperator.pending}
-                  onAnswer={askOperator.answer}
-                  onDismiss={askOperator.dismiss}
-                />
-              )}
-              {commandApproval.pending && (
-                <CommandApprovalPrompt
-                  request={commandApproval.pending}
-                  onApprove={(remember) => commandApproval.approve(remember)}
-                  onDeny={commandApproval.deny}
-                  listening={spokenApproval.listening}
-                />
-              )}
-            </div>
-          </div>
-
-          <div className="flex-shrink-0 flex flex-col items-center gap-2 px-8 pt-2.5 pb-4">
-            {/* Directly above the composer: the last thing between an edit that
-                is already on disk and the next prompt. */}
-            <ChangeReviewDock />
-            <Composer
-              value={input}
-              onChange={setInput}
-              onSubmit={() => void send(input)}
-              onStop={stop}
-              streaming={isStreaming}
-              placeholder="Send follow-up"
-              modelName={modelLabel}
-              voice={voice}
-              attachments={attachments}
-            />
-            {/* The machine, at caption weight. It was repeated here at the
-                same 13px as the empty state's picker, which made a static fact
-                the second-loudest thing under the composer. */}
-            <div
-              className="w-full max-w-composer flex items-center gap-1.5 text-2xs text-ink-disabled pl-1"
-              title="Turns run locally on this machine"
-            >
-              <Laptop size={11} />
-              {MACHINE_LABEL}
-            </div>
-          </div>
-        </>
+      )}
+      {commandApproval.pending && (
+        <div className="absolute bottom-24 left-1/2 -translate-x-1/2 z-50 w-full max-w-composer">
+          <CommandApprovalPrompt
+            request={commandApproval.pending}
+            onApprove={(remember) => commandApproval.approve(remember)}
+            onDeny={commandApproval.deny}
+            listening={spokenApproval.listening}
+          />
+        </div>
       )}
     </main>
   );
 };
+
 
 /* ── Pieces ──────────────────────────────────────────────────────────────── */
 

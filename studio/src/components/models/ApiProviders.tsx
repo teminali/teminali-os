@@ -176,6 +176,14 @@ const ProviderCard: React.FC<{
         {provider.configured ? (
           <>
             <span className="font-mono text-2xs text-ink-muted truncate">{provider.hint}</span>
+            {provider.backupConfigured && (
+              <span
+                className="text-3xs text-emerald-400 bg-emerald-950/40 px-1.5 py-0.5 rounded border border-emerald-800/40 font-mono flex-shrink-0"
+                title={`Auto-failover backup key: ${provider.backupHint}`}
+              >
+                backup: {provider.backupHint}
+              </span>
+            )}
             <span className="text-3xs text-ink-disabled flex-shrink-0">
               {provider.source === "environment" ? `from ${provider.envVar}` : "stored on this machine"}
             </span>

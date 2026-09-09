@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
-  AlertTriangle, ChevronLeft, FilePlus2, Gauge, Loader2, Maximize, Minimize, Pause, Play,
-  PictureInPicture2, RotateCcw, RotateCw, SkipBack, SkipForward, Subtitles, Volume1, Volume2, VolumeX,
+  AlertTriangle, ChevronLeft, ChevronRight, ChevronUp, FilePlus2, Gauge, Loader2, Maximize, Minimize, Pause, Play,
+  PictureInPicture2, RotateCcw, RotateCw, SkipBack, SkipForward, Subtitles, Volume1, Volume2, VolumeX, X,
 } from "lucide-react";
 import { EmptyState } from "../../ui";
 import { WorkspaceService } from "../../../services/workspaceService";
@@ -19,7 +19,7 @@ import {
   isSubtitleFileName, subtitleToVtt, subtitleFileRefusal, type SubtitleTrack,
 } from "../../../services/workspaceGallery";
 import {
-  clampRate, clampVolume, PLAYER_LIMITS, publishPlayerState, subscribePlayerCommands,
+  clampRate, clampVolume, dispatchPlayerCommand, PLAYER_LIMITS, publishPlayerState, subscribePlayerCommands,
   type PlayerCommand, type PlayerEpisodeSummary, type PlayerSnapshot,
 } from "../../../services/playerControl";
 import { usePlayerStore } from "../../../store/playerStore";
@@ -132,6 +132,17 @@ function volumeGlyph(volume: number, muted: boolean) {
   return volume < 0.5 ? Volume1 : Volume2;
 }
 
+/** Format seconds as hh:mm:ss to match the clean cinematic player format. */
+function formatTimestamp(seconds: number): string {
+  if (!Number.isFinite(seconds) || seconds < 0) return "00:00:00";
+  const whole = Math.max(0, Math.floor(seconds));
+  const hours = Math.floor(whole / 3600);
+  const minutes = Math.floor((whole % 3600) / 60);
+  const rest = whole % 60;
+  const two = (value: number) => String(value).padStart(2, "0");
+  return `${two(hours)}:${two(minutes)}:${two(rest)}`;
+}
+
 /** A control on the scrim. One shape, so the bar reads as one row of controls. */
 const PlayerButton: React.FC<{
   onClick: () => void;
@@ -188,6 +199,7 @@ export const MediaPlayer: React.FC<MediaPlayerProps> = ({
   const [fullscreen, setFullscreen] = useState(false);
   const [activeTrack, setActiveTrack] = useState<string | null>(null);
   const [menu, setMenu] = useState<"none" | "subtitles" | "rate">("none");
+  const [episodesOpen, setEpisodesOpen] = useState(false);
   const [idle, setIdle] = useState(false);
   const [dragging, setDragging] = useState(false);
   /** Where the pointer is on the scrubber, 0–1, for the time bubble. */
@@ -615,7 +627,7 @@ export const MediaPlayer: React.FC<MediaPlayerProps> = ({
   const position = duration && duration > 0 ? Math.min(1, time / duration) : 0;
   const bufferedFraction = duration && duration > 0 ? Math.min(1, buffered / duration) : 0;
   const VolumeGlyph = volumeGlyph(volume, muted);
-  const chromeHidden = idle && kind === "video" && playing;
+  const chromeHidden = idle && kind === "video" && playing && menu === "none" && !episodesOpen;
 
   if (failure) {
     return (
@@ -692,241 +704,357 @@ export const MediaPlayer: React.FC<MediaPlayerProps> = ({
         )}
       </div>
 
-      {/* What is playing, at the top, with the way back. Fades with the rest. */}
+      {/* Top Bar: Title on left, transcode info & Close 'X' button on far right */}
       <div
-        className={`absolute top-0 inset-x-0 flex items-center gap-2 px-3 py-2.5 bg-[var(--player-scrim)] transition-opacity duration-ds ease-ds ${
+        className={`absolute top-0 inset-x-0 z-20 flex items-center justify-between gap-4 px-6 pt-4 pb-8 bg-gradient-to-b from-black/85 via-black/40 to-transparent transition-opacity duration-300 ease-out ${
           chromeHidden ? "opacity-0 pointer-events-none" : "opacity-100"
         }`}
+        onClick={(e) => e.stopPropagation()}
       >
-        {onExit && (
-          <PlayerButton onClick={onExit} title="All episodes">
-            <ChevronLeft size={17} />
-          </PlayerButton>
-        )}
         <div className="min-w-0 flex-1">
-          <p className="text-xs text-[var(--player-ink)] truncate">{title}</p>
+          <p className="text-sm font-medium text-white/95 truncate tracking-tight">{title}</p>
           {series && (
-            <p className="text-2xs text-[var(--player-ink-dim)] font-mono mt-0.5">
-              {series.title} · episode {series.index} of {series.count}
+            <p className="text-2xs text-white/60 font-mono mt-0.5">
+              {series.title} · Episode {series.index} of {series.count}
             </p>
           )}
         </div>
-        {transcoding && (
-          <span className="text-3xs font-mono text-[var(--player-ink-dim)] px-2 py-1 rounded-full border border-[var(--player-edge)] flex-shrink-0">
-            {probe?.plan.mode === "remux" ? "rewrapped" : "converted"} live
-          </span>
-        )}
+
+        <div className="flex items-center gap-3 flex-shrink-0">
+          {transcoding && (
+            <span className="text-3xs font-mono text-white/70 px-2.5 py-0.5 rounded-full border border-white/20 bg-black/40 backdrop-blur-sm">
+              {probe?.plan.mode === "remux" ? "rewrapped" : "converted"} live
+            </span>
+          )}
+          {onExit && (
+            <button
+              type="button"
+              onClick={onExit}
+              title="Close (esc)"
+              className="w-8 h-8 rounded-full flex items-center justify-center text-white/80 hover:text-white hover:bg-white/15 active:scale-95 transition"
+            >
+              <X size={20} />
+            </button>
+          )}
+        </div>
       </div>
 
-      {/* The one big affordance: paused film, one button. Nothing while it plays. */}
-      {kind === "video" && !playing && !waiting && (
+      {/* Side Navigation: Left / Right floating chevrons */}
+      {onPrevious && (
         <button
           type="button"
-          onClick={() => runCommand({ action: "play" })}
-          aria-label="Play"
-          className="absolute inset-0 flex items-center justify-center bg-[var(--player-veil)] transition-opacity duration-ds ease-ds"
+          onClick={(e) => {
+            e.stopPropagation();
+            onPrevious();
+          }}
+          disabled={!onPrevious}
+          title="Previous episode"
+          aria-label="Previous episode"
+          className={`absolute left-5 top-1/2 -translate-y-1/2 z-20 w-11 h-11 rounded-full bg-black/40 hover:bg-black/75 active:scale-90 backdrop-blur-md border border-white/10 flex items-center justify-center text-white/80 hover:text-white transition shadow-xl duration-300 ease-out ${
+            chromeHidden ? "opacity-0 pointer-events-none" : "opacity-100"
+          }`}
         >
-          <span className="w-16 h-16 rounded-full bg-accent flex items-center justify-center">
-            <Play size={26} className="text-accent-ink ml-1" fill="currentColor" />
-          </span>
+          <ChevronLeft size={24} />
+        </button>
+      )}
+
+      {onNext && (
+        <button
+          type="button"
+          onClick={(e) => {
+            e.stopPropagation();
+            onNext();
+          }}
+          disabled={!onNext}
+          title="Next episode"
+          aria-label="Next episode"
+          className={`absolute right-5 top-1/2 -translate-y-1/2 z-20 w-11 h-11 rounded-full bg-black/40 hover:bg-black/75 active:scale-90 backdrop-blur-md border border-white/10 flex items-center justify-center text-white/80 hover:text-white transition shadow-xl duration-300 ease-out ${
+            chromeHidden ? "opacity-0 pointer-events-none" : "opacity-100"
+          }`}
+        >
+          <ChevronRight size={24} />
         </button>
       )}
 
       {waiting && !failure && (
         <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-          <Loader2 size={24} className="animate-spin text-[var(--player-ink-dim)]" />
+          <Loader2 size={24} className="animate-spin text-white/60" />
         </div>
       )}
 
-      {/* ── The control bar ─────────────────────────────────────────────── */}
+      {/* ── The control bar & scrubber ─────────────────────────────────── */}
       <div
-        className={`absolute bottom-0 inset-x-0 bg-[var(--player-scrim)] transition-opacity duration-ds ease-ds ${
+        className={`absolute bottom-0 inset-x-0 z-20 bg-gradient-to-t from-black/95 via-black/60 to-transparent pt-10 pb-3 px-6 transition-opacity duration-300 ease-out ${
           chromeHidden ? "opacity-0 pointer-events-none" : "opacity-100"
         }`}
         onClick={(event) => event.stopPropagation()}
         onMouseLeave={() => setHover(null)}
       >
-        {/* The timeline. A real range input, kept transparent over the track
-            drawn beneath it: the keyboard and the screen reader get a slider,
-            the eye gets a bar this design owns. */}
-        <div
-          className="relative h-4 mx-3 group/scrub"
-          onMouseMove={(event) => {
-            const box = event.currentTarget.getBoundingClientRect();
-            setHover(Math.min(1, Math.max(0, (event.clientX - box.left) / box.width)));
-          }}
-        >
-          <input
-            type="range"
-            className="player-range absolute inset-0 w-full h-full z-10"
-            min={0}
-            max={duration && duration > 0 ? duration : 100}
-            step={0.1}
-            value={time}
-            disabled={!duration}
-            aria-label="Position"
-            aria-valuetext={`${formatDuration(time)} of ${formatDuration(duration ?? 0)}`}
-            onChange={(event) => seekTo(Number(event.target.value))}
-          />
-          <div className="player-focus absolute inset-x-0 top-1/2 -translate-y-1/2 h-[3px] group-hover/scrub:h-[5px] rounded-full bg-[var(--player-track)] transition-[height] duration-ds ease-ds overflow-hidden">
-            <div className="absolute inset-y-0 left-0 bg-[var(--player-buffered)]" style={{ width: `${bufferedFraction * 100}%` }} />
-            <div className="absolute inset-y-0 left-0 bg-accent" style={{ width: `${position * 100}%` }} />
-          </div>
+        {/* Timeline Scrubber Row */}
+        <div className="flex items-center gap-3 w-full mb-1">
+          <span className="text-xs font-mono tabular-nums text-white/90 font-medium w-16 text-left flex-shrink-0">
+            {formatTimestamp(time)}
+          </span>
+
           <div
-            className="absolute top-1/2 w-3 h-3 -mt-1.5 -ml-1.5 rounded-full bg-accent opacity-0 group-hover/scrub:opacity-100 transition-opacity duration-ds ease-ds pointer-events-none"
-            style={{ left: `${position * 100}%` }}
-          />
-          {/* Where the pointer would land, in minutes and seconds. */}
-          {hover !== null && duration ? (
-            <span
-              className="absolute bottom-full mb-1 px-1.5 py-0.5 -translate-x-1/2 rounded bg-[var(--player-cue)] text-[var(--player-ink)] text-3xs font-mono tabular-nums opacity-0 group-hover/scrub:opacity-100 pointer-events-none"
-              style={{ left: `${hover * 100}%` }}
-            >
-              {formatDuration(hover * duration)}
-            </span>
-          ) : null}
+            className="relative flex-1 h-6 flex items-center cursor-pointer group/scrub"
+            onMouseMove={(event) => {
+              const box = event.currentTarget.getBoundingClientRect();
+              setHover(Math.min(1, Math.max(0, (event.clientX - box.left) / box.width)));
+            }}
+          >
+            <input
+              type="range"
+              className="player-range absolute inset-0 w-full h-full z-20 opacity-0 cursor-pointer"
+              min={0}
+              max={duration && duration > 0 ? duration : 100}
+              step={0.1}
+              value={time}
+              disabled={!duration}
+              aria-label="Position"
+              aria-valuetext={`${formatTimestamp(time)} of ${formatTimestamp(duration ?? 0)}`}
+              onChange={(event) => seekTo(Number(event.target.value))}
+            />
+            {/* Background rail */}
+            <div className="absolute inset-x-0 h-1 rounded-full bg-white/20 overflow-hidden">
+              <div
+                className="absolute inset-y-0 left-0 bg-white/30 rounded-full"
+                style={{ width: `${bufferedFraction * 100}%` }}
+              />
+              {/* Sky blue progress rail */}
+              <div
+                className="absolute inset-y-0 left-0 bg-sky-400 rounded-full"
+                style={{ width: `${position * 100}%` }}
+              />
+            </div>
+            {/* Scrubber thumb: crisp white vertical rounded pill */}
+            <div
+              className="absolute top-1/2 -translate-y-1/2 w-1.5 h-3.5 bg-white rounded-full shadow pointer-events-none -ml-[3px]"
+              style={{ left: `${position * 100}%` }}
+            />
+            {/* Hover timestamp */}
+            {hover !== null && duration ? (
+              <span
+                className="absolute bottom-full mb-2 px-1.5 py-0.5 -translate-x-1/2 rounded bg-black/85 text-white text-3xs font-mono tabular-nums border border-white/10 opacity-0 group-hover/scrub:opacity-100 pointer-events-none"
+                style={{ left: `${hover * 100}%` }}
+              >
+                {formatTimestamp(hover * duration)}
+              </span>
+            ) : null}
+          </div>
+
+          <span className="text-xs font-mono tabular-nums text-white/70 font-medium w-16 text-right flex-shrink-0">
+            {duration ? formatTimestamp(duration) : "00:00:00"}
+          </span>
         </div>
 
+        {/* Controls Row */}
         <div
-          className="h-12 flex items-center gap-0.5 pl-2 pr-3"
-          // See VERSION_BADGE_STRIP: shared chrome owns the window's
-          // bottom-right corner, and a fullscreen element has none over it.
+          className="h-10 flex items-center justify-between"
           style={{ paddingRight: fullscreen ? undefined : VERSION_BADGE_STRIP }}
         >
-          {series && (
-            <PlayerButton onClick={() => onPrevious?.()} disabled={!onPrevious} title="Previous episode">
-              <SkipBack size={15} fill="currentColor" />
-            </PlayerButton>
-          )}
-          <PlayerButton onClick={() => runCommand({ action: "toggle" })} title={playing ? "Pause (space)" : "Play (space)"} large>
-            {playing ? <Pause size={19} fill="currentColor" /> : <Play size={19} fill="currentColor" />}
-          </PlayerButton>
-          {series && (
-            <PlayerButton onClick={() => onNext?.()} disabled={!onNext} title="Next episode">
-              <SkipForward size={15} fill="currentColor" />
-            </PlayerButton>
-          )}
-          <PlayerButton onClick={() => runCommand({ action: "seek_by", value: -PLAYER_LIMITS.seekStep })} title="Back 10 seconds (←)">
-            <RotateCcw size={15} />
-          </PlayerButton>
-          <PlayerButton onClick={() => runCommand({ action: "seek_by", value: PLAYER_LIMITS.seekStep })} title="Forward 10 seconds (→)">
-            <RotateCw size={15} />
-          </PlayerButton>
+          {/* Left: Play/Pause, Volume */}
+          <div className="flex items-center gap-3">
+            <button
+              type="button"
+              onClick={() => runCommand({ action: "toggle" })}
+              title={playing ? "Pause (space)" : "Play (space)"}
+              className="text-white/90 hover:text-white transition active:scale-95 flex items-center justify-center w-8 h-8 rounded-full hover:bg-white/10"
+            >
+              {playing ? <Pause size={20} fill="currentColor" /> : <Play size={20} fill="currentColor" />}
+            </button>
 
-          {/* Volume opens on hover rather than holding a slider's width all the
-              time, which is what leaves room for the picture's own bar. */}
-          <div className="flex items-center group/volume">
-            <PlayerButton onClick={() => runCommand({ action: muted ? "unmute" : "mute" })} title={muted ? "Unmute (m)" : "Mute (m)"}>
-              <VolumeGlyph size={16} />
-            </PlayerButton>
-            <div className="relative h-8 w-0 group-hover/volume:w-20 focus-within:w-20 transition-[width] duration-ds ease-ds overflow-hidden">
-              <input
-                type="range"
-                className="player-range absolute inset-0 w-full h-full z-10"
-                min={0}
-                max={1}
-                step={0.05}
-                value={muted ? 0 : volume}
-                aria-label="Volume"
-                onChange={(event) => runCommand({ action: "volume", value: Number(event.target.value) })}
-              />
-              <div className="player-focus absolute inset-x-1.5 top-1/2 -translate-y-1/2 h-[3px] rounded-full bg-[var(--player-track)] overflow-hidden">
-                <div className="absolute inset-y-0 left-0 bg-accent" style={{ width: `${(muted ? 0 : volume) * 100}%` }} />
+            {/* Volume */}
+            <div className="flex items-center gap-1.5">
+              <button
+                type="button"
+                onClick={() => runCommand({ action: muted ? "unmute" : "mute" })}
+                title={muted ? "Unmute (m)" : "Mute (m)"}
+                className="text-white/80 hover:text-white transition w-7 h-7 flex items-center justify-center rounded-full hover:bg-white/10"
+              >
+                <VolumeGlyph size={18} />
+              </button>
+              <div className="relative w-20 h-5 flex items-center">
+                <input
+                  type="range"
+                  className="player-range absolute inset-0 w-full h-full opacity-0 z-10 cursor-pointer"
+                  min={0}
+                  max={1}
+                  step={0.05}
+                  value={muted ? 0 : volume}
+                  aria-label="Volume"
+                  onChange={(event) => runCommand({ action: "volume", value: Number(event.target.value) })}
+                />
+                <div className="w-full h-1 rounded-full bg-white/25 overflow-hidden">
+                  <div
+                    className="h-full bg-white rounded-full"
+                    style={{ width: `${(muted ? 0 : volume) * 100}%` }}
+                  />
+                </div>
               </div>
             </div>
           </div>
 
-          <span className="ml-2 text-2xs font-mono tabular-nums text-[var(--player-ink)] flex-shrink-0">
-            {formatDuration(time)}
-            <span className="text-[var(--player-ink-dim)]"> / {duration ? formatDuration(duration) : "—"}</span>
-          </span>
-
-          <div className="flex-1" />
-
-          {/* Subtitles. The menu is the whole reason the native controls are
-              gone: these come from sidecar files, from streams ffmpeg wrote
-              out, and from a file the operator hands us — and Chromium's own
-              menu lists none of the three. */}
-          <div className="relative">
-            <PlayerButton
-              onClick={() => setMenu(menu === "subtitles" ? "none" : "subtitles")}
-              active={Boolean(activeTrack)}
-              title="Subtitles (c)"
-            >
-              <Subtitles size={16} />
-            </PlayerButton>
-            {menu === "subtitles" && (
-              <div className="absolute bottom-10 right-0 z-20 min-w-52 py-1 rounded-lg bg-surface-popover border border-edge-popover shadow-popover">
-                <p className="px-3 py-1 text-3xs text-ink-disabled uppercase tracking-wide">Subtitles</p>
-                <button
-                  type="button"
-                  className={`w-full text-left px-3 py-1.5 text-xs hover:bg-surface-hover ${activeTrack === null ? "text-accent" : "text-ink-body"}`}
-                  onClick={() => { runCommand({ action: "subtitles", value: "off" }); setMenu("none"); }}
-                >
-                  Off
-                </button>
-                {tracks.map((track) => (
+          {/* Right: Subtitle Track, Playback Speed, Fullscreen */}
+          <div className="flex items-center gap-2">
+            {/* Subtitles: "Original" pill */}
+            <div className="relative">
+              <button
+                type="button"
+                onClick={() => setMenu(menu === "subtitles" ? "none" : "subtitles")}
+                className={`text-xs px-2.5 py-1 rounded transition hover:bg-white/10 flex items-center gap-1 ${
+                  activeTrack ? "text-sky-400 font-medium bg-white/10" : "text-white/70"
+                }`}
+                title="Subtitles (c)"
+              >
+                <span>{activeTrack ?? "Original"}</span>
+              </button>
+              {menu === "subtitles" && (
+                <div className="absolute bottom-10 right-0 z-30 min-w-52 py-1 rounded-xl bg-black/90 backdrop-blur-2xl border border-white/15 shadow-2xl text-white">
+                  <p className="px-3 py-1 text-3xs text-white/50 uppercase tracking-wider">Subtitles</p>
                   <button
-                    key={track.url}
                     type="button"
-                    className={`w-full text-left px-3 py-1.5 text-xs hover:bg-surface-hover flex items-center gap-2 ${activeTrack === track.label ? "text-accent" : "text-ink-body"}`}
-                    onClick={() => { runCommand({ action: "subtitles", value: track.label }); setMenu("none"); }}
+                    className={`w-full text-left px-3 py-1.5 text-xs hover:bg-white/10 transition ${activeTrack === null ? "text-sky-400 font-medium" : "text-white/90"}`}
+                    onClick={() => { runCommand({ action: "subtitles", value: "off" }); setMenu("none"); }}
                   >
-                    <span className="flex-1 truncate">{track.label}</span>
-                    <span className="text-3xs text-ink-disabled">
-                      {track.source === "sidecar" ? "file" : track.source === "embedded" ? "embedded" : "added"}
-                    </span>
+                    Original (Off)
                   </button>
-                ))}
-                <div className="h-px bg-edge my-1" />
-                <button
-                  type="button"
-                  className="w-full text-left px-3 py-1.5 text-xs text-ink-body hover:bg-surface-hover flex items-center gap-2"
-                  onClick={() => { pickerRef.current?.click(); setMenu("none"); }}
-                >
-                  <FilePlus2 size={12} className="flex-shrink-0" />
-                  Add subtitle file…
-                </button>
-                <p className="px-3 pt-1 pb-1.5 text-3xs text-ink-disabled leading-snug">
-                  Or drop an .srt or .vtt onto the picture.
-                </p>
-              </div>
-            )}
-          </div>
-
-          <div className="relative">
-            <PlayerButton onClick={() => setMenu(menu === "rate" ? "none" : "rate")} active={rate !== 1} title="Speed">
-              {rate === 1 ? <Gauge size={16} /> : <span className="text-2xs font-mono tabular-nums">{rate}×</span>}
-            </PlayerButton>
-            {menu === "rate" && (
-              <div className="absolute bottom-10 right-0 z-20 min-w-24 py-1 rounded-lg bg-surface-popover border border-edge-popover shadow-popover">
-                {RATES.map((value) => (
+                  {tracks.map((track) => (
+                    <button
+                      key={track.url}
+                      type="button"
+                      className={`w-full text-left px-3 py-1.5 text-xs hover:bg-white/10 transition flex items-center gap-2 ${activeTrack === track.label ? "text-sky-400 font-medium" : "text-white/90"}`}
+                      onClick={() => { runCommand({ action: "subtitles", value: track.label }); setMenu("none"); }}
+                    >
+                      <span className="flex-1 truncate">{track.label}</span>
+                      <span className="text-3xs text-white/40">
+                        {track.source === "sidecar" ? "file" : track.source === "embedded" ? "embedded" : "added"}
+                      </span>
+                    </button>
+                  ))}
+                  <div className="h-px bg-white/10 my-1" />
                   <button
-                    key={value}
                     type="button"
-                    className={`w-full text-left px-3 py-1.5 text-xs hover:bg-surface-hover ${rate === value ? "text-accent" : "text-ink-body"}`}
-                    onClick={() => { runCommand({ action: "rate", value }); setMenu("none"); }}
+                    className="w-full text-left px-3 py-1.5 text-xs text-white/90 hover:bg-white/10 flex items-center gap-2"
+                    onClick={() => { pickerRef.current?.click(); setMenu("none"); }}
                   >
-                    {value}×
+                    <FilePlus2 size={13} className="flex-shrink-0" />
+                    Add subtitle file…
                   </button>
-                ))}
-              </div>
-            )}
-          </div>
+                </div>
+              )}
+            </div>
 
-          {kind === "video" && (
-            <PlayerButton
-              onClick={() => void (elementRef.current as HTMLVideoElement | null)?.requestPictureInPicture?.()}
-              title="Picture in picture"
+            {/* Speed: "1.0X" pill */}
+            <div className="relative">
+              <button
+                type="button"
+                onClick={() => setMenu(menu === "rate" ? "none" : "rate")}
+                className="text-xs font-semibold text-white/80 hover:text-white px-2.5 py-1 rounded hover:bg-white/10 transition tabular-nums"
+                title="Playback speed"
+              >
+                {rate === 1 ? "1.0X" : `${rate.toFixed(1)}X`}
+              </button>
+              {menu === "rate" && (
+                <div className="absolute bottom-10 right-0 z-30 min-w-24 py-1 rounded-xl bg-black/90 backdrop-blur-2xl border border-white/15 shadow-2xl text-white">
+                  {RATES.map((value) => (
+                    <button
+                      key={value}
+                      type="button"
+                      className={`w-full text-left px-3 py-1.5 text-xs hover:bg-white/10 transition ${rate === value ? "text-sky-400 font-semibold" : "text-white/85"}`}
+                      onClick={() => { runCommand({ action: "rate", value }); setMenu("none"); }}
+                    >
+                      {value.toFixed(1)}X
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            {/* Fullscreen */}
+            <button
+              type="button"
+              onClick={() => runCommand({ action: "fullscreen" })}
+              title="Fullscreen (f)"
+              className="text-white/80 hover:text-white transition w-8 h-8 flex items-center justify-center rounded-full hover:bg-white/10"
             >
-              <PictureInPicture2 size={16} />
-            </PlayerButton>
-          )}
-          <PlayerButton onClick={() => runCommand({ action: "fullscreen" })} title="Fullscreen (f)">
-            {fullscreen ? <Minimize size={16} /> : <Maximize size={16} />}
-          </PlayerButton>
+              {fullscreen ? <Minimize size={18} /> : <Maximize size={18} />}
+            </button>
+          </div>
         </div>
       </div>
+
+      {/* ── Bottom Center Episode Pill Drawer Affordance ─────────────────────── */}
+      <div
+        className={`absolute bottom-1.5 left-1/2 -translate-x-1/2 z-30 transition-opacity duration-300 ease-out ${
+          chromeHidden ? "opacity-0 pointer-events-none" : "opacity-100"
+        }`}
+      >
+        <button
+          type="button"
+          onClick={() => setEpisodesOpen((prev) => !prev)}
+          className="flex items-center gap-1.5 px-3 py-0.5 rounded-full bg-black/60 hover:bg-black/85 active:scale-95 backdrop-blur-md border border-white/15 text-xs font-mono text-white/90 hover:text-white transition shadow-xl"
+          title="Toggle episodes"
+        >
+          <span>{series ? `${series.index} / ${series.count}` : "1 / 1"}</span>
+          <ChevronUp size={13} className={`transition-transform duration-200 ${episodesOpen ? "rotate-180" : ""}`} />
+        </button>
+      </div>
+
+      {/* Episode Drawer Modal */}
+      {episodesOpen && series && (
+        <div
+          className="absolute bottom-12 inset-x-4 max-w-2xl mx-auto z-40 rounded-2xl bg-black/90 backdrop-blur-2xl border border-white/15 p-4 shadow-2xl transition-all"
+          onClick={(e) => e.stopPropagation()}
+        >
+          <div className="flex items-center justify-between mb-3">
+            <h4 className="text-xs font-medium text-white/90 tracking-wide uppercase">
+              {series.title} · Episodes ({series.count})
+            </h4>
+            <button
+              type="button"
+              onClick={() => setEpisodesOpen(false)}
+              className="text-white/60 hover:text-white text-xs p-1 rounded hover:bg-white/10 transition"
+            >
+              <X size={16} />
+            </button>
+          </div>
+          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-2 max-h-56 overflow-y-auto pr-1">
+            {series.episodes.map((ep) => {
+              const isCurrent = ep.index === series.index;
+              return (
+                <button
+                  key={ep.path}
+                  type="button"
+                  onClick={() => {
+                    dispatchPlayerCommand({ action: "episode", value: ep.index });
+                    setEpisodesOpen(false);
+                  }}
+                  className={`text-left p-2.5 rounded-xl border transition flex flex-col justify-between gap-1.5 ${
+                    isCurrent
+                      ? "bg-sky-500/20 border-sky-400/80 text-white shadow-[0_0_12px_rgba(56,189,248,0.25)]"
+                      : "bg-white/5 border-white/10 text-white/80 hover:bg-white/10 hover:border-white/25 hover:text-white"
+                  }`}
+                >
+                  <div className="flex items-center justify-between w-full">
+                    <span className={`text-2xs font-mono font-semibold px-1.5 py-0.5 rounded ${isCurrent ? "bg-sky-400/20 text-sky-300" : "bg-white/10"}`}>
+                      Ep {ep.index}
+                    </span>
+                    {ep.duration && (
+                      <span className="text-3xs font-mono text-white/50">
+                        {formatDuration(ep.duration)}
+                      </span>
+                    )}
+                  </div>
+                  <p className="text-xs font-medium truncate w-full" title={ep.title}>
+                    {ep.title}
+                  </p>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      )}
 
       {/* The picker the menu row opens. Reading the File directly is what keeps
           a subtitle from anywhere on the disk working without a path, an IPC

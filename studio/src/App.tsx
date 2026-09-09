@@ -9,6 +9,7 @@ import { WorkspacePanel } from "./components/workspace/WorkspacePanel";
 import { CursorSettingsModal } from "./components/modals/CursorSettingsModal";
 import { CommandPaletteModal } from "./components/modals/CommandPaletteModal";
 import { SkillsModal } from "./components/modals/SkillsModal";
+import { GeminiKeyModal } from "./components/modals/GeminiKeyModal";
 import { MediaConsentModal } from "./components/modals/MediaConsentModal";
 import { RecorderModal } from "./components/modals/RecorderModal";
 import { useRecorderDialogStore } from "./store/recorderDialogStore";
@@ -448,6 +449,7 @@ export default function App() {
       <GitHubModal isOpen={isGitHubOpen} onClose={() => setGitHubOpen(false)} />
       <UpdateModal updates={updates} isOpen={isUpdateOpen} onClose={() => setUpdateOpen(false)} />
       <SkillsModal />
+      <GeminiKeyModal />
       <DiffInspectorModal />
       {/* App-level, not panel-level: the video tool bridge is registered at
           module load and serves agent CLIs whether or not a video panel is
