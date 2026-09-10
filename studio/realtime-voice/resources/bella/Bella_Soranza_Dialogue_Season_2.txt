@@ -1,0 +1,1875 @@
+THE GENTLEMEN — SEASON 2
+Countess Isabella 'Bella' Soranza de Parme
+Verbatim dialogue extraction with contextual speaker attribution
+====================================================================================================================================
+SOURCE AND SCOPE
+Source: the eight SRT files in gentleman-season-2_english_10256803-[SubSource].zip, supplied by the user.
+No external scripts, episode accounts, or invented dialogue were used.
+All eight files were reviewed. They have no speaker labels. Attribution below is inferred from conversation context, not verified against audio/video.
+This is a best-effort extraction, not a guaranteed exhaustive or speaker-verified transcript.
+
+READING THE EXTRACTION
+CONTEXTUAL: the surrounding conversation supports attribution to Bella. This is still an inference.
+UNCERTAIN: a plausible Bella line, with an explicit reason for doubt. It is not confirmed dialogue by Bella.
+REVIEW-ONLY appendix: unresolved group speech. These cues are NOT counted as Bella dialogue and may contain other speakers.
+Original wording, punctuation, subtitle line breaks, dialogue dashes, and <i> tags are preserved.
+For mixed-speaker cues, only the selected physical line is copied. Its timestamp remains the original full-cue interval.
+Repeated dialogue is retained at each occurrence. Editorial headings and notes are separate from the quoted text.
+
+EPISODE 01
+==========
+Source file: The.Gentlemen.2024.S02E01.720p.HEVC.x265-MeGusta.srt
+
+[CONTEXTUAL | S02E01 | source cue 52 | physical line(s) 2]
+00:04:50,916 --> 00:04:54,142
+Verbatim:
+- Thank you, Miss Glass.
+
+[CONTEXTUAL | S02E01 | source cue 76]
+00:05:54,291 --> 00:05:56,809
+Verbatim:
+It wasn't a storm.
+He was just being a baby.
+
+[CONTEXTUAL | S02E01 | source cue 80 | physical line(s) 2]
+00:06:03,291 --> 00:06:05,124
+Verbatim:
+- Your Grace.
+
+[UNCERTAIN | S02E01 | source cue 81 | physical line(s) 2]
+00:06:06,666 --> 00:06:08,249
+Attribution note: A brief reply during the introduction; the transcript does not identify which guest answers.
+Verbatim:
+- Thank you.
+
+[CONTEXTUAL | S02E01 | source cue 100]
+00:07:00,333 --> 00:07:03,208
+Verbatim:
+Don't worry, Cico. We've got all morning.
+
+[CONTEXTUAL | S02E01 | source cue 210]
+00:13:27,208 --> 00:13:29,374
+Verbatim:
+Thank you. You shoot like a god.
+
+[CONTEXTUAL | S02E01 | source cue 383]
+00:23:33,499 --> 00:23:35,225
+Verbatim:
+Why didn't you drink?
+
+[CONTEXTUAL | S02E01 | source cue 387]
+00:23:43,624 --> 00:23:45,350
+Verbatim:
+You think Cico's uncouth?
+
+[CONTEXTUAL | S02E01 | source cue 390]
+00:23:54,124 --> 00:23:55,350
+Verbatim:
+He is uncouth.
+
+[CONTEXTUAL | S02E01 | source cue 393]
+00:24:01,458 --> 00:24:05,267
+Verbatim:
+Cico's idea of class is giving me
+a stripy lion for my birthday.
+
+[CONTEXTUAL | S02E01 | source cue 394 | physical line(s) 2]
+00:24:05,291 --> 00:24:07,208
+Verbatim:
+- Whatever.
+
+[CONTEXTUAL | S02E01 | source cue 398 | physical line(s) 2]
+00:24:18,291 --> 00:24:20,416
+Verbatim:
+- At a party.
+
+[CONTEXTUAL | S02E01 | source cue 399]
+00:24:21,083 --> 00:24:22,517
+Verbatim:
+He was selling cocaine.
+
+[CONTEXTUAL | S02E01 | source cue 401]
+00:24:25,166 --> 00:24:26,416
+Verbatim:
+God, no.
+
+[CONTEXTUAL | S02E01 | source cue 402]
+00:24:27,833 --> 00:24:31,791
+Verbatim:
+I know you think he's gauche and clumsy,
+but he's ambitious.
+
+[CONTEXTUAL | S02E01 | source cue 403]
+00:24:32,291 --> 00:24:33,915
+Verbatim:
+A trait I find attractive.
+
+[CONTEXTUAL | S02E01 | source cue 404]
+00:24:35,874 --> 00:24:38,458
+Verbatim:
+The clumsiness of that ambition
+is a work in progress though.
+
+[CONTEXTUAL | S02E01 | source cue 405]
+00:24:38,958 --> 00:24:43,083
+Verbatim:
+You seem to elicit his insecurity,
+and he can be volatile.
+
+[CONTEXTUAL | S02E01 | source cue 406]
+00:24:44,583 --> 00:24:47,559
+Verbatim:
+What about you, Eddie?
+What are your ambitions?
+
+[CONTEXTUAL | S02E01 | source cue 410]
+00:24:55,499 --> 00:24:57,916
+Verbatim:
+'Cause there's nothing feckless
+about you, Your Grace.
+
+[CONTEXTUAL | S02E01 | source cue 412]
+00:25:02,666 --> 00:25:03,874
+Verbatim:
+I do.
+
+EPISODE 02
+==========
+Source file: The.Gentlemen.2024.S02E02.720p.HEVC.x265-MeGusta.srt
+
+[CONTEXTUAL | S02E02 | source cue 503]
+00:28:43,416 --> 00:28:44,624
+Verbatim:
+Good evening, Eduardo.
+
+[CONTEXTUAL | S02E02 | source cue 504]
+00:28:45,124 --> 00:28:46,708
+Verbatim:
+Sorry to drop in unannounced.
+
+[CONTEXTUAL | S02E02 | source cue 506]
+00:28:50,374 --> 00:28:51,374
+Verbatim:
+Thank you.
+
+[CONTEXTUAL | S02E02 | source cue 507]
+00:28:52,083 --> 00:28:54,517
+Verbatim:
+I won't take much of your time
+as it's late.
+
+[CONTEXTUAL | S02E02 | source cue 508]
+00:28:54,541 --> 00:28:56,781
+Verbatim:
+But out of respect,
+I wanted to talk to you face-to-face.
+
+[CONTEXTUAL | S02E02 | source cue 509]
+00:28:58,124 --> 00:29:01,517
+Verbatim:
+How and why my boyfriend was killed
+is no longer relevant.
+
+[CONTEXTUAL | S02E02 | source cue 510]
+00:29:01,541 --> 00:29:02,999
+Verbatim:
+That door is closed.
+
+[CONTEXTUAL | S02E02 | source cue 511]
+00:29:03,999 --> 00:29:06,666
+Verbatim:
+Now that he's gone,
+his role has gone with him.
+
+[CONTEXTUAL | S02E02 | source cue 512]
+00:29:10,541 --> 00:29:15,184
+Verbatim:
+But I've spoken to Marco Moretti,
+and he has asked me to take Cico's place.
+
+[CONTEXTUAL | S02E02 | source cue 513]
+00:29:15,208 --> 00:29:17,975
+Verbatim:
+So I will act as an intermediary
+between you and Marco
+
+[CONTEXTUAL | S02E02 | source cue 514]
+00:29:17,999 --> 00:29:21,374
+Verbatim:
+to ensure there is no friction
+between his organization and yours.
+
+[CONTEXTUAL | S02E02 | source cue 515]
+00:29:24,416 --> 00:29:25,708
+Verbatim:
+Thank you for your time.
+
+[CONTEXTUAL | S02E02 | source cue 516]
+00:29:33,291 --> 00:29:36,249
+Verbatim:
+And if I may, on a more personal note,
+
+[CONTEXTUAL | S02E02 | source cue 517]
+00:29:37,166 --> 00:29:39,249
+Verbatim:
+it seems like you could use some rest.
+
+[CONTEXTUAL | S02E02 | source cue 522]
+00:29:55,166 --> 00:29:56,333
+Verbatim:
+Leave it with me.
+
+[UNCERTAIN | S02E02 | source cue 523]
+00:29:58,833 --> 00:29:59,833
+Attribution note: Two consecutive identical farewells; Bella likely says one, but their order is not established by the text.
+Verbatim:
+Good night.
+
+[UNCERTAIN | S02E02 | source cue 524]
+00:30:01,458 --> 00:30:02,458
+Attribution note: Two consecutive identical farewells; Bella likely says one, but their order is not established by the text.
+Verbatim:
+Good night.
+
+[CONTEXTUAL | S02E02 | source cue 658]
+00:37:26,749 --> 00:37:28,833
+Verbatim:
+Strictly business today, Mr. Jack.
+
+[CONTEXTUAL | S02E02 | source cue 660]
+00:37:32,166 --> 00:37:33,166
+Verbatim:
+Thank you.
+
+[UNCERTAIN | S02E02 | source cue 662]
+00:37:43,124 --> 00:37:44,124
+Attribution note: A standalone thank-you immediately before Bella speaks; speaker is not explicit.
+Verbatim:
+Thank you.
+
+[CONTEXTUAL | S02E02 | source cue 663]
+00:37:45,541 --> 00:37:49,684
+Verbatim:
+What a wonderful place for an office.
+Such a masculine atmosphere.
+
+[CONTEXTUAL | S02E02 | source cue 664]
+00:37:49,708 --> 00:37:52,100
+Verbatim:
+You can just taste the testosterone.
+
+[CONTEXTUAL | S02E02 | source cue 665]
+00:37:52,124 --> 00:37:55,809
+Verbatim:
+And yet here you sit,
+a beautiful rose in a tangle of thorns.
+
+[CONTEXTUAL | S02E02 | source cue 668]
+00:38:09,208 --> 00:38:10,666
+Verbatim:
+I'm here to kiss the ring.
+
+[CONTEXTUAL | S02E02 | source cue 669]
+00:38:11,708 --> 00:38:14,642
+Verbatim:
+I assume Eduardo told you my exciting news
+
+[CONTEXTUAL | S02E02 | source cue 670]
+00:38:14,666 --> 00:38:18,267
+Verbatim:
+that I will be acting as liaison
+between Marco and your good selves.
+
+[CONTEXTUAL | S02E02 | source cue 674]
+00:38:27,999 --> 00:38:29,291
+Verbatim:
+I'm glad.
+
+[CONTEXTUAL | S02E02 | source cue 675]
+00:38:30,124 --> 00:38:33,874
+Verbatim:
+And I hope it will pave the way
+to a new working relationship.
+
+[CONTEXTUAL | S02E02 | source cue 676]
+00:38:34,749 --> 00:38:36,517
+Verbatim:
+But I'm new to this world, Susie.
+
+[CONTEXTUAL | S02E02 | source cue 677]
+00:38:36,541 --> 00:38:39,916
+Verbatim:
+I've only ever known
+la dolce vita of an aristocrat.
+
+[CONTEXTUAL | S02E02 | source cue 678]
+00:38:40,416 --> 00:38:42,208
+Verbatim:
+That's why I wanted to talk to you.
+
+[CONTEXTUAL | S02E02 | source cue 679]
+00:38:42,708 --> 00:38:46,458
+Verbatim:
+To see if you'd take me under your wing.
+There's so much I have to learn.
+
+[CONTEXTUAL | S02E02 | source cue 681]
+00:38:49,708 --> 00:38:50,958
+Verbatim:
+Like Eduardo?
+
+[CONTEXTUAL | S02E02 | source cue 682]
+00:38:51,458 --> 00:38:52,833
+Verbatim:
+I know he was a soldier.
+
+[CONTEXTUAL | S02E02 | source cue 683]
+00:38:53,333 --> 00:38:57,541
+Verbatim:
+But he lived just an innocuous life
+of pleasure and frivolity like me.
+
+[CONTEXTUAL | S02E02 | source cue 684]
+00:38:58,041 --> 00:39:00,416
+Verbatim:
+And yet, with your guidance,
+he has become so much more.
+
+[CONTEXTUAL | S02E02 | source cue 692]
+00:39:24,333 --> 00:39:25,333
+Verbatim:
+Of course.
+
+[CONTEXTUAL | S02E02 | source cue 693]
+00:39:25,874 --> 00:39:28,207
+Verbatim:
+As soon as you say it,
+it seems so obvious.
+
+[CONTEXTUAL | S02E02 | source cue 694]
+00:39:34,291 --> 00:39:35,458
+Verbatim:
+Thank you, Susanna.
+
+[CONTEXTUAL | S02E02 | source cue 695]
+00:39:36,041 --> 00:39:37,100
+Verbatim:
+You see?
+
+[CONTEXTUAL | S02E02 | source cue 696]
+00:39:37,124 --> 00:39:38,833
+Verbatim:
+You're already teaching me.
+
+[CONTEXTUAL | S02E02 | source cue 697]
+00:39:39,916 --> 00:39:41,416
+Verbatim:
+And thank you for the coffee.
+
+EPISODE 03
+==========
+Source file: The.Gentlemen.2024.S02E03.720p.HEVC.x265-MeGusta.srt
+
+[CONTEXTUAL | S02E03 | source cue 294]
+00:16:54,708 --> 00:16:55,708
+Verbatim:
+<i>Morning.</i>
+
+[CONTEXTUAL | S02E03 | source cue 297]
+00:17:01,416 --> 00:17:04,309
+Verbatim:
+Cico was not as on top of things
+as one might have hoped,
+
+[CONTEXTUAL | S02E03 | source cue 298]
+00:17:04,333 --> 00:17:06,017
+Verbatim:
+<i>but I'm not as busy as you.</i>
+
+[CONTEXTUAL | S02E03 | source cue 300]
+00:17:09,458 --> 00:17:10,517
+Verbatim:
+<i>Marco's very appreciative</i>
+
+[CONTEXTUAL | S02E03 | source cue 301]
+00:17:10,541 --> 00:17:12,142
+Verbatim:
+of the favor you did for him.
+
+[UNCERTAIN | S02E03 | source cue 304]
+00:17:14,583 --> 00:17:16,083
+Attribution note: May be Bella responding to Eddie, or the end of Eddie's preceding statement.
+Verbatim:
+Executed to perfection.
+
+[CONTEXTUAL | S02E03 | source cue 305]
+00:17:17,166 --> 00:17:19,666
+Verbatim:
+<i>You asked me to find out
+about the accountant.</i>
+
+[CONTEXTUAL | S02E03 | source cue 306]
+00:17:21,291 --> 00:17:25,166
+Verbatim:
+<i>It turns out what he told you
+about being totally innocent,</i>
+
+[CONTEXTUAL | S02E03 | source cue 307]
+00:17:25,666 --> 00:17:27,166
+Verbatim:
+<i>he was telling you the truth.</i>
+
+[CONTEXTUAL | S02E03 | source cue 308]
+00:17:28,041 --> 00:17:31,208
+Verbatim:
+<i>All he did was see an email
+he shouldn't have seen.</i>
+
+[CONTEXTUAL | S02E03 | source cue 309]
+00:17:31,791 --> 00:17:34,333
+Verbatim:
+<i>He wasn't a criminal. He was a witness.</i>
+
+[CONTEXTUAL | S02E03 | source cue 310]
+00:17:34,916 --> 00:17:36,749
+Verbatim:
+<i>That's why they needed him killed.</i>
+
+[CONTEXTUAL | S02E03 | source cue 311]
+00:17:37,249 --> 00:17:38,809
+Verbatim:
+<i>They're very appreciative of your help.</i>
+
+[CONTEXTUAL | S02E03 | source cue 312]
+00:17:41,541 --> 00:17:43,916
+Verbatim:
+<i>But they did have some feedback.</i>
+
+[CONTEXTUAL | S02E03 | source cue 313]
+00:17:44,458 --> 00:17:48,017
+Verbatim:
+The man they sent over.
+Takashi, I think his name was.
+
+[CONTEXTUAL | S02E03 | source cue 314]
+00:17:48,041 --> 00:17:49,934
+Verbatim:
+<i>They have not heard from him.</i>
+
+[CONTEXTUAL | S02E03 | source cue 317]
+00:17:54,791 --> 00:17:57,059
+Verbatim:
+According to the Japanese,
+he never got on the plane.
+
+[CONTEXTUAL | S02E03 | source cue 318]
+00:17:57,083 --> 00:18:00,850
+Verbatim:
+<i>You think maybe he decided to stay
+in London to do some sightseeing?</i>
+
+[UNCERTAIN | S02E03 | source cue 320]
+00:18:03,958 --> 00:18:08,350
+Attribution note: May be Bella proposing another explanation, or Eddie continuing his previous answer.
+Verbatim:
+Or one of the friends or relatives
+of someone he'd recently dispatched
+
+[UNCERTAIN | S02E03 | source cue 321]
+00:18:08,374 --> 00:18:10,249
+Attribution note: May be Bella proposing another explanation, or Eddie continuing his previous answer.
+Verbatim:
+decided to come back for vengeance.
+
+[CONTEXTUAL | S02E03 | source cue 322]
+00:18:13,083 --> 00:18:15,434
+Verbatim:
+I will tell Marco
+you delivered Takashi to the airport.
+
+[CONTEXTUAL | S02E03 | source cue 323 | physical line(s) 1]
+00:18:15,458 --> 00:18:18,142
+Verbatim:
+<i>- That will be the end of the story.</i>
+
+[CONTEXTUAL | S02E03 | source cue 324]
+00:18:18,166 --> 00:18:19,916
+Verbatim:
+<i>We'll never mention his name again.</i>
+
+[CONTEXTUAL | S02E03 | source cue 326]
+00:18:22,249 --> 00:18:23,333
+Verbatim:
+Ciao.
+
+EPISODE 04
+==========
+Source file: The.Gentlemen.S02E04.The.Bigger.Picture.720p.HEVC.x265-MeGusta.srt
+
+[CONTEXTUAL | S02E04 | source cue 308]
+00:16:52,208 --> 00:16:54,351
+Verbatim:
+Ciao, Susanna. I'm coming to London today,
+
+[CONTEXTUAL | S02E04 | source cue 309]
+00:16:54,375 --> 00:16:58,517
+Verbatim:
+and I have three new palazzos
+I wanted to show you the details of.
+
+[CONTEXTUAL | S02E04 | source cue 310]
+00:16:58,541 --> 00:16:59,892
+Verbatim:
+An extravaganza.
+
+[CONTEXTUAL | S02E04 | source cue 311]
+00:16:59,916 --> 00:17:01,309
+Verbatim:
+<i>Are you free tonight?</i>
+
+[CONTEXTUAL | S02E04 | source cue 314]
+00:17:05,916 --> 00:17:07,476
+Verbatim:
+I've tried him, but he didn't answer.
+
+[CONTEXTUAL | S02E04 | source cue 316]
+00:17:10,583 --> 00:17:13,267
+Verbatim:
+<i>Don't make jokes, Susie.</i>
+
+[CONTEXTUAL | S02E04 | source cue 317]
+00:17:13,291 --> 00:17:15,226
+Verbatim:
+I'm taking my new duties very seriously,
+
+[CONTEXTUAL | S02E04 | source cue 318]
+00:17:15,250 --> 00:17:17,976
+Verbatim:
+and Marco is keen
+I show you what I've come up with.
+
+[CONTEXTUAL | S02E04 | source cue 322 | physical line(s) 2]
+00:17:29,458 --> 00:17:32,059
+Verbatim:
+- <i>Eight o'clock, yes.</i>
+
+[CONTEXTUAL | S02E04 | source cue 323]
+00:17:32,083 --> 00:17:34,976
+Verbatim:
+I can jump in my plane and be with you
+in a couple of hours.
+
+[CONTEXTUAL | S02E04 | source cue 324]
+00:17:35,000 --> 00:17:36,559
+Verbatim:
+Perhaps you could join us, Susie?
+
+[CONTEXTUAL | S02E04 | source cue 326]
+00:17:39,833 --> 00:17:41,726
+Verbatim:
+<i>Bring him along so we can meet him.</i>
+
+[CONTEXTUAL | S02E04 | source cue 329 | physical line(s) 1]
+00:17:47,166 --> 00:17:49,583
+Verbatim:
+- Ciao.
+
+[UNCERTAIN | S02E04 | source cue 449 | physical line(s) 1]
+00:24:11,583 --> 00:24:14,059
+Attribution note: Brief interjection during Joe's anecdote; may be Bella or another listener.
+Verbatim:
+- Everything?
+
+[CONTEXTUAL | S02E04 | source cue 451]
+00:24:17,958 --> 00:24:20,559
+Verbatim:
+You should have warned me
+how naughty your boyfriend is.
+
+[UNCERTAIN | S02E04 | source cue 455]
+00:24:26,708 --> 00:24:28,226
+Attribution note: Group dinner conversation: this could be Bella, but another diner could also be speaking.
+Verbatim:
+Is that why you moved to the US?
+
+[UNCERTAIN | S02E04 | source cue 469]
+00:25:00,916 --> 00:25:02,309
+Attribution note: Group dinner conversation: this could be Bella, but another diner could also be speaking.
+Verbatim:
+Do we know these people?
+
+[UNCERTAIN | S02E04 | source cue 472]
+00:25:06,583 --> 00:25:08,976
+Attribution note: Group dinner conversation: this could be Bella, but another diner could also be speaking.
+Verbatim:
+Now, Joe, why don't we not let them ruin
+
+[UNCERTAIN | S02E04 | source cue 473]
+00:25:09,000 --> 00:25:11,684
+Attribution note: Group dinner conversation: this could be Bella, but another diner could also be speaking.
+Verbatim:
+what's turned out to be
+a really lovely evening?
+
+[UNCERTAIN | S02E04 | source cue 476]
+00:25:17,041 --> 00:25:17,976
+Attribution note: Group dinner conversation: this could be Bella, but another diner could also be speaking.
+Verbatim:
+Good idea.
+
+[CONTEXTUAL | S02E04 | source cue 477]
+00:25:18,000 --> 00:25:21,517
+Verbatim:
+If you're ordering Dom Pérignon for them,
+you should get some for us as well.
+
+[CONTEXTUAL | S02E04 | source cue 479]
+00:25:22,458 --> 00:25:24,517
+Verbatim:
+Susie, shall we go
+to the bathroom together?
+
+[CONTEXTUAL | S02E04 | source cue 514]
+00:26:58,375 --> 00:27:00,291
+Verbatim:
+I'm glad you came out tonight.
+
+[CONTEXTUAL | S02E04 | source cue 515]
+00:27:00,791 --> 00:27:03,226
+Verbatim:
+Sometimes it's good
+to mix business with pleasure.
+
+[CONTEXTUAL | S02E04 | source cue 517]
+00:27:08,083 --> 00:27:10,083
+Verbatim:
+And you were never tempted to
+
+[CONTEXTUAL | S02E04 | source cue 518]
+00:27:10,875 --> 00:27:12,958
+Verbatim:
+make an exception for Eddie?
+
+[CONTEXTUAL | S02E04 | source cue 528]
+00:27:43,041 --> 00:27:44,458
+Verbatim:
+You make a good couple,
+
+[CONTEXTUAL | S02E04 | source cue 529]
+00:27:45,375 --> 00:27:46,601
+Verbatim:
+you and Joe.
+
+[CONTEXTUAL | S02E04 | source cue 530]
+00:27:46,625 --> 00:27:48,458
+Verbatim:
+You seem happier when you're with him.
+
+[CONTEXTUAL | S02E04 | source cue 531]
+00:27:49,000 --> 00:27:50,291
+Verbatim:
+It's a good thing.
+
+[CONTEXTUAL | S02E04 | source cue 532]
+00:27:51,125 --> 00:27:52,750
+Verbatim:
+Sometimes we all need to be happy.
+
+[CONTEXTUAL | S02E04 | source cue 537 | physical line(s) 1]
+00:28:04,500 --> 00:28:06,976
+Verbatim:
+- Susie told me about the missing bird.
+
+[CONTEXTUAL | S02E04 | source cue 538 | physical line(s) 1]
+00:28:07,000 --> 00:28:09,000
+Verbatim:
+- Do you know what sex it is?
+
+[CONTEXTUAL | S02E04 | source cue 539]
+00:28:09,500 --> 00:28:12,976
+Verbatim:
+Okay, so you need to find an expert
+to find the female he's fucking.
+
+[CONTEXTUAL | S02E04 | source cue 540 | physical line(s) 2]
+00:28:13,000 --> 00:28:15,392
+Verbatim:
+- Very romantic creatures.
+
+[CONTEXTUAL | S02E04 | source cue 541 | physical line(s) 1]
+00:28:15,416 --> 00:28:17,976
+Verbatim:
+- Her call will bring him back.
+
+[CONTEXTUAL | S02E04 | source cue 543]
+00:28:20,625 --> 00:28:22,726
+Verbatim:
+Okay, I'll find the bird. We go now.
+
+[CONTEXTUAL | S02E04 | source cue 544 | physical line(s) 2]
+00:28:22,750 --> 00:28:23,642
+Verbatim:
+- Now.
+
+[UNCERTAIN | S02E04 | source cue 545 | physical line(s) 2]
+00:28:23,666 --> 00:28:24,642
+Attribution note: The short instruction likely continues Bella's proposal to leave, but the speaker is not explicit.
+Verbatim:
+- Let's go.
+
+[CONTEXTUAL | S02E04 | source cue 559]
+00:29:08,916 --> 00:29:11,208
+Verbatim:
+They're cute, no? Susie and Joe.
+
+[UNCERTAIN | S02E04 | source cue 566 | physical line(s) 2]
+00:29:34,958 --> 00:29:37,392
+Attribution note: Likely Bella from the preceding plan and subsequent exchange with Eddie. However, cue 564 introduces the woman as "the Contessa di Fabri", not Soranza de Parme. The supplied text alone cannot resolve this name discrepancy or rule out another woman.
+Verbatim:
+- No, no.
+
+[UNCERTAIN | S02E04 | source cue 567]
+00:29:37,416 --> 00:29:40,267
+Attribution note: Likely Bella from the preceding plan and subsequent exchange with Eddie. However, cue 564 introduces the woman as "the Contessa di Fabri", not Soranza de Parme. The supplied text alone cannot resolve this name discrepancy or rule out another woman.
+Verbatim:
+I think it's like a lullaby
+for the falcons, isn't it?
+
+[UNCERTAIN | S02E04 | source cue 570]
+00:29:44,291 --> 00:29:48,017
+Attribution note: Likely Bella from the preceding plan and subsequent exchange with Eddie. However, cue 564 introduces the woman as "the Contessa di Fabri", not Soranza de Parme. The supplied text alone cannot resolve this name discrepancy or rule out another woman.
+Verbatim:
+Well, what you need to understand is
+falcons are incredibly romantic.
+
+[UNCERTAIN | S02E04 | source cue 571]
+00:29:48,041 --> 00:29:50,184
+Attribution note: Likely Bella from the preceding plan and subsequent exchange with Eddie. However, cue 564 introduces the woman as "the Contessa di Fabri", not Soranza de Parme. The supplied text alone cannot resolve this name discrepancy or rule out another woman.
+Verbatim:
+When they mate, they mate for life.
+
+[UNCERTAIN | S02E04 | source cue 572]
+00:29:50,208 --> 00:29:52,934
+Attribution note: Likely Bella from the preceding plan and subsequent exchange with Eddie. However, cue 564 introduces the woman as "the Contessa di Fabri", not Soranza de Parme. The supplied text alone cannot resolve this name discrepancy or rule out another woman.
+Verbatim:
+And this is how we're going to find
+your missing bird.
+
+[UNCERTAIN | S02E04 | source cue 573]
+00:29:52,958 --> 00:29:54,851
+Attribution note: Likely Bella from the preceding plan and subsequent exchange with Eddie. However, cue 564 introduces the woman as "the Contessa di Fabri", not Soranza de Parme. The supplied text alone cannot resolve this name discrepancy or rule out another woman.
+Verbatim:
+Oscar, how many falcons do you have?
+
+[UNCERTAIN | S02E04 | source cue 575 | physical line(s) 1]
+00:29:56,666 --> 00:29:59,125
+Attribution note: Likely Bella from the preceding plan and subsequent exchange with Eddie. However, cue 564 introduces the woman as "the Contessa di Fabri", not Soranza de Parme. The supplied text alone cannot resolve this name discrepancy or rule out another woman.
+Verbatim:
+- And they're all female?
+
+[UNCERTAIN | S02E04 | source cue 576]
+00:30:00,083 --> 00:30:03,392
+Attribution note: Likely Bella from the preceding plan and subsequent exchange with Eddie. However, cue 564 introduces the woman as "the Contessa di Fabri", not Soranza de Parme. The supplied text alone cannot resolve this name discrepancy or rule out another woman.
+Verbatim:
+Only one is the mate of the bird
+that has gone missing. Which one is it?
+
+[UNCERTAIN | S02E04 | source cue 578]
+00:30:05,125 --> 00:30:09,351
+Attribution note: Likely Bella from the preceding plan and subsequent exchange with Eddie. However, cue 564 introduces the woman as "the Contessa di Fabri", not Soranza de Parme. The supplied text alone cannot resolve this name discrepancy or rule out another woman.
+Verbatim:
+Well, then we need to find out.
+Because if we find her, we find him.
+
+[UNCERTAIN | S02E04 | source cue 579]
+00:30:09,375 --> 00:30:12,500
+Attribution note: Likely Bella from the preceding plan and subsequent exchange with Eddie. However, cue 564 introduces the woman as "the Contessa di Fabri", not Soranza de Parme. The supplied text alone cannot resolve this name discrepancy or rule out another woman.
+Verbatim:
+You don't have to watch. We can
+find you as soon as we find the bird.
+
+[UNCERTAIN | S02E04 | source cue 580]
+00:30:13,458 --> 00:30:16,059
+Attribution note: Likely Bella from the preceding plan and subsequent exchange with Eddie. However, cue 564 introduces the woman as "the Contessa di Fabri", not Soranza de Parme. The supplied text alone cannot resolve this name discrepancy or rule out another woman.
+Verbatim:
+But I warn you, it could take some time.
+
+[UNCERTAIN | S02E04 | source cue 653]
+00:34:26,083 --> 00:34:28,059
+Attribution note: Possibly Bella describing the female bird; Oscar is also present. See the name discrepancy noted in the extraction.
+Verbatim:
+She's frisky, a little aggressive.
+
+[UNCERTAIN | S02E04 | source cue 654]
+00:34:28,083 --> 00:34:32,142
+Attribution note: Possibly Bella describing the female bird; Oscar is also present. See the name discrepancy noted in the extraction.
+Verbatim:
+When I tried to tickle her tummy,
+she scratched me. Blood.
+
+[UNCERTAIN | S02E04 | source cue 656]
+00:34:34,166 --> 00:34:35,434
+Attribution note: Possibly Bella describing the female bird; Oscar is also present. See the name discrepancy noted in the extraction.
+Verbatim:
+Naughty girl.
+
+[UNCERTAIN | S02E04 | source cue 658]
+00:34:39,250 --> 00:34:42,708
+Attribution note: Likely Bella from the preceding plan and subsequent exchange with Eddie. However, cue 564 introduces the woman as "the Contessa di Fabri", not Soranza de Parme. The supplied text alone cannot resolve this name discrepancy or rule out another woman.
+Verbatim:
+She's calling for her lover.
+He will come to see her. You'll see.
+
+[CONTEXTUAL | S02E04 | source cue 676]
+00:35:37,791 --> 00:35:39,059
+Verbatim:
+My pleasure.
+
+[CONTEXTUAL | S02E04 | source cue 678]
+00:35:42,458 --> 00:35:44,041
+Verbatim:
+I'm not playing hard to get.
+
+[CONTEXTUAL | S02E04 | source cue 679]
+00:35:44,625 --> 00:35:46,351
+Verbatim:
+All you have to do is ask, Eddie.
+
+EPISODE 05
+==========
+Source file: The.Gentlemen.2024.S02E05.720p.HEVC.x265-MeGusta.srt
+
+[UNCERTAIN | S02E05 | source cue 12]
+00:04:56,749 --> 00:04:58,416
+Attribution note: Opening montage: this may be Bella in a memory, but the text does not identify the voice.
+Verbatim:
+Sorry to drop in unannounced.
+
+[CONTEXTUAL | S02E05 | source cue 13]
+00:05:01,333 --> 00:05:02,999
+Attribution note: Repeated line / flashback; retained as a separate occurrence.
+Verbatim:
+<i>All you have to do is ask, Eddie.</i>
+
+[UNCERTAIN | S02E05 | source cue 16]
+00:05:14,958 --> 00:05:16,208
+Attribution note: Opening montage: this may be Bella in a memory, but the text does not identify the voice.
+Verbatim:
+<i>Your Grace.</i>
+
+[CONTEXTUAL | S02E05 | source cue 132]
+00:14:28,708 --> 00:14:31,725
+Verbatim:
+So, how's the patient, Your Ladyship?
+
+[CONTEXTUAL | S02E05 | source cue 134]
+00:14:34,916 --> 00:14:35,850
+Verbatim:
+Okay.
+
+[CONTEXTUAL | S02E05 | source cue 137]
+00:14:44,249 --> 00:14:47,434
+Verbatim:
+I understand and appreciate
+your concern, Lady Sabrina.
+
+[CONTEXTUAL | S02E05 | source cue 138]
+00:14:47,458 --> 00:14:51,708
+Verbatim:
+But if it's all the same with you,
+I really would like to go and see him now.
+
+[UNCERTAIN | S02E05 | source cue 139]
+00:14:54,999 --> 00:14:55,999
+Attribution note: May be Sabrina allowing the visit, or Bella replying to her.
+Verbatim:
+We'll try.
+
+[CONTEXTUAL | S02E05 | source cue 140]
+00:15:28,416 --> 00:15:30,374
+Verbatim:
+I know you don't want to see anyone.
+
+[CONTEXTUAL | S02E05 | source cue 141]
+00:15:35,624 --> 00:15:38,874
+Verbatim:
+But I didn't come here
+just out of compassion.
+
+[CONTEXTUAL | S02E05 | source cue 142]
+00:15:40,624 --> 00:15:42,458
+Verbatim:
+I brought you a message.
+
+[CONTEXTUAL | S02E05 | source cue 144]
+00:15:50,458 --> 00:15:51,958
+Verbatim:
+It's from Marco.
+
+[CONTEXTUAL | S02E05 | source cue 145]
+00:15:53,499 --> 00:15:54,958
+Verbatim:
+He wants his money, Eddie.
+
+[CONTEXTUAL | S02E05 | source cue 146]
+00:15:56,249 --> 00:15:59,916
+Verbatim:
+The 60 million he invested in your plan
+to decriminalize marijuana.
+
+[CONTEXTUAL | S02E05 | source cue 147]
+00:16:01,708 --> 00:16:04,291
+Verbatim:
+He said if he doesn't get it
+by the end of the month,
+
+[CONTEXTUAL | S02E05 | source cue 148]
+00:16:05,124 --> 00:16:06,916
+Verbatim:
+there will be consequences.
+
+[CONTEXTUAL | S02E05 | source cue 149]
+00:16:19,749 --> 00:16:20,916
+Verbatim:
+I could help you.
+
+[CONTEXTUAL | S02E05 | source cue 150]
+00:16:21,416 --> 00:16:23,708
+Verbatim:
+He is my godfather. He listens to me.
+
+[CONTEXTUAL | S02E05 | source cue 151]
+00:16:25,374 --> 00:16:28,017
+Verbatim:
+I could tell him that you need more time,
+or whatever you need.
+
+[CONTEXTUAL | S02E05 | source cue 154]
+00:16:42,374 --> 00:16:44,916
+Verbatim:
+Death has followed me my whole life.
+
+[CONTEXTUAL | S02E05 | source cue 155]
+00:16:48,124 --> 00:16:51,083
+Verbatim:
+My parents died in a plane crash
+when I was very young.
+
+[CONTEXTUAL | S02E05 | source cue 156]
+00:16:53,458 --> 00:16:55,749
+Verbatim:
+My younger brother took his own life.
+
+[CONTEXTUAL | S02E05 | source cue 157]
+00:16:59,791 --> 00:17:01,874
+Verbatim:
+But when I heard what happened to you...
+
+[CONTEXTUAL | S02E05 | source cue 158]
+00:17:06,499 --> 00:17:08,583
+Verbatim:
+I felt something I never felt before.
+
+[CONTEXTUAL | S02E05 | source cue 160]
+00:17:16,249 --> 00:17:17,374
+Verbatim:
+It was love.
+
+[CONTEXTUAL | S02E05 | source cue 161]
+00:17:26,166 --> 00:17:29,166
+Verbatim:
+I realize there is no space in your heart
+for this right now...
+
+[CONTEXTUAL | S02E05 | source cue 162]
+00:17:31,208 --> 00:17:33,541
+Verbatim:
+but I thought it was important
+for you to know that.
+
+[CONTEXTUAL | S02E05 | source cue 515]
+00:39:47,416 --> 00:39:49,517
+Attribution note: Flashback; retained with the wording used in this occurrence.
+Verbatim:
+<i>When I heard what they did to you...</i>
+
+[CONTEXTUAL | S02E05 | source cue 516 | physical line(s) 2]
+00:39:49,541 --> 00:39:52,059
+Attribution note: Flashback; only the second physical line belongs to the recalled Bella dialogue.
+Verbatim:
+- <i>I felt something I'd never felt.</i>
+
+[CONTEXTUAL | S02E05 | source cue 517 | physical line(s) 2]
+00:39:52,083 --> 00:39:54,892
+Attribution note: Flashback; only the second physical line belongs to the recalled Bella dialogue.
+Verbatim:
+- It was love.</i>
+
+[CONTEXTUAL | S02E05 | source cue 728]
+00:54:59,583 --> 00:55:01,374
+Verbatim:
+This is unexpected.
+
+[CONTEXTUAL | S02E05 | source cue 729]
+00:55:02,416 --> 00:55:04,208
+Verbatim:
+To what do I owe the pleasure?
+
+[CONTEXTUAL | S02E05 | source cue 731]
+00:55:10,583 --> 00:55:11,958
+Verbatim:
+You sound serious.
+
+[CONTEXTUAL | S02E05 | source cue 732]
+00:55:12,958 --> 00:55:14,017
+Verbatim:
+Am I in trouble?
+
+[CONTEXTUAL | S02E05 | source cue 735]
+00:55:20,749 --> 00:55:21,850
+Verbatim:
+Antonio.
+
+[CONTEXTUAL | S02E05 | source cue 736]
+00:55:21,874 --> 00:55:23,999
+Verbatim:
+Two drinks?
+
+[UNCERTAIN | S02E05 | source cue 750]
+00:56:07,583 --> 00:56:08,666
+Attribution note: Either Eddie or Bella may thank Antonio for the drinks.
+Verbatim:
+Thank you, Antonio.
+
+[CONTEXTUAL | S02E05 | source cue 764]
+00:57:03,124 --> 00:57:04,291
+Verbatim:
+Why did you stop?
+
+[CONTEXTUAL | S02E05 | source cue 766]
+00:57:11,958 --> 00:57:14,166
+Verbatim:
+How am I supposed to know
+how the story finishes?
+
+[CONTEXTUAL | S02E05 | source cue 774]
+00:58:08,499 --> 00:58:09,916
+Verbatim:
+The answer is yes.
+
+EPISODE 06
+==========
+Source file: The.Gentlemen.2024.S02E06.720p.HEVC.x265-MeGusta.srt
+
+[CONTEXTUAL | S02E06 | source cue 107]
+00:07:46,666 --> 00:07:50,100
+Verbatim:
+Close your eyes! Close your eyes!
+No peeking. It's bad luck. Please.
+
+[CONTEXTUAL | S02E06 | source cue 108 | physical line(s) 2]
+00:07:50,124 --> 00:07:52,809
+Verbatim:
+- Wait, wait. No peeking.
+
+[CONTEXTUAL | S02E06 | source cue 109 | physical line(s) 2]
+00:07:52,833 --> 00:07:55,975
+Verbatim:
+- Wait, wait, wait, wait. Okay.
+
+[CONTEXTUAL | S02E06 | source cue 110 | physical line(s) 2]
+00:07:55,999 --> 00:07:57,791
+Verbatim:
+- Yes.
+
+[UNCERTAIN | S02E06 | source cue 111]
+00:08:00,041 --> 00:08:02,208
+Attribution note: Brief standalone response in the couple's exchange; the speaker change is not explicit.
+Verbatim:
+Hello.
+
+[CONTEXTUAL | S02E06 | source cue 112]
+00:08:03,249 --> 00:08:05,416
+Verbatim:
+I hope you brought your dancing shoes.
+
+[CONTEXTUAL | S02E06 | source cue 114]
+00:08:08,249 --> 00:08:10,541
+Verbatim:
+But that's tomorrow.
+Tonight we dance, remember?
+
+[CONTEXTUAL | S02E06 | source cue 115 | physical line(s) 1]
+00:08:11,499 --> 00:08:13,083
+Verbatim:
+- Did you peek?
+
+[CONTEXTUAL | S02E06 | source cue 116]
+00:08:17,874 --> 00:08:21,309
+Verbatim:
+Yeah, I know what you think
+about these superstitious things.
+
+[CONTEXTUAL | S02E06 | source cue 117]
+00:08:21,333 --> 00:08:23,684
+Verbatim:
+Like the groom can't see the dress
+before the wedding.
+
+[CONTEXTUAL | S02E06 | source cue 118]
+00:08:23,708 --> 00:08:25,934
+Verbatim:
+But these rules are here for a reason,
+
+[CONTEXTUAL | S02E06 | source cue 119]
+00:08:25,958 --> 00:08:28,333
+Verbatim:
+and I don't want anything bad
+to happen to us.
+
+[CONTEXTUAL | S02E06 | source cue 121]
+00:08:31,666 --> 00:08:32,767
+Verbatim:
+Exactly.
+
+[CONTEXTUAL | S02E06 | source cue 123]
+00:08:34,708 --> 00:08:36,850
+Verbatim:
+I would say looky, but no touchy.
+
+[UNCERTAIN | S02E06 | source cue 124]
+00:08:36,874 --> 00:08:38,458
+Attribution note: Brief standalone response in the couple's exchange; the speaker change is not explicit.
+Verbatim:
+I know.
+
+[CONTEXTUAL | S02E06 | source cue 125]
+00:08:39,958 --> 00:08:42,350
+Verbatim:
+Marco's waiting for you downstairs
+with Angelica.
+
+[CONTEXTUAL | S02E06 | source cue 220]
+00:14:19,333 --> 00:14:20,517
+Verbatim:
+Oh, Marco.
+
+[CONTEXTUAL | S02E06 | source cue 222 | physical line(s) 1]
+00:14:26,749 --> 00:14:29,416
+Verbatim:
+- Cousins Luca, Julia, and Matteo.
+
+[CONTEXTUAL | S02E06 | source cue 223 | physical line(s) 1]
+00:14:30,333 --> 00:14:32,767
+Verbatim:
+- More cousins.
+
+[CONTEXTUAL | S02E06 | source cue 224]
+00:14:32,791 --> 00:14:34,309
+Verbatim:
+And more over there.
+
+[CONTEXTUAL | S02E06 | source cue 228]
+00:15:01,041 --> 00:15:03,583
+Verbatim:
+Can I introduce you, my beloved, Edoardo?
+
+[CONTEXTUAL | S02E06 | source cue 262]
+00:16:54,166 --> 00:16:56,916
+Verbatim:
+Is everything all right?
+
+[CONTEXTUAL | S02E06 | source cue 264]
+00:16:59,999 --> 00:17:03,166
+Verbatim:
+He pursued me for years
+and never really accepted my rejections.
+
+[CONTEXTUAL | S02E06 | source cue 265]
+00:17:03,749 --> 00:17:05,124
+Verbatim:
+He's just a boy.
+
+[CONTEXTUAL | S02E06 | source cue 266]
+00:17:05,624 --> 00:17:07,790
+Verbatim:
+Don't be jealous?
+
+[CONTEXTUAL | S02E06 | source cue 267]
+00:17:11,749 --> 00:17:14,475
+Verbatim:
+Shall we go and meet Auntie Simonetta?
+She's 103.
+
+[CONTEXTUAL | S02E06 | source cue 275]
+00:17:47,666 --> 00:17:50,017
+Verbatim:
+Be careful.
+Eddie studied theology at university,
+
+[CONTEXTUAL | S02E06 | source cue 276]
+00:17:50,041 --> 00:17:53,475
+Verbatim:
+so, if you go up against him,
+you go up against the devil.
+
+[CONTEXTUAL | S02E06 | source cue 277 | physical line(s) 1]
+00:17:53,499 --> 00:17:56,350
+Verbatim:
+- I love this song. Come, please!
+
+[CONTEXTUAL | S02E06 | source cue 278]
+00:17:56,374 --> 00:18:00,291
+Verbatim:
+Come on! Come on, it's fun!
+
+[UNCERTAIN | S02E06 | source cue 356]
+00:23:26,583 --> 00:23:28,708
+Attribution note: Possibly Bella addressing Giuseppe during the disturbance; no speaker label identifies the voice.
+Verbatim:
+You don't need to get involved, Giuseppe.
+
+[CONTEXTUAL | S02E06 | source cue 359 | physical line(s) 2]
+00:24:54,541 --> 00:24:56,892
+Verbatim:
+- I'm all right.
+
+[CONTEXTUAL | S02E06 | source cue 361]
+00:24:58,291 --> 00:25:02,142
+Verbatim:
+Nothing. Nothing. He was drunk.
+He's back at the hotel. It's fine.
+
+[CONTEXTUAL | S02E06 | source cue 363]
+00:25:04,708 --> 00:25:06,809
+Verbatim:
+The guy, but Tancredi is an idiot.
+
+[CONTEXTUAL | S02E06 | source cue 364]
+00:25:06,833 --> 00:25:09,166
+Verbatim:
+It was just a misunderstanding.
+Nothing happened.
+
+[UNCERTAIN | S02E06 | source cue 365]
+00:25:10,166 --> 00:25:11,583
+Attribution note: May be Bella repeating her reassurance, or Eddie echoing it.
+Verbatim:
+Nothing happened.
+
+[CONTEXTUAL | S02E06 | source cue 366]
+00:25:13,291 --> 00:25:15,041
+Verbatim:
+Trust me, it's okay.
+
+[CONTEXTUAL | S02E06 | source cue 367 | physical line(s) 1]
+00:25:15,958 --> 00:25:17,600
+Verbatim:
+- I'm okay.
+
+[CONTEXTUAL | S02E06 | source cue 368 | physical line(s) 1]
+00:25:17,624 --> 00:25:19,434
+Verbatim:
+- It was so stupid.
+
+[CONTEXTUAL | S02E06 | source cue 369]
+00:25:19,458 --> 00:25:20,541
+Verbatim:
+Nothing happened.
+
+[CONTEXTUAL | S02E06 | source cue 370 | physical line(s) 1]
+00:25:21,041 --> 00:25:23,166
+Verbatim:
+- Promise. I love you.
+
+[CONTEXTUAL | S02E06 | source cue 371]
+00:25:24,958 --> 00:25:27,767
+Verbatim:
+I'm gonna get a drink.
+I'll be back in one moment. Okay?
+
+[CONTEXTUAL | S02E06 | source cue 451]
+00:31:23,291 --> 00:31:24,416
+Verbatim:
+Marco's so generous.
+
+[CONTEXTUAL | S02E06 | source cue 452 | physical line(s) 1]
+00:31:24,999 --> 00:31:26,583
+Verbatim:
+- It's fast, no?
+
+[CONTEXTUAL | S02E06 | source cue 454]
+00:31:28,624 --> 00:31:32,600
+Verbatim:
+Don't worry. In six hours' time,
+the map will also be mine.
+
+[CONTEXTUAL | S02E06 | source cue 456 | physical line(s) 1]
+00:31:34,416 --> 00:31:36,559
+Verbatim:
+- For something old, I have this necklace.
+
+[CONTEXTUAL | S02E06 | source cue 457]
+00:31:36,583 --> 00:31:39,832
+Verbatim:
+It belonged to my grandmother.
+For something new, I have your ring.
+
+[CONTEXTUAL | S02E06 | source cue 458]
+00:31:41,124 --> 00:31:44,850
+Verbatim:
+And I have blue flowers on my knickers,
+and Angelica lent me a pin for my hair.
+
+[CONTEXTUAL | S02E06 | source cue 460]
+00:31:48,333 --> 00:31:50,184
+Verbatim:
+I sense you don't like her, do you?
+
+[CONTEXTUAL | S02E06 | source cue 463]
+00:31:55,083 --> 00:31:57,059
+Verbatim:
+That's because she hides her feelings.
+
+[CONTEXTUAL | S02E06 | source cue 464]
+00:31:57,083 --> 00:32:00,333
+Verbatim:
+She's nursing a broken heart.
+Her husband ran off with another woman.
+
+[CONTEXTUAL | S02E06 | source cue 465 | physical line(s) 1]
+00:32:00,916 --> 00:32:04,100
+Verbatim:
+- Nobody knows, but she talks to me.
+
+[CONTEXTUAL | S02E06 | source cue 466]
+00:32:04,124 --> 00:32:06,624
+Verbatim:
+Does it matter where did he run off to?
+
+[CONTEXTUAL | S02E06 | source cue 468]
+00:32:09,541 --> 00:32:12,749
+Verbatim:
+My God, Eddie, why ask questions
+when you already know the answer?
+
+[CONTEXTUAL | S02E06 | source cue 470]
+00:32:25,374 --> 00:32:27,225
+Verbatim:
+I brought you here for a reason.
+
+[CONTEXTUAL | S02E06 | source cue 471]
+00:32:27,249 --> 00:32:29,374
+Verbatim:
+I want you to make confession
+before we get married.
+
+[CONTEXTUAL | S02E06 | source cue 472 | physical line(s) 2]
+00:32:30,374 --> 00:32:32,725
+Verbatim:
+- Yeah, I know.
+
+[CONTEXTUAL | S02E06 | source cue 473]
+00:32:32,749 --> 00:32:35,541
+Verbatim:
+But I've spoken to Father Bosco.
+He said he would make an exception.
+
+[CONTEXTUAL | S02E06 | source cue 475]
+00:32:41,791 --> 00:32:43,124
+Verbatim:
+It would mean a lot to me.
+
+[CONTEXTUAL | S02E06 | source cue 476]
+00:32:44,499 --> 00:32:45,624
+Verbatim:
+Please.
+
+[CONTEXTUAL | S02E06 | source cue 478 | physical line(s) 1]
+00:32:51,291 --> 00:32:54,583
+Verbatim:
+- And be quick. It's very hot.
+
+[CONTEXTUAL | S02E06 | source cue 546]
+00:36:51,583 --> 00:36:52,833
+Verbatim:
+Thank you, Eddie.
+
+[CONTEXTUAL | S02E06 | source cue 548]
+00:36:56,666 --> 00:37:00,499
+Verbatim:
+I know. And I don't need to know
+where you buried the bodies.
+
+[CONTEXTUAL | S02E06 | source cue 549]
+00:37:03,166 --> 00:37:06,916
+Verbatim:
+I don't wanna change you.
+The only thing I want more of is you.
+
+[UNCERTAIN | S02E06 | source cue 550]
+00:37:09,624 --> 00:37:10,624
+Attribution note: The short instruction may be Bella's continuation or Eddie's reply.
+Verbatim:
+Andiamo.
+
+[CONTEXTUAL | S02E06 | source cue 621]
+00:41:15,833 --> 00:41:16,916
+Verbatim:
+Thank you.
+
+[CONTEXTUAL | S02E06 | source cue 622]
+00:41:18,999 --> 00:41:20,541
+Verbatim:
+Anything I can do for you?
+
+[CONTEXTUAL | S02E06 | source cue 624]
+00:41:25,333 --> 00:41:29,434
+Verbatim:
+I didn't think you'd come.
+Eddie said you would, but I wasn't sure.
+
+[CONTEXTUAL | S02E06 | source cue 625 | physical line(s) 2]
+00:41:29,458 --> 00:41:32,333
+Verbatim:
+- I'm glad.
+
+[CONTEXTUAL | S02E06 | source cue 626]
+00:41:33,666 --> 00:41:36,475
+Verbatim:
+It's important to me
+that we remain friends.
+
+[CONTEXTUAL | S02E06 | source cue 628]
+00:41:38,458 --> 00:41:42,624
+Verbatim:
+I don't know. I always felt
+there was something between you two.
+
+[CONTEXTUAL | S02E06 | source cue 629]
+00:41:44,041 --> 00:41:46,083
+Verbatim:
+A certain <i>brivido</i>.
+
+[CONTEXTUAL | S02E06 | source cue 632]
+00:41:52,416 --> 00:41:53,749
+Verbatim:
+That's why you're here now,
+
+[CONTEXTUAL | S02E06 | source cue 633]
+00:41:54,249 --> 00:41:56,499
+Verbatim:
+to find out from Marco what they're up to?
+
+[CONTEXTUAL | S02E06 | source cue 636]
+00:42:03,874 --> 00:42:08,017
+Verbatim:
+And whatever have might been
+between you and Edoardo
+
+[CONTEXTUAL | S02E06 | source cue 637]
+00:42:08,041 --> 00:42:10,166
+Verbatim:
+was just in my imagination?
+
+[CONTEXTUAL | S02E06 | source cue 639]
+00:42:13,708 --> 00:42:17,642
+Verbatim:
+You don't think he's marrying me
+just because of who my godfather is?
+
+[CONTEXTUAL | S02E06 | source cue 646]
+00:42:31,374 --> 00:42:32,374
+Verbatim:
+Thank you.
+
+[CONTEXTUAL | S02E06 | source cue 752]
+00:51:34,208 --> 00:51:36,583
+Verbatim:
+I know this marriage
+is good for your career.
+
+[CONTEXTUAL | S02E06 | source cue 754]
+00:51:42,083 --> 00:51:43,416
+Verbatim:
+I'm not stupid.
+
+[CONTEXTUAL | S02E06 | source cue 755]
+00:51:47,999 --> 00:51:49,166
+Verbatim:
+I don't mind.
+
+[CONTEXTUAL | S02E06 | source cue 756]
+00:51:50,458 --> 00:51:51,583
+Verbatim:
+I love you.
+
+[CONTEXTUAL | S02E06 | source cue 757]
+00:51:53,166 --> 00:51:54,583
+Verbatim:
+So it doesn't matter.
+
+[CONTEXTUAL | S02E06 | source cue 758]
+00:52:00,208 --> 00:52:01,374
+Verbatim:
+But I need to know.
+
+[CONTEXTUAL | S02E06 | source cue 759]
+00:52:05,374 --> 00:52:07,166
+Verbatim:
+Is this real for you or not?
+
+[CONTEXTUAL | S02E06 | source cue 786]
+00:53:44,124 --> 00:53:46,850
+Verbatim:
+If we fly,
+we'll be in Switzerland in 15 minutes.
+
+[CONTEXTUAL | S02E06 | source cue 789]
+00:53:53,166 --> 00:53:55,934
+Verbatim:
+The bags won't fit in the Ferrari.
+You've seen the trunk.
+
+[CONTEXTUAL | S02E06 | source cue 791]
+00:54:01,458 --> 00:54:04,559
+Verbatim:
+I have a much better idea.
+You want to hear?
+
+[CONTEXTUAL | S02E06 | source cue 792 | physical line(s) 2]
+00:54:04,583 --> 00:54:06,708
+Verbatim:
+- Okay.
+
+[CONTEXTUAL | S02E06 | source cue 793]
+00:54:07,416 --> 00:54:08,791
+Verbatim:
+You take the car.
+
+[CONTEXTUAL | S02E06 | source cue 794]
+00:54:10,041 --> 00:54:11,083
+Verbatim:
+I take the plane.
+
+[CONTEXTUAL | S02E06 | source cue 795]
+00:54:11,583 --> 00:54:12,624
+Verbatim:
+And I race you.
+
+[CONTEXTUAL | S02E06 | source cue 796 | physical line(s) 2]
+00:54:15,458 --> 00:54:17,517
+Verbatim:
+- Please drive carefully.
+
+[CONTEXTUAL | S02E06 | source cue 797]
+00:54:17,541 --> 00:54:19,374
+Verbatim:
+If you hurt yourself, I'll kill you.
+
+[CONTEXTUAL | S02E06 | source cue 798]
+00:54:19,874 --> 00:54:21,892
+Verbatim:
+But if you hurt the car, I'll kill your family.
+
+[CONTEXTUAL | S02E06 | source cue 799 | physical line(s) 2]
+00:54:21,916 --> 00:54:24,999
+Verbatim:
+- Shut up and kiss me.
+
+[CONTEXTUAL | S02E06 | source cue 800 | physical line(s) 2]
+00:54:32,416 --> 00:54:33,666
+Verbatim:
+- Ciao.
+
+[UNCERTAIN | S02E06 | source cue 803]
+00:54:38,999 --> 00:54:40,100
+Attribution note: Likely Bella saying goodbye, but several wedding guests are nearby and the voice is not labelled.
+Verbatim:
+Bye.
+
+[UNCERTAIN | S02E06 | source cue 808]
+00:54:52,708 --> 00:54:53,975
+Attribution note: Likely Bella saying goodbye, but several wedding guests are nearby and the voice is not labelled.
+Verbatim:
+Ciao!
+
+EPISODE 07
+==========
+Source file: The.Gentlemen.2024.S02E07.720p.HEVC.x265-MeGusta.srt
+
+No dialogue attributable to Bella identified in this episode's supplied transcript. References to her by other characters are excluded.
+
+EPISODE 08
+==========
+Source file: The.Gentlemen.2024.S02E08.720p.HEVC.x265-MeGusta.srt
+
+No dialogue attributable to Bella identified in this episode's supplied transcript. References to her by other characters are excluded.
+
+APPENDIX — UNRESOLVED GROUP SPEECH FOR REVIEW
+=============================================
+The following are candidate locations, not identified Bella lines. Full source cues are preserved because their speakers cannot be isolated reliably. Do not treat all their contents as hers. This appendix cannot resolve every unlabelled group response.
+
+[REVIEW-ONLY | S02E01 | source cue 82]
+00:06:10,791 --> 00:06:11,684
+Attribution note: Unlabelled group-scene speech or brief reaction. Bella may speak here, but these cues cannot be assigned to her from the text. Full cues are supplied only for review; they may contain other speakers.
+Verbatim source cue:
+Hello.
+
+[REVIEW-ONLY | S02E01 | source cue 193]
+00:12:01,916 --> 00:12:03,434
+Attribution note: Unlabelled group-scene speech or brief reaction. Bella may speak here, but these cues cannot be assigned to her from the text. Full cues are supplied only for review; they may contain other speakers.
+Verbatim source cue:
+- Cheers.
+- Chin-chin.
+
+[REVIEW-ONLY | S02E01 | source cue 207]
+00:13:16,999 --> 00:13:17,999
+Attribution note: Unlabelled group-scene speech or brief reaction. Bella may speak here, but these cues cannot be assigned to her from the text. Full cues are supplied only for review; they may contain other speakers.
+Verbatim source cue:
+Thank you.
+
+[REVIEW-ONLY | S02E01 | source cue 294]
+00:18:36,541 --> 00:18:37,624
+Attribution note: Unlabelled group-scene speech or brief reaction. Bella may speak here, but these cues cannot be assigned to her from the text. Full cues are supplied only for review; they may contain other speakers.
+Verbatim source cue:
+Cico!
+
+[REVIEW-ONLY | S02E01 | source cue 295]
+00:18:38,833 --> 00:18:39,725
+Attribution note: Unlabelled group-scene speech or brief reaction. Bella may speak here, but these cues cannot be assigned to her from the text. Full cues are supplied only for review; they may contain other speakers.
+Verbatim source cue:
+Cico!
+
+[REVIEW-ONLY | S02E01 | source cue 297]
+00:18:44,458 --> 00:18:46,934
+Attribution note: Unlabelled group-scene speech or brief reaction. Bella may speak here, but these cues cannot be assigned to her from the text. Full cues are supplied only for review; they may contain other speakers.
+Verbatim source cue:
+Cico. Cico?
+
+[REVIEW-ONLY | S02E01 | source cue 298]
+00:18:46,958 --> 00:18:48,350
+Attribution note: Unlabelled group-scene speech or brief reaction. Bella may speak here, but these cues cannot be assigned to her from the text. Full cues are supplied only for review; they may contain other speakers.
+Verbatim source cue:
+Is he dead?
+
+[REVIEW-ONLY | S02E01 | source cue 301]
+00:18:53,541 --> 00:18:54,541
+Attribution note: Unlabelled group-scene speech or brief reaction. Bella may speak here, but these cues cannot be assigned to her from the text. Full cues are supplied only for review; they may contain other speakers.
+Verbatim source cue:
+"Usually"?
+
+[REVIEW-ONLY | S02E01 | source cue 302]
+00:18:57,291 --> 00:18:59,999
+Attribution note: Unlabelled group-scene speech or brief reaction. Bella may speak here, but these cues cannot be assigned to her from the text. Full cues are supplied only for review; they may contain other speakers.
+Verbatim source cue:
+Cico? Cico?
+
+[REVIEW-ONLY | S02E01 | source cue 373]
+00:22:55,249 --> 00:22:56,916
+Attribution note: Unlabelled group-scene speech or brief reaction. Bella may speak here, but these cues cannot be assigned to her from the text. Full cues are supplied only for review; they may contain other speakers.
+Verbatim source cue:
+- Thank you.
+- Thank you.
+
+[REVIEW-ONLY | S02E01 | source cue 379]
+00:23:24,041 --> 00:23:25,124
+Attribution note: Unlabelled group-scene speech or brief reaction. Bella may speak here, but these cues cannot be assigned to her from the text. Full cues are supplied only for review; they may contain other speakers.
+Verbatim source cue:
+His Grace.
+
+[REVIEW-ONLY | S02E01 | source cue 380]
+00:23:25,708 --> 00:23:27,350
+Attribution note: Unlabelled group-scene speech or brief reaction. Bella may speak here, but these cues cannot be assigned to her from the text. Full cues are supplied only for review; they may contain other speakers.
+Verbatim source cue:
+Eddie.
+
+[REVIEW-ONLY | S02E01 | source cue 381]
+00:23:27,374 --> 00:23:28,499
+Attribution note: Unlabelled group-scene speech or brief reaction. Bella may speak here, but these cues cannot be assigned to her from the text. Full cues are supplied only for review; they may contain other speakers.
+Verbatim source cue:
+Hear, hear.
+
+[REVIEW-ONLY | S02E01 | source cue 382]
+00:23:29,749 --> 00:23:31,083
+Attribution note: Unlabelled group-scene speech or brief reaction. Bella may speak here, but these cues cannot be assigned to her from the text. Full cues are supplied only for review; they may contain other speakers.
+Verbatim source cue:
+- Right, shall we?
+- Yes.
+
+[REVIEW-ONLY | S02E01 | source cue 441]
+00:26:57,624 --> 00:26:58,999
+Attribution note: Unlabelled group-scene speech or brief reaction. Bella may speak here, but these cues cannot be assigned to her from the text. Full cues are supplied only for review; they may contain other speakers.
+Verbatim source cue:
+Where did you two meet?
+
+[REVIEW-ONLY | S02E04 | source cue 454]
+00:24:25,041 --> 00:24:26,684
+Attribution note: Two listeners repeat the same name; the transcript does not identify which, if either, is Bella.
+Verbatim source cue:
+- Penguin Joe.
+- Penguin Joe, wow.
+
+[REVIEW-ONLY | S02E04 | source cue 535]
+00:28:00,041 --> 00:28:01,434
+Attribution note: Unlabelled greetings on returning to the table; these full cues may include other speakers.
+Verbatim source cue:
+- Hi.
+- Hello.
+
+[REVIEW-ONLY | S02E04 | source cue 536]
+00:28:01,458 --> 00:28:03,125
+Attribution note: Unlabelled greetings on returning to the table; these full cues may include other speakers.
+Verbatim source cue:
+- All good?
+- Good.
+
+[REVIEW-ONLY | S02E04 | source cue 651]
+00:34:20,333 --> 00:34:22,416
+Attribution note: Bella and Oscar have been finding the female falcon. Either may speak either part of this cue; see the name discrepancy noted in the extraction.
+Verbatim source cue:
+- We think we have a winner.
+- Ta-da!
+
+[REVIEW-ONLY | S02E04 | source cue 657]
+00:34:35,458 --> 00:34:37,500
+Attribution note: Group reactions around the falcon's return. These full cues are not attributed to Bella; she may contribute, but the text cannot isolate her voice.
+Verbatim source cue:
+Well, let's see what she can do.
+
+[REVIEW-ONLY | S02E04 | source cue 663]
+00:35:02,708 --> 00:35:04,226
+Attribution note: Group reactions around the falcon's return. These full cues are not attributed to Bella; she may contribute, but the text cannot isolate her voice.
+Verbatim source cue:
+Oh.
+
+[REVIEW-ONLY | S02E04 | source cue 664]
+00:35:04,250 --> 00:35:05,559
+Attribution note: Group reactions around the falcon's return. These full cues are not attributed to Bella; she may contribute, but the text cannot isolate her voice.
+Verbatim source cue:
+- Is that it?
+- Yeah.
+
+[REVIEW-ONLY | S02E04 | source cue 665]
+00:35:05,583 --> 00:35:07,142
+Attribution note: Group reactions around the falcon's return. These full cues are not attributed to Bella; she may contribute, but the text cannot isolate her voice.
+Verbatim source cue:
+- I see something.
+- That?
+
+[REVIEW-ONLY | S02E04 | source cue 666]
+00:35:07,166 --> 00:35:08,833
+Attribution note: Group reactions around the falcon's return. These full cues are not attributed to Bella; she may contribute, but the text cannot isolate her voice.
+Verbatim source cue:
+- Do you see it?
+- Is it?
+
+[REVIEW-ONLY | S02E04 | source cue 667]
+00:35:10,166 --> 00:35:11,166
+Attribution note: Group reactions around the falcon's return. These full cues are not attributed to Bella; she may contribute, but the text cannot isolate her voice.
+Verbatim source cue:
+Come on, Pepe!
+
+[REVIEW-ONLY | S02E04 | source cue 668]
+00:35:14,541 --> 00:35:15,851
+Attribution note: Group reactions around the falcon's return. These full cues are not attributed to Bella; she may contribute, but the text cannot isolate her voice.
+Verbatim source cue:
+- Go on, my son!
+- Come on!
+
+[REVIEW-ONLY | S02E04 | source cue 669]
+00:35:15,875 --> 00:35:18,101
+Attribution note: Group reactions around the falcon's return. These full cues are not attributed to Bella; she may contribute, but the text cannot isolate her voice.
+Verbatim source cue:
+- Come on! That's it!
+- Come on!
+
+[REVIEW-ONLY | S02E04 | source cue 670]
+00:35:18,125 --> 00:35:19,625
+Attribution note: Group reactions around the falcon's return. These full cues are not attributed to Bella; she may contribute, but the text cannot isolate her voice.
+Verbatim source cue:
+- Come the fuck on!
+- Come on!
+
+[REVIEW-ONLY | S02E04 | source cue 671]
+00:35:20,833 --> 00:35:24,041
+Attribution note: Group reactions around the falcon's return. These full cues are not attributed to Bella; she may contribute, but the text cannot isolate her voice.
+Verbatim source cue:
+Oh my. You fucking birdbrain. Come here.
+
+[REVIEW-ONLY | S02E04 | source cue 672]
+00:35:25,083 --> 00:35:27,726
+Attribution note: Group reactions around the falcon's return. These full cues are not attributed to Bella; she may contribute, but the text cannot isolate her voice.
+Verbatim source cue:
+Well. And they say romance is dead.
+
+[REVIEW-ONLY | S02E04 | source cue 674]
+00:35:31,166 --> 00:35:34,375
+Attribution note: Group reactions around the falcon's return. These full cues are not attributed to Bella; she may contribute, but the text cannot isolate her voice.
+Verbatim source cue:
+Where you been hiding?
+That's all right. Don't worry about it.
+
+[REVIEW-ONLY | S02E06 | source cue 217]
+00:14:14,124 --> 00:14:15,309
+Attribution note: Greetings or exclamations at the family party. The full cues may include Bella and other speakers; the text cannot reliably separate them.
+Verbatim source cue:
+Hello!
+
+[REVIEW-ONLY | S02E06 | source cue 218]
+00:14:15,333 --> 00:14:16,309
+Attribution note: Greetings or exclamations at the family party. The full cues may include Bella and other speakers; the text cannot reliably separate them.
+Verbatim source cue:
+Ciao!
+
+[REVIEW-ONLY | S02E06 | source cue 225]
+00:14:34,333 --> 00:14:35,434
+Attribution note: Greetings or exclamations at the family party. The full cues may include Bella and other speakers; the text cannot reliably separate them.
+Verbatim source cue:
+- Hello.
+- Ciao.
+
+[REVIEW-ONLY | S02E06 | source cue 226]
+00:14:35,458 --> 00:14:36,541
+Attribution note: Greetings or exclamations at the family party. The full cues may include Bella and other speakers; the text cannot reliably separate them.
+Verbatim source cue:
+Ciao.
+
+[REVIEW-ONLY | S02E06 | source cue 227]
+00:14:40,833 --> 00:14:42,124
+Attribution note: Greetings or exclamations at the family party. The full cues may include Bella and other speakers; the text cannot reliably separate them.
+Verbatim source cue:
+Mamma mia!
+
+[REVIEW-ONLY | S02E06 | source cue 230]
+00:15:12,291 --> 00:15:13,999
+Attribution note: Greetings or exclamations at the family party. The full cues may include Bella and other speakers; the text cannot reliably separate them.
+Verbatim source cue:
+- Thank you.
+- Hi, ciao!
+
+[REVIEW-ONLY | S02E06 | source cue 279]
+00:18:02,541 --> 00:18:03,541
+Attribution note: Greetings or exclamations at the family party. The full cues may include Bella and other speakers; the text cannot reliably separate them.
+Verbatim source cue:
+Whoo!
+
+[REVIEW-ONLY | S02E06 | source cue 801]
+00:54:35,499 --> 00:54:37,392
+Attribution note: Two brief reactions during the departure; neither is securely attributable to Bella.
+Verbatim source cue:
+- Oh no!
+- Oh!
+
+EXTRACTION COUNTS
+=================
+Counts are source-cue selections, not sentences, speaking turns, or verified Bella lines.
+
+S02E01: 20 contextual; 1 uncertain; 15 review-only.
+S02E02: 39 contextual; 3 uncertain; 0 review-only.
+S02E03: 21 contextual; 3 uncertain; 0 review-only.
+S02E04: 36 contextual; 22 uncertain; 16 review-only.
+S02E05: 36 contextual; 4 uncertain; 0 review-only.
+S02E06: 92 contextual; 7 uncertain; 8 review-only.
+S02E07: 0 contextual; 0 uncertain; 0 review-only.
+S02E08: 0 contextual; 0 uncertain; 0 review-only.
