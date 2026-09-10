@@ -1,4 +1,4 @@
-import { MacCloseButton } from "./Primitives";
+import { DialogCloseButton } from "./Primitives";
 import React, { useEffect } from "react";
 
 export type ModalSize = "sm" | "md" | "lg" | "xl" | "full";
@@ -71,9 +71,13 @@ export const Modal: React.FC<ModalProps> = ({
         className={`lit lit-strong w-full ${sizeStyles[size]} bg-surface rounded-xl shadow-modal overflow-hidden flex flex-col animate-in zoom-in-95 duration-100 ${className}`}
       >
         {/* Modal Header */}
+        {/* `items-stretch`, not `items-center`, because the Windows dialect's
+            close is a caption button: a rectangle hard against the corner
+            taking the header's full height. The other two dialects carry
+            their own padding so the header does not have to choose. */}
         {(title || showCloseButton) && (
-          <header className="px-4 py-3 border-b border-edge flex items-center justify-between gap-3 flex-shrink-0">
-            <div className="flex items-center gap-2.5 truncate">
+          <header className="border-b border-edge flex items-stretch justify-between gap-3 flex-shrink-0">
+            <div className="flex items-center gap-2.5 truncate pl-4 py-3 min-w-0">
               {icon && <span className="flex-shrink-0">{icon}</span>}
               <div className="flex flex-col truncate">
                 {title && (
@@ -87,8 +91,10 @@ export const Modal: React.FC<ModalProps> = ({
               </div>
             </div>
 
-            {showCloseButton && (
-              <MacCloseButton onClose={onClose} />
+            {showCloseButton ? (
+              <DialogCloseButton onClose={onClose} flush />
+            ) : (
+              <span className="w-4 flex-shrink-0" aria-hidden />
             )}
           </header>
         )}

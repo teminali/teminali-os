@@ -1,0 +1,1786 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>Teminali OS — Temi</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --bg-codex: #141415;
+      --bg-chat: #000000;
+      --bg-sidebar: #171717;
+      --bg-card: #212121;
+      --bg-card-hover: #262626;
+      --bg-pill-switcher: #181818;
+      --bg-pill-active: #343438;
+      --border-subtle: rgba(255, 255, 255, 0.07);
+      --border-card: rgba(255, 255, 255, 0.08);
+      --user-pill-bg: #1e3a5f;
+      --text-primary: #ececec;
+      --text-secondary: #8e8e93;
+      --text-dim: #5c5c62;
+      --text-dark-muted: #71717a;
+      --green-live: #22c55e;
+      --amber-live: #f59e0b;
+      --blue-accent: #38bdf8;
+      --purple-accent: #a855f7;
+      --red-mic: #ef4444;
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+      -webkit-tap-highlight-color: transparent;
+    }
+
+    html, body {
+      width: 100%;
+      height: 100%;
+      background-color: var(--bg-codex);
+      color: var(--text-primary);
+      font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+      overflow: hidden;
+      user-select: none;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    #app {
+      display: flex;
+      width: 100vw;
+      height: 100vh;
+      position: relative;
+      background-color: var(--bg-codex);
+    }
+
+    /* ----------------------------------------------------
+       Unified Codex Desktop Sidebar (240px)
+       Matching Screenshot 3 Exactly
+       ---------------------------------------------------- */
+    .codex-sidebar {
+      width: 240px;
+      height: 100vh;
+      background-color: var(--bg-sidebar);
+      border-right: 1px solid var(--border-subtle);
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+      padding: 14px 10px 12px;
+      z-index: 50;
+      flex-shrink: 0;
+      transition: width 0.22s cubic-bezier(0.4, 0, 0.2, 1), transform 0.22s ease, padding 0.22s ease;
+      overflow: hidden;
+    }
+
+    .codex-sidebar.collapsed {
+      width: 0;
+      padding: 0;
+      border-right: none;
+      pointer-events: none;
+    }
+
+    .sidebar-top-container {
+      display: flex;
+      flex-direction: column;
+      flex: 1;
+      overflow-y: auto;
+      overflow-x: hidden;
+      padding-right: 2px;
+    }
+
+    .sidebar-top-container::-webkit-scrollbar {
+      width: 4px;
+    }
+    .sidebar-top-container::-webkit-scrollbar-thumb {
+      background: rgba(255, 255, 255, 0.1);
+      border-radius: 2px;
+    }
+
+    /* macOS Window Controls & Sidebar Controls Row */
+    .window-controls-row {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 2px 4px 14px;
+    }
+
+    .traffic-lights {
+      display: flex;
+      align-items: center;
+      gap: 7px;
+    }
+
+    .traffic-dot {
+      width: 11px;
+      height: 11px;
+      border-radius: 50%;
+    }
+    .dot-red    { background-color: #ff5f57; }
+    .dot-yellow { background-color: #febc2e; }
+    .dot-green  { background-color: #28c840; }
+
+    .sidebar-nav-icons {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin-left: 6px;
+      color: #71717a;
+    }
+
+    .nav-icon-btn {
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: #71717a;
+      transition: color 0.15s ease;
+    }
+    .nav-icon-btn:hover {
+      color: #ffffff;
+    }
+
+    /* Brand Header with Chevron and Search Icon */
+    .sidebar-brand-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 6px 8px 12px;
+    }
+
+    .brand-selector {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 14px;
+      font-weight: 600;
+      color: #ffffff;
+      cursor: pointer;
+    }
+
+    .brand-selector svg {
+      color: #8e8e93;
+    }
+
+    .brand-search-btn {
+      cursor: pointer;
+      color: #8e8e93;
+      display: flex;
+      align-items: center;
+      transition: color 0.15s ease;
+    }
+    .brand-search-btn:hover {
+      color: #ffffff;
+    }
+
+    /* Top Navigation Links (New chat, Sites, Scheduled, Plugins) */
+    .sidebar-menu-list {
+      display: flex;
+      flex-direction: column;
+      gap: 1px;
+      margin-bottom: 12px;
+    }
+
+    .menu-link-item {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 7px 8px;
+      border-radius: 6px;
+      font-size: 13px;
+      color: #d1d5db;
+      cursor: pointer;
+      transition: background 0.15s ease, color 0.15s ease;
+    }
+
+    .menu-link-item:hover {
+      background-color: rgba(255, 255, 255, 0.06);
+      color: #ffffff;
+    }
+
+    .menu-link-item.active {
+      background-color: rgba(255, 255, 255, 0.08);
+      color: #ffffff;
+      font-weight: 500;
+    }
+
+    .menu-link-item svg {
+      width: 15px;
+      height: 15px;
+      color: #9ca3af;
+      flex-shrink: 0;
+    }
+
+    /* Section Headers (Projects / Recents) */
+    .sidebar-section-header {
+      font-size: 11.5px;
+      font-weight: 500;
+      color: var(--text-dark-muted);
+      padding: 10px 8px 6px;
+      letter-spacing: 0.01em;
+    }
+
+    /* Projects List with Subtitle/Status */
+    .projects-list {
+      display: flex;
+      flex-direction: column;
+      gap: 3px;
+      margin-bottom: 10px;
+    }
+
+    .project-card-item {
+      display: flex;
+      flex-direction: column;
+      padding: 6px 8px;
+      border-radius: 6px;
+      cursor: pointer;
+      transition: background 0.15s ease;
+    }
+
+    .project-card-item:hover {
+      background-color: rgba(255, 255, 255, 0.05);
+    }
+
+    .project-card-item.active {
+      background-color: rgba(255, 255, 255, 0.08);
+    }
+
+    .project-title-row {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 13px;
+      color: var(--text-primary);
+      font-weight: 400;
+    }
+
+    .project-title-row svg {
+      width: 14px;
+      height: 14px;
+      color: #8e8e93;
+      flex-shrink: 0;
+    }
+
+    .project-subtext {
+      font-size: 11px;
+      color: var(--text-dark-muted);
+      margin-left: 22px;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      margin-top: 1px;
+    }
+
+    /* Recents Chat History List */
+    .recents-list {
+      display: flex;
+      flex-direction: column;
+      gap: 1px;
+    }
+
+    .recent-chat-item {
+      padding: 6px 8px;
+      border-radius: 6px;
+      font-size: 13px;
+      color: #c5c5d2;
+      cursor: pointer;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      transition: background 0.15s ease, color 0.15s ease;
+    }
+
+    .recent-chat-item:hover {
+      background-color: rgba(255, 255, 255, 0.05);
+      color: #ffffff;
+    }
+
+    .recent-chat-item.active {
+      background-color: rgba(255, 255, 255, 0.08);
+      color: #ffffff;
+      font-weight: 500;
+    }
+
+    /* Bottom Profile Footer */
+    .codex-profile-footer {
+      border-top: 1px solid var(--border-subtle);
+      padding-top: 10px;
+      margin-top: 8px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+
+    .profile-info {
+      display: flex;
+      align-items: center;
+      gap: 9px;
+      cursor: pointer;
+    }
+
+    .profile-avatar {
+      width: 24px;
+      height: 24px;
+      border-radius: 50%;
+      background: #9333ea;
+      color: #ffffff;
+      font-size: 11px;
+      font-weight: 600;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .profile-name {
+      font-size: 13px;
+      font-weight: 500;
+      color: var(--text-primary);
+    }
+
+    .profile-help-btn {
+      color: #71717a;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      transition: color 0.15s ease;
+    }
+    .profile-help-btn:hover {
+      color: #ffffff;
+    }
+
+    /* ----------------------------------------------------
+       Workspace Container
+       ---------------------------------------------------- */
+    .workspace-container {
+      flex: 1;
+      height: 100vh;
+      display: flex;
+      flex-direction: column;
+      position: relative;
+      overflow: hidden;
+      transition: background-color 0.22s ease;
+    }
+
+    .workspace-container.chat-mode-active {
+      background-color: var(--bg-chat);
+    }
+
+    .workspace-container.work-mode-active {
+      background-color: var(--bg-codex);
+    }
+
+    /* Top Navigation Header with Codex Segmented Switcher */
+    .codex-header {
+      height: 46px;
+      padding: 0 16px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      position: absolute;
+      top: 0;
+      left: 0;
+      right: 0;
+      z-index: 40;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+      background: transparent;
+    }
+
+    .header-left-tools {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+
+    .collapse-toggle-btn {
+      width: 26px;
+      height: 26px;
+      border-radius: 5px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: #8e8e93;
+      cursor: pointer;
+      transition: all 0.15s ease;
+    }
+    .collapse-toggle-btn:hover {
+      color: #ffffff;
+      background-color: rgba(255, 255, 255, 0.07);
+    }
+
+    /* The Iconic Codex Segmented Switcher (Chat vs Work) */
+
+    .header-share-btn {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      background: rgba(255, 255, 255, 0.08);
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      color: #ffffff;
+      font-family: inherit;
+      font-size: 12px;
+      font-weight: 500;
+      padding: 4px 12px;
+      border-radius: 9999px;
+      cursor: pointer;
+      transition: all 0.15s ease;
+    }
+
+    .header-share-btn:hover {
+      background: rgba(255, 255, 255, 0.14);
+      border-color: rgba(255, 255, 255, 0.18);
+    }
+
+    .header-right-tools {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      color: #8e8e93;
+    }
+
+    .layout-icon-btn {
+      cursor: pointer;
+      color: #71717a;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      width: 28px;
+      height: 28px;
+      border-radius: 6px;
+      transition: all 0.15s ease;
+      position: relative;
+    }
+
+    .layout-icon-btn:hover {
+      color: #ffffff;
+      background-color: rgba(255, 255, 255, 0.06);
+    }
+
+    .activity-indicator-dot {
+      position: absolute;
+      top: 3px;
+      right: 3px;
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      background-color: var(--blue-accent);
+      box-shadow: 0 0 6px var(--blue-accent);
+    }
+
+    /* ----------------------------------------------------
+       VIEW 1: "Work" Mode Workbench (Screenshot 3)
+       ---------------------------------------------------- */
+    .work-workbench-view {
+      flex: 1;
+      width: 100%;
+      height: 100%;
+      display: none;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      padding: 0 20px;
+      margin-top: -30px;
+    }
+
+    .work-workbench-view.active {
+      display: flex;
+    }
+
+    .work-headline {
+      font-size: 29px;
+      font-weight: 400;
+      color: #ffffff;
+      letter-spacing: -0.015em;
+      margin-bottom: 26px;
+      text-align: center;
+    }
+
+    .work-input-card {
+      width: 100%;
+      max-width: 680px;
+      background-color: var(--bg-card);
+      border: 1px solid var(--border-card);
+      border-radius: 16px;
+      box-shadow: 0 8px 32px rgba(0, 0, 0, 0.45);
+      padding: 14px 16px 12px;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+      transition: border-color 0.15s ease, box-shadow 0.15s ease;
+    }
+
+    .work-input-card:focus-within {
+      border-color: rgba(255, 255, 255, 0.16);
+      box-shadow: 0 10px 40px rgba(0, 0, 0, 0.6);
+    }
+
+    .work-textarea {
+      width: 100%;
+      min-height: 48px;
+      background: transparent;
+      border: none;
+      outline: none;
+      color: #ffffff;
+      font-family: inherit;
+      font-size: 14px;
+      line-height: 1.5;
+      resize: none;
+      user-select: text;
+    }
+
+    .work-textarea::placeholder {
+      color: #71717a;
+    }
+
+    .work-action-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+
+    .work-action-left {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .work-icon-btn {
+      width: 28px;
+      height: 28px;
+      border-radius: 6px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: #8e8e93;
+      cursor: pointer;
+      background: transparent;
+      border: none;
+      transition: all 0.15s ease;
+    }
+
+    .work-icon-btn:hover {
+      color: #ffffff;
+      background: rgba(255, 255, 255, 0.08);
+    }
+
+    .approve-pill-btn {
+      display: flex;
+      align-items: center;
+      gap: 5px;
+      background: transparent;
+      border: none;
+      color: #a1a1aa;
+      font-family: inherit;
+      font-size: 12px;
+      cursor: pointer;
+      padding: 4px 8px;
+      border-radius: 6px;
+      transition: all 0.15s ease;
+    }
+
+    .approve-pill-btn:hover {
+      color: #ffffff;
+      background: rgba(255, 255, 255, 0.06);
+    }
+
+    .work-action-right {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .model-selector-pill {
+      display: flex;
+      align-items: center;
+      gap: 5px;
+      font-size: 12px;
+      color: #d4d4d8;
+      cursor: pointer;
+      padding: 4px 8px;
+      border-radius: 6px;
+      background: transparent;
+      border: none;
+      transition: all 0.15s ease;
+    }
+
+    .model-selector-pill:hover {
+      color: #ffffff;
+      background: rgba(255, 255, 255, 0.06);
+    }
+
+    .work-mic-btn {
+      width: 28px;
+      height: 28px;
+      border-radius: 6px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: #8e8e93;
+      cursor: pointer;
+      background: transparent;
+      border: none;
+      transition: all 0.15s ease;
+    }
+
+    .work-mic-btn:hover {
+      color: #ffffff;
+      background: rgba(255, 255, 255, 0.08);
+    }
+
+    .work-submit-btn {
+      width: 28px;
+      height: 28px;
+      border-radius: 50%;
+      background: #38383a;
+      border: none;
+      color: #a1a1aa;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+      transition: all 0.15s ease;
+    }
+
+    .work-submit-btn:hover {
+      background: #4a4a4d;
+      color: #ffffff;
+      transform: scale(1.04);
+    }
+
+    .work-card-bottom-bar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      border-top: 1px solid rgba(255, 255, 255, 0.05);
+      padding-top: 9px;
+      margin-top: 2px;
+    }
+
+    .bottom-bar-left {
+      display: flex;
+      align-items: center;
+      gap: 14px;
+    }
+
+    .choose-project-btn {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 12px;
+      color: #a1a1aa;
+      cursor: pointer;
+      transition: color 0.15s ease;
+    }
+
+    .choose-project-btn:hover {
+      color: #ffffff;
+    }
+
+    .plugins-indicator {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 12px;
+      color: #a1a1aa;
+      cursor: pointer;
+    }
+
+    .plugin-dots {
+      display: flex;
+      align-items: center;
+      gap: 3px;
+    }
+
+    .p-dot {
+      width: 7px;
+      height: 7px;
+      border-radius: 2px;
+    }
+    .p-blue  { background-color: #3b82f6; }
+    .p-red   { background-color: #ef4444; }
+    .p-green { background-color: #22c55e; }
+
+    /* ----------------------------------------------------
+       VIEW 2: "Chat" Mode (ChatGPT Voice Assistant - Screenshot 2)
+       ---------------------------------------------------- */
+    .chat-voice-view {
+      flex: 1;
+      width: 100%;
+      height: 100%;
+      display: none;
+      flex-direction: column;
+      position: relative;
+    }
+
+    .chat-voice-view.active {
+      display: flex;
+    }
+
+    .conversation-viewport {
+      flex: 1;
+      width: 100%;
+      height: calc(100vh - 160px);
+      margin-top: 46px;
+      overflow-y: auto;
+      display: flex;
+      flex-direction: column;
+      padding: 24px 300px 140px 60px; /* Safe padding so 260px drawer NEVER collides with user pills! */
+      scroll-behavior: smooth;
+      transition: padding-right 0.22s ease;
+    }
+
+    .conversation-viewport.pane-closed {
+      padding-right: 60px;
+    }
+
+    .conversation-viewport::-webkit-scrollbar {
+      display: none;
+    }
+
+    .conversation-stream {
+      max-width: 760px;
+      width: 100%;
+      margin: 0 auto;
+      display: flex;
+      flex-direction: column;
+      gap: 28px;
+    }
+
+    /* Top Amber Voice Session Indicator */
+    .voice-session-indicator-row {
+      width: 100%;
+      display: flex;
+      justify-content: center;
+      margin-bottom: -10px;
+    }
+
+    .session-amber-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background-color: var(--amber-live);
+      box-shadow: 0 0 10px rgba(245, 158, 11, 0.7);
+      display: inline-block;
+      animation: amberPulse 2.5s infinite ease-in-out;
+    }
+
+    @keyframes amberPulse {
+      0%, 100% { opacity: 0.8; transform: scale(1); }
+      50% { opacity: 1; transform: scale(1.2); }
+    }
+
+    /* ChatGPT Voice User Bubble: Floating Blue Pill on the Right */
+    .user-turn-block {
+      width: 100%;
+      display: flex;
+      justify-content: flex-end;
+      animation: fadeIn 0.2s ease-out;
+    }
+
+    .chatgpt-user-pill {
+      background: var(--user-pill-bg);
+      color: #ffffff;
+      border-radius: 9999px;
+      padding: 9px 20px;
+      font-size: 15px;
+      font-weight: 400;
+      line-height: 1.48;
+      box-shadow: 0 4px 14px rgba(0, 0, 0, 0.25);
+      word-break: break-word;
+      user-select: text;
+      transition: all 0.2s ease;
+      display: inline-block;
+      max-width: 80%;
+    }
+
+    .chatgpt-user-pill.live {
+      border: 1px solid rgba(56, 189, 248, 0.5);
+      box-shadow: 0 0 16px rgba(56, 189, 248, 0.35);
+    }
+
+    .user-live-cursor {
+      display: inline-block;
+      width: 7px;
+      height: 15px;
+      background-color: var(--blue-accent);
+      margin-left: 5px;
+      vertical-align: text-bottom;
+      animation: blink 0.8s infinite;
+    }
+
+    /* ChatGPT Voice Assistant Block: Left-Aligned Clean Spoken Prose */
+    .assistant-turn-block {
+      width: 100%;
+      display: flex;
+      flex-direction: column;
+      align-items: flex-start;
+      gap: 10px;
+      animation: fadeIn 0.2s ease-out;
+    }
+
+    .assistant-text {
+      max-width: 84%;
+      color: #ececec;
+      font-size: 15px;
+      line-height: 1.6;
+      word-break: break-word;
+      user-select: text;
+    }
+
+    /* Waiting-for-reply indicator. Dimmed so it reads as a placeholder rather
+       than as something she said. */
+    .thinking-text {
+      opacity: 0.55;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .thinking-label {
+      font-style: italic;
+      font-size: 0.92em;
+    }
+
+    /* Each word fades up as it is spoken, so the transcript arrives with the voice
+       instead of snapping into place ahead of it. */
+    .spoken-word {
+      display: inline;
+      animation: spokenWordIn 260ms cubic-bezier(0.22, 0.61, 0.36, 1) both;
+    }
+    @keyframes spokenWordIn {
+      from { opacity: 0; filter: blur(3px); }
+      to   { opacity: 1; filter: blur(0); }
+    }
+    @media (prefers-reduced-motion: reduce) {
+      .spoken-word { animation: none; }
+    }
+
+    .assistant-streaming-cursor {
+      display: inline-block;
+      width: 7px;
+      height: 15px;
+      background-color: #ffffff;
+      margin-left: 3px;
+      vertical-align: text-bottom;
+      animation: blink 0.9s infinite;
+    }
+
+    /* 6 Minimalist Action Buttons: [Copy] [Thumbs Up] [Thumbs Down] [Share] [Regenerate] [•••] */
+    .assistant-actions {
+      display: flex;
+      align-items: center;
+      gap: 4px;
+      margin-top: 4px;
+      opacity: 0.65;
+      transition: opacity 0.2s ease;
+    }
+
+    .assistant-turn-block:hover .assistant-actions {
+      opacity: 1;
+    }
+
+    .action-icon-btn {
+      appearance: none;
+      background: transparent;
+      border: none;
+      color: var(--text-secondary);
+      width: 26px;
+      height: 26px;
+      border-radius: 6px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+      transition: all 0.15s ease;
+    }
+
+    .action-icon-btn:hover {
+      color: #ffffff;
+      background-color: rgba(255, 255, 255, 0.08);
+    }
+
+    .action-icon-btn svg {
+      width: 14px;
+      height: 14px;
+    }
+
+    /* Voice Orb Stage */
+    .orb-stage {
+      position: fixed;
+      bottom: 84px;
+      left: 50%;
+      transform: translateX(-50%);
+      width: 76px;
+      height: 76px;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      z-index: 35;
+      transition: transform 0.2s ease;
+    }
+
+    .orb-stage:hover {
+      transform: translateX(-50%) scale(1.07);
+    }
+
+    #teminaliOrb {
+      width: 76px;
+      height: 76px;
+      border-radius: 50%;
+    }
+
+    /* Floating Pill Composer (Screenshot 2) */
+    .bottom-composer-wrapper {
+      position: fixed;
+      bottom: 14px;
+      left: 50%;
+      transform: translateX(-50%);
+      width: calc(100% - 300px);
+      max-width: 660px;
+      z-index: 45;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 7px;
+    }
+
+    .disclaimer-text {
+      font-size: 11.5px;
+      color: #71717a;
+      letter-spacing: 0.01em;
+    }
+
+    .chat-pill-input-box {
+      width: 100%;
+      height: 48px;
+      background-color: var(--bg-card);
+      border: 1px solid var(--border-card);
+      border-radius: 9999px;
+      display: flex;
+      align-items: center;
+      padding: 0 8px 0 12px;
+      gap: 10px;
+      box-shadow: 0 8px 30px rgba(0, 0, 0, 0.8);
+    }
+
+    .pill-btn {
+      appearance: none;
+      background: transparent;
+      border: none;
+      outline: none;
+      width: 30px;
+      height: 30px;
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+      color: var(--text-secondary);
+      transition: all 0.15s ease;
+    }
+
+    .pill-btn:hover {
+      color: #ffffff;
+      background-color: rgba(255, 255, 255, 0.08);
+    }
+
+    .pill-input {
+      flex: 1;
+      background: transparent;
+      border: none;
+      outline: none;
+      color: #ffffff;
+      font-family: inherit;
+      font-size: 14.5px;
+      padding: 0 4px;
+      user-select: text;
+    }
+
+    .pill-input::placeholder {
+      color: var(--text-dark-muted);
+    }
+
+    /* Red Mic Button (Active Voice State) */
+    .mic-circle-btn {
+      width: 32px;
+      height: 32px;
+      border-radius: 50%;
+      background: var(--red-mic);
+      color: #ffffff;
+      border: none;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+      box-shadow: 0 0 14px rgba(239, 68, 68, 0.5);
+      transition: all 0.18s ease;
+    }
+
+    .mic-circle-btn.muted {
+      background: #333338;
+      color: var(--text-secondary);
+      box-shadow: none;
+    }
+
+    .mic-circle-btn:hover {
+      transform: scale(1.06);
+    }
+
+    /* Crisp White Circle Close Button */
+    .close-circle-btn {
+      width: 28px;
+      height: 28px;
+      border-radius: 50%;
+      background-color: #ffffff;
+      color: #000000;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+      border: none;
+      outline: none;
+      transition: all 0.15s ease;
+    }
+
+    .close-circle-btn:hover {
+      transform: scale(1.06);
+      background-color: #f4f4f5;
+    }
+
+    /* ----------------------------------------------------
+       Top Right Floating Assistant Activity & Context Window
+       (Compact 260px matching Screenshot 2 "In this chat" size)
+       ---------------------------------------------------- */
+    .assistant-activity-pane {
+      position: fixed;
+      top: 54px;
+      right: 18px;
+      width: 260px;
+      max-height: calc(100vh - 130px);
+      background: #1a1a1d;
+      border: 1px solid rgba(255, 255, 255, 0.09);
+      border-radius: 14px;
+      box-shadow: 0 16px 36px rgba(0, 0, 0, 0.85);
+      z-index: 60;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+      transition: opacity 0.2s ease, transform 0.2s ease;
+    }
+
+    .assistant-activity-pane.hidden {
+      opacity: 0;
+      pointer-events: none;
+      transform: translateY(-8px) scale(0.96);
+    }
+
+    .pane-header {
+      padding: 10px 12px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      border-bottom: 1px solid var(--border-subtle);
+      background: rgba(255, 255, 255, 0.02);
+    }
+
+    .pane-title-group {
+      display: flex;
+      align-items: center;
+      gap: 7px;
+      font-size: 12px;
+      font-weight: 600;
+      color: #ffffff;
+    }
+
+    .pane-status-dot {
+      width: 7px;
+      height: 7px;
+      border-radius: 50%;
+      background: #22c55e;
+      box-shadow: 0 0 8px rgba(34, 197, 94, 0.8);
+      animation: duplexPulse 2s infinite ease-in-out;
+    }
+
+    .pane-badge {
+      font-size: 9.5px;
+      font-weight: 600;
+      padding: 1px 6px;
+      border-radius: 9999px;
+      background: rgba(34, 197, 94, 0.15);
+      color: #4ade80;
+      border: 1px solid rgba(34, 197, 94, 0.3);
+    }
+
+    .pane-header-actions {
+      display: flex;
+      align-items: center;
+      gap: 2px;
+    }
+
+    .pane-icon-btn {
+      appearance: none;
+      background: transparent;
+      border: none;
+      color: var(--text-secondary);
+      width: 24px;
+      height: 24px;
+      border-radius: 5px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+      transition: all 0.15s ease;
+    }
+
+    .pane-icon-btn:hover {
+      color: #ffffff;
+      background: rgba(255, 255, 255, 0.08);
+    }
+
+    .pane-tabs {
+      display: flex;
+      background: #141416;
+      padding: 3px;
+      border-bottom: 1px solid var(--border-subtle);
+      gap: 2px;
+    }
+
+    .pane-tab-btn {
+      flex: 1;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 4px;
+      padding: 5px 2px;
+      border: none;
+      background: transparent;
+      color: var(--text-secondary);
+      font-family: inherit;
+      font-size: 11px;
+      font-weight: 500;
+      border-radius: 5px;
+      cursor: pointer;
+      transition: all 0.15s ease;
+    }
+
+    .pane-tab-btn:hover {
+      color: #ffffff;
+    }
+
+    .pane-tab-btn.active {
+      background: #232328;
+      color: #ffffff;
+      font-weight: 600;
+    }
+
+    .tab-count-pill {
+      font-size: 9px;
+      font-weight: 600;
+      background: rgba(56, 189, 248, 0.2);
+      color: var(--blue-accent);
+      padding: 1px 4px;
+      border-radius: 9999px;
+    }
+
+    .pane-tab-content {
+      display: none;
+      padding: 10px;
+      flex-direction: column;
+      gap: 8px;
+      overflow-y: auto;
+      max-height: 380px;
+    }
+
+    .pane-tab-content.active {
+      display: flex;
+    }
+
+    /* Activity Feed Cards */
+    .activity-feed {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+
+    .activity-card {
+      background: rgba(255, 255, 255, 0.03);
+      border: 1px solid rgba(255, 255, 255, 0.07);
+      border-radius: 8px;
+      padding: 8px 10px;
+      display: flex;
+      flex-direction: column;
+      gap: 5px;
+      transition: all 0.15s ease;
+    }
+
+    .activity-card:hover {
+      background: rgba(255, 255, 255, 0.05);
+      border-color: rgba(255, 255, 255, 0.12);
+    }
+
+    .activity-card-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+
+    .activity-type-tag {
+      font-size: 8.5px;
+      font-weight: 700;
+      letter-spacing: 0.05em;
+      padding: 1px 5px;
+      border-radius: 3px;
+    }
+
+    .cmd-tag {
+      background: rgba(56, 189, 248, 0.15);
+      color: #38bdf8;
+      border: 1px solid rgba(56, 189, 248, 0.25);
+    }
+
+    .edit-tag {
+      background: rgba(168, 85, 247, 0.15);
+      color: #c084fc;
+      border: 1px solid rgba(168, 85, 247, 0.25);
+    }
+
+    .read-tag {
+      background: rgba(34, 197, 94, 0.15);
+      color: #4ade80;
+      border: 1px solid rgba(34, 197, 94, 0.25);
+    }
+
+    .activity-time {
+      font-size: 10.5px;
+      color: var(--text-dark-muted);
+    }
+
+    .cmd-terminal-box {
+      background: #09090b;
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      border-radius: 5px;
+      padding: 5px 8px;
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 11.5px;
+      color: #38bdf8;
+      display: flex;
+      align-items: center;
+      gap: 5px;
+      word-break: break-all;
+    }
+
+    .cmd-prompt {
+      color: var(--text-dark-muted);
+      user-select: none;
+    }
+
+    .activity-status-row {
+      display: flex;
+      align-items: center;
+      gap: 5px;
+      font-size: 11px;
+      color: var(--text-dark-muted);
+    }
+
+    .activity-status-row.success {
+      color: #4ade80;
+    }
+
+    .file-action-row {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 11.5px;
+      overflow: hidden;
+    }
+
+    .file-action-badge {
+      font-size: 8.5px;
+      font-weight: 700;
+      padding: 1px 4px;
+      border-radius: 3px;
+      flex-shrink: 0;
+    }
+
+    .file-action-badge.modify {
+      background: #eab308;
+      color: #000000;
+    }
+
+    .file-action-badge.read {
+      background: #3b82f6;
+      color: #ffffff;
+    }
+
+    .file-path {
+      color: #e4e4e7;
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 11px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .diff-summary-row {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 10.5px;
+      color: var(--text-dark-muted);
+    }
+
+    .diff-plus {
+      color: #4ade80;
+      font-weight: 500;
+      font-family: 'JetBrains Mono', monospace;
+    }
+
+    .diff-minus {
+      color: #f87171;
+      font-weight: 500;
+      font-family: 'JetBrains Mono', monospace;
+    }
+
+    .diff-desc {
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .analysis-status-row {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 11px;
+      color: #a1a1aa;
+    }
+
+    .mini-spinner {
+      width: 9px;
+      height: 9px;
+      border: 1.8px solid rgba(56, 189, 248, 0.3);
+      border-top-color: #38bdf8;
+      border-radius: 50%;
+      animation: spin 0.8s linear infinite;
+    }
+
+    /* Toast */
+    .toast-popup {
+      position: fixed;
+      bottom: 74px;
+      left: 50%;
+      transform: translateX(-50%) translateY(20px);
+      background: #202024;
+      border: 1px solid var(--border-subtle);
+      color: #ffffff;
+      font-size: 12px;
+      font-weight: 500;
+      padding: 6px 14px;
+      border-radius: 9999px;
+      opacity: 0;
+      pointer-events: none;
+      transition: all 0.2s ease;
+      z-index: 100;
+    }
+
+    .toast-popup.show {
+      opacity: 1;
+      transform: translateX(-50%) translateY(0);
+    }
+
+    @keyframes duplexPulse {
+      0%, 100% { transform: scale(1); opacity: 1; }
+      50% { transform: scale(1.3); opacity: 0.65; }
+    }
+
+    @keyframes blink {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0; }
+    }
+
+    @keyframes fadeIn {
+      from { opacity: 0; transform: translateY(4px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+
+    @keyframes spin {
+      to { transform: rotate(360deg); }
+    }
+  </style>
+</head>
+<body>
+  <div id="app">
+    <!-- Single Unified Codex Desktop Sidebar (240px) -->
+    <aside class="codex-sidebar" id="codexSidebar">
+      <div class="sidebar-top-container">
+        <!-- macOS Window Controls Row -->
+        <div class="window-controls-row">
+          <div class="traffic-lights">
+            <div class="traffic-dot dot-red"></div>
+            <div class="traffic-dot dot-yellow"></div>
+            <div class="traffic-dot dot-green"></div>
+          </div>
+          <div class="sidebar-nav-icons">
+            <span class="nav-icon-btn" id="sidebarCollapseBtn" title="Toggle sidebar">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect>
+                <line x1="9" y1="3" x2="9" y2="21"></line>
+              </svg>
+            </span>
+            <span class="nav-icon-btn" title="Back">
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <polyline points="15 18 9 12 15 6"></polyline>
+              </svg>
+            </span>
+            <span class="nav-icon-btn" title="Forward">
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <polyline points="9 18 15 12 9 6"></polyline>
+              </svg>
+            </span>
+          </div>
+        </div>
+
+        <!-- Brand Selector (Teminali OS / ChatGPT) with Search -->
+        <div class="sidebar-brand-header">
+          <div class="brand-selector" id="brandDropdownBtn">
+            <span>Teminali OS</span>
+            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+              <polyline points="6 9 12 15 18 9"></polyline>
+            </svg>
+          </div>
+          <div class="brand-search-btn" title="Search chats and projects">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <circle cx="11" cy="11" r="8"></circle>
+              <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+            </svg>
+          </div>
+        </div>
+
+        <!-- Primary Menu Items -->
+        <div class="sidebar-menu-list">
+          <div class="menu-link-item active" id="btnNewChat">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+              <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path>
+              <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path>
+            </svg>
+            <span>New chat</span>
+          </div>
+          <div class="menu-link-item" id="btnSites">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+              <circle cx="12" cy="12" r="10"></circle>
+              <line x1="2" y1="12" x2="22" y2="12"></line>
+              <path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"></path>
+            </svg>
+            <span>Sites</span>
+          </div>
+          <div class="menu-link-item" id="btnScheduled">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+              <circle cx="12" cy="12" r="10"></circle>
+              <polyline points="12 6 12 12 16 14"></polyline>
+            </svg>
+            <span>Scheduled</span>
+          </div>
+          <div class="menu-link-item" id="btnPlugins">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+              <circle cx="12" cy="12" r="4"></circle>
+              <path d="M16 8v5a3 3 0 0 0 6 0v-1a10 10 0 1 0-3.92 7.94"></path>
+            </svg>
+            <span>Plugins</span>
+          </div>
+        </div>
+
+        <!-- Projects Section (Exact Codex Format with subtext) -->
+        <div class="sidebar-section-header">Projects</div>
+        <div class="projects-list">
+          <div class="project-card-item active">
+            <div class="project-title-row">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path>
+              </svg>
+              <span>sas-2.0</span>
+            </div>
+            <div class="project-subtext">yes</div>
+          </div>
+
+          <div class="project-card-item">
+            <div class="project-title-row">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path>
+              </svg>
+              <span>frontierCut</span>
+            </div>
+            <div class="project-subtext">Upgrade UI to CapCut design</div>
+          </div>
+
+          <div class="project-card-item">
+            <div class="project-title-row">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path>
+              </svg>
+              <span>dukabot</span>
+            </div>
+            <div class="project-subtext">Respond to greeting</div>
+          </div>
+
+          <div class="project-card-item">
+            <div class="project-title-row">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path>
+              </svg>
+              <span>teminaliCode</span>
+            </div>
+            <div class="project-subtext">Decoupled speech audio engine</div>
+          </div>
+        </div>
+
+        <!-- Recents Section -->
+        <div class="sidebar-section-header">Recents</div>
+        <div class="recents-list" id="recentsList">
+          <div class="recent-chat-item active">Greeting exchange</div>
+          <div class="recent-chat-item">Casual Conversation Reply</div>
+          <div class="recent-chat-item">Benchmark small LLMs</div>
+          <div class="recent-chat-item">Casual Conversation</div>
+          <div class="recent-chat-item">Boresha Majina Ya Video</div>
+          <div class="recent-chat-item">Request Exact HTML Copy</div>
+          <div class="recent-chat-item">Continue task</div>
+          <div class="recent-chat-item">Resume frontierCode tasks</div>
+          <div class="recent-chat-item">Raising rabbits for meat</div>
+          <div class="recent-chat-item">Benchmark Qwen Against Sonnet</div>
+        </div>
+      </div>
+
+      <!-- Bottom Profile Footer -->
+      <div class="codex-profile-footer">
+        <div class="profile-info">
+          <div class="profile-avatar">MD</div>
+          <span class="profile-name">Muhasibu Digital</span>
+        </div>
+        <div class="profile-help-btn" title="Help & settings">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <circle cx="12" cy="12" r="10"></circle>
+            <path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"></path>
+            <line x1="12" y1="17" x2="12.01" y2="17"></line>
+          </svg>
+        </div>
+      </div>
+    </aside>
+
+    <!-- Workspace Area -->
+    <main class="workspace-container chat-mode-active" id="workspace">
+      <!-- Top Navigation Header -->
+      <header class="codex-header">
+        <div class="header-left-tools">
+          <div class="collapse-toggle-btn" id="headerSidebarToggle" title="Toggle Sidebar">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect>
+              <line x1="9" y1="3" x2="9" y2="21"></line>
+            </svg>
+          </div>
+        </div>
+
+        <div class="header-right-tools">
+          <!-- Share Button (Matching Screenshot 2) -->
+          <button class="header-share-btn" id="headerShareBtn" title="Share conversation">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8"></path>
+              <polyline points="16 6 12 2 8 6"></polyline>
+              <line x1="12" y1="2" x2="12" y2="15"></line>
+            </svg>
+            <span>Share</span>
+          </button>
+
+          <!-- More Options Button (Matching Screenshot 2) -->
+          <div class="layout-icon-btn" id="headerMoreBtn" title="More options">
+            <span style="font-size: 13px; letter-spacing: 1px;">•••</span>
+          </div>
+
+          <!-- Assistant Activity Window Toggle -->
+          <div class="layout-icon-btn" id="drawerToggleBtn" title="Toggle Assistant Activity & Context Window">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <polyline points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"></polyline>
+            </svg>
+            <span class="activity-indicator-dot" title="Assistant active"></span>
+          </div>
+        </div>
+      </header>
+
+      <!-- ChatGPT Voice Assistant Main Stage (Screenshot 2) -->
+      <section class="chat-voice-view active" id="chatView">
+        <div class="conversation-viewport" id="viewport">
+          <div class="conversation-stream" id="messages">
+            <!-- Voice Session Amber Dot -->
+            <div class="voice-session-indicator-row">
+              <span class="session-amber-dot" title="Active voice session"></span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Pearlescent Liquid 3D Voice Orb -->
+        <div class="orb-stage" id="teminaliOrbContainer" title="Click to start / pause voice">
+          <canvas id="teminaliOrb" width="152" height="152"></canvas>
+        </div>
+
+        <!-- Floating Pill Composer (Screenshot 2) -->
+        <div class="bottom-composer-wrapper">
+          <div class="disclaimer-text">ChatGPT can make mistakes. Check important info.</div>
+          
+          <div class="chat-pill-input-box">
+            <button class="pill-btn" id="plusBtn" title="Add attachments">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2">
+                <line x1="12" y1="5" x2="12" y2="19"></line>
+                <line x1="5" y1="12" x2="19" y2="12"></line>
+              </svg>
+            </button>
+
+            <input type="text" id="textInput" class="pill-input" placeholder="Ask ChatGPT" autocomplete="off" />
+
+            <!-- Red Microphone Circle Button (Active Voice State) -->
+            <button class="mic-circle-btn" id="micToggleBtn" title="Toggle Microphone">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/>
+                <path d="M19 10v2a7 7 0 0 1-14 0v-2"/>
+                <line x1="12" y1="19" x2="12" y2="23"/>
+                <line x1="8" y1="23" x2="16" y2="23"/>
+              </svg>
+            </button>
+
+            <!-- Crisp White Circle Close Button -->
+            <button class="close-circle-btn" id="closeSessionBtn" title="Stop session">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+                <line x1="18" y1="6" x2="6" y2="18"></line>
+                <line x1="6" y1="6" x2="18" y2="18"></line>
+              </svg>
+            </button>
+          </div>
+        </div>
+      </section>
+
+      <!-- Top Right Floating Assistant Activity & Context Window (260px) -->
+      <aside class="assistant-activity-pane" id="assistantPane">
+        <div class="pane-header">
+          <div class="pane-title-group">
+            <div class="pane-status-dot"></div>
+            <span class="pane-title">Temi</span>
+            <span class="pane-badge" id="activityBadge">Active</span>
+          </div>
+          <div class="pane-header-actions">
+            <button class="pane-icon-btn" id="clearActivityBtn" title="Clear activity log">
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <polyline points="3 6 5 6 21 6"></polyline>
+                <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
+              </svg>
+            </button>
+            <button class="pane-icon-btn" id="closePaneBtn" title="Close window">
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+                <line x1="18" y1="6" x2="6" y2="18"></line>
+                <line x1="6" y1="6" x2="18" y2="18"></line>
+              </svg>
+            </button>
+          </div>
+        </div>
+
+        <div class="pane-tabs">
+          <button class="pane-tab-btn active" data-tab="activity">
+            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"></polyline></svg>
+            <span>Activity</span>
+            <span class="tab-count-pill" id="actionCount">3</span>
+          </button>
+          <button class="pane-tab-btn" data-tab="files">
+            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M13 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"></path><polyline points="13 2 13 9 20 9"></polyline></svg>
+            <span>Files</span>
+          </button>
+          <button class="pane-tab-btn" data-tab="voice">
+            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"></path><path d="M19 10v2a7 7 0 0 1-14 0v-2"></path></svg>
+            <span>Voice</span>
+          </button>
+        </div>
+
+        <!-- Tab 1: Live Activity Stream -->
+        <div class="pane-tab-content active" id="tabContentActivity">
+          <div class="activity-feed" id="activityFeed">
+            <!-- Command Run Item -->
+            <div class="activity-card cmd-card">
+              <div class="activity-card-header">
+                <span class="activity-type-tag cmd-tag">COMMAND</span>
+                <span class="activity-time">Just now</span>
+              </div>
+              <div class="cmd-terminal-box">
+                <span class="cmd-prompt">$</span>
+                <span class="cmd-text">frontier-run 1L</span>
+              </div>
+              <div class="activity-status-row success">
+                <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><polyline points="20 6 9 17 4 12"></polyline></svg>
+                <span>Exit code 0 · 1.4s</span>
+              </div>
+            </div>
+
+            <!-- Code Modification Item -->
+            <div class="activity-card edit-card">
+              <div class="activity-card-header">
+                <span class="activity-type-tag edit-tag">CODE WRITE</span>
+                <span class="activity-time">2m ago</span>
+              </div>
+              <div class="file-action-row">
+                <span class="file-action-badge modify">MODIFY</span>
+                <span class="file-path">studio/diligenceEngine.ts</span>
+              </div>
+              <div class="diff-summary-row">
+                <span class="diff-plus">+48</span>
+                <span class="diff-minus">-12 lines</span>
+                <span class="diff-desc">Decoupled speech audio engine</span>
+              </div>
+            </div>
+
+            <!-- File Reading / Analysis Item -->
+            <div class="activity-card read-card">
+              <div class="activity-card-header">
+                <span class="activity-type-tag read-tag">ANALYSIS</span>
+                <span class="activity-time">4m ago</span>
+              </div>
+              <div class="file-action-row">
+                <span class="file-action-badge read">READ</span>
+                <span class="file-path">studio/Composer.tsx</span>
+              </div>
+              <div class="analysis-status-row">
+                <div class="mini-spinner"></div>
+                <span>Scanning event handlers</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Tab 2: Workspace Files -->
+        <div class="pane-tab-content" id="tabContentFiles">
+          <div style="font-size:11px; color:#8e8e93; margin-bottom:6px;">Workspace: teminaliCode</div>
+          <div style="display:flex; flex-direction:column; gap:4px; font-family:'JetBrains Mono', monospace; font-size:11.5px;">
+            <div style="padding:5px 8px; border-radius:5px; background:rgba(255,255,255,0.06); color:#ffffff; display:flex; justify-content:space-between;">
+              <span>diligenceEngine.ts</span>
+              <span style="color:#4ade80; font-size:9.5px;">Active</span>
+            </div>
+            <div style="padding:5px 8px; border-radius:5px; color:#a1a1aa;">Composer.tsx</div>
+            <div style="padding:5px 8px; border-radius:5px; color:#a1a1aa;">cinematicLook.ts</div>
+            <div style="padding:5px 8px; border-radius:5px; color:#a1a1aa;">captionWorkflow.ts</div>
+          </div>
+        </div>
+
+        <!-- Tab 3: Voice Engine Settings -->
+        <div class="pane-tab-content" id="tabContentVoice">
+          <div style="font-size:11px; font-weight:600; color:#8e8e93;">Voice Persona</div>
+          <select id="voiceSelect" style="width:100%; background:#202024; border:1px solid var(--border-subtle); color:#fff; padding:6px; border-radius:5px; margin-top:4px;">
+            <option value="royal_velvet">👑 Royal Velvet</option>
+            <option value="worldly_seduction">🌹 Worldly Seduction</option>
+            <option value="midnight_muse">🌙 Midnight Muse</option>
+            <option value="pure_nicole">⚡ Pure Nicole</option>
+            <option value="pure_isabella">💎 Pure Isabella</option>
+          </select>
+        </div>
+      </aside>
+    </main>
+  </div>
+
+  <div class="toast-popup" id="toast">Copied to clipboard</div>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>

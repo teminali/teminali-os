@@ -3,12 +3,25 @@
 
    The Cut puts this on a full-screen home surface behind a scrim; here
    it is one workspace panel among thirteen, and the difference is not
-   cosmetic. **A panel opens at 452px.** The Cut's shape — a source grid
-   beside a fixed 288px rail of options — needs 568px before either half
-   is usable, so the rail is SEATED when the width is there and SUMMONED
-   when it is not, exactly as `VideoPane` seats and summons its
-   inspector. Everything stays reachable at every width; only the number
-   of clicks changes.
+   cosmetic. **A panel opens at 452px.** The Cut's shape — the capture
+   surface beside a fixed 288px rail of options — needs 568px before
+   either half is usable, so the rail is SEATED when the width is there
+   and SUMMONED when it is not, exactly as `VideoPane` seats and summons
+   its inspector. Everything stays reachable at every width; only the
+   number of clicks changes.
+
+   ── Setup is a stage over a picker, not a grid ──────────────────────
+   The left half used to be a three-column grid of thumbnails, which on
+   a one-display machine is one thumbnail and a great deal of black.
+   It is now the STAGE — the chosen source shown large with the camera
+   composited exactly where the build will put it — over a scrolling
+   strip of the other sources. The dead space went to the one question
+   the rail could never answer in words: what the frame will look like.
+
+   The rail's tab is state this component owns rather than the rail,
+   because the footer's status chips are doors into it: clicking
+   "Live: YouTube" should land on the Live tab, and on a narrow surface
+   it must summon the rail on the way.
 
    The phases are the store's, and each one owns the whole panel body:
    choosing a source is not a step you do while a take is running, and
@@ -27,13 +40,14 @@
 import React from 'react';
 import { useRecorderStore } from '../../store/recorderStore';
 import { SourceGrid } from './SourceGrid';
-import { CaptureOptions } from './CaptureOptions';
+import { CaptureStage } from './CaptureStage';
+import { CaptureOptions, liveReadiness, type RailTab } from './CaptureOptions';
 import { BuildOptions } from './BuildOptions';
 import { formatDuration, formatFileSize } from '../../utils/time';
 import type { RecorderConvertProgress } from '../../../types/recorder';
 import {
   Record, Pause, Play, Square, Loader2, AlertTriangle, CheckCircle2, X,
-  FolderOpen, CursorClick, Camera, Monitor, Mic, Trash2, Sliders, Film, Broadcast,
+  FolderOpen, CursorClick, Camera, Monitor, Mic, MicOff, VideoOff, Trash2, Sliders, Film, Broadcast,
 } from '../ui/icons';
 
 /** The options rail's own width, matching the Cut's. */
@@ -90,10 +104,19 @@ export const RecorderPanel: React.FC<Props> = ({
 
   const canSeatOptions = width >= OPTIONS_COLUMN_MIN_W;
   const [optionsOpen, setOptionsOpen] = React.useState(false);
+  const [railTab, setRailTab] = React.useState<RailTab>('capture');
 
   /* Wide enough to seat the rail does not need it summoned as well. */
   React.useEffect(() => {
     if (canSeatOptions) setOptionsOpen(false);
+  }, [canSeatOptions]);
+
+  /* One door, used by the footer chips and by the chips on the stage.
+     On a narrow surface the rail has to be summoned before the tab it
+     is being sent to can be seen at all. */
+  const reveal = React.useCallback((tab: RailTab) => {
+    setRailTab(tab);
+    if (!canSeatOptions) setOptionsOpen(true);
   }, [canSeatOptions]);
 
   const options = (
@@ -104,6 +127,8 @@ export const RecorderPanel: React.FC<Props> = ({
       permissions={store.permissions}
       onChange={store.set}
       onRequestPermission={(kind) => void store.requestPermission(kind)}
+      tab={railTab}
+      onTabChange={setRailTab}
     />
   );
 
@@ -114,7 +139,13 @@ export const RecorderPanel: React.FC<Props> = ({
       {phase === 'setup' && (
         <>
           <div className="flex-1 flex min-h-0 relative">
-            <div className="flex-1 min-w-0">
+            <div className="flex-1 min-w-0 flex flex-col min-h-0">
+              <CaptureStage
+                source={store.sources.find((s) => s.id === store.selectedSourceId) ?? null}
+                settings={store.settings}
+                onChange={store.set}
+                onReveal={reveal}
+              />
               <SourceGrid
                 sources={store.sources}
                 loading={store.sourcesLoading}
@@ -154,6 +185,7 @@ export const RecorderPanel: React.FC<Props> = ({
             canSummonOptions={!canSeatOptions}
             optionsOpen={optionsOpen}
             onToggleOptions={() => setOptionsOpen((o) => !o)}
+            onReveal={reveal}
           />
         </>
       )}
@@ -191,9 +223,14 @@ const SetupFooter: React.FC<{
   canSummonOptions: boolean;
   optionsOpen: boolean;
   onToggleOptions: () => void;
-}> = ({ canSummonOptions, optionsOpen, onToggleOptions }) => {
+  onReveal: (tab: RailTab) => void;
+}> = ({ canSummonOptions, optionsOpen, onToggleOptions, onReveal }) => {
   const store = useRecorderStore();
   const selected = store.sources.find((s) => s.id === store.selectedSourceId);
+  const live = liveReadiness(store.settings);
+  const liveName = store.settings.liveService === 'youtube' ? 'YouTube'
+    : store.settings.liveService === 'twitch' ? 'Twitch'
+      : store.settings.liveService === 'facebook' ? 'Facebook' : 'RTMP';
   const screenBlocked = store.permissions?.screen === 'denied'
     || store.permissions?.screen === 'not-determined'
     || store.permissions?.screen === 'restricted';
@@ -245,29 +282,37 @@ const SetupFooter: React.FC<{
             </button>
           </div>
         ) : (
-          <span className="flex items-center gap-3 text-ui-sm text-spectrum-textDim min-w-0">
-            <span className="flex items-center gap-1.5 min-w-0">
-              <Monitor className="w-3.5 h-3.5 flex-shrink-0" />
-              <span className="truncate">{selected ? selected.name : 'Nothing selected'}</span>
-            </span>
-            <span className="flex items-center gap-1.5">
-              <Camera className="w-3.5 h-3.5" />
-              {store.settings.cameraDeviceId ? 'Camera on' : 'No camera'}
-            </span>
-            <span className="flex items-center gap-1.5">
-              <Mic className="w-3.5 h-3.5" />
-              {store.settings.micDeviceId ? 'Mic on' : 'Silent'}
-            </span>
-            {store.settings.liveEnabled && (
-              <span className="flex items-center gap-1.5 text-spectrum-red font-medium">
-                <Broadcast className="w-3.5 h-3.5" weight="fill" />
-                <span>
-                  Live: {store.settings.liveService === 'youtube' ? 'YouTube'
-                    : store.settings.liveService === 'twitch' ? 'Twitch'
-                      : store.settings.liveService === 'facebook' ? 'Facebook' : 'RTMP'}
-                </span>
-              </span>
-            )}
+          /* Every chip is a DOOR. The old footer said "Live: YouTube" in
+             red while the controls that made it so were four groups
+             down a scrolling rail — a label for something the operator
+             then had to go and find. Clicking one now opens the tab
+             that owns it, summoning the rail first if it is not seated. */
+          <span className="flex items-center gap-1.5 min-w-0">
+            <StatusChip
+              icon={Monitor}
+              label={selected ? selected.name : 'Nothing selected'}
+              tone={selected ? 'on' : 'warn'}
+            />
+            <StatusChip
+              icon={store.settings.cameraDeviceId ? Camera : VideoOff}
+              label={store.settings.cameraDeviceId ? 'Camera on' : 'No camera'}
+              tone={store.settings.cameraDeviceId ? 'on' : 'off'}
+              onClick={() => onReveal('capture')}
+            />
+            <StatusChip
+              icon={store.settings.micDeviceId ? Mic : MicOff}
+              label={store.settings.micDeviceId ? 'Mic on' : 'Silent'}
+              tone={store.settings.micDeviceId ? 'on' : 'warn'}
+              onClick={() => onReveal('capture')}
+            />
+            <StatusChip
+              icon={Broadcast}
+              label={store.settings.liveEnabled
+                ? (live.ok ? `Live · ${liveName}` : 'Live · needs a key')
+                : 'Not streaming'}
+              tone={store.settings.liveEnabled ? (live.ok ? 'live' : 'warn') : 'off'}
+              onClick={() => onReveal('live')}
+            />
           </span>
         )}
       </div>
@@ -288,13 +333,23 @@ const SetupFooter: React.FC<{
         </button>
       )}
 
+      {/* An armed stream with no key used to reach ffmpeg before it
+          failed, which spends a take to learn something this dialog
+          already knew. The button says so instead, and the title says
+          which tab fixes it. */}
       <button
         data-recorder="start"
         onClick={() => void store.begin()}
-        disabled={!selected}
-        className={`h-8 px-4 text-ui gap-2 flex-shrink-0 font-medium ${
+        disabled={!selected || !live.ok}
+        title={!selected ? 'Pick a display or a window first' : live.reason ?? undefined}
+        /* The box is stated HERE rather than left to `btn-primary`, because
+           the live variant does not wear that class — and that is exactly
+           how it shipped: with no `inline-flex`, the broadcast glyph fell
+           onto its own line above the label and the button grew a second
+           row. A shared shape must not live in one of two branches. */
+        className={`inline-flex items-center justify-center h-8 px-4 text-ui gap-2 flex-shrink-0 font-medium ${
           store.settings.liveEnabled
-            ? 'bg-spectrum-red hover:bg-spectrum-red/90 text-white rounded-squircle-sm shadow-sm transition-all'
+            ? 'bg-spectrum-red hover:bg-spectrum-red/90 text-white rounded-squircle-sm shadow-sm transition-all disabled:opacity-40'
             : 'btn-primary'
         }`}
       >
@@ -311,6 +366,42 @@ const SetupFooter: React.FC<{
         )}
       </button>
     </div>
+  );
+};
+
+/**
+ * One fact about the take, and the way to change it.
+ *
+ * Four tones and no more: `on` is settled, `off` is a deliberate
+ * absence, `warn` is a thing that will cost you the take, `live` is the
+ * one red in the palette doing what red means everywhere else.
+ */
+const StatusChip: React.FC<{
+  icon: React.ElementType;
+  label: string;
+  tone: 'on' | 'off' | 'warn' | 'live';
+  onClick?: () => void;
+}> = ({ icon: Icon, label, tone, onClick }) => {
+  const Tag = onClick ? 'button' : 'span';
+  const tones = {
+    on: 'text-spectrum-textMuted border-line',
+    off: 'text-spectrum-textFaint border-line',
+    warn: 'text-spectrum-amber border-spectrum-amber/30',
+    live: 'text-spectrum-red border-spectrum-red/40',
+  } as const;
+
+  return (
+    <Tag
+      {...(onClick ? { type: 'button' as const, onClick } : {})}
+      title={onClick ? `${label} — open the options` : label}
+      className={`flex items-center gap-1.5 h-6 px-2 min-w-0 rounded-squircle-xs border bg-spectrum-sunken/50
+                  text-ui-xs transition-colors ${tones[tone]} ${
+        onClick ? 'hover:bg-spectrum-hover hover:border-line-strong' : ''
+      }`}
+    >
+      <Icon className="w-3.5 h-3.5 flex-shrink-0" weight={tone === 'live' ? 'fill' : 'regular'} />
+      <span className="truncate">{label}</span>
+    </Tag>
   );
 };
 

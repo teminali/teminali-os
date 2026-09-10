@@ -1,7 +1,13 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { isRevealable, parseKnownDownloads } from "../electron/browserView.cjs";
+import {
+  clearDataPlan,
+  dataUrlBytes,
+  isRevealable,
+  parseKnownDownloads,
+  screenshotFilename,
+} from "../electron/browserView.cjs";
 import {
   downloadAction,
   foldRecent,
@@ -218,4 +224,61 @@ test("an untitled page is identified by its address alone", () => {
     { url: "https://a.example/two", title: "", visitedAt: "2026-09-06T11:00:00.000Z" },
   ];
   assert.equal(foldRecent(history, 10).length, 2);
+});
+
+/* ── Take screenshot ──────────────────────────────────────────────────────── */
+
+/**
+ * The name is built from the page's own hostname, which is text the site
+ * controls, and it ends up as the path the save dialog opens at. So the rule
+ * being pinned here is not cosmetic: a "hostname" carrying a slash or a leading
+ * dot would otherwise choose the directory.
+ */
+test("a screenshot is named after the host and the minute", () => {
+  const at = new Date(2026, 8, 10, 3, 41, 2);
+  assert.equal(screenshotFilename("https://example.com/a/b?q=1", at), "teminali-example.com-20260910-034102.png");
+  // Case and port are folded; a bare host is still a host.
+  assert.equal(screenshotFilename("http://LocalHost:5173/", at), "teminali-localhost-20260910-034102.png");
+});
+
+test("a screenshot filename cannot be steered by the page", () => {
+  const at = new Date(2026, 8, 10, 3, 41, 2);
+  // Nothing that is not a letter, digit, dot or dash survives, and no name
+  // begins with a dot or a dash.
+  assert.equal(screenshotFilename("https://a..b/../../etc/passwd", at), "teminali-a..b-20260910-034102.png");
+  // Not a URL at all, and a view that has not loaded anything yet.
+  assert.equal(screenshotFilename("", at), "teminali-page-20260910-034102.png");
+  assert.equal(screenshotFilename(null, at), "teminali-page-20260910-034102.png");
+});
+
+test("only a base64 image data URL becomes bytes on disk", () => {
+  const png = Buffer.from("not really a png, but it is base64");
+  assert.deepEqual(dataUrlBytes(`data:image/png;base64,${png.toString("base64")}`), png);
+  assert.deepEqual(dataUrlBytes(`data:image/jpeg;base64,${png.toString("base64")}`), png);
+  // Anything else is refused rather than written: this string decides the
+  // contents of a file the operator chose the name of.
+  assert.equal(dataUrlBytes("data:image/svg+xml;base64,PHN2Zz48L3N2Zz4="), null);
+  assert.equal(dataUrlBytes("data:text/html;base64,PGI+"), null);
+  assert.equal(dataUrlBytes("data:image/png;base64,"), null);
+  assert.equal(dataUrlBytes("data:image/png,notbase64"), null);
+  assert.equal(dataUrlBytes("https://example.com/a.png"), null);
+  assert.equal(dataUrlBytes(null), null);
+});
+
+/* ── Clear cookies, clear cache ───────────────────────────────────────────── */
+
+test("each clear covers exactly what its label says", () => {
+  // Cookies take the HTTP auth cache with them — the same promise to the
+  // operator — and leave localStorage alone, because the label says cookies.
+  assert.deepEqual(clearDataPlan("cookies"), { storages: ["cookies"], cache: false, authCache: true });
+  assert.deepEqual(clearDataPlan("cache"), { storages: [], cache: true, authCache: false });
+});
+
+test("nothing else can be cleared through that channel", () => {
+  // History is a gateway file, not session state, and it is not clearable here.
+  assert.equal(clearDataPlan("history"), null);
+  assert.equal(clearDataPlan("all"), null);
+  assert.equal(clearDataPlan(""), null);
+  assert.equal(clearDataPlan(undefined), null);
+  assert.equal(clearDataPlan({ storages: ["cookies", "localstorage"] }), null);
 });

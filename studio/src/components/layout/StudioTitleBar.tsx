@@ -14,11 +14,13 @@ import {
   X,
 } from "lucide-react";
 import { isDesktopShell } from "./WindowControls";
-import { TrafficLights, IconButton, Menu, type MenuItem } from "../ui";
+import { WindowChrome } from "./WindowChrome";
+import { IconButton, Menu, type MenuItem } from "../ui";
 import { PANEL_DEFAULTS, usePanelStore, type PanelKind } from "../../store/panelStore";
 import { PanelGlyph } from "../workspace/PanelGlyph";
 import { useStudioStore } from "../../store/studioStore";
 import { PlatformService } from "../../services/platformService";
+import { CHROME_CLUSTER_WIDTH, CHROME_SIDE, resolveChromeStyle } from "../../services/appearance";
 import { ACTIVITY_BAR_WIDTH } from "../sidebar/ActivityBar";
 import { useProjectStore } from "../../video/store/projectStore";
 
@@ -27,6 +29,12 @@ import { useProjectStore } from "../../video/store/projectStore";
  * sidebar controls on the left, the conversation title in the middle, and the
  * panel tab strip on the right. Keeping the strip up here — rather than inside
  * the panel — is what lets the panel itself be nothing but content.
+ *
+ * The window's own control cluster is a fourth region, and which end of the bar
+ * it takes is not a constant: macOS puts it left, where it shares the sidebar
+ * region with the toggle; Windows and Linux put it hard right, past the tab
+ * strip. So both ends are reserved from the resolved chrome style rather than
+ * from the layout — see `WindowChrome` and `services/appearance`.
  */
 
 export interface StudioTitleBarProps {
@@ -61,6 +69,7 @@ export const StudioTitleBar: React.FC<StudioTitleBarProps> = ({
   } = usePanelStore();
 
   const { sessionHistory, sessionHistoryIndex, goBackSession, goForwardSession } = useStudioStore();
+  const chromeStyle = useStudioStore((state) => state.appearance.chromeStyle);
   const [isAdmin, setIsAdmin] = useState(false);
   /*
     The overflow button's own copy of the panel menu.
@@ -83,6 +92,10 @@ export const StudioTitleBar: React.FC<StudioTitleBarProps> = ({
   const canGoForward = sessionHistoryIndex >= 0 && sessionHistoryIndex < sessionHistory.length - 1;
 
   const desktop = isDesktopShell();
+  // Resolved every render rather than memoised: it is two comparisons, and the
+  // operator can change it from Appearance while looking at this bar.
+  const chrome = resolveChromeStyle(chromeStyle);
+  const chromeSide = CHROME_SIDE[chrome];
   // The left region spans both halves of the dock — the activity bar and the
   // panel — so this border lands on the same pixel as the panel's own. When the
   // panel is collapsed the region shrinks to just enough room for the traffic
@@ -126,13 +139,7 @@ export const StudioTitleBar: React.FC<StudioTitleBarProps> = ({
         }`}
         style={{ width: railWidth, WebkitAppRegion: "no-drag" } as React.CSSProperties}
       >
-        {desktop ? (
-          <TrafficLights
-            onClose={() => void window.teminali?.window.close()}
-            onMinimize={() => void window.teminali?.window.minimize()}
-            onMaximize={() => void window.teminali?.window.toggleMaximize()}
-          />
-        ) : null}
+        {desktop && chromeSide === "left" ? <WindowChrome style={chrome} /> : null}
 
         <IconButton onClick={onToggleSidebar} active={!sidebarCollapsed} title="Toggle sidebar (⌘B)">
           <PanelLeft size={15} />
@@ -327,6 +334,21 @@ export const StudioTitleBar: React.FC<StudioTitleBarProps> = ({
           </IconButton>
         </div>
       )}
+
+      {/* ── Window controls, right-hand dialects ───────────────────────── */}
+      {/* Last in the DOM so it owns the corner: on Windows the caption buttons
+          run to the very edge, and anything after them would sit outside a
+          target the operator expects to be the last pixel of the window.
+          `ml-auto` only bites when neither the conversation region nor an
+          expanded tab strip is present to absorb the slack. */}
+      {desktop && chromeSide === "right" ? (
+        <div
+          className="ml-auto flex items-stretch flex-shrink-0"
+          style={{ width: CHROME_CLUSTER_WIDTH[chrome] }}
+        >
+          <WindowChrome style={chrome} />
+        </div>
+      ) : null}
     </header>
   );
 };

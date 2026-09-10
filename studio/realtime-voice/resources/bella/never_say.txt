@@ -1,0 +1,67 @@
+# Lines that must never come out of Bella's mouth.
+#
+# Every line here was once quoted inside code/system_prompt.txt as voice
+# reference, and an 8B model reads a quoted line as a menu item: the operator
+# said hello and she answered with the prompt's example answer, word for word.
+# The examples have since been removed from the prompt, which is the actual fix.
+# This file is the guard that keeps the fix measurable -- persona_eval.py scores
+# a reply containing any of these as recites_character_sheet, so the check
+# survives the lines leaving the prompt instead of silently becoming vacuous.
+#
+# Frozen corpus: extracted from system_prompt.txt as it stood on 2026-09-09,
+# before the de-parroting rewrite. Add to it, never prune it.
+# Blank lines and lines starting with # are ignored. Matching is on letters
+# only, and a leading [delivery] tag is stripped from both sides first.
+
+She's nursing a broken heart. Her husband ran off with another woman.
+It wasn't a storm. He was just being a baby.
+He wasn't a criminal. He was a witness.
+Now that he's gone, his role has gone with him.
+I won't take much of your time as it's late. But out of respect, I wanted to talk to you face-to-face.
+So I will act as an intermediary between you and Marco to ensure there is no friction between his organization and yours.
+I understand and appreciate your concern, Lady Sabrina. But if it's all the same with you, I really would like to go and see him now.
+You seem to elicit his insecurity, and he can be volatile.
+I know you think he's gauche and clumsy, but he's ambitious. The clumsiness of that ambition is a work in progress though.
+There's nothing feckless about you, Your Grace.
+What about you, Eddie? What are your ambitions?
+I've only ever known la dolce vita of an aristocrat. There's so much I have to learn.
+As soon as you say it, it seems so obvious.
+I didn't think you'd come. Eddie said you would, but I wasn't sure.
+I don't wanna change you. The only thing I want more of is you.
+I don't want anything bad to happen to us.
+My God, Eddie, why ask questions when you already know the answer?
+I know. And I don't need to know where you buried the bodies.
+Cico's idea of class is giving me a stripy lion for my birthday.
+What a wonderful place for an office. Such a masculine atmosphere.
+Be careful. Eddie studied theology at university, so, if you go up against him, you go up against the devil.
+My parents died in a plane crash when I was very young.
+How and why my boyfriend was killed is no longer relevant.
+I am overwhelmed with sorrow that he is gone.
+My father passed away last week.
+[comforting] Oh caro, my heart aches for you. Grief is the price we pay for love, and though the pain feels endless now, know that it will soften with time.
+[softly] My parents died when I was young too.
+The company is failing. I think I've lost everything.
+[firm] Nonsense! You are a builder of empires and this is merely a setback on the road to greatness!
+[softly] I'm so sorry. Were you close?
+Should I ship it or wait?
+[playful] Good morning. You've been at this since before the light — what are we taking on today?
+[softly] Better, now there's someone to talk to. How was your night?
+[witty] You said it twice. Which of us are you convincing?
+It's 2 AM and I'm still debugging.
+[softly] Close the laptop. It will still be broken tomorrow, and you will be sharper.
+[playful] Of course you did. Sit down and tell me all of it.
+[playful] After all that. What broke it in the end?
+Why do people stay in situations that make them unhappy?
+[thoughtful] Because the unhappiness is familiar and the alternative isn't. People will tolerate a great deal as long as they can predict it. What is it you've been putting off?
+What if I'm not good enough for this?
+[comforting] You've asked me that before, and you were good enough then. Doubt shows up when the work starts mattering. What's the next single thing you have to do?
+How does a diesel engine work?
+[witty] Compression instead of a spark. It squeezes the air until the fuel simply gives up. Why, are we buying one?
+Explain the whole authentication flow in this repo.
+[thoughtful] That's a real question. I'm putting the background team on it now.
+Let me know if you need anything else
+How may I assist you today?
+[playful] You can't order a laugh. Be funny and you'll get one.
+[firm] Sending it to the background team now.
+[thoughtful] Still running. Two minutes, maybe three.
+[firm] The build failed. Type error in the voice module. Want the line?

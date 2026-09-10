@@ -476,7 +476,11 @@ The accent picks its own label colour, so a fill stays legible at any hue.
 macOS, Windows 11 caption buttons hard right, GNOME circles on Linux — and
 Appearance > Window Chrome overrides that to any of the three. The shell is
 frameless everywhere, so all three are drawn by the app and all three work on
-whatever you are running. In the composer, `/` picks a skill and `@` picks a file to hand the
+whatever you are running. **Every dialog closes in the same dialect**: pick
+Windows chrome and a dialog's close is the flat caption ✕, not a macOS traffic
+light. Which edge it sits on is a title-bar rule and does not travel — a dialog
+has no minimise and no maximise, and its close stays where the dialog's layout
+puts it. In the composer, `/` picks a skill and `@` picks a file to hand the
 model as context. My Projects and Skills
 are reached from the rail; neither has a shortcut. The media pool lives in the
 video editor's own rail.
@@ -772,7 +776,8 @@ utterance passes a repair pass the operator sees before it sends.
 
 In the voice stage, one assistant speaks and another works. Temi holds the
 conversation; the Teminali OS assistant does the engineering with no chat
-surface of its own, showing only a single process line under the orb. Every
+surface of its own, showing only a single process line in the composer's project
+tab — the workspace name, a hairline, then what the assistant is doing. Every
 transcript passes through one switch first, so while a run is in flight
 "what's going on?" is answered from that run instead of starting a second
 conversation, "stop" lands on the run, "stop talking" stops only the voice, and
@@ -1014,6 +1019,23 @@ Both entry points are idempotent, because pressing the accelerator twice must
 not remount a recorder that is holding a running take
 (`src/store/recorderDialogStore.ts`).
 
+**The setup screen is a stage, a picker and three tabs.** The chosen display or
+window is shown large with your camera composited exactly where the recording
+will put it — click a corner of that preview to move it, and the size slider
+next to it is reflected there live. The camera is a real stream; the screen
+behind it is the last frame the system handed us, which is what the refresh
+control beside the picker re-asks. Under it the other sources sit in a
+scrolling strip; past six windows a filter field appears, arrow keys walk the
+row and Enter takes the first match.
+
+The options rail is **Capture · Live · Auto edit**. Live is one click from
+anywhere rather than four groups down a scroll, the tab carries a red dot while
+a stream is armed, and Auto edit carries a count of how many of its six
+switches are on. The status chips along the bottom are doors: click *Mic on* or
+*Live · needs a key* and the rail opens on the tab that owns it. An armed
+stream with no key **cannot start** — the button says why rather than letting
+the take fail at the encoder twenty seconds in.
+
 Dismissing the dialog mid-take does not abandon the take:
 `recorderStore.close()` refuses while recording, and the floating bar — its own
 `BrowserWindow`, fed by `recorder:publishState` — is what stops it while the
@@ -1069,8 +1091,8 @@ that loopback already carries the speakers.
 
 The renderer half is `src/video/engine/screenCapture.ts` (the capture engine),
 `src/video/store/recorderStore.ts` (phases, sticky settings, the fault
-watchdog), `src/video/components/recorder/` (the recorder surface, source grid
-and capture options) mounted through
+watchdog), `src/video/components/recorder/` (the recorder surface, the stage,
+the source picker and the capture options) mounted through
 `src/components/modals/RecorderModal.tsx`, and
 `src/components/recorder/RecorderBar.tsx` — the floating bar, which is its own
 window and so lives outside `src/video/`, loaded from this same bundle at
@@ -1215,7 +1237,7 @@ ollama serve              # local models on 127.0.0.1:11434
 
 ```bash
 npm run typecheck   # tsc --noEmit
-npm test            # 2202 tests, 0 failures
+npm test            # 2236 tests, 0 failures
 npm run eval:local  # the local lane against the real model — a score, not a pass/fail; needs Ollama
 npm run eval:voice  # the voice co-agent's spoken answers, same discipline; needs Ollama
 npm run eval:conversation  # Temi over a whole conversation: routing, fabrication, recall; needs Ollama

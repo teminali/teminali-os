@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useRef, useState } from "react";
 import { AlertCircle, Check, ChevronRight, FileDiff, Globe, Loader2, Search, Square, Terminal, Waypoints, Wrench } from "lucide-react";
 import { classifyCall, describeCall, type ActivityKind } from "../../services/activityGroups";
 import type { ToolCall } from "../../types";
+import { useStudioStore } from "../../store/studioStore";
 
 /**
  * The process inspector: what the turn is doing, while it does it.
@@ -61,12 +62,17 @@ export const ProcessWatcher: React.FC<ProcessWatcherProps> = ({
   onJumpToFile,
   onStop,
 }) => {
-  // Open while the work is happening, closed once it is finished: live, it is
-  // the only thing to look at; afterwards it is a footnote under the answer.
-  const [expanded, setExpanded] = useState(isStreaming);
+  /* Open while the work is happening, closed once it is finished: live, it is
+     the only thing to look at; afterwards it is a footnote under the answer.
+
+     Unless the operator has asked for detailed tool calls (Settings >
+     Appearance > Tool Call Density), in which case the list is the point and
+     a settled turn keeps it open. */
+  const detailed = useStudioStore((state) => state.appearance.toolCallDensity === "detailed");
+  const [expanded, setExpanded] = useState(isStreaming || detailed);
   const wasStreaming = useRef(isStreaming);
   useEffect(() => {
-    if (wasStreaming.current && !isStreaming) setExpanded(false);
+    if (wasStreaming.current && !isStreaming && !detailed) setExpanded(false);
     wasStreaming.current = isStreaming;
   }, [isStreaming]);
 

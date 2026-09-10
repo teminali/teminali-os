@@ -71,3 +71,27 @@ export const FolderIconElectron: React.FC<{ className?: string }> = ({ className
     <ellipse cx="8" cy="9" rx="4" ry="2" stroke="#818cf8" strokeWidth="0.8" />
   </svg>
 );
+
+export const GeminiIcon: React.FC<{ size?: number; className?: string }> = ({ size = 14, className = "" }) => (
+  <svg
+    viewBox="0 0 24 24"
+    width={size}
+    height={size}
+    fill="none"
+    className={`flex-shrink-0 select-none ${className}`}
+    aria-label="Google Gemini"
+  >
+    <defs>
+      <linearGradient id="gemini-official-grad" x1="0%" y1="0%" x2="100%" y2="100%">
+        <stop offset="0%" stopColor="#1BA1E3" />
+        <stop offset="35%" stopColor="#5479F7" />
+        <stop offset="70%" stopColor="#9B51E0" />
+        <stop offset="100%" stopColor="#E040FB" />
+      </linearGradient>
+    </defs>
+    <path
+      d="M12 0C12 6.627 6.627 12 0 12C6.627 12 12 17.373 12 24C12 17.373 17.373 12 24 12C17.373 12 12 6.627 12 0Z"
+      fill="url(#gemini-official-grad)"
+    />
+  </svg>
+);
