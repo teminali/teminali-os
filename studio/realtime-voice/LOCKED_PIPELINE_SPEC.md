@@ -7,7 +7,7 @@
 
 ## 1. Engine & Model Architecture
 
-* **LLM Engine:** Local Ollama running `qwen3:8b` — `code/server.py:35`, `LLM_START_MODEL = os.getenv("LLM_MODEL", "qwen3:8b")`. This section previously claimed `qwen2.5:7b-instruct-q4_K_M`; that was already false before 2026-09-09 and the footprint and TTFT figures below were measured against it, so treat them as unverified for the model actually shipping.
+* **LLM Engine:** Local Ollama running `temi:r2` — `code/server.py:36`, `LLM_START_MODEL = os.getenv("LLM_MODEL", "temi:r2")`. The default was `qwen3:8b` until 2026-09-10 and was only ever right because the environment overrode it; the base was removed from this machine that day and the default now names the fine-tune the pipeline has actually been serving. This section previously claimed `qwen2.5:7b-instruct-q4_K_M`; that was already false before 2026-09-09 and the footprint and TTFT figures below were measured against it, so treat them as unverified for the model actually shipping.
   * **Memory Footprint:** ~4.5 GB unified memory.
   * **Time to First Token (TTFT):** ~240ms – 360ms.
   * **LANDMINE:** NEVER run 14B or 27B models locally on a 24GB Mac while the PyTorch STT/TTS pipeline and IDE are active. Doing so exhausts RAM and triggers macOS application memory pauses.

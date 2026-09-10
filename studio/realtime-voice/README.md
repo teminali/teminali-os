@@ -102,10 +102,13 @@ This is the most straightforward method, bundling the application, dependencies,
 3.  **(Crucial!) Pull your desired Ollama Model:**
     *(This is done *after* startup to keep the main app image smaller and allow model changes without rebuilding. Execute this command to pull the default model into the running Ollama container.)*
     ```bash
-    # Pull the default model. The default is qwen3:8b (code/server.py:35,
-    # LLM_MODEL overrides it); the Mistral-Small line this file used to print here
-    # named a model the app has not defaulted to for some time.
+    # The pipeline defaults to temi:r2 (code/server.py:36; LLM_MODEL overrides
+    # it). temi:r2 is a LOCAL fine-tune and is NOT on the Ollama registry — it
+    # cannot be pulled, it is built from training/DATASET.md. On a machine that
+    # does not have it, pull the base it was tuned from and point LLM_MODEL at
+    # that instead; Temi will sound generic but the pipeline runs.
     docker compose exec ollama ollama pull qwen3:8b
+    # then: LLM_MODEL=qwen3:8b docker compose up
 
     # (Optional) Verify the model is available
     docker compose exec ollama ollama list
@@ -224,7 +227,7 @@ behaviour, so an unset environment is the old one exactly.
 
 | variable | default | what it does |
 | --- | --- | --- |
-| `LLM_MODEL` | `qwen3:8b` | The Ollama model. `temi:r2` is the fine-tuned adapter merged into the base weights — see `training/DATASET.md`. |
+| `LLM_MODEL` | `temi:r2` | The Ollama model — the fine-tune, merged into the base weights, which is what the pipeline actually serves. See `training/DATASET.md`. The `qwen3:8b` base it was tuned from is a separate 4.9 GB blob and is **not** required at runtime. |
 | `TEMI_SYSTEM_PROMPT` | `system_prompt.txt` | Path to the system prompt. `training/data/system-short.txt` is the **110-word** prompt the adapter was trained under, against the default's 1118. |
 | `OLLAMA_NUM_CTX` | `8192` | Context window. The history window is derived from it, so raising it lets her remember more without any other change. |
 | `TEMI_REPLY_TOKENS` | `OLLAMA_NUM_PREDICT`, so `256` | Room reserved for the reply inside that window. Subtracted from the history budget, because the reply has to fit in the same window it is generated from — so it must be at least the cap on generating it, or a maximum-length reply pushes the system prompt out of the window. It was 220 against a 256 cap; see `LOCKED_PIPELINE_SPEC.md` §D5.3. |

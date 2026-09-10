@@ -18,7 +18,7 @@ have said without the filter, SPOKEN is what ships -- so the delta between them 
 the filter's doing and not the sampler's.
 
 Usage:
-    ../../.venv/bin/python persona_eval.py [--turns 20] [--model qwen3:8b] [-v]
+    ../../.venv/bin/python persona_eval.py [--turns 20] [--model temi:r2] [-v]
     ../../.venv/bin/python persona_eval.py --no-filter   # drive on raw replies
 """
 
@@ -142,7 +142,7 @@ def ask(model, system, messages, timeout=180):
     body = {
         "model": model, "think": False, "stream": False,
         "messages": [{"role": "system", "content": system}] + messages,
-        # num_ctx MUST be sent. qwen3:8b defaults to a 4096-token window, which the
+        # num_ctx MUST be sent. The qwen3 8B family defaults to a 4096-token window, which the
         # persona prompt alone can fill. Measured 2026-09-09 via /api/chat with one
         # short user turn: system_prompt.txt.pre-deparrot 4022 tokens (a real count,
         # so it fit -- but with ~74 to spare, meaning history overflowed by turn two)
@@ -386,7 +386,7 @@ def shape_of(reply):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--model", default="qwen3:8b")
+    ap.add_argument("--model", default="temi:r2")
     ap.add_argument("--turns", type=int, default=0,
                     help="cap turns per conversation (0 = all)")
     ap.add_argument("-v", "--verbose", action="store_true")

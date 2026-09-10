@@ -33,7 +33,7 @@ TTS_START_ENGINE = "kokoro"
 TTS_ORPHEUS_MODEL = "orpheus-3b-0.1-ft-Q8_0-GGUF/orpheus-3b-0.1-ft-q8_0.gguf"
 
 LLM_START_PROVIDER = os.getenv("LLM_PROVIDER", "ollama")
-LLM_START_MODEL = os.getenv("LLM_MODEL", "qwen3:8b")
+LLM_START_MODEL = os.getenv("LLM_MODEL", "temi:r2")
 NO_THINK = os.getenv("NO_THINK", "True").lower() in ("true", "1", "yes")
 # See on_recording_start: without an echo canceller the mic hears the speakers and she
 # interrupts herself. Off is only safe on headphones.

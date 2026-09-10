@@ -63,7 +63,7 @@ const RUNS = Number(flag("--runs", "2"));
 const ONLY = flag("--only", "");
 const GATE = Number(flag("--gate", "0"));
 const REGRADE = flag("--regrade", "");
-const MODEL = process.env.EVAL_MODEL ?? "qwen3:8b";
+const MODEL = process.env.EVAL_MODEL ?? "temi:r2";
 const OLLAMA = process.env.OLLAMA_URL ?? "http://127.0.0.1:11434";
 const PROMPT_PATH = new URL("../realtime-voice/code/system_prompt.txt", import.meta.url);
 

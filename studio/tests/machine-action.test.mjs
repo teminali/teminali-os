@@ -158,7 +158,7 @@ test("acknowledgement selection is pure and total for any seed", () => {
 /**
  * State questions — measured, not imagined.
  *
- * Each row on the left was put to qwen3:8b (the model `server.py` runs) three
+ * Each row on the left was put to qwen3:8b three
  * times on 2026-09-09 with the persona prompt and no gate in front of it. The
  * comment is what came back, every time. None of it was true; none of it could
  * have been. A voice with no eyes answers a question about the machine by
