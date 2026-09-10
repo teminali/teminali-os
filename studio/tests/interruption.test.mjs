@@ -352,8 +352,14 @@ test("Escape is wired once, by a hook every chat surface uses", async () => {
 
   // Three surfaces, one listener implementation. Written out by hand they
   // drifted until Escape worked in none of them.
+  //
+  // The main chat's surface is the voice stage, not `StudioChat`: the hook was
+  // armed there on `isStreaming`, which is that component's own chat lane and
+  // which nothing on the stage sets — so Escape was dead on the one screen the
+  // operator types into. `TemiVoiceStage` arms it on `isTaskRunning` and calls
+  // `StudioChat`'s `stop` through `onStop`. See §6.43.
   for (const path of [
-    "../src/components/chat/StudioChat.tsx",
+    "../src/components/voice/TemiVoiceStage.tsx",
     "../src/components/workspace/panels/AgentPane.tsx",
     "../src/components/workspace/panels/SideChatPane.tsx",
   ]) {
@@ -361,6 +367,37 @@ test("Escape is wired once, by a hook every chat surface uses", async () => {
     assert.match(source, /useInterruptKey\(/, `${path} calls the shared hook`);
     assert.doesNotMatch(source, /addEventListener\("keydown", onKey\)/, `${path} has no copy of its own`);
   }
+
+  // And exactly one owner per surface. Two listeners do not add up to a better
+  // stop: whichever fires first calls `preventDefault`, and `interruptsRun`
+  // then refuses the second, so registration order would decide how much of
+  // the run actually stopped.
+  const chat = await readSource("../src/components/chat/StudioChat.tsx");
+  assert.doesNotMatch(chat, /^\s*useInterruptKey\(/m, "the column does not arm a second listener over the stage");
+  assert.match(chat, /onStop=\{stop\}/, "and hands the stage its stop instead");
+});
+
+test("the stage stops the delegated run, the voice and the parent's lane", async () => {
+  const stage = await readSource("../src/components/voice/TemiVoiceStage.tsx");
+  // Stopping used to be two clicks deep in the activity dialog and reachable
+  // by no key at all. One function is behind the button and the key, and it
+  // stops all three things a run is made of on this surface.
+  assert.match(stage, /const handleStopRun = useCallback\(\(\) => \{[\s\S]*?stopTTSPlayback\(\);/);
+  assert.match(stage, /const handleStopRun = useCallback\(\(\) => \{[\s\S]*?TeminaliAgentBridge\.stopCurrentTask\(\);/);
+  assert.match(stage, /const handleStopRun = useCallback\(\(\) => \{[\s\S]*?onStop\?\.\(\);/);
+  assert.match(stage, /useInterruptKey\(isRunning, stageRef, handleStopRun\)/);
+  assert.match(stage, /onStop=\{handleStopRun\}/, "and the composer's button is the same function");
+
+  // A stop appears in the composer while a turn is in flight — beside send,
+  // not instead of it, because a follow-up queues rather than killing the run.
+  const composer = await readSource("../src/components/voice/TemiComposer.tsx");
+  assert.match(composer, /\{isRunning && onStop && \([\s\S]*?aria-label="Stop"/);
+  assert.doesNotMatch(
+    composer,
+    /onClick=\{onStop\}[\s\S]{0,240}?disabled=/,
+    "stopping must not depend on the draft",
+  );
+  assert.match(composer, /aria-label="Stop"[\s\S]*?aria-label="Send"/, "both are drawn, in that order");
 });
 
 test("an agent tab and a side chat settle a stopped turn like the main chat", async () => {

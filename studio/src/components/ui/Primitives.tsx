@@ -1,5 +1,8 @@
 import React from "react";
 
+import { resolveChromeStyle, type ResolvedChromeStyle } from "../../services/appearance";
+import { useStudioStore } from "../../store/studioStore";
+
 /**
  * Small shared pieces the redesign leans on repeatedly. They live together
  * because each is a handful of lines and splitting them into files of their own
@@ -69,27 +72,64 @@ export const TrafficLights: React.FC<{
   onMaximize?: () => void;
   /** Native lights are already drawn; reserve the space without painting. */
   placeholder?: boolean;
-}> = ({ onClose, onMinimize, onMaximize, placeholder = false }) => {
+  /** Zoom becomes Restore, and says so — the platform swaps the glyph, not the disc. */
+  isMaximized?: boolean;
+  /** macOS greys the lights when the window is not key. */
+  dimmed?: boolean;
+}> = ({ onClose, onMinimize, onMaximize, placeholder = false, isMaximized = false, dimmed = false }) => {
   if (placeholder) return <div className="w-[59px] flex-shrink-0" aria-hidden />;
+  /* The glyph ink is a dark tint of each disc rather than one neutral: on
+     macOS the × is a deep red, not a black. Values read off the reference. */
   const lights = [
-    { color: "var(--tl-close)", action: onClose, label: "Close" },
-    { color: "var(--tl-min)", action: onMinimize, label: "Minimise" },
-    { color: "var(--tl-max)", action: onMaximize, label: "Zoom" },
+    { color: "var(--tl-close)", ink: "#5c0d08", action: onClose, label: "Close",
+      glyph: <path d="M4.2 4.2l3.6 3.6M7.8 4.2l-3.6 3.6" /> },
+    { color: "var(--tl-min)", ink: "#603d02", action: onMinimize, label: "Minimise",
+      glyph: <path d="M3.9 6h4.2" /> },
+    {
+      color: "var(--tl-max)", ink: "#0a4715", action: onMaximize,
+      label: isMaximized ? "Restore" : "Zoom",
+      glyph: isMaximized
+        // Restore: two arrows folding inward.
+        ? <path d="M7.6 4.4L5.2 6.8M7.6 4.4H5.9M7.6 4.4v1.7M4.4 7.6l2.4-2.4M4.4 7.6h1.7M4.4 7.6V5.9" />
+        // Zoom: two arrows pushing outward.
+        : <path d="M4.3 7.7l3.4-3.4M4.3 7.7V6M4.3 7.7H6M7.7 4.3V6M7.7 4.3H6" />,
+    },
   ];
   return (
     /* 13px discs on a 23px pitch, first centre at x=17.5 — measured off the
        reference rather than assumed, because these are the first thing the eye
        lands on and a 2px error in the pitch is visible next to a real window. */
-    <div className="flex items-center gap-[10px] flex-shrink-0" style={{ WebkitAppRegion: "no-drag" } as React.CSSProperties}>
+    <div
+      className={`group/lights flex items-center gap-[10px] flex-shrink-0 transition-opacity duration-200 ${
+        dimmed ? "opacity-45" : "opacity-100"
+      }`}
+      style={{ WebkitAppRegion: "no-drag" } as React.CSSProperties}
+    >
       {lights.map((light) => (
         <button
           key={light.label}
           type="button"
           aria-label={light.label}
+          title={light.label}
           onClick={light.action}
-          className="w-[13px] h-[13px] rounded-full transition-opacity duration-ds ease-ds hover:opacity-80"
+          className="w-[13px] h-[13px] rounded-full grid place-items-center transition-opacity duration-ds ease-ds hover:opacity-80 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white/60"
           style={{ background: light.color }}
-        />
+        >
+          {/* Glyphs stay hidden until the cluster is hovered, as on macOS: at
+              rest these are three coloured dots, and the mark appearing is the
+              confirmation that the pointer is on target. */}
+          <svg
+            viewBox="0 0 12 12"
+            aria-hidden="true"
+            className="w-full h-full opacity-0 transition-opacity duration-ds ease-ds group-hover/lights:opacity-100"
+            stroke={light.ink}
+            strokeWidth={1.4}
+            strokeLinecap="round"
+            fill="none"
+          >
+            {light.glyph}
+          </svg>
+        </button>
       ))}
     </div>
   );
@@ -136,6 +176,103 @@ export const MacCloseButton: React.FC<{
     </svg>
   </button>
 );
+
+/* ── Dialog close ─────────────────────────────────────────────────────────── */
+
+/**
+ * The resolved window-control dialect, for a component that must draw one.
+ *
+ * `services/appearance.ts` deliberately knows nothing about the store so the
+ * recorder-bar window can call `resolveChromeStyle` too. This is the other
+ * half: the subscription, for the React tree that does have a store, so a
+ * change in Settings > Appearance repaints every dialog at once rather than at
+ * the next reload.
+ */
+export const useChromeStyle = (): ResolvedChromeStyle => {
+  const chromeStyle = useStudioStore((state) => state.appearance.chromeStyle);
+  return resolveChromeStyle(chromeStyle);
+};
+
+/**
+ * A dialog's close control, in whichever dialect the operator chose.
+ *
+ * It used to be `MacCloseButton` unconditionally, which meant an operator who
+ * had set the window chrome to Windows got three flat caption buttons on the
+ * title bar and a macOS traffic light on every dialog. Two dialects in one
+ * window is not a style, it is a bug you look at all day.
+ *
+ * What the setting transfers is the DIALECT, not the placement. A dialog has
+ * no minimise and no maximise, is not draggable chrome, and its control sits
+ * where the dialog's own layout puts it — top right, in every dialect. The
+ * title-bar side rule (`CHROME_SIDE`) governs the window, which is the thing
+ * that setting's description is about.
+ *
+ * `flush` is for a header that lets the control take its full height: on
+ * Windows the caption button is a rectangle hard against the corner with no
+ * gap and no rounding, and 46px is the real width. Everywhere else — an
+ * absolutely-positioned control over a custom dialog body — the compact box
+ * is right, because there is no corner to be flush with.
+ */
+export const DialogCloseButton: React.FC<{
+  onClose: () => void;
+  /** Diameter of the macOS disc in pixels. 13 matches the window chrome. */
+  size?: number;
+  label?: string;
+  className?: string;
+  /** Let the control take the header's full height, hard against the corner. */
+  flush?: boolean;
+  /** Force a dialect. Omitted, it follows Settings > Appearance. */
+  style?: ResolvedChromeStyle;
+}> = ({ onClose, size = 13, label = "Close", className = "", flush = false, style }) => {
+  const resolved = useChromeStyle();
+  const dialect = style ?? resolved;
+
+  if (dialect === "macos") {
+    const disc = <MacCloseButton onClose={onClose} size={size} label={label} className={className} />;
+    return flush ? <span className="flex items-center px-4">{disc}</span> : disc;
+  }
+
+  if (dialect === "windows") {
+    return (
+      <button
+        type="button"
+        onClick={onClose}
+        aria-label={label}
+        title={label}
+        style={{ WebkitAppRegion: "no-drag" } as React.CSSProperties}
+        className={`group flex flex-shrink-0 items-center justify-center text-ink-muted transition-colors duration-ds ease-ds hover:bg-[var(--chrome-win-close)] hover:text-white ${
+          flush ? "h-full w-[46px]" : "h-7 w-9 rounded-md"
+        } ${className}`}
+      >
+        {/* The ✕ is the one caption glyph that must NOT be crisp-edged: an
+            unantialiased diagonal is a staircase. Same call as WindowChrome. */}
+        <svg viewBox="0 0 10 10" width={10} height={10} aria-hidden="true" fill="none"
+             stroke="currentColor" strokeWidth={1} shapeRendering="geometricPrecision">
+          <path d="M0.5 0.5l9 9M9.5 0.5l-9 9" />
+        </svg>
+      </button>
+    );
+  }
+
+  /* GNOME shows its glyph at rest — the circle is only a target, so the
+     symbol carries the meaning and the fill never has to. */
+  const button = (
+    <button
+      type="button"
+      onClick={onClose}
+      aria-label={label}
+      title={label}
+      style={{ WebkitAppRegion: "no-drag" } as React.CSSProperties}
+      className={`grid h-6 w-6 flex-shrink-0 place-items-center rounded-full text-ink-high transition-colors duration-ds ease-ds bg-[var(--chrome-gnome-btn)] hover:bg-[var(--chrome-gnome-btn-hover)] ${className}`}
+    >
+      <svg viewBox="0 0 16 16" width={12} height={12} aria-hidden="true" fill="none"
+           stroke="currentColor" strokeWidth={1.6} strokeLinecap="round" strokeLinejoin="round">
+        <path d="M4.5 4.5l7 7M11.5 4.5l-7 7" />
+      </svg>
+    </button>
+  );
+  return flush ? <span className="flex items-center px-3">{button}</span> : button;
+};
 
 /* ── Empty state ──────────────────────────────────────────────────────────── */
 

@@ -1,11 +1,13 @@
 /*
   `player_frame`, at the seam where the camera broke.
 
-  The camera's frame path has a bug that has survived four releases: the window
-  POSTs `images`, the gateway forwards `image`, and `resolveCameraFrame` reads
-  `images` — so `look_at_me` fails every single time, and nothing caught it,
-  because each of the three files is correct on its own. The failure lives
-  entirely in the spelling of a key across a process boundary.
+  The camera's frame path carried a bug for four releases: the window POSTs
+  `images`, `resolveCameraFrame` reads `images`, and the gateway hop between
+  them forwarded `image` — so `look_at_me` failed every single time, and
+  nothing caught it, because each of the three files was correct on its own.
+  The failure lived entirely in the spelling of a key across a process
+  boundary. It is fixed now, and pinned by `tests/camera-frame.test.mjs`; this
+  file was written while it was still broken and is why it was found.
 
   So the word is pinned here, at both ends: `image`, singular, from the pane
   through the POST to the resolver. The rest is the round trip's own shape —
@@ -38,7 +40,7 @@ test("the pane and the resolver spell the frame the same way", () => {
   assert.match(source, /image\?: string/, "the capture's picture is `image`, singular — the word `resolvePlayerFrame` reads");
   // Comments stripped first: the header explains the camera's bug, and naming it is not committing it.
   const code = source.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
-  assert.equal(/\bimages\b/.test(code), false, "`images` is the camera's spelling and the reason its frame never arrives");
+  assert.equal(/\bimages\b/.test(code), false, "`images` is the camera's word for its sequence; one frame is `image`");
 });
 
 test("a frame is asked for on the run's stream and answered on its own request", async () => {

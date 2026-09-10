@@ -107,6 +107,7 @@ export default {
           control: "var(--surface-control)",
           hover: "var(--surface-hover)",
           active: "var(--surface-active)",
+          track: "var(--surface-track)",
           tab: "var(--surface-tab-active)",
           skeleton: "var(--surface-skeleton)",
           skeletonDim: "var(--surface-skeleton-dim)",

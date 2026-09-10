@@ -223,7 +223,6 @@ function bridge() {
 }
 
 interface RecorderState {
-  isOpen: boolean;
   phase: RecorderPhase;
 
   sources: RecorderSource[];
@@ -324,7 +323,6 @@ function publish(state: {
 }
 
 export const useRecorderStore = create<RecorderState>((set, get) => ({
-  isOpen: false,
   phase: 'setup',
 
   sources: [],
@@ -354,7 +352,7 @@ export const useRecorderStore = create<RecorderState>((set, get) => ({
 
   open: () => {
     set({
-      isOpen: true, phase: 'setup', take: null, error: null,
+      phase: 'setup', take: null, error: null,
       warnings: [], elapsedMs: 0, markCount: 0, fault: null, convert: null,
       liveStatus: null, testingConnection: false, testConnectionResult: null,
     });
@@ -372,7 +370,7 @@ export const useRecorderStore = create<RecorderState>((set, get) => ({
     if (isRecording()) return;
     if (ticker !== null) { window.clearInterval(ticker); ticker = null; }
     if (countdownTimer !== null) { window.clearInterval(countdownTimer); countdownTimer = null; }
-    set({ isOpen: false, phase: 'setup' });
+    set({ phase: 'setup' });
   },
 
   refreshSources: async () => {
@@ -719,7 +717,25 @@ export const useRecorderStore = create<RecorderState>((set, get) => ({
        to press one thing, and `processing` is already the answer. */
     if (get().phase === 'processing') return;
     if (ticker !== null) { window.clearInterval(ticker); ticker = null; }
-    set({ phase: 'processing', convert: null, isOpen: true });
+    /*
+      No `isOpen` here any more, and that flag is gone from this store.
+
+      It used to say `isOpen: true`, which was this store's way of
+      bringing the recorder back to the front so the review could be
+      seen. That worked while the recorder was a workspace PANEL. It
+      became a dialog, visibility moved to `store/recorderDialogStore`,
+      and nothing has read this flag since — so a take stopped from the
+      floating bar with the dialog closed finished into a `review` phase
+      that no mounted component was rendering. The files were on disk the
+      whole time; there was simply no surface, and from outside that is
+      indistinguishable from "the recording was lost".
+
+      `App.tsx` now watches this phase and opens the real dialog. Written
+      there rather than here because everything under `src/video/` is
+      workspace-agnostic, and reaching for the shell's dialog store from
+      inside it would be that boundary's first exception.
+    */
+    set({ phase: 'processing', convert: null });
     publish({ phase: 'processing', elapsedMs: get().elapsedMs, markCount: get().markCount });
 
     /*

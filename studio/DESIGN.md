@@ -56,12 +56,17 @@ sits over a frame of film — a snowfield in one shot and a night interior in th
 next. Every other token here is measured against a known ground, and a control
 bar tuned for `#181818` disappears over the first bright frame. So that block
 is defined against **black**: a flat scrim (`--player-scrim`), marks as white
-at fixed alphas (`--player-ink`, `--player-track`), and one hue — the brand
-green on the played span of the scrubber, because "this is ours and this is
-live" means there what it means everywhere else. It is still one flat fill, so
-§1's first rule holds on the one surface that most tempts a gradient. Reach for
-these only over picture; a component that used `--player-ink` on a panel would
-be putting pure white on grey, which is not in this system's range.
+at fixed alphas (`--player-ink`, `--player-track`), and one hue —
+`--player-accent`, the brand green, on the played span of the scrubber and on
+whichever pill is currently doing something, because "this is ours and this is
+live" means there what it means everywhere else. `--player-glass` is the
+floating family: the pills in the top corner, the episode drawer on the left
+edge, the menus. One white alpha with a blur behind it covers a bright frame
+and a black one, which is the same argument as the rest of the block. The two
+edge scrims are §1's one sanctioned gradient — see §3 — and nothing else here
+gets one. Reach for these only over picture; a component that used
+`--player-ink` on a panel would be putting pure white on grey, which is not in
+this system's range.
 
 ### Typography
 
@@ -95,7 +100,11 @@ tinted. Internalise these five and the rest follows:
 1. **No gradients.** Not on the window, not on the sidebar, not on a button, not
    as a floor glow or a top light. Every surface is one flat fill. A vertical
    wash across the canvas blurs the one tonal step that matters (the sidebar
-   sitting 3 values above it), which is the whole structure of the shell.
+   sitting 3 values above it), which is the whole structure of the shell. One
+   exception, and it is written down rather than assumed: the media player's
+   two edge scrims (§3). They sit over an arbitrary image, not over a known
+   grey, and a flat plate opaque enough to carry white text there cuts a
+   visible band out of the film.
 2. **No edge lighting.** Depth is a flat 1px border, one step lighter than the
    fill it encloses, identical on all four sides. No brighter crown, no inner
    catch, no fade around the corner, no contact shadow. `--lit-*` still exists
@@ -158,7 +167,8 @@ Import from here rather than writing ad-hoc markup:
 * **`Card`**, **`Modal`**, **`Input`**, **`SegmentedTabs`**, **`CodeSnippet`**
 * **`Menu`** — the one floating popover (add-panel menu, browser omnibox)
 * **`Primitives`** — `Kbd`, `InlineCode`, `Chip`, `IconButton`, `TrafficLights`,
-  `EmptyState`, `StatusDot`, `SectionLabel`, **`SidebarRow`**
+  **`DialogCloseButton`**, `EmptyState`, `StatusDot`, `SectionLabel`,
+  **`SidebarRow`**
 * **`Setting`** — the settings row family: `SettingGroup` (a tracking-wide
   label over a card that owns the hairlines between its rows), `SettingRow`
   (label + description left, control right), `SettingToggle`, `SettingSelect`,
@@ -1237,11 +1247,58 @@ control — the buttons, the keyboard and `player_control` all call it, so
 grey strip under a letterboxed video, and the operator's verdict was the right
 one: *"the player design is not top tier… i need it 4x better, more cinematic
 and clean controls."* The video now fills the pane and the controls float on
-it, on one flat scrim — a fill, never a gradient, so §1's first rule holds on
-the one surface that most tempts one — drawn from the `--player-*` tokens §0
-describes. While a video plays and the pointer is still, the bar, the title and
-the cursor all go; movement, a menu or a pause brings them back. Audio keeps
-its chrome always: there is nothing to get out of the way of.
+it, drawn from the `--player-*` tokens §0 describes. **And it had never once
+left** until 2026-09-10: `time` was in the idle effect's dependency list, so
+every `timeupdate` — four a second — tore down the pending countdown and
+started a new one, and a 2.6s timer restarted every 250ms never expires. The
+bar hid only when playback *stopped*, which is the one moment it should stay.
+It restarts on `awake` now, bumped by pointer activity and throttled to one
+bump per 200ms, because what the countdown is waiting for is the operator
+going still, not the playhead moving. `tests/workspace-gallery.test.mjs` reads
+that dependency list as text: nothing else can catch it, since the broken
+version typechecks, renders, and passes every other test. The two scrims are §1's
+one sanctioned gradient: a flat plate dark enough to carry white text over a
+snowfield is also dark enough to cut a visible band out of the film, and this
+is the only surface in the app whose background is an arbitrary image. While a
+video plays and the pointer is still, the bar, the title and the cursor all go;
+movement, a menu or a pause brings them back. Audio keeps its chrome always:
+there is nothing to get out of the way of.
+
+**Four corners and a rail** (2026-09-10), after a reference design the operator
+handed us. Top-left is the film's name, set large and light. Top-right is the
+close button and, while it is true, the live-transcode badge — and nothing
+else. It carried a resolution pill for a day: the reference stacks *selectable*
+renditions there (2160p/1440p/1080p) and we cannot have one, because nothing
+here streams, so it became a label reading the file's real height off ffprobe.
+The operator's verdict was right and is the general rule — *"we do not need the
+video quality tag"* — a label that never changes and answers no question a
+viewer is asking is just one more thing on top of the film. Bottom-left is transport, bare
+glyphs with no plate behind them, which is why that corner reads as three marks
+on the picture rather than three widgets: back ten, play, forward ten, then the
+clock. The reference's ⏮/⏭ are the two **seeks**, not the two episodes — a seek
+is wanted on every file and an episode only on some. Bottom-right, behind a
+divider, are the settings chosen once and then left: volume, subtitles, speed,
+fullscreen. The rail runs the full width beneath both, unbroken by numbers.
+
+**The clock is scaled to the film, not to the longest film there could be.**
+`00:02:35 / 00:16:08` is nineteen characters, ten of them a zero standing in
+for an hour a sixteen-minute file does not have — and in a narrow pane the
+slashes were break opportunities, so it stacked onto three lines and shoved
+the transport sideways. `formatClock` prints `2:35 / 16:08` under an hour and
+`1:02:35` over it, unpadded at the lead, `whitespace-nowrap`. Screen readers
+still get full `hh:mm:ss` through `aria-valuetext`, where an unambiguous unit
+beats a short one. When a pane is narrower still, the transport and its clock
+hold their size and the **Subtitles pill truncates** — it is the only control
+in the bar whose width is text rather than a glyph, so it is the only one that
+can give up room without giving up a target.
+
+**A series gets a drawer on the left edge**, with a vertical tab where the
+reference puts X-Ray, and its own prev/next in the header. It replaced a pill
+at the bottom centre that opened a modal over the middle of the frame — over
+the very thing you were choosing between — and the two floating chevrons that
+used to sit over the picture are gone with it. Where the reference shows a
+face, an episode row shows its number in the same circle: a folder of episodes
+has no faces, and the number is what identifies one.
 
 The scrubber is a **real `<input type="range">` kept transparent over a track
 this pane draws**. A div with a drag handler would have looked the same and
@@ -1255,11 +1312,15 @@ once.
 is `fixed bottom-2 right-3` at z-40, above anything a panel draws — the video
 editor's timeline has reserved that strip since it shipped, and the player,
 being the second pane to draw content that far down, put the version pill
-straight on top of its fullscreen button. `VERSION_BADGE_STRIP` reserves it the
-same way rather than moving shared chrome for one pane's sake, and only when
-windowed: a fullscreen element is rendered alone, so nothing of the app's is
-over it. A test pins the reservation against the badge's own position, because
-the two are one measurement in two files.
+straight on top of its fullscreen button. It reserved it *horizontally* at
+first, indenting the right end of the controls row. The full-bleed rail ended
+that: the lowest thing in the corner is now the rail, and no right-indent short
+of shortening the rail would clear it. So `VERSION_BADGE_LIFT` raises the whole
+bar off the bottom edge instead — 8px of `bottom-2` plus the badge's 22px plus
+4px of air — which clears the badge for the rail and the controls row alike and
+costs the rail nothing. Only when windowed: a fullscreen element is rendered
+alone, so nothing of the app's is over it. A test pins the reservation against
+the badge's own position, because the two are one measurement in two files.
 
 **The timeline is virtual, and that is not an optimisation.** In `direct` mode
 the element holds the file and seeks by byte range. In a transcode ffmpeg is
@@ -3506,6 +3567,112 @@ a failed analysis reported success by saying nothing. `video/components/ui/Overl
 renders both, and it renders them *inside* `.video-workspace` because the classes
 they wear are scoped to it.
 
+### The preview's frame budget (`hooks/useProgramLoop.ts`, `engine/compositor.ts`, `engine/videoEngine.ts`, 2026-09-10)
+
+Reported from the running app on Windows, and not only on weak machines: a
+recording lands on the timeline and the webcam clip lags, freezes, or goes
+black — the screen clip with it. Every finding below is measured on an M4 Pro
+through CDP against the production build, drawing one frame of the shape a
+recording actually produces (backdrop, screen, cursor, camera, grade) and
+sustaining it in a rAF loop. **An M4 Pro is not the machine this was reported
+on; the ratios are the point, not the absolutes.** A laptop iGPU fills several
+times slower, and the frame rates below land in single figures there — at which
+point the renderer's main thread is saturated, the `<video>` elements it also
+has to service are never scheduled, and a camera clip shows black. It was
+never a video bug. It was a budget.
+
+**Motion blur was the whole cost, and the canvas size was not.**
+
+| one preview frame | sustained |
+| --- | --- |
+| 2560×1662, motion blur ×4 — as it shipped | **42.9 fps** |
+| 2560×1662, blur accumulator off | **120.7 fps** |
+| 1600×1040, motion blur ×4 | 38.3 fps |
+
+The accumulator is why. It renders the clip once per sample into a full-size
+scratch canvas, clears that canvas between samples, and adds each one in with
+`lighter` — four samples is thirteen full-frame operations where the rest of
+the frame needs five. It is also correct, and three earlier attempts at it were
+not (see the note in `compositor.ts`), so it is kept exactly as it is and
+simply not *asked for* while somebody is working.
+
+`RenderQuality` is that ask. `full` is the picture as the file will hold it and
+is what `exportPipeline` and `frameCapture` get **by omission** — the parameter
+defaults to it, so neither file changed. `draft` is the picture as an operator
+needs it while cutting, and today it gives up exactly one thing, because
+exactly one thing measured. What is lost is a smear on a moving zoom: a matter
+of finish, not of framing, timing or grade. Nothing decided at the timeline
+depends on it.
+
+**It is said on screen.** A `Preview · motion blur off` chip sits on the stage
+whenever a clip in the project actually asks for blur. An operator who is not
+told will read the difference as the export having invented something, and §1.8
+is the rule: if the machine is doing something, say which thing, in words.
+
+**The canvas is sized to the screen, not to the sequence.** It was
+`project.width × project.height` — a 3024×1964 laptop take becomes a 2560×1662
+sequence, so 4.25 million pixels were composited into an element being looked
+at inside `MAX_CANVAS_WIDTH`, 960 CSS px at the widest tier. Two thirds of
+every pixel was discarded by the browser on the way to the screen. It now
+follows `viewport.displayWidth × devicePixelRatio`, capped at 2× and never
+above the sequence's own size, and the compositor's existing
+`canvasWidth / project.width` scale does the rest — export has always relied on
+that path to render a 1080p sequence at 4K, so this is the same road in the
+other direction. Measured in the running app: an 870×489 backing store where it
+used to be 1920×1080, five times fewer pixels per layer. **Its benefit could
+not be measured on this machine** — the table above shows resolution moving
+nothing — because an M4 Pro is not fill-rate bound. It is kept for the machines
+that are, and that is a reasoned bet rather than a measurement.
+
+Hit-testing and the gizmo are untouched by it: `viewToCanvas` and `canvasToView`
+work in project coordinates off `viewport`, and never read the element's
+`width`/`height`.
+
+**A seek narrower than a frame is a seek storm.** `syncVideo`'s paused branch
+re-seeked whenever the element sat more than **20 ms** from the playhead —
+shorter than a frame at any rate this editor supports. A long-GOP screen
+recording seeks to the nearest decodable frame; ask for 4.100 and it answers
+4.400, which is instantly "wrong" again, so the next tick re-seeks, and the one
+after that. The element never leaves `seeking`, `getVideoFrame` therefore
+returns the held frame forever, every seek fires `onseeked` → a full-resolution
+readback and a `generation` bump that forces a repaint — and the picture never
+moves. That needs no slow machine to reproduce, and it is the other half of
+"the footage gets stuck".
+
+Two guards, and `shouldScrubSeek` is a pure exported function so both are
+provable rather than asserted by regex (`tests/recorder-preview-cost.test.mjs`).
+The tolerance is one frame at 60fps. More importantly the entry remembers
+`requestedTime`: asking for the same position twice can only produce the answer
+it already gave, so it is not asked — which makes it safe at any tolerance,
+including a wrong one.
+
+**Three more, each small and each free.**
+
+- `el.ontimeupdate` called `updateLastFrame`, which is a full-resolution
+  `drawImage` — **4.21 ms** at 2560×1662 — about four times a second per
+  element, for a held frame that is only ever READ while seeking, which
+  `onseeked` already covers. The handler is gone and the held canvas is capped
+  at a 640px long edge; it is a stand-in for a few frames, not a copy.
+- The video cache had no upper bound. Every clip ever passed under the playhead
+  kept a `<video>`, its decoder and its buffers for the life of the page — which
+  is the shape of "it got slower the longer I used it" across several takes in
+  one session. Idle entries are released past a soft limit of six.
+- `ScopesOverlay` called `getImageData(0, 0, source.width, source.height)` on
+  the program canvas — the whole frame, 17 MB on a screen recording, eight times
+  a second, each one a hard GPU stall — and asked that canvas for a
+  `willReadFrequently` context, which is a request to take it off the GPU for
+  the life of the page. Its own comment claimed to downsample and the code never
+  had. It now scales the frame onto a 160×90 scratch and reads 57 KB off that;
+  the scopes were sampling at 160×90 either way.
+
+**Measured and left alone, which is worth writing down.** `interpolateKeyframes`
+is O(n) over a clip's keyframes per property per frame, and the cursor clip
+carries up to 1,840 of them. That reads like a problem and is not: **0.022 ms
+per frame**, 1.3 ms per second of playback. No index, no binary search, no
+`WeakMap` cache. The timeline is likewise clean — `Playhead` subscribes to
+`playheadMs` alone and re-renders one `translateX`, and `Timeline` reads the
+store imperatively inside a subscription rather than through a selector.
+
 ### Screen recorder (`modals/RecorderModal.tsx`, `src/video/components/recorder/**`)
 
 **Not a panel kind — a dialog**, and the change is the design. A workspace
@@ -3581,8 +3748,66 @@ fault watchdog — the one warning that can save a take recording nothing —
 pushes to the video `uiStore`, whose toast surface only renders inside that
 scope. Outside it the recorder is not slightly off; it is unstyled and silent.
 
+**The setup screen is a stage over a picker, and a rail of three tabs.**
+The shape that shipped was a three-column grid of thumbnails beside five
+stacked groups of switches, and the report on it was exact: *too cheap, the
+live settings are too far, not clear enough*. Three separate faults, and each
+one is a layout decision rather than a styling one.
+
+- **Two thirds of the left half was black.** A one-display machine has one
+  thumbnail to show in a grid built for nine. `CaptureStage` spends that space
+  on the one question the rail could never answer in words — what the frame
+  will look like — by showing the chosen source large with the camera
+  composited at the corner and size the build will actually use. `BR` and `24%`
+  are not answers a person can picture; a bubble sitting in the corner it will
+  sit in is. The corner is chosen by clicking the corner (the four hotspots are
+  invisible until the stage is hovered, because this is a preview first and a
+  control second), and the same choice is in the rail as a picture of the frame
+  for the keyboard and for anyone who never hovers.
+
+  Two clocks, and the caption says which is which: the camera is a real stream,
+  the screen behind it is the last frame `desktopCapturer` handed us. This
+  surface answers *what will the frame look like*, not *what is on my screen
+  right now*; the picker's refresh control re-asks the second question.
+
+  The camera preview MOVED here rather than being added — the rail used to run
+  its own `getUserMedia` on the same device for a 288px thumbnail that proved
+  the lens worked and said nothing about framing. One stream, one place.
+
+- **Depth is the wrong axis for a 288px rail.** Live stream was the fourth
+  heading below the fold and Auto edit the fifth, so the footer announced
+  "Live: YouTube" in red while the controls that said so were three scrolls
+  away. The three groups answer three different questions — what the FILE will
+  contain, where it is going while it happens, what the BUILD makes of it — and
+  only the third is changeable after the take, so they are tabs. The strip
+  carries the state that used to be invisible: a red dot when the stream is
+  armed, a count of the Auto edit switches that are on.
+
+- **The footer's chips are doors, not labels.** Each one opens the tab that
+  owns it, summoning the rail first when the surface is too narrow to seat it.
+  The tab is `RecorderPanel`'s state rather than the rail's for exactly that
+  reason.
+
+- **An armed stream with no key never reaches ffmpeg.** `liveReadiness` is
+  exported from `CaptureOptions` and read by both the rail and the start
+  button, so the two cannot disagree; `begin()` does not check, and a take that
+  fails at the encoder spends a recording to learn something the dialog already
+  knew. A custom endpoint is exempt from the key requirement — it may carry one
+  in the path — and the presets are not, because every one of them fails
+  silently without it.
+
+- **The picker is a strip with a filter.** Past about six windows the title is
+  how anybody finds one, not the picture, and twenty-one thumbnails in a
+  three-column grid is a scroll hunt. Arrow keys walk the row, Enter commits the
+  first match, and the selection is scrolled into view — a filter whose result
+  you then have to reach for the mouse to commit is half a filter.
+
+The corner picker in the rail is 80×50 with 30×17 blocks on a 5px inset. That
+is measured, not chosen: at 72×42 the two rows met in the middle and the widget
+read as two tall bars rather than as the four corners of a frame.
+
 **The dialog is what finally gives the layout its width.** The Cut's shape puts
-the source grid beside a fixed 288px options rail, which needs 568px before
+the capture surface beside a fixed 288px options rail, which needs 568px before
 either half works, and the panel opened at 452px — so the recorder's most
 common surface summoned its rail as an overlay. At `size="xl"` the rail seats.
 Both paths are kept and still measured rather than assumed (`max-w-5xl` is a
@@ -3625,6 +3850,88 @@ refuses while a take is running — which is what makes dismissing the dialog
 mid-take safe rather than destructive, with the floating bar carrying the stop
 control while the main window is hidden.
 
+**A take owns the machine, so everything else stands down** (2026-09-10).
+`screenRecorder.cjs` calls `setBackgroundThrottling(false)` and hides the main
+window for the duration of a take, and both are right: the capture lives in that
+renderer and a throttled rAF would drop its frames. The consequence was not:
+every OTHER loop in the renderer inherited the same reprieve, and the expensive
+one is the programme loop, which went on compositing the LAST take at full rate
+behind a window nobody could see while the encoder for the next one wanted the
+same GPU. `PreviewPlayer` now yields through `countdown`, `recording`, `paused`
+and `processing`, exactly as it yields to an export.
+
+**The live compositor rendered four times more frames than it broadcast.** Its
+rAF loop called `render()` once per vsync — 120 times a second on a ProMotion
+display, 144 on a gaming laptop — to feed a `captureStream(30)` that samples
+thirty. Three quarters of every composite was encoded by nobody, during the one
+activity that already has an encoder, a screen capture and a camera to serve.
+It is rate-limited to the target interval now, with a tenth of an interval of
+slack so that a vsync which does not divide evenly into the target rate does not
+drop every other frame. The interval watchdog keeps its own schedule; it exists
+for when rAF stops.
+
+**And it composited the display rather than the broadcast.** The canvas took the
+screen track's own dimensions, so a 3024×1964 laptop pushed 5.9 million pixels a
+frame into an encoder the operator had set to 4.5 Mbps for 1080p — fill rate,
+encoder time and upstream bandwidth spent on pixels the service scales away.
+`broadcastHeightFor` reads the height back off the bitrate, because the rail
+offers the two as one choice (720p·2.5M, 1080p·4.5M, 1440p·8M) and a second
+control would be a second place for the answer to disagree with itself.
+
+**A chunk is wrapped on arrival, not copied.** `recorder:chunk` did
+`Buffer.from(p.bytes)`, which allocates and memcpys; `Buffer.from(buffer,
+offset, length)` views the bytes IPC already handed over. At the 3s timeslice a
+screen chunk is several megabytes, so this was a multi-megabyte allocation and
+copy on the main process, twice a second across the two streams, for bytes that
+are written and dropped. `TIMESLICE_MS` itself is deliberately NOT changed:
+3000ms is what made the Windows chunk ordering correct (see `tail`, above), and
+a throughput guess is not worth reopening a corruption bug.
+
+**A take stopped from the bar had nowhere to land** (2026-09-10). Reported
+against a capture of Teminali OS's own window: close the dialog, stop from the
+bar, and the recording is "gone, not saved anywhere". Two independent faults,
+and neither of them lost a byte — the files were in
+`~/Videos/Teminali OS Recordings/<timestamp>/` the whole time.
+
+**The recorder had a second, dead idea of whether it was on screen.**
+`recorderStore` carried an `isOpen` boolean, and `stop()` set it to `true` so
+the review would come back to the front. That was correct while the recorder was
+a workspace panel. It became a dialog, visibility moved to
+`store/recorderDialogStore`, and **nothing read the flag again** — it was
+written in four places and read in none. So a take stopped from the bar with the
+dialog shut finished into a `review` phase (or an `error` one) that no mounted
+component was rendering: no review screen, no *Open on the timeline*, no way to
+reveal the folder. From outside, indistinguishable from the take being thrown
+away.
+
+The flag is gone, so `recorderDialogStore` is the only answer to that question,
+and `App.tsx` subscribes to the recorder's phase and opens the real dialog on
+the edge into `processing`, `review` or `error`. `processing` is in that list on
+purpose: a slow remux should show its progress bar rather than appear at the
+end. It lives in the shell rather than in the store because everything under
+`src/video/` is workspace-agnostic, and a reach from there into the shell's
+dialog store would be that boundary's first exception — the same reason
+`onOpenedOnTimeline` is a callback.
+
+**And `hideWindow` was hiding the subject.** The switch exists to keep Teminali
+OS out of a capture of the DISPLAY. Point the recorder at Teminali OS's own
+window and it hides what is being filmed: macOS delivers no frames for an
+ordered-out window, so the take records nothing at all — no chunks, an empty
+file, and a remux that fails on it.
+
+Only main can tell which window is ours: `getMediaSourceId()` is a
+`BrowserWindow` method, and matching on the window's TITLE from the renderer
+would break the first time it carried a file name. So `recorder:sources` tags
+that one source `isSelf`, the rail disables the switch and says *"Not while
+Teminali OS is what you are recording"* rather than leaving it on and ignoring
+it — a control that silently does nothing is worse than a missing one — and
+`recorder:begin` now receives the `sourceId` and refuses the hide itself. The
+renderer's half is the explanation; main's half is the guarantee, because a
+stale source list must not be able to cost somebody a take.
+
+`ToggleRow` gained `disabled` for this, in the shared control rather than at the
+call site.
+
 **The floating bar is the one recorder file outside `src/video/`.**
 `components/recorder/RecorderBar.tsx` renders in its own transparent,
 always-on-top window — `setContentProtection(true)`, so it is not *in* the
@@ -3646,18 +3953,19 @@ and turning all six off leaves `RAW_ASSEMBLE`, which lays down screen, camera
 and narration and stops. Either way the whole build is one history entry, so
 there is nothing to undo piecemeal.
 
-**The fourth group on the rail is the only one that is not final.** Camera,
-Sound and Capture describe the FILE being written and are settled the moment the
-take stops. Auto edit describes what the build makes of that file, which can be
-turned off and rebuilt. That is why it is a separate group rather than more rows
-under Capture.
+**The Auto edit tab is the only one that is not final.** Camera, Sound and
+Quality describe the FILE being written and are settled the moment the take
+stops. Auto edit describes what the build makes of that file, which can be
+turned off and rebuilt — and the tab says so at the top, because a switch
+believed to be destructive is a switch nobody touches. That is why it is a
+separate tab rather than more rows under Capture.
 
 What Review still cannot offer is everything decided from the WORDS: the camera
 taking the whole frame during a spoken pause, opening on a spoken introduction,
 and captions. All three read a TRANSCRIPT and this app ships no speech model, so
 they are absent from `AssembleOptions` rather than pinned to `false` — the Cut's
 `alignToSpeech` returns null on an empty transcript, so they would be inert, not
-conservative. Go live is likewise absent from the rail. The tutorial skill is not
+conservative. Go live has since arrived and is the rail's second tab. The tutorial skill is not
 a rail control at all: it is the build, listed in the Skills catalogue as Tutorial
 Builder and exposed to agents as the `cut` server's `build_recording` tool
 (`src/video/mcp/toolRegistry.ts`), which calls the recorder store's
@@ -3881,6 +4189,31 @@ Every dialog goes through the `Modal` primitive — raised `--surface` behind th
 brightest hairline, one close control, sentence-case title at body size. A
 dialog that draws its own backdrop and its own header is how the Skills modal
 ended up in uppercase mono with two close buttons and a broken template literal.
+
+**A dialog closes in the dialect the window does** (`ui/Primitives.tsx` —
+`DialogCloseButton`, `useChromeStyle`). Every dialog drew `MacCloseButton`
+unconditionally, so an operator who had set Appearance > Window Chrome to
+Windows got three flat caption buttons on the title bar and a macOS traffic
+light on every dialog in the app. Two dialects in one window is not a style, it
+is a bug you look at all day. `DialogCloseButton` resolves the setting and draws
+the macOS disc, the Windows caption ✕ or the GNOME circle; `MacCloseButton`
+survives as the macOS branch of it, and a call site that names it directly is a
+call site the setting cannot reach — which `tests/recorder-dialog-ui.test.mjs`
+asserts against.
+
+What transfers is the **dialect, not the placement**. `CHROME_SIDE` governs the
+title bar, which is what that setting's description is about; a dialog has no
+minimise and no maximise, is not draggable chrome, and its control stays where
+the dialog's own layout puts it. `Modal`'s header is `items-stretch` rather than
+`items-center` for one of the three: the Windows caption button is a 46px
+rectangle hard against the corner taking the header's full height, and a
+centred one with a gap around it is the pixel-level tell that it was drawn by an
+app.
+
+`useChromeStyle` is the store-subscribing half of `services/appearance.ts`,
+which deliberately knows nothing about the store so the recorder-bar window can
+call `resolveChromeStyle` too. Having both means a change in Settings repaints
+every dialog at once rather than at the next reload.
 
 `MediaConsentModal` is the one dialog nothing in the shell opens. It subscribes
 to the media approval gate's singleton and appears when a tool asks to read a
@@ -5341,8 +5674,8 @@ at all.
 
 The Teminali OS assistant has no chat surface of its own in the voice stage. It
 reads, edits, searches and runs entirely in the background, and its whole
-visible presence is one line under Temi's orb:
-`AgentActivityTicker.tsx`, fed by `activityPhrase.ts` from
+visible presence is one line in the composer's project tab, after the workspace
+name (§6.44): `AgentActivityTicker.tsx`, fed by `activityPhrase.ts` from
 `assistantActivityStore`.
 
 Small by constraint, not by taste. A panel would become a second chat, which is
@@ -5364,8 +5697,10 @@ Three rules the phrasing follows, each testable and tested
 
 The split into `AgentActivityTicker` (presentational, takes a phrase) and
 `ConnectedAgentActivity` (reads this store) is what makes it portable: the strip
-can be dropped beside any orb, into a status bar or a compact window without
-dragging a store behind it.
+can be dropped into any horizontal strip — a status bar, a compact window —
+without dragging a store behind it. It renders as a fragment into that row, and
+draws its own leading hairline, so the separator disappears with the line rather
+than hanging off the end of the bar.
 
 ### 6.0.2 One switch between the voice and the hands (2026-09-09)
 
@@ -5565,6 +5900,87 @@ same sentence verbatim — at this model size any speakable string in the prompt
 becomes the template for every answer, which `temi_moves.py` documents at
 length. The mechanism is the gate: with state questions delegated, few of these
 questions reach the persona at all.
+
+### 6.0.6 The shell's own directive must not return as a user turn (2026-09-10)
+
+`sendAssistantDirective` is not a user turn. But the pipeline has one way in, so
+`realtime-voice/code/server.py` wraps the line and delivers it through
+`on_final` — **the same callback a spoken turn uses** — and it comes back to the
+shell as `final_user_request`. Type alone cannot tell it from speech.
+
+Unguarded, that closes a loop, and it was observed live: the shell delegates,
+speaks "On it.", the directive returns as a user turn, `performTurn` classifies
+it as work, and it delegates again. The activity queue fills with identical
+tasks and the assistant talks to itself. **The Stop button cannot win** — each
+stop is followed by another delegation, which is why it read as a broken button
+rather than a loop.
+
+Two things were wrong per cycle: the directive was appended to
+`dialogueHistory` **as a user bubble**, captioning the operator with words they
+never said; and it reached the turn switch.
+
+`Realtime8000ProtocolManager.isAssistantDirectiveEcho()` is the guard, matching
+`server.py`'s prefix. It lives on the class that **sends** the directive, so the
+sender and the recogniser cannot drift apart, and `TemiVoiceStage` drops such
+messages on both the `partial_` and `final_user_request` paths before either
+effect happens. It is deliberately narrow: bracketed artefacts like
+`[keyboard clicking]` belong to `transcriptRepair` and must pass through.
+
+Pinned by `tests/voice-directive-echo.test.mjs`, which rebuilds the wrapper from
+`server.py`'s own wording so the test fails if either side drifts.
+
+### 6.0.7 The caption is paced by the speaker, not by the model (`services/voice/captionPacer.ts`, 2026-09-10)
+
+The model finishes a sentence several seconds before the voice does. Rendering
+`partial_assistant_answer` straight to the screen therefore showed the end of a thought
+while the listener was still hearing its beginning — the eye overtakes the ear, and the
+reader stops listening. The two halves of one reply ran at different speeds.
+
+The playback worklet is the only thing that knows how much audio has actually left the
+buffer, so it is now the thing that drives the caption. It reports `ttsProgress` every
+~50ms — finer than a syllable — and `CaptionPacer` maps those seconds onto a prefix of the
+text at a **measured** speaking rate: every completed turn is a direct observation of
+characters per second, so a voice change or a speed change retunes it without anyone
+remembering to.
+
+Three properties, each pinned by `tests/caption-pacer.test.mjs`:
+
+* **Nothing is captioned before the voice has said it.** No lead is added. A caption a
+  little ahead of the voice is the same defect as one seconds ahead, only quieter.
+* **A word is never shown half-written**, and the caption never un-reveals a word — a
+  barge-in resets the worklet's clock, and progress can legitimately drop.
+* **A clipped turn does not poison the rate.** A turn cut off measures the interruption,
+  not the voice, so it is discarded rather than averaged in.
+
+Two boundaries are conversational and cannot be inferred acoustically, which is where the
+first two attempts at this went wrong:
+
+* The worklet's `ttsPlaybackStarted` fires again after **any** 120ms underrun — the
+  ordinary gap between two synthesised sentences — so it cannot reset the caption clock.
+  The turn does, via `resetTTSProgress()`.
+* `ttsPlaybackStopped` fires on that same gap, so it cannot commit the turn either. The
+  commit is debounced, and also fires when the spoken text catches up with the generated
+  text.
+
+`final_assistant_answer` no longer commits the reply. It is **held** until the voice has
+caught up, or the transcript would snap the whole sentence into place the instant
+generation ended — precisely the defect being removed. If a turn is stopped mid-sentence,
+what lands in the transcript is what she **actually said**: a transcript recording words
+the speaker was silenced before reaching is a record of something that did not happen.
+
+### 6.0.8 If she is talking, she can be stopped (`components/voice/TemiVoiceStage.tsx`, 2026-09-10)
+
+`isRunning` was `isTaskRunning || isStreaming`. Temi speaking with no delegated run behind
+it — every plain answer, the ordinary case — was neither, so **Escape was unarmed and the
+composer offered no Stop**. The pipeline runs half-duplex, deliberately ignoring the
+microphone while she speaks so that she does not interrupt herself, so the voice could not
+do it either. There was no way at all to cut her off. Reported as *"I cannot stop this."*
+
+This is the same bug the comment above that line already recorded once, for delegated runs.
+It was fixed there and not here.
+
+`isSpeaking` now counts as running. The rule is the whole of it: **if she is talking, she
+can be stopped.**
 
 ### 6.1 Turn semantics while a run is in flight (2026-09-05)
 
@@ -7508,7 +7924,8 @@ sits under Temi's answers only.
 
 **The activity pane is deleted.** `TemiAssistantPane.tsx` is gone, and with it
 the store's `activeTab`. The Teminali OS assistant's entire standing presence is
-now the one process line under the orb (`AgentActivityTicker`), exactly as
+now the one process line in the composer's project tab (`AgentActivityTicker`,
+§6.44), exactly as
 §6.0.1 said it should be and never quite was. Clicking that line opens
 `TemiActivityDialog` — the full log, paged 20 rows at a time as you reach the
 end, so opening it mid-run costs one screenful rather than the whole feed.
@@ -7851,7 +8268,9 @@ The box, drawn in `TemiComposer`:
 
 - a project tab above its top edge — folder icon and the workspace name, or
   "Choose project" — inset on both sides with square bottom corners, because it
-  is a narrower panel *behind* the box with its top showing, not a floating chip;
+  is a narrower panel *behind* the box with its top showing, not a floating chip.
+  Since §6.44 it is a row of two controls: the project name, then a hairline and
+  the assistant's live process line;
 - a 16px body on `#252525`, borderless, against the stage's black canvas;
 - the placeholder floated to the top-left of a field that starts 52px tall and
   grows to 200px. It is a `textarea`. The control it replaced was an `<input>`,
@@ -8397,3 +8816,172 @@ returning the half-written draft. Geometry was measured off
 **Left open:** `onSend` is still declared by `TemiVoiceStage` and dropped. Wiring
 it would route typed turns through `StudioChat.send` and change the whole lane;
 it is a decision, not an oversight, and it is not this one.
+
+### 6.44 The process line moves into the project tab (`components/voice/AgentActivityTicker.tsx`, `components/voice/TemiComposer.tsx`, `components/voice/TemiVoiceStage.tsx`, `services/voice/activityPhrase.ts`, 2026-09-10)
+
+§6.0.1 gave the Teminali OS assistant one line and put it under Temi's orb, as a
+bordered pill floating between the orb and the box. That placement was wrong for
+three reasons, and only the third is aesthetic.
+
+**It rented a row to say a short sentence.** The pill was its own object with its
+own border, its own `mt-2`, and nothing beside it — roughly 32px of the stage
+occupied by a strip that is empty most of the time and, when it is not, holds
+about four words.
+
+**The bar it belonged in was already drawn and already half empty.** The composer
+has a project tab above it (§6.36) carrying a folder glyph and a workspace name,
+and the rest of that bar was blank. Where the work is happening and what is
+happening to it are the same question asked twice; they now read as one strip:
+
+```
+📁 teminaliCode │ ✳ Reading …/realtimeVoiceStatus.ts
+```
+
+**Three objects stacked over one box is a stack.** Orb, pill, composer read as
+three things to look at. Orb and composer read as a face and a box.
+
+The tab is a `<div>` of two controls now, not one control. It had to be: the
+process line is itself clickable — it opens `TemiActivityDialog` — and a
+`<button>` inside a `<button>` is not markup a browser honours. The project name
+keeps the whole of its own hit area and both controls answer the pointer the
+same way, a colour shift and nothing else, because two controls sharing one
+strip that highlight differently look like two different kinds of thing.
+
+The hairline belongs to the line, not to the bar. `AgentActivityTicker` renders
+a fragment — separator, then the control — so when the assistant goes quiet the
+separator goes with it. A divider owned by the tab would be left pointing at
+nothing every time a run ended.
+
+The orb's dock moved from `bottom-[172px]` to `bottom-[188px]`. 172 was measured
+against a block that also held the pill; with the pill gone, half of the 32px it
+occupied is returned as clearance so the orb does not sit on the box, and the
+other half is the compaction this change was for.
+
+**Three bugs found in the code being moved**, all pinned by
+`tests/activity-phrase.test.mjs` and `tests/temi-composer.test.mjs`:
+
+- **The strip named the wrong step.** `currentActivityPhrase` reversed the item
+  list and took the first match, which is only correct for an oldest-first
+  array — and `assistantActivityStore.logAction` *prepends*. With two steps in
+  flight it named the older one and stayed there while the assistant moved on.
+  It now sorts newest-first rather than trusting the caller's order, the same
+  defence `runProgressFromActivity` already took. (That file's comment claimed
+  the store appends; it does not, and the comment is corrected.)
+- **`truncate` was doing nothing.** The target span is a flex item, and a flex
+  item's `min-width` defaults to `auto`, so it would not shrink below its own
+  text: a long path widened the strip instead of ellipsing. `min-w-0` is what
+  makes the elision `activityPhrase.ts` computes actually visible.
+- **The tooltip showed the elision back.** `title` hung off the shortened
+  target, so hovering `…/realtimeVoiceStatus.ts` answered with
+  `…/realtimeVoiceStatus.ts`. `ActivityPhrase` carries `full` now — the
+  unshortened value, absent when nothing was lost — and the tooltip recovers the
+  path the line had to cut.
+
+Two smaller corrections while in there. The polite live region is now mounted
+whether or not there is anything in it (`sr-only`, and therefore absolutely
+positioned, so it is not a flex item and adds no gap): a live region inserted
+*with* its first message is not reliably announced, and the old strip
+unmounted itself completely whenever a run ended. And `disabled={!onClick}` is
+gone — browsers suppress the tooltip on a disabled element, which is the one
+thing this strip needs; with no click-through it renders as a `<span>` instead.
+
+**Not verified visually.** The measurements above are read off the CSS, not off
+a screenshot; the suite proves the wiring and the phrasing, not the pixels.
+
+### 6.45 The acknowledgement was never the lie; the report was (`services/voice/progressNarration.ts`, `services/voice/teminaliAgentBridge.ts`, `components/voice/TemiVoiceStage.tsx`, 2026-09-10)
+
+`machineAction.ts` classifies "did the tests pass" as `inspect` and Temi says
+**"Checking now."** The module's docstring promises the truthful part "arrives
+afterwards from the activity record", and the standing suspicion was that
+nothing ever followed — that the acknowledgement was a promise of work she
+could not do.
+
+**The wire is whole.** `voiceTurnRouter` → `delegate` → `TeminaliAgentBridge.
+delegateTask` → `onCompleted` → `sendAssistantDirective` → `server.py`'s
+`assistant_directive` → `on_final` → spoken. Both exits of `runTask` call
+`onCompleted`, the success one and the `catch`. Ten of ten realistic state
+questions route to `delegate`/`inspect` and are acknowledged. So the phrases
+are fine and were left alone.
+
+**What arrived was the answer with its answer removed.** `summariseOutcome`
+reads the assistant's own first sentence, and `firstSentence` strips markdown
+so a work narration does not read punctuation aloud. On a question that strip
+deletes the payload. Measured 2026-09-10, eight of eight realistic answers:
+
+| The assistant wrote | The operator heard |
+| --- | --- |
+| ``The port is `8080`.`` | "The port is ." |
+| ``There are `3` errors in the log.`` | "There are errors in the log." |
+| ``You are on branch `master`.`` | "You are on branch ." |
+| ``The tests passed: `2222 passed, 0 failed`.`` | "The tests passed: ." |
+| "The answer is:" then a fence holding only `8080` | "The answer is:" |
+
+The second row is the worst of them: a fluent, complete sentence with the
+number taken out. It does not sound like a failure, so nothing about it invites
+a second question — which is the same failure mode §6.0.4 named, arriving from
+the other end of the turn.
+
+Three changes, all deterministic, no second generation:
+
+- **Code spans are unwrapped, not deleted.** Keep what was inside the
+  backticks, lose only the backticks. A fenced block is still dropped — output
+  read aloud is unbearable — *unless* its whole body is one line of ≤ 40
+  characters, which is a value wearing a fence.
+- **A silent `inspect` run admits it.** With no prose and no edits,
+  `summariseOutcome` returned `"Done."` — the answer to "do this", standing
+  where the answer to "did it pass" belongs. The turn's kind now travels with
+  the prompt (`TaskDelegationOptions.action` → `RunProgress.kind`), and an
+  `inspect` that came back with nothing says so. Work still reports as work.
+- **A refused delegation is spoken.** The queue's "Already queued" and "Queue
+  is full" reached `onProgress` only, which is a toast — on a screen the
+  operator is not looking at, which is why they asked aloud. It reaches
+  `onCompleted` now, like every other exit. **Silence after an acknowledgement
+  is the lie the phrasing was suspected of.**
+
+`tests/inspect-answer.test.mjs` (7) pins all three, the eight measured rows
+included. Suite **2229**, `tsc` and `npm run build` clean.
+
+**Not verified against the ear.** Nothing here was spoken aloud on this
+machine; the tests prove the string that reaches `sendAssistantDirective`, not
+what the synthesiser makes of it.
+
+### 6.46 An audit for fixes the live path never reaches (`services/voice/activityPhrase.ts`, 2026-09-10)
+
+Two defects on the same day shared a shape: the code was right and unreachable.
+§6.45's report deleted the answer it was carrying; `history_window.py` spent a
+context budget on a list `server.py` had already cut to twenty messages. Both
+had passing tests, because both tests examined the module that had been fixed
+rather than the path a turn actually takes. So the voice modules were swept for
+the same thing — anything exported and referenced nowhere, in either language.
+
+Most of what that turns up is noise: constants exported so a test can name
+them, and helpers used only inside their own file. Discounting those leaves
+**one** in the TypeScript:
+
+**`speakActivityPhrase` is never called.** `activityPhrase.ts` builds two forms
+of the same fact — `describeActivity` for the strip, which
+`AgentActivityTicker.tsx` renders, and `speakActivityPhrase` for the ear
+("Editing composer dot tsx."). The visual half is wired. The spoken half is
+exported, tested, and reached by nothing, so **the activity phrase is shown and
+never spoken**. Left as it is deliberately: wiring it is a product decision, not
+a repair. This lane's own instinct is that a voice narrating every step becomes
+a tic, and §6.45's finish-line report already covers the moment that matters.
+Recorded here so the next reader does not mistake the tests for evidence it runs.
+
+Three others were checked and are **not** defects. `resetSpeechBus` is a test
+fixture. `ephemeralTranscript.ts` is untracked and unwired — in flight, not
+dead. `realtime-voice/code/filler_policy.py` is a complete, tested, undocumented
+module that nothing imports, and it should stay that way for now: it selects
+from a bank of pre-rendered breaths that **does not exist** — no
+`render_filler_bank.py`, no audio — so it is unfinished rather than inert.
+
+One real drift was found and closed on the Python side: the six-word floor is
+written in both `temi_moves._TAIL_FLOOR_WORDS` and `second_beat.WORD_FLOOR`,
+the spec says the two MUST agree, and nothing checked. They are reached by
+different paths — `temi_moves` in the shipped pipeline, `second_beat` only in
+`persona_eval.py` — so a change to one would have passed every test and every
+live turn. `TheFloorIsWrittenTwice` now pins them. Python **208** (was 207).
+
+**The lesson is about the tests, not the code.** A test that imports the fixed
+module proves the fix. It says nothing about whether the conversation reaches
+it, and on this codebase that has now been the actual defect three times.

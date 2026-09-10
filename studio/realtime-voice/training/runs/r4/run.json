@@ -1,0 +1,85 @@
+{
+  "model": "mlx-community/Qwen3-8B-4bit",
+  "iters": 31,
+  "full_iters": 31,
+  "batch_size": 4,
+  "layers": 8,
+  "rank": 8,
+  "scale": 20.0,
+  "lr": 0.0001,
+  "optimizer": "adamw",
+  "seed": 0,
+  "max_seq_length": 222,
+  "mask_prompt": true,
+  "system": "short",
+  "system_words": 110,
+  "n_train": 123,
+  "n_valid": 15,
+  "wall_seconds": 401.1,
+  "bench": false,
+  "train_reports": [
+    {
+      "iteration": 10,
+      "train_loss": 2.668929100036621,
+      "learning_rate": 9.999999747378752e-05,
+      "iterations_per_second": 0.09061460484019618,
+      "tokens_per_second": 8.264051961425892,
+      "trained_tokens": 912,
+      "peak_memory": 7.906148164
+    },
+    {
+      "iteration": 20,
+      "train_loss": 2.0393524169921875,
+      "learning_rate": 9.999999747378752e-05,
+      "iterations_per_second": 0.10107326273744568,
+      "tokens_per_second": 8.884339794621475,
+      "trained_tokens": 1791,
+      "peak_memory": 7.906148164
+    },
+    {
+      "iteration": 30,
+      "train_loss": 1.9492488861083985,
+      "learning_rate": 9.999999747378752e-05,
+      "iterations_per_second": 0.1199360702361274,
+      "tokens_per_second": 10.626335822920888,
+      "trained_tokens": 2677,
+      "peak_memory": 7.906148164
+    },
+    {
+      "iteration": 31,
+      "train_loss": 1.3315348625183105,
+      "learning_rate": 9.999999747378752e-05,
+      "iterations_per_second": 1.2685070957965257,
+      "tokens_per_second": 10.909161023850121,
+      "trained_tokens": 2763,
+      "peak_memory": 7.906148164
+    }
+  ],
+  "val_reports": [
+    {
+      "iteration": 0,
+      "val_loss": 6.907595634460449,
+      "val_time": 21.555100999976275
+    },
+    {
+      "iteration": 7,
+      "val_loss": 1.9773684740066528,
+      "val_time": 25.302327540994156
+    },
+    {
+      "iteration": 15,
+      "val_loss": 2.086136817932129,
+      "val_time": 17.59781020801165
+    },
+    {
+      "iteration": 23,
+      "val_loss": 1.983204960823059,
+      "val_time": 15.412320707982872
+    },
+    {
+      "iteration": 30,
+      "val_loss": 1.854495882987976,
+      "val_time": 17.26756158299395
+    }
+  ]
+}

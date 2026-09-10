@@ -122,6 +122,24 @@ function recordingsRoot() {
 
 /* ── The cursor track ───────────────────────────────────────────── */
 
+/**
+ * The `desktopCapturer` id of our own main window, or null.
+ *
+ * Wrapped because `getMediaSourceId()` throws on a destroyed window and
+ * is absent on platforms/builds that predate it, and a recorder that
+ * cannot enumerate sources because of a defensive lookup would be a
+ * worse bug than the one this exists to fix.
+ */
+function mainWindowSourceId() {
+  try {
+    const win = getMainWindow();
+    if (!win || win.isDestroyed() || typeof win.getMediaSourceId !== "function") return null;
+    return win.getMediaSourceId();
+  } catch {
+    return null;
+  }
+}
+
 function startSampling(session) {
   if (!session.bounds) return;
   const bounds = session.bounds;
@@ -576,6 +594,17 @@ function initScreenRecorder(mainWindowGetter) {
 
     const displays = screen.getAllDisplays();
     const primaryId = screen.getPrimaryDisplay().id;
+    /*
+      Which of these windows is US.
+
+      Only main can answer it: `getMediaSourceId()` is a BrowserWindow
+      method, and matching on the window's TITLE from the renderer would
+      break the first time the title carried a file name. Tagged once
+      here so the renderer never has to guess — see `isSelf` on
+      `RecorderSource`, and `hideWindow` below, which is the thing that
+      goes wrong when nobody knows.
+    */
+    const selfSourceId = mainWindowSourceId();
 
     /*
       A Mac always has at least one display. Zero of them is not a state
@@ -611,6 +640,7 @@ function initScreenRecorder(mainWindowGetter) {
         return {
           id: source.id,
           name: source.name,
+          isSelf: Boolean(selfSourceId) && source.id === selfSourceId,
           kind: source.id.startsWith("screen:") ? "screen" : "window",
           displayId: display ? display.id : null,
           /* Real pixels, not the thumbnail's. A window's are unknown
@@ -841,7 +871,26 @@ function initScreenRecorder(mainWindowGetter) {
     }
     session.liveStream = liveStream;
 
-    if (p.hideWindow) {
+    /*
+      Never hide the window that is BEING RECORDED.
+
+      `hideWindow` exists to keep Teminali OS out of a capture of the
+      display. Point the recorder at Teminali OS's own window and the
+      same switch hides the subject: macOS stops delivering frames for an
+      ordered-out window, so the take records nothing at all — no chunks,
+      an empty file, and a remux that fails on it. Reported as "I recorded
+      Teminali OS and the take was gone".
+
+      Decided here rather than trusted from the renderer because main is
+      the only side that can ask a BrowserWindow for its media source id.
+      The renderer disables the switch as well, so this is the belt to
+      that brace — a stale source list must not be able to lose a take.
+    */
+    const selfId = mainWindowSourceId();
+    const recordingOurselves = Boolean(selfId) && p.sourceId === selfId;
+    session.recordingOurselves = recordingOurselves;
+
+    if (p.hideWindow && !recordingOurselves) {
       const win = getMainWindow();
       if (win && !win.isDestroyed()) {
         try { win.webContents.setBackgroundThrottling(false); } catch { /* ignore */ }
@@ -878,8 +927,20 @@ function initScreenRecorder(mainWindowGetter) {
     }
     if (out.closed) return { ok: false, error: `The "${p.stream}" file is already closed.` };
 
+    /*
+      Wrapped, not copied. `Buffer.from(uint8Array)` allocates a second
+      buffer and memcpys into it; `Buffer.from(buffer, offset, length)`
+      views the bytes IPC already gave us. At the default 3s timeslice a
+      screen chunk is several megabytes, so this was a multi-megabyte
+      allocation and copy on the main process, twice a second across the
+      two streams, for no reason — the bytes are written and dropped.
+
+      The comment sits ABOVE the `try` rather than inside it:
+      `recorder-live-stream.test.mjs` pins the write to being guarded by
+      matching `try { out.handle.write`, and that pin is worth keeping.
+    */
     try {
-      out.handle.write(Buffer.from(p.bytes));
+      out.handle.write(Buffer.from(p.bytes.buffer, p.bytes.byteOffset, p.bytes.byteLength));
       out.bytes += p.bytes.byteLength;
       return { ok: true, bytes: out.bytes };
     } catch (err) {

@@ -4,6 +4,7 @@ export * from "./Modal";
 export * from "./SegmentedTabs";
 export * from "./Input";
 export * from "./Card";
+export * from "./Setting";
 export * from "./CodeSnippet";
 export * from "./Icons";
 export * from "./Menu";
