@@ -1727,6 +1727,27 @@ need that install to be told the target (`--cpu x64 --os darwin`) or its
 sidecar fails the same way. The Windows and Linux entries are written but have
 not been built here.
 
+**The media stack has the same shape and a worse ending, which is why CI does
+not build it.** One arm64 runner produces both `--arm64` and `--x64` app
+bundles, and the two `extraResources` entries copy the same
+`media-stack/ffmpeg` into each. What `build-media-stack.sh` produces is
+single-arch — `lipo -archs media-stack/ffmpeg/ffmpeg` answers `arm64` — so an
+Intel Mac would receive an arm64 ffmpeg. `sharp` fails softly there; this does
+not. `findFfmpeg` prefers the bundled copy over `PATH`, and it decides by
+`statSync().isFile()`, so the wrong-architecture binary *exists*, wins, and
+then cannot exec — and the PATH fallback that works on that machine today never
+gets a turn. A bundle like that is worse than no bundle.
+
+So the workflow's media-stack step is left to stop at its tool gate: no runner
+installs `meson`, `ninja` or `nasm`, every platform ships without a bundle, and
+the app falls back exactly as v0.0.6 did. **Installing that toolchain is not
+the one-line change it looks like.** macOS needs the closure built once per
+architecture and `lipo -create`d before staging, with `verify_bundle` asserting
+both slices are present. Linux (`--linux --x64` on an x64 runner) has no
+mismatch, but that half of the recipe has never been run anywhere and is
+unproven rather than known-good. See
+[`docs/MEDIA_LICENSING.md`](docs/MEDIA_LICENSING.md).
+
 ## Configuration
 
 Everything is optional; every default is loopback.
