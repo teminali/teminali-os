@@ -60,6 +60,39 @@ function authHeaders(extra = {}) {
   return { authorization: "Bearer test-session-token-with-enough-entropy", "content-type": "application/json", ...extra };
 }
 
+test("a Frontier lane is available when its model is installed, and when only its source is", async (t) => {
+  /*
+    Two ways a lane can work. The derived model may be installed outright, or
+    only the source it is built from — `frontier-runner.js` creates the derived
+    model from the source on demand, so a present source is a lane that works
+    after one create. Both count; nothing else does.
+  */
+  const withModels = (names) => (url, init = {}) => {
+    if (new URL(url).pathname === "/api/tags") {
+      return Promise.resolve(jsonResponse({ models: names.map((name) => ({ name })) }));
+    }
+    return healthyFetch(url, init);
+  };
+
+  const derived = await startGateway({ fetchImpl: withModels(["frontier-qwen2.5-coder-14b-8k"]) });
+  t.after(() => derived.gateway.close());
+  const a = await (await fetch(`${derived.baseUrl}/api/frontier/status`, { headers: authHeaders() })).json();
+  assert.equal(a.modes.flash.available, true);
+  assert.equal(a.modes.auto.available, true);
+  assert.equal(a.modes.flash.reason, undefined);
+
+  const sourceOnly = await startGateway({ fetchImpl: withModels(["qwen2.5-coder:14b-instruct"]) });
+  t.after(() => sourceOnly.gateway.close());
+  const b = await (await fetch(`${sourceOnly.baseUrl}/api/frontier/status`, { headers: authHeaders() })).json();
+  assert.equal(b.modes.flash.available, true);
+
+  // A model that is neither is not a near miss.
+  const unrelated = await startGateway({ fetchImpl: withModels(["temi:r2"]) });
+  t.after(() => unrelated.gateway.close());
+  const c = await (await fetch(`${unrelated.baseUrl}/api/frontier/status`, { headers: authHeaders() })).json();
+  assert.equal(c.modes.flash.available, false);
+});
+
 test("Frontier model status and routing keep Max locked and Auto truthful before qualification", async (t) => {
   const { gateway, baseUrl, audit } = await startGateway({ expertQualifiedProvider: () => false });
   t.after(() => gateway.close());
@@ -69,9 +102,15 @@ test("Frontier model status and routing keep Max locked and Auto truthful before
   const status = await statusResponse.json();
   assert.equal(status.defaultMode, "auto");
   assert.equal(status.maxQualified, false);
-  assert.equal(status.modes.flash.available, true);
-  assert.equal(status.modes.auto.available, true);
+  // The harness's Ollama has no models, so no lane can answer — and saying so
+  // is the point. `available` was the literal `true` here until 2026-09-10,
+  // which is how an operator spent an evening on a composer that could not
+  // reply: the derived model had been deleted and the interface still said
+  // "Frontier Auto is ready".
+  assert.equal(status.modes.flash.available, false);
+  assert.equal(status.modes.auto.available, false);
   assert.equal(status.modes.max.available, false);
+  assert.match(status.modes.flash.reason, /ollama pull qwen2\.5-coder:14b-instruct/);
   assert.equal(status.models.flash.model, "frontier-qwen2.5-coder-14b-8k");
 
   const privatePrompt = "debug a private multi-file concurrency problem";

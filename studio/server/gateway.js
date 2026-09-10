@@ -251,16 +251,72 @@ function localModelForProfile(profile) {
   return config?.structuredLocalModel || config?.localModel;
 }
 
-function frontierStatusPayload(expertQualified) {
+/**
+ * Which models Ollama actually has, or null when Ollama cannot be reached.
+ *
+ * Null and empty are different answers and the caller must not conflate them:
+ * "Ollama is down" is not "the model is missing", and telling an operator to
+ * pull a model they already have is its own kind of lie.
+ */
+async function installedModelNames(fetchImpl, config) {
+  try {
+    const res = await fetchImpl(joinUrl(config.ollamaUrl, "api/tags"), { method: "GET", signal: AbortSignal.timeout(3000) });
+    if (!res.ok) return null;
+    const body = await res.json();
+    if (!Array.isArray(body.models)) return null;
+    return new Set(body.models.map((m) => m?.name).filter((n) => typeof n === "string"));
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Whether a Frontier lane can actually answer, rather than whether it exists.
+ *
+ * `available` was the literal `true` for flash and auto for as long as this
+ * route has existed, and on 2026-09-10 that cost an operator an evening: the
+ * derived model had been deleted to free disk, every request 404'd inside
+ * Ollama, and the interface went on saying "Frontier Auto is ready" over a
+ * composer that could not answer a single message.
+ *
+ * A lane counts as available when its derived model is installed, OR when the
+ * source it is derived from is — `frontier-runner.js` builds the derived model
+ * from the source on demand, so a present source is a lane that will work after
+ * one create. Nothing else counts, and an unreachable Ollama is reported as
+ * unknown rather than as either answer.
+ */
+function laneAvailability(installed, model) {
+  if (installed === null) return { available: false, reason: "Ollama is not reachable." };
+  if (installed.has(model.model)) return { available: true };
+  if (model.source && installed.has(model.source)) return { available: true };
+  return {
+    available: false,
+    reason: model.source
+      ? `${model.model} is not installed. Run: ollama pull ${model.source}`
+      : `${model.model} is not installed.`,
+  };
+}
+
+async function frontierStatusPayload(expertQualified, fetchImpl, config) {
   const flash = localModelForProfile("local");
   const max = localModelForProfile("local-expert");
+  const installed = await installedModelNames(fetchImpl, config);
+  const flashState = laneAvailability(installed, flash);
+  const maxState = laneAvailability(installed, max);
   return {
     defaultMode: "auto",
     maxQualified: expertQualified,
     modes: {
-      flash: { ...MODEL_MODES.flash, available: true },
-      auto: { ...MODEL_MODES.auto, available: true },
-      max: { ...MODEL_MODES.max, available: expertQualified },
+      flash: { ...MODEL_MODES.flash, ...flashState },
+      auto: { ...MODEL_MODES.auto, ...flashState },
+      // Max needs both the entitlement and the weights; the stricter of the two
+      // decides, and the reason says which is missing.
+      max: {
+        ...MODEL_MODES.max,
+        available: expertQualified && maxState.available,
+        ...(expertQualified ? {} : { reason: "Max is not qualified on this machine." }),
+        ...(expertQualified && !maxState.available && maxState.reason ? { reason: maxState.reason } : {}),
+      },
     },
     models: {
       flash: { model: flash.model, contextTokens: flash.contextTokens },
@@ -1372,7 +1428,7 @@ export async function createGateway(options = {}) {
       }
 
       if (request.method === "GET" && route === "/api/frontier/status") {
-        replyJson(response, 200, frontierStatusPayload(expertQualifiedProvider()));
+        replyJson(response, 200, await frontierStatusPayload(expertQualifiedProvider(), fetchImpl, config));
         return;
       }
 

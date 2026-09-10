@@ -534,6 +534,14 @@ Three kinds of engine answer a turn, and they are peers rather than tiers.
 **Frontier (local, via Ollama).** Three modes — `flash`, `auto`, `max` — backed
 by profiles in `gateway/frontier-runner.js`:
 
+A mode reports `available` only when it can actually answer: `/api/frontier/status`
+asks Ollama what is installed and marks a lane available when its derived model
+is there, or when the source it is built from is (the runner creates the derived
+model from the source on demand). When it cannot, the mode carries a `reason`
+naming the exact `ollama pull` to run. Until 2026-09-10 `flash` and `auto` were
+hardcoded available, so a machine whose model had been deleted was told
+"Frontier Auto is ready" over a composer that answered nothing.
+
 | Profile | Model | Notes |
 | --- | --- | --- |
 | `local` | Qwen2.5-Coder 14B (16k / 8k structured) | The default. Needs 16 GB. |
