@@ -88,6 +88,16 @@ contextBridge.exposeInMainWorld("teminali", {
     chooseFolder: () => ipcRenderer.invoke("dialog:open-folder"),
     /** Keeps the File > Open Recent submenu in step with the app. */
     setRecent: (projects) => ipcRenderer.invoke("menu:set-recent-projects", projects),
+    /** Show a project in the Finder. */
+    reveal: (target) => ipcRenderer.invoke("projects:reveal", target),
+    /**
+     * Move a project folder to the Trash.
+     *
+     * Main raises the confirmation and main applies the rule about what is a
+     * project — neither is repeated here, because a check on this side of the
+     * bridge is a check the caller could have skipped.
+     */
+    moveToTrash: (target) => ipcRenderer.invoke("projects:move-to-trash", target),
   },
   menu: {
     /** Menu commands the renderer must act on. Returns an unsubscribe function. */

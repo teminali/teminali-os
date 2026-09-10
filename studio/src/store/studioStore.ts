@@ -899,7 +899,7 @@ export const useStudioStore = create<StudioState>()(
         {
           id: "front-1",
           role: "assistant",
-          content: "**Frontier Auto** is ready. Frontier Auto is our official flagship engineered wrapper routing to best-fit local and specialized engines.",
+          content: "**Frontier Auto** is ready — the flagship wrapper that routes to best-fit local and specialized engines.",
           timestamp: "Just now",
           costUsd: 0.0000,
           costLabel: "$0.0000",

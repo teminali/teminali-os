@@ -9,6 +9,7 @@ const { initVideoToolBridge, setBridgeWindow, videoBridge } = require("./videoTo
 const { startVideoRpcServer } = require("./videoRpc.cjs");
 const { resolveRealPath, processWithFfmpeg, formatAuditLine, findFfmpeg } = require("./mediaAccess.cjs");
 const { initScreenRecorder, shutdownScreenRecorder } = require("./screenRecorder.cjs");
+const { trashRefusalReason } = require("./projectTrash.cjs");
 const { initVideoProjects, shutdownVideoProjects } = require("./videoProjects.cjs");
 const { initVideoExport, shutdownVideoExport } = require("./videoExport.cjs");
 const { registerWorkspaceMediaScheme, initWorkspaceMedia, stopWorkspaceTranscodes } = require("./workspaceMedia.cjs");
@@ -990,6 +991,52 @@ ipcMain.handle("menu:set-recent-projects", (_event, projects) => {
 
 ipcMain.handle("dialog:open-folder", async (event) => {
   return chooseProjectFolder(BrowserWindow.fromWebContents(event.sender));
+});
+
+/* ── The sidebar's project actions ────────────────────────────────────────
+   Reveal is a courtesy. Trash is the only control in Teminali OS that takes
+   something off the operator's disk, so three things are true of it on purpose:
+
+   - The rule that decides what may go lives in `projectTrash.cjs`, pure, and
+     is tested. Nothing at or above the home folder is a project.
+   - The confirmation is raised *here*, not in the renderer. A confirm the
+     renderer draws is a confirm the renderer can decide to skip; this one is
+     on the path to `shell.trashItem` and cannot be gone round.
+   - It trashes rather than deletes. macOS keeps a Put Back, and the difference
+     between a bad click and a lost afternoon is exactly that.
+   ────────────────────────────────────────────────────────────────────────── */
+ipcMain.handle("projects:reveal", (_event, target) => {
+  if (typeof target !== "string" || !target.trim()) return { ok: false, reason: "No project path was given." };
+  shell.showItemInFolder(target);
+  return { ok: true };
+});
+
+ipcMain.handle("projects:move-to-trash", async (event, target) => {
+  const refusal = trashRefusalReason(target, { home: app.getPath("home") });
+  if (refusal) return { trashed: false, reason: refusal };
+
+  if (!fs.existsSync(target)) {
+    // Already gone is not a failure to report as one — the sidebar's next act
+    // is to forget the project, which is the right outcome either way.
+    return { trashed: true, missing: true };
+  }
+
+  const { response } = await dialog.showMessageBox(BrowserWindow.fromWebContents(event.sender), {
+    type: "warning",
+    buttons: ["Move to Trash", "Cancel"],
+    defaultId: 1,
+    cancelId: 1,
+    message: `Move “${path.basename(target)}” to the Trash?`,
+    detail: `${target}\n\nThe folder and everything inside it goes to the Trash. You can put it back from the Finder.`,
+  });
+  if (response !== 0) return { trashed: false, cancelled: true };
+
+  try {
+    await shell.trashItem(target);
+    return { trashed: true };
+  } catch (error) {
+    return { trashed: false, reason: error?.message || "The Trash refused the folder." };
+  }
 });
 
 /* ── The media approval gate's half in main ───────────────────────────────
