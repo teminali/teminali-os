@@ -36,11 +36,37 @@ export interface BrowserViewState {
   /**
    * The page asked for a passkey and no platform authenticator answered.
    *
-   * Not a failure of the page or of the request: macOS grants Touch ID only to
-   * registered web browsers, so inside this app the answer is always no. Main
-   * clears this on the next navigation. See electron/browserView.cjs.
+   * Not a failure of the page or of the request. On Windows and Linux there is
+   * no platform authenticator in this app at all; on macOS a signed build has
+   * Touch ID and this never arrives, which is the point. Main clears it on the
+   * next navigation. See electron/browserView.cjs.
    */
   passkey?: boolean;
+  /**
+   * A passkey request that matched several credentials and is waiting to be
+   * told which. Null once it is answered, cancelled or gone stale.
+   */
+  webauthn?: BrowserWebauthnRequest | null;
+}
+
+/** One credential the operator may sign in with. Text written by the site. */
+export interface BrowserWebauthnAccount {
+  credentialId: string;
+  name?: string;
+  displayName?: string;
+}
+
+/**
+ * A choice main is holding a page's promise open for.
+ *
+ * The page is blocked until `chooseWebauthnAccount` answers with the
+ * `requestId`, so this is one of the few pieces of view state the pane must
+ * act on rather than merely draw.
+ */
+export interface BrowserWebauthnRequest {
+  requestId: string;
+  relyingPartyId: string;
+  accounts: BrowserWebauthnAccount[];
 }
 
 /** What a view is made with. Settled when the tab opens; a navigation cannot change it. */
@@ -80,8 +106,29 @@ export interface BrowserViewBridge {
   ensure(id: string, url: string, options?: BrowserViewOptions): Promise<{ ok: boolean; reason?: string; existing?: boolean }>;
   setBounds(id: string, bounds: BrowserViewBounds, visible: boolean): void;
   command(id: string, command: BrowserViewCommand): void;
+  /**
+   * Read or drive this panel's page through the DevTools Protocol.
+   *
+   * The op is named, never a CDP method — see electron/browserCdp.cjs, which is
+   * the only thing in the app that speaks the protocol. Always resolves: a
+   * refusal is `ok: false` with a message meant for the agent that asked.
+   */
+  cdp(id: string, op: BrowserCdpOp, params?: BrowserCdpParams): Promise<BrowserCdpAnswer>;
+  /**
+   * The operator's own screenshot: the whole page, as a PNG, wherever they say.
+   *
+   * Not the agent's `page_screenshot`, which is a jpeg of the viewport sized for
+   * a model's context. Main shows the save dialog, so a dismissed dialog comes
+   * back as `cancelled` rather than as an error — the pane must not draw that as
+   * a failure.
+   */
+  screenshot(id: string): Promise<BrowserScreenshotAnswer>;
+  /** Cookies or the cache, on both sessions. History is the gateway's — see store/browserStore.ts. */
+  clearData(kind: BrowserClearKind): Promise<{ ok: boolean; error?: string }>;
   destroy(id: string): void;
   destroyAll(): void;
+  /** Answer a passkey chooser. `null` cancels, and the page sees a NotAllowedError. */
+  chooseWebauthnAccount(requestId: string, credentialId: string | null): void;
   onState(handler: (state: BrowserViewState) => void): () => void;
   onDownload(handler: (download: BrowserDownload) => void): () => void;
   /** False when main did not itself save that path — see electron/browserView.cjs. */
@@ -90,6 +137,55 @@ export interface BrowserViewBridge {
   openExternal(url: string): Promise<boolean>;
   /** Tell main which engine the right-click menu's "Search … for" means. */
   setSearchEngine(engine: { name: string; query: string }): void;
+}
+
+/**
+ * The operations the browser panel's CDP channel answers.
+ *
+ * One per agent tool, and the names are the tool names minus their `page_`
+ * prefix. Kept as a union rather than a string so that adding a tool without
+ * adding a handler in electron/browserView.cjs is a typecheck failure.
+ */
+export type BrowserCdpOp = "snapshot" | "read" | "screenshot" | "click" | "type" | "network" | "eval";
+
+export interface BrowserCdpParams {
+  /** A `ref` from the last snapshot, for "click" and "type". */
+  ref?: string;
+  text?: string;
+  /** Press Enter after typing — for a field that only reacts to a keystroke. */
+  submit?: boolean;
+  button?: "left" | "right" | "middle";
+  fullPage?: boolean;
+  limit?: number;
+  filter?: string;
+  expression?: string;
+}
+
+/**
+ * What the panel can clear, and what it deliberately cannot.
+ *
+ * Two words, because each has one honest meaning in main
+ * (`clearDataPlan` in electron/browserView.cjs). "history" is absent on
+ * purpose: it is a gateway file the assistant reads, not session state, and it
+ * goes through `browserStore.clearHistory`.
+ */
+export type BrowserClearKind = "cookies" | "cache";
+
+/** Where the screenshot went, or why it did not. `cancelled` is neither. */
+export interface BrowserScreenshotAnswer {
+  ok: boolean;
+  /** Where the operator saved it. Absent unless it was saved. */
+  path?: string;
+  /** The save dialog was dismissed. Not an error, and not worth a message. */
+  cancelled?: boolean;
+  error?: string;
+}
+
+/** Always resolved. `ok: false` carries a message written for the agent. */
+export interface BrowserCdpAnswer {
+  ok: boolean;
+  error?: string;
+  result?: Record<string, unknown>;
 }
 
 export interface BrowserViewBounds {
@@ -137,14 +233,25 @@ export function boundsEqual(a: BrowserViewBounds | null, b: BrowserViewBounds): 
  * Is the app drawing something over the panel right now?
  *
  * A view sits above the whole document, so a modal that dims the app would be
- * dimmed *by* the page it is supposed to cover. Every overlay in the shell is
- * either a `role="dialog"` (Modal) or a `role="menu"` (Menu), so asking the
- * document is both cheaper and more honest than threading a flag out of every
- * store that can open one.
+ * dimmed *by* the page it is supposed to cover. Every overlay in the shell
+ * carries a role, so asking the document is both cheaper and more honest than
+ * threading a flag out of every store that can open one.
+ *
+ * `alertdialog` is in the list because leaving it out cost the one prompt that
+ * could least afford it: `MediaConsentModal` is marked up correctly and asks
+ * for the camera and the microphone, and a page was drawn over it — an
+ * operator granting a device to something they cannot see. A role that means
+ * "modal" must be matched however ARIA spells it, so the roles live in one
+ * named constant that the source guard in `tests/overlay-roles.test.mjs`
+ * checks every hand-rolled overlay against.
  */
+export const OVERLAY_ROLES = ["dialog", "alertdialog", "menu"] as const;
+
+const OVERLAY_SELECTOR = OVERLAY_ROLES.map((role) => `[role="${role}"]`).join(", ");
+
 export function isOverlayOpen(): boolean {
   if (typeof document === "undefined") return false;
-  return document.querySelector('[role="dialog"], [role="menu"]') !== null;
+  return document.querySelector(OVERLAY_SELECTOR) !== null;
 }
 
 /**

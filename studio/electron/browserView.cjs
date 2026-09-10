@@ -23,8 +23,9 @@
   the whole of the contract below: bounds, visibility, navigation, and a state
   event back for the toolbar.
 */
-const { app, WebContentsView, ipcMain, session, shell } = require("electron");
+const { app, dialog, WebContentsView, ipcMain, session, shell, webContents } = require("electron");
 const { attachContextMenu, setSearchEngine } = require("./contextMenu.cjs");
+const { createBrowserCdp } = require("./browserCdp.cjs");
 const fs = require("node:fs");
 const path = require("node:path");
 
@@ -48,16 +49,29 @@ const MAX_KNOWN_DOWNLOADS = 200;
 /*
   Passkeys, and the silence that made them look broken.
 
-  macOS gates the platform authenticator — Touch ID — behind
-  `com.apple.developer.web-browser.public-key-credential`, an entitlement Apple
-  grants to registered web browsers and to nothing else; an Electron app cannot
-  hold it. Measured in this app rather than assumed: `PublicKeyCredential` is
-  defined, `navigator.credentials.get` is a function, and
-  `isUserVerifyingPlatformAuthenticatorAvailable()` answers false. So the page
-  asks correctly and there is simply nothing to answer, which the operator
-  experiences as a button that does nothing at all.
+  macOS grants the *system* passkey provider — the one that reaches iCloud
+  Keychain — only to registered web browsers, behind
+  `com.apple.developer.web-browser.public-key-credential`, which an Electron
+  app cannot hold. Measured in this app rather than assumed:
+  `PublicKeyCredential` is defined, `navigator.credentials.get` is a function,
+  and `isUserVerifyingPlatformAuthenticatorAvailable()` answered false. So the
+  page asked correctly and there was simply nothing to answer, which the
+  operator experienced as a button that does nothing at all.
 
-  The limit is not fixable here. The silence is. The probe wraps
+  **On macOS this is now answered**, by a different authenticator than the one
+  Apple withholds: Electron 44's `app.configureWebAuthn` implements a platform
+  authenticator against this Mac's Secure Enclave, and `electron/webauthn.cjs`
+  turns it on when the build was signed with the keychain access group it
+  needs. Touch ID only — device-bound credentials, no iCloud sync, no phone
+  passkeys, no security keys — and nothing at all on Windows and Linux, which
+  still have no platform authenticator here.
+
+  So the probe below stays, and its going quiet on macOS is the acceptance
+  test: `isUserVerifyingPlatformAuthenticatorAvailable()` now answers true,
+  the early return at the check fires, and the notice never reaches the
+  toolbar. Everywhere else the notice is still the honest answer.
+
+  The probe wraps
   `credentials.get` and `.create` in the page's own world, calls through
   untouched, and — only when the platform authenticator really is absent —
   says so on the console. `console.info` is the channel deliberately: this view
@@ -138,6 +152,44 @@ const PASSKEY_PROBE = `(() => {
   }
 })();`;
 
+/**
+ * How long an unanswered passkey chooser waits before it cancels itself.
+ *
+ * Generous: the operator may be reading two account names they have not seen
+ * in a year. Bounded all the same, because Electron holds the page's promise
+ * open until the callback comes back, and a chooser left behind a switched-away
+ * tab must not hold it for the life of the process.
+ */
+const WEBAUTHN_CHOICE_MS = 120_000;
+
+/**
+ * The accounts a `select-webauthn-account` offers, reduced to what a chooser
+ * can draw.
+ *
+ * Everything here was written by the page that created the credential, so it
+ * is text of someone else's choosing: only the fields the UI shows survive,
+ * they are clamped, and an entry with no credential id is dropped — a choice
+ * that cannot be answered is not a choice.
+ */
+function webauthnAccounts(details) {
+  const accounts = Array.isArray(details?.accounts) ? details.accounts : [];
+  const text = (value) => (typeof value === "string" && value.trim() ? value.trim().slice(0, 120) : undefined);
+  return accounts
+    .filter((account) => typeof account?.credentialId === "string" && account.credentialId)
+    .slice(0, 12)
+    .map((account) => ({
+      credentialId: account.credentialId,
+      name: text(account.name),
+      displayName: text(account.displayName),
+    }));
+}
+
+/** The site asking, as a host the operator can recognise. */
+function relyingPartyOf(details) {
+  const id = details?.relyingPartyId;
+  return typeof id === "string" ? id.slice(0, 253) : "";
+}
+
 /** Is this console line the probe above, rather than the page talking? */
 function isPasskeyNotice(text) {
   return typeof text === "string" && text.startsWith(PASSKEY_SENTINEL);
@@ -185,6 +237,66 @@ function isRevealable(known, filePath) {
   return typeof filePath === "string" && filePath.length > 0 && known.has(filePath);
 }
 
+/*
+  What a screenshot is called before the operator renames it.
+
+  The host and the minute, because a folder of `Screenshot 12.png` is a folder
+  nobody can search. The hostname is site-controlled text on its way to a file
+  path, so it is reduced to letters, digits, dots and dashes here rather than
+  trusted — a leading dot or a slash in a "hostname" would otherwise decide
+  which directory the save dialog opened in.
+*/
+function screenshotFilename(url, at = new Date()) {
+  let host = "";
+  try {
+    host = new URL(String(url)).hostname;
+  } catch {
+    host = "";
+  }
+  const safe = host.toLowerCase().replace(/[^a-z0-9.-]+/g, "-").replace(/^[.-]+|[.-]+$/g, "");
+  const pad = (value) => String(value).padStart(2, "0");
+  const stamp =
+    `${at.getFullYear()}${pad(at.getMonth() + 1)}${pad(at.getDate())}` +
+    `-${pad(at.getHours())}${pad(at.getMinutes())}${pad(at.getSeconds())}`;
+  return `teminali-${safe || "page"}-${stamp}.png`;
+}
+
+/*
+  A picture, back out of the data URL the CDP layer answers with.
+
+  browserCdp.cjs returns an image the way the agent's tools need it — a data URL
+  in a JSON result — and this is the one caller that wants bytes instead. Kept
+  strict on purpose: the string is what gets written to a file the operator
+  chose, so anything that is not a base64 png or jpeg is refused rather than
+  decoded on a guess.
+*/
+function dataUrlBytes(value) {
+  if (typeof value !== "string") return null;
+  const match = /^data:image\/(png|jpeg);base64,([A-Za-z0-9+/]+={0,2})$/.exec(value);
+  if (!match) return null;
+  const bytes = Buffer.from(match[2], "base64");
+  return bytes.length > 0 ? bytes : null;
+}
+
+/*
+  What "Clear cookies" and "Clear cache" actually clear.
+
+  A mapping rather than two calls at the call site, because the honest answer to
+  each label is not obvious and belongs somewhere a test can read it. Cookies
+  take the HTTP auth cache with them: a stored Basic-auth credential is the same
+  promise to the operator as a session cookie, and leaving it would sign them
+  out of every site except the ones they would least expect. Nothing here
+  touches localStorage or IndexedDB — the label says cookies.
+
+  History is not in this table. It is the gateway's file, not a session's, and
+  it is cleared through `browserStore` (see store/browserStore.ts).
+*/
+function clearDataPlan(kind) {
+  if (kind === "cookies") return { storages: ["cookies"], cache: false, authCache: true };
+  if (kind === "cache") return { storages: [], cache: true, authCache: false };
+  return null;
+}
+
 function isBounds(value) {
   return Boolean(
     value &&
@@ -225,6 +337,9 @@ function initBrowserViews({ getMainWindow, log }) {
       private: entry.private === true,
       // The page asked for a passkey and nothing can answer. See PASSKEY_PROBE.
       passkey: entry.passkey === true,
+      // A passkey request that found more than one credential and is waiting
+      // for the operator to say which. See the chooser at the end of this file.
+      webauthn: entry.webauthn ?? null,
     });
   };
 
@@ -253,7 +368,10 @@ function initBrowserViews({ getMainWindow, log }) {
     const contents = view.webContents;
     /* Registered before the listeners below, because they read it: `passkey`
        has to be cleared by a navigation before that same navigation publishes. */
-    const entry = { view, bounds: null, visible: false, private: isPrivate === true, passkey: false };
+    /* `cdp` stays null until something asks: attaching a debugger to every tab
+       the operator opens would put a protocol channel on pages nobody ever
+       asks the assistant about. See electron/browserCdp.cjs. */
+    const entry = { view, bounds: null, visible: false, private: isPrivate === true, passkey: false, webauthn: null, cdp: null };
     views.set(id, entry);
 
     /*
@@ -289,6 +407,15 @@ function initBrowserViews({ getMainWindow, log }) {
     // below: the same `did-navigate` that clears it is the one that reports.
     contents.on("did-navigate", () => {
       entry.passkey = false;
+      // A chooser belongs to the request that raised it, and that request did
+      // not survive the navigation. Cancelling settles Electron's callback,
+      // which otherwise stays owed for ever.
+      cancelWebauthnFor(id);
+      /* The snapshot refs the assistant is holding describe a document that is
+         no longer here. Dropped rather than left to fail on their own: a ref
+         that still resolves after a navigation is a click on whatever now
+         occupies that slot, reported as a success. */
+      entry.cdp?.invalidateRefs();
     });
     contents.on("dom-ready", () => {
       contents.executeJavaScript(PASSKEY_PROBE, false).catch(() => {
@@ -340,6 +467,16 @@ function initBrowserViews({ getMainWindow, log }) {
   function destroy(id) {
     const entry = views.get(id);
     if (!entry) return;
+    // Before the entry goes: an unanswered chooser owes Electron a callback,
+    // and the tab it belonged to is not going to answer now.
+    cancelWebauthnFor(id);
+    // And the debugger, before the contents it is attached to goes: a detach
+    // after the target is destroyed throws, and the message listener would
+    // outlive the view that owns it.
+    try {
+      entry.cdp?.dispose();
+    } catch {}
+    entry.cdp = null;
     views.delete(id);
     if (entry.private && ![...views.values()].some((other) => other.private)) clearPrivateSession();
     const window = getMainWindow();
@@ -423,6 +560,70 @@ function initBrowserViews({ getMainWindow, log }) {
   ipcMain.on("browser-view:destroy", (event, id) => {
     if (!mainWindowOf(event.sender)) return;
     destroy(id);
+  });
+
+  /*
+    The assistant, reaching the page.
+
+    One channel, and the operations are named rather than composed: the
+    renderer asks for `snapshot` or `click`, never for a CDP method. The
+    protocol is spoken only in browserCdp.cjs, behind an allowlist, and this
+    handler's whole job is to find the view and hand over a plain result.
+
+    Errors come back as `{ ok: false, error }` rather than as a rejected
+    invoke. This answer travels on to the gateway and then into a tool result,
+    and "there is no snapshot of this page yet" is something the agent can act
+    on — where a thrown IPC error arrives as an unhandled rejection in the
+    renderer and a silent timeout in the turn.
+  */
+  ipcMain.handle("browser-view:cdp", async (event, id, op, params) => {
+    if (!mainWindowOf(event.sender)) return { ok: false, error: "The browser panel is not available in this window." };
+    const entry = views.get(id);
+    if (!entry || entry.view.webContents.isDestroyed()) {
+      return { ok: false, error: "That browser panel is not open. Open a page with `browse` first." };
+    }
+    const contents = entry.view.webContents;
+    if (contents.isLoading()) {
+      /*
+        Not a refusal, a wait. A snapshot taken mid-navigation describes the
+        page being left, which is worse than being told to ask again — and the
+        agent's next call is usually one round trip away.
+      */
+      await new Promise((resolve) => {
+        const timer = setTimeout(resolve, 5_000);
+        if (typeof timer.unref === "function") timer.unref();
+        contents.once("did-stop-loading", () => {
+          clearTimeout(timer);
+          resolve();
+        });
+      });
+      if (contents.isDestroyed()) return { ok: false, error: "That browser panel closed while it was loading." };
+    }
+    if (!entry.cdp) entry.cdp = createBrowserCdp({ contents, log });
+    try {
+      switch (op) {
+        case "snapshot":
+          return { ok: true, result: await entry.cdp.snapshot() };
+        case "read":
+          return { ok: true, result: await entry.cdp.read() };
+        case "screenshot":
+          return { ok: true, result: await entry.cdp.screenshot({ fullPage: params?.fullPage === true }) };
+        case "click":
+          return { ok: true, result: await entry.cdp.click({ ref: params?.ref, button: params?.button }) };
+        case "type":
+          return { ok: true, result: await entry.cdp.type({ ref: params?.ref, text: params?.text, submit: params?.submit === true }) };
+        case "network":
+          return { ok: true, result: await entry.cdp.networkLog({ limit: params?.limit, filter: params?.filter }) };
+        case "eval":
+          return { ok: true, result: await entry.cdp.evaluate({ expression: params?.expression }) };
+        default:
+          return { ok: false, error: `"${op}" is not something the browser panel can be asked to do.` };
+      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      log(`Browser view ${id} could not ${op}:`, message);
+      return { ok: false, error: message };
+    }
   });
 
   /* ── Downloads ──────────────────────────────────────────────────────────
@@ -532,6 +733,78 @@ function initBrowserViews({ getMainWindow, log }) {
   armDownloads(PARTITION);
   armDownloads(PRIVATE_PARTITION);
 
+  /*
+    The operator's own screenshot of the page.
+
+    Full page and PNG, which is what separates it from the agent's
+    `page_screenshot`: that one is a jpeg of what is on screen, sized for a
+    model's context, and this one is a file somebody will open at 200% to read
+    the small print. Same CDP layer either way — nothing else in the app speaks
+    the protocol.
+
+    Electron's save dialog, for the reason the downloads block below states: main
+    does not invent paths inside the operator's home. The path it hands back is
+    remembered the way a finished download is, so "Show in Finder" can reveal
+    it — main watched this exact file being written, which is the only thing
+    that makes a path revealable here. A screenshot of a private tab is kept for
+    the session and not written to the list on disk, like a private download.
+  */
+  ipcMain.handle("browser-view:screenshot", async (event, id) => {
+    const window = mainWindowOf(event.sender);
+    if (!window) return { ok: false, error: "The browser panel is not available in this window." };
+    const entry = views.get(id);
+    if (!entry || entry.view.webContents.isDestroyed()) return { ok: false, error: "That browser panel is not open." };
+    const contents = entry.view.webContents;
+    try {
+      if (!entry.cdp) entry.cdp = createBrowserCdp({ contents, log });
+      const shot = await entry.cdp.screenshot({ fullPage: true, format: "png" });
+      const bytes = dataUrlBytes(shot.image);
+      if (!bytes) return { ok: false, error: "The page produced no picture." };
+      const chosen = await dialog.showSaveDialog(window, {
+        title: "Save screenshot",
+        defaultPath: path.join(app.getPath("downloads"), screenshotFilename(shot.url || contents.getURL?.() || "")),
+        filters: [{ name: "PNG image", extensions: ["png"] }],
+      });
+      // Cancelled is not a failure, and must not read as one: the pane draws a
+      // refusal in the same strip it draws a load error in.
+      if (chosen.canceled || !chosen.filePath) return { ok: false, cancelled: true };
+      await fs.promises.writeFile(chosen.filePath, bytes);
+      remember(chosen.filePath, !entry.private);
+      return { ok: true, path: chosen.filePath };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      log(`Browser view ${id} could not be photographed:`, message);
+      return { ok: false, error: message };
+    }
+  });
+
+  /*
+    Clearing cookies or the cache.
+
+    Both sessions, always. The private one is wiped when its last tab closes
+    anyway — but an operator asking to clear cookies means all of them, and a
+    private tab open right now is holding some. Which storages each word covers
+    is `clearDataPlan`, above, and not decided here.
+  */
+  ipcMain.handle("browser-view:clear-data", async (event, kind) => {
+    if (!mainWindowOf(event.sender)) return { ok: false, error: "The browser panel is not available in this window." };
+    const plan = clearDataPlan(kind);
+    if (!plan) return { ok: false, error: "That is not something the browser panel can clear." };
+    try {
+      for (const partition of [PARTITION, PRIVATE_PARTITION]) {
+        const store = session.fromPartition(partition);
+        if (plan.storages.length) await store.clearStorageData({ storages: plan.storages });
+        if (plan.cache) await store.clearCache();
+        if (plan.authCache) await store.clearAuthCache();
+      }
+      return { ok: true };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      log(`Browser data (${kind}) could not be cleared:`, message);
+      return { ok: false, error: message };
+    }
+  });
+
   ipcMain.handle("browser-view:reveal-download", (event, filePath) => {
     if (!mainWindowOf(event.sender)) return false;
     if (!isRevealable(known, filePath)) return false;
@@ -582,6 +855,97 @@ function initBrowserViews({ getMainWindow, log }) {
     destroyAllBrowserViews();
   });
 
+  /*
+    Two passkeys for one site, and a choice that has to leave this process.
+
+    Once `app.configureWebAuthn` is on (electron/webauthn.cjs), a
+    `navigator.credentials.get()` that matches more than one credential stops
+    on `select-webauthn-account` and waits — and Electron is explicit that the
+    request **stays pending until the callback is invoked**, and that a session
+    with no listener at all cancels the request. So this is not decoration:
+    without it, an operator with two passkeys for one site gets a
+    `NotAllowedError` and no way to say which account they meant.
+
+    The chooser is drawn by the renderer rather than by a native dialog, for
+    the same reason everything else in this panel is: it is a page's request
+    about the operator's own accounts, and it belongs in the panel's own
+    chrome. It travels on the existing state channel, so it is subject to the
+    same merge the toolbar already does, and the renderer's answer comes back
+    on one narrow channel that carries a request id — a stale id settles
+    nothing, which is what makes a second click harmless.
+
+    Every path out of here settles the callback exactly once: a choice, a
+    cancel, a navigation, a closed tab, or the timeout. An unanswered one is
+    not a stuck dialog — it is a page that never hears back.
+  */
+  const pendingWebauthn = new Map();
+  let webauthnSeq = 0;
+
+  /**
+   * Settle one pending request and take its chooser off the toolbar.
+   *
+   * `credentialId` must be one of the ids that were offered; anything else —
+   * including the cancel this sends as `null` — makes the page's promise
+   * reject with `NotAllowedError`, which is the same outcome as dismissing a
+   * browser's own sheet.
+   */
+  function settleWebauthn(requestId, credentialId) {
+    const pending = pendingWebauthn.get(requestId);
+    if (!pending) return;
+    pendingWebauthn.delete(requestId);
+    clearTimeout(pending.timer);
+    const entry = views.get(pending.id);
+    if (entry && entry.webauthn && entry.webauthn.requestId === requestId) {
+      entry.webauthn = null;
+      publish(pending.id);
+    }
+    try {
+      pending.callback(typeof credentialId === "string" && credentialId ? credentialId : null);
+    } catch (error) {
+      log("A passkey choice could not be delivered:", error?.message ?? error);
+    }
+  }
+
+  /** Cancel whatever this view was asking, if anything. */
+  function cancelWebauthnFor(id) {
+    for (const [requestId, pending] of pendingWebauthn) {
+      if (pending.id === id) settleWebauthn(requestId, null);
+    }
+  }
+
+  for (const partition of [PARTITION, PRIVATE_PARTITION]) {
+    session.fromPartition(partition).on("select-webauthn-account", (_event, details, callback) => {
+      let claimed = false;
+      try {
+        const contents = details?.frame ? webContents.fromFrame(details.frame) : null;
+        const id = contents ? panelIdOf(contents) : null;
+        const entry = id ? views.get(id) : null;
+        const window = getMainWindow();
+        const accounts = webauthnAccounts(details);
+        if (!entry || !window || window.isDestroyed() || accounts.length === 0) {
+          callback(null);
+          return;
+        }
+        const requestId = `webauthn-${++webauthnSeq}`;
+        const timer = setTimeout(() => settleWebauthn(requestId, null), WEBAUTHN_CHOICE_MS);
+        // A pending choice is not a reason to keep the process alive.
+        if (typeof timer.unref === "function") timer.unref();
+        pendingWebauthn.set(requestId, { id, callback, timer });
+        claimed = true;
+        entry.webauthn = { requestId, relyingPartyId: relyingPartyOf(details), accounts };
+        publish(id);
+      } catch (error) {
+        log("The passkey account chooser failed:", error?.message ?? error);
+        if (!claimed) callback(null);
+      }
+    });
+  }
+
+  ipcMain.on("browser-view:webauthn-choice", (event, requestId, credentialId) => {
+    if (!mainWindowOf(event.sender)) return;
+    settleWebauthn(requestId, credentialId);
+  });
+
   return { destroyAllBrowserViews };
 }
 
@@ -589,11 +953,17 @@ module.exports = {
   initBrowserViews,
   isPasskeyNotice,
   PASSKEY_PROBE,
+  WEBAUTHN_CHOICE_MS,
+  webauthnAccounts,
+  relyingPartyOf,
   isAllowedUrl,
   scaleBounds,
   isBounds,
   parseKnownDownloads,
   isRevealable,
+  screenshotFilename,
+  dataUrlBytes,
+  clearDataPlan,
   BROWSER_VIEW_PARTITION: PARTITION,
   BROWSER_VIEW_PRIVATE_PARTITION: PRIVATE_PARTITION,
 };
