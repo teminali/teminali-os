@@ -1,0 +1,88 @@
+{
+  "model": "mlx-community/Qwen3-8B-4bit",
+  "iters": 30,
+  "full_iters": 126,
+  "batch_size": 4,
+  "layers": 8,
+  "rank": 8,
+  "scale": 20.0,
+  "lr": 0.0001,
+  "optimizer": "adamw",
+  "seed": 0,
+  "max_seq_length": 222,
+  "mask_prompt": true,
+  "system": "short",
+  "system_words": 110,
+  "n_train": 126,
+  "n_valid": 12,
+  "wall_seconds": 222.5,
+  "bench": true,
+  "train_reports": [
+    {
+      "iteration": 5,
+      "train_loss": 3.423335647583008,
+      "learning_rate": 9.999999747378752e-05,
+      "iterations_per_second": 0.15971813263896248,
+      "tokens_per_second": 13.895477539589736,
+      "trained_tokens": 435,
+      "peak_memory": 7.886781622
+    },
+    {
+      "iteration": 10,
+      "train_loss": 1.8397571563720703,
+      "learning_rate": 9.999999747378752e-05,
+      "iterations_per_second": 0.15835173703820093,
+      "tokens_per_second": 14.916733628998527,
+      "trained_tokens": 906,
+      "peak_memory": 7.886781622
+    },
+    {
+      "iteration": 15,
+      "train_loss": 1.985727310180664,
+      "learning_rate": 9.999999747378752e-05,
+      "iterations_per_second": 0.1583895591646165,
+      "tokens_per_second": 14.03331494198502,
+      "trained_tokens": 1349,
+      "peak_memory": 7.886781622
+    },
+    {
+      "iteration": 20,
+      "train_loss": 2.0675470352172853,
+      "learning_rate": 9.999999747378752e-05,
+      "iterations_per_second": 0.16021032838964522,
+      "tokens_per_second": 14.38688748939014,
+      "trained_tokens": 1798,
+      "peak_memory": 7.886781622
+    },
+    {
+      "iteration": 25,
+      "train_loss": 2.033450698852539,
+      "learning_rate": 9.999999747378752e-05,
+      "iterations_per_second": 0.15253246059513453,
+      "tokens_per_second": 13.42285653237184,
+      "trained_tokens": 2238,
+      "peak_memory": 7.886781622
+    },
+    {
+      "iteration": 30,
+      "train_loss": 2.0720903396606447,
+      "learning_rate": 9.999999747378752e-05,
+      "iterations_per_second": 0.14049348695563446,
+      "tokens_per_second": 11.829551601664422,
+      "trained_tokens": 2659,
+      "peak_memory": 7.886781622
+    }
+  ],
+  "val_reports": [
+    {
+      "iteration": 0,
+      "val_loss": 6.811910629272461,
+      "val_time": 12.128354541986482
+    },
+    {
+      "iteration": 29,
+      "val_loss": 1.927971601486206,
+      "val_time": 14.779256083013024
+    }
+  ]
+}

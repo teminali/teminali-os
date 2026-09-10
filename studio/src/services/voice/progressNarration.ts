@@ -9,6 +9,8 @@
  * can be tested without a microphone.
  */
 
+import type { MachineActionKind } from "./machineAction.ts";
+
 export interface NarratableToolCall {
   id: string;
   name: string;
@@ -25,6 +27,13 @@ export interface RunProgress {
   /** The assistant's streamed prose so far, markdown allowed. */
   lastText: string;
   finishedAt?: number;
+  /**
+   * What `machineAction` classified the turn as, when it came from the voice.
+   * Only `inspect` changes anything here, and it has to: an inspect turn is a
+   * *question*, and a question whose run says nothing back was being answered
+   * "Done." — a completion report standing where an answer belongs.
+   */
+  kind?: MachineActionKind;
 }
 
 const PATH_KEYS = ["file_path", "filePath", "path", "file", "target", "filename", "notebook_path", "directory", "dir"];
@@ -163,10 +172,35 @@ export function describeToolCall(call: NarratableToolCall): string | null {
   return `Using ${name.replace(/[_-]+/g, " ")}.`;
 }
 
+/**
+ * A fenced block whose whole body is one short line is a value wearing a
+ * fence — the answer to "what is the port", not a listing. Anything longer is
+ * output, and output read aloud is unbearable, so it still goes.
+ */
+const FENCE_VALUE_CHARS = 40;
+
+function unfence(block: string): string {
+  const body = block.replace(/^```[^\n]*\n?/, "").replace(/```$/, "").trim();
+  return !body.includes("\n") && body.length <= FENCE_VALUE_CHARS ? ` ${body} ` : " ";
+}
+
+/**
+ * The first thing the assistant said, made speakable.
+ *
+ * Code spans are **unwrapped, not deleted**. Deleting them is right for a work
+ * narration — "backtick npm run build backtick" is not a sentence — but this
+ * same function supplies `summariseOutcome`, which is the whole of what an
+ * `inspect` turn ever says back. There the span is the payload: measured
+ * 2026-09-10, all eight realistic answers to a state question lost theirs.
+ * "The port is `8080`." was spoken as "The port is ."; "There are `3` errors
+ * in the log." became "There are errors in the log." — a fluent sentence with
+ * the answer removed, which is worse than silence. Keep what was inside the
+ * backticks; lose only the backticks.
+ */
 function firstSentence(text: string, max = 160): string {
   const clean = text
-    .replace(/```[\s\S]*?```/g, " ")
-    .replace(/`[^`]*`/g, " ")
+    .replace(/```[\s\S]*?```/g, unfence)
+    .replace(/`([^`]*)`/g, "$1")
     .replace(/[#*_>|]/g, " ")
     .replace(/\s+/g, " ")
     .trim();
@@ -242,6 +276,17 @@ export function summariseProgress(run: RunProgress, now = Date.now()): string {
   return parts.join(" ");
 }
 
+/**
+ * What an inspect turn says when its run finished having said nothing.
+ *
+ * "Done." is the answer to "do this"; to "did the tests pass" it reports the
+ * completion of work in place of the answer that was asked for, which is the
+ * fiction `machineAction` exists to keep out of her mouth. Admitting the miss
+ * costs the operator one sentence; the alternative costs them their trust in
+ * every other answer.
+ */
+export const NO_ANSWER = "I looked, but nothing came back that I can read out.";
+
 /** What to say once a run finishes and nothing else was read out. */
 export function summariseOutcome(run: RunProgress): string {
   const edits = new Set<string>();
@@ -251,7 +296,7 @@ export function summariseOutcome(run: RunProgress): string {
     if (path && /(edit|write|patch|replace|create|apply|multiedit|str_replace)/.test(name)) edits.add(basename(path));
   }
   const note = firstSentence(run.lastText, 140);
-  if (edits.size === 0) return note || "Done.";
+  if (edits.size === 0) return note || (run.kind === "inspect" ? NO_ANSWER : "Done.");
   const named = [...edits].slice(0, 3).map(speakablePath).join(", ");
   return `Done. I changed ${edits.size <= 3 ? named : `${plural(edits.size, "file")}, including ${named}`}.${note ? ` ${note}` : ""}`;
 }

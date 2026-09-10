@@ -1,44 +1,90 @@
 /* ═══════════════════════════════════════════════════════════════════
-   The right rail of the panel: what goes into the take.
+   The right rail: what goes into the take, and what the build makes of it.
 
-   Two rules this rail is built around.
+   ── Three tabs, not one scroll of five groups ───────────────────────
+   This rail used to be five stacked groups in a 288px column. Camera
+   came first and carried a preview, a mirror switch, two segmented
+   controls and a slider; by the time Live stream arrived it was the
+   fourth heading below the fold, and Auto edit — six switches nobody
+   had ever seen — was the fifth. The footer would announce "Live:
+   YouTube" in red while the controls that said so were three scrolls
+   away, which is how the report put it: *the live settings are too far*.
 
-   **Show the camera, do not describe it.** A dropdown reading
-   "FaceTime HD Camera" does not tell you the lid is half closed, that
-   the lamp behind you is blowing the frame out, or that the wrong
-   camera is selected on a machine with three. A live preview does, and
-   it costs one low-resolution stream.
+   Depth is the wrong axis for a rail this narrow. The three groups
+   answer three different questions, asked at different moments:
 
-   **Show the microphone too.** The single most common way a screen
-   recording is ruined is a muted or wrong input, discovered after
-   twenty minutes of talking. The meter is not decoration: it is the
-   only thing on this rail that can prove the take will have sound.
+     Capture   what the FILE will contain          settled at the take
+     Live      where it is going while it happens  settled at the take
+     Auto edit what the BUILD makes of the file    changeable forever
+
+   So they are tabs. Everything is one click from everywhere, the tab
+   strip carries the state that used to be invisible (a live dot, a
+   count of edit steps), and the footer's chips are doors into the tab
+   that owns them rather than labels for something you must go hunting
+   for.
+
+   ── Two rules the rail is still built around ────────────────────────
+   **Show the microphone, do not describe it.** The single most common
+   way a screen recording is ruined is a muted or wrong input,
+   discovered after twenty minutes of talking. The meter is not
+   decoration: it is the only thing here that can prove the take will
+   have sound.
+
+   **Show the camera where it will BE.** The preview moved out of this
+   rail and onto the stage (`CaptureStage`), because a 288px thumbnail
+   proves the lens works and says nothing about the thing you actually
+   get wrong — which corner it lands in and how much of the frame it
+   eats. One stream, one place, at the size and position of the real
+   thing. What stays here is the choosing: device, mirror, resolution,
+   corner and size.
 
    The preview streams are deliberately SMALL — 640x360 and whatever the
    default sample rate is. They are thrown away when recording starts
    and the real streams are opened at full resolution, so previewing
    costs nothing in the file.
-
-   ── Four groups, not eight ───────────────────────────────────────────
-   Three describe the CAPTURE and the fourth describes the EDIT the
-   build makes of it. What is still missing from the Cut's rail is the
-   tutorial skill and Go live: the first reads a transcript this app
-   cannot produce, the second has no streaming surface here. A control
-   that writes to nothing is worse than a missing one, so they come
-   back with the code that honours them.
    ═══════════════════════════════════════════════════════════════════ */
 
 import React from 'react';
 import { SliderRow, ToggleRow, SegmentedControl } from '../ui/Controls';
-import { previewCamera, previewMicrophone } from '../../engine/screenCapture';
+import { previewMicrophone } from '../../engine/screenCapture';
 import type { DeviceOption } from '../../engine/screenCapture';
 import { useRecorderStore, type StickySettings } from '../../store/recorderStore';
 import type { RecorderPermissions, LiveStreamService } from '../../../types/recorder';
 import {
-  Camera, Mic, MicOff, VideoOff, Monitor, Film, AlertTriangle,
-  Broadcast, Eye, EyeOff, CheckCircle2, Loader2,
+  Camera, Mic, MicOff, Film, AlertTriangle,
+  Broadcast, Eye, EyeOff, CheckCircle2, Loader2, Gauge, KeyRound, Globe, Info,
 } from '../ui/icons';
 import { cursorHint } from '../../engine/platformCopy';
+
+export type RailTab = 'capture' | 'live' | 'edit';
+
+/**
+ * Whether a live take can start, and why not.
+ *
+ * Read by the rail and by the footer's start button, from here, so the
+ * two can never disagree about it. It exists because the store's
+ * `begin()` does not check: an armed stream with no key used to get all
+ * the way to ffmpeg before failing, which spends a take to learn
+ * something the dialog already knew.
+ */
+export function liveReadiness(settings: StickySettings): { ok: boolean; reason: string | null } {
+  if (!settings.liveEnabled) return { ok: true, reason: null };
+  if (!settings.liveCustomUrl.trim()) return { ok: false, reason: 'The stream needs a server URL' };
+  /* A custom endpoint may carry its key in the path — the presets never
+     do, and every one of them fails silently without it. */
+  if (settings.liveService !== 'custom' && !settings.liveStreamKey.trim()) {
+    return { ok: false, reason: 'Paste the stream key from your broadcaster' };
+  }
+  return { ok: true, reason: null };
+}
+
+/** How many of the build's interpretations are switched on. */
+export function autoEditCount(settings: StickySettings): number {
+  return [
+    settings.autoZoom, settings.drawCursor, settings.motionBlur,
+    settings.cinematic, settings.sound, settings.markMoments,
+  ].filter(Boolean).length;
+}
 
 interface Props {
   settings: StickySettings;
@@ -47,15 +93,66 @@ interface Props {
   permissions: RecorderPermissions | null;
   onChange: <K extends keyof StickySettings>(key: K, value: StickySettings[K]) => void;
   onRequestPermission: (kind: 'camera' | 'microphone' | 'screen' | 'accessibility') => void;
+  tab: RailTab;
+  onTabChange: (tab: RailTab) => void;
 }
 
 export const CaptureOptions: React.FC<Props> = ({
+  settings, cameras, microphones, permissions, onChange, onRequestPermission, tab, onTabChange,
+}) => {
+  const edits = autoEditCount(settings);
+
+  return (
+    /* Width and the dividing edge belong to whoever seats this rail — a
+       column in a wide panel, a sheet in a narrow one. See `RecorderPanel`. */
+    <div className="h-full flex flex-col min-h-0">
+      <div className="tab-strip flex-shrink-0 flex" role="tablist">
+        <RailTabButton id="capture" label="Capture" tab={tab} onSelect={onTabChange} />
+        <RailTabButton
+          id="live"
+          label="Live"
+          tab={tab}
+          onSelect={onTabChange}
+          badge={settings.liveEnabled
+            ? <span className="w-1.5 h-1.5 rounded-full bg-spectrum-red animate-pulse" aria-label="armed" />
+            : null}
+        />
+        <RailTabButton
+          id="edit"
+          label="Auto edit"
+          tab={tab}
+          onSelect={onTabChange}
+          badge={edits > 0
+            ? <span className="text-micro tabular text-spectrum-textFaint">{edits}</span>
+            : null}
+        />
+      </div>
+
+      <div className="flex-1 min-h-0 overflow-y-auto" role="tabpanel">
+        {tab === 'capture' && (
+          <CaptureTab
+            settings={settings}
+            cameras={cameras}
+            microphones={microphones}
+            permissions={permissions}
+            onChange={onChange}
+            onRequestPermission={onRequestPermission}
+          />
+        )}
+        {tab === 'live' && <LiveTab settings={settings} onChange={onChange} />}
+        {tab === 'edit' && <AutoEditTab settings={settings} permissions={permissions} onChange={onChange} />}
+      </div>
+    </div>
+  );
+};
+
+/* ── Capture ────────────────────────────────────────────────────── */
+
+const CaptureTab: React.FC<Omit<Props, 'tab' | 'onTabChange'>> = ({
   settings, cameras, microphones, permissions, onChange, onRequestPermission,
 }) => (
-  /* Width and the dividing edge belong to whoever seats this rail — a
-     column in a wide panel, a sheet in a narrow one. See `RecorderPanel`. */
-  <div className="h-full overflow-y-auto">
-    <Group title="Camera" icon={Camera}>
+  <>
+    <Group title="Camera" icon={Camera} summary={settings.cameraDeviceId ? `${settings.cameraHeight}p` : 'Off'}>
       <DeviceSelect
         value={settings.cameraDeviceId}
         options={cameras}
@@ -63,20 +160,8 @@ export const CaptureOptions: React.FC<Props> = ({
         onChange={(id) => onChange('cameraDeviceId', id)}
       />
       {cameras.length === 0 && (
-        <button
-          type="button"
-          onClick={() => onRequestPermission('camera')}
-          className="w-full h-7 px-2 text-ui-xs rounded bg-spectrum-accent/15 text-spectrum-accent hover:bg-spectrum-accent/25 transition-colors font-medium flex items-center justify-center gap-1.5"
-        >
-          <Camera className="w-3.5 h-3.5" />
-          Enable Camera
-        </button>
+        <EnableButton icon={Camera} label="Enable Camera" onClick={() => onRequestPermission('camera')} />
       )}
-      <CameraPreview
-        deviceId={settings.cameraDeviceId}
-        mirror={settings.mirrorCamera}
-        onEnable={() => onRequestPermission('camera')}
-      />
 
       {settings.cameraDeviceId && (
         <>
@@ -86,23 +171,35 @@ export const CaptureOptions: React.FC<Props> = ({
             onChange={(v) => onChange('mirrorCamera', v)}
             hint="Flip horizontally like a mirror"
           />
-          <SegmentedControl
-            value={String(settings.cameraHeight) as '720' | '1080'}
-            options={[{ value: '720', label: '720p' }, { value: '1080', label: '1080p' }]}
-            onChange={(v) => onChange('cameraHeight', Number(v) as 720 | 1080)}
-          />
-          <SegmentedControl
-            value={settings.cameraCorner}
-            options={[
-              { value: 'bottom-right', label: 'BR', title: 'Bottom right' },
-              { value: 'bottom-left', label: 'BL', title: 'Bottom left' },
-              { value: 'top-right', label: 'TR', title: 'Top right' },
-              { value: 'top-left', label: 'TL', title: 'Top left' },
-            ]}
-            onChange={(v) => onChange('cameraCorner', v)}
-          />
+          <Row label="Camera resolution">
+            <SegmentedControl
+              value={String(settings.cameraHeight) as '720' | '1080'}
+              options={[{ value: '720', label: '720p' }, { value: '1080', label: '1080p' }]}
+              onChange={(v) => onChange('cameraHeight', Number(v) as 720 | 1080)}
+            />
+          </Row>
+
+          {/* Four letters — BR, BL, TR, TL — asked the operator to hold a
+              coordinate system in their head. A picture of the frame with
+              the corner filled in does not. The same choice is on the
+              stage, on the picture itself; this one is here for the
+              keyboard and because a control that only exists on hover is
+              a control some people never find. */}
+          <div className="flex items-end justify-between gap-3">
+            <div className="min-w-0 space-y-1">
+              <span className="prop-label block">Corner</span>
+              <span className="text-micro text-spectrum-textFaint leading-tight block">
+                Or click a corner on the preview
+              </span>
+            </div>
+            <CornerPicker
+              value={settings.cameraCorner}
+              onChange={(corner) => onChange('cameraCorner', corner)}
+            />
+          </div>
+
           <SliderRow
-            label="Inset size"
+            label="Camera size"
             value={settings.cameraSizePct}
             onChange={(v) => onChange('cameraSizePct', Math.round(v))}
             min={10}
@@ -121,7 +218,12 @@ export const CaptureOptions: React.FC<Props> = ({
       )}
     </Group>
 
-    <Group title="Sound" icon={Mic}>
+    <Group
+      title="Sound"
+      icon={Mic}
+      summary={settings.micDeviceId ? 'Mic on' : 'Silent'}
+      summaryTone={settings.micDeviceId ? 'normal' : 'warn'}
+    >
       <DeviceSelect
         value={settings.micDeviceId}
         options={microphones}
@@ -129,14 +231,7 @@ export const CaptureOptions: React.FC<Props> = ({
         onChange={(id) => onChange('micDeviceId', id)}
       />
       {microphones.length === 0 && (
-        <button
-          type="button"
-          onClick={() => onRequestPermission('microphone')}
-          className="w-full h-7 px-2 text-ui-xs rounded bg-spectrum-accent/15 text-spectrum-accent hover:bg-spectrum-accent/25 transition-colors font-medium flex items-center justify-center gap-1.5"
-        >
-          <Mic className="w-3.5 h-3.5" />
-          Enable Microphone
-        </button>
+        <EnableButton icon={Mic} label="Enable Microphone" onClick={() => onRequestPermission('microphone')} />
       )}
       <MicMeter deviceId={settings.micDeviceId} />
 
@@ -160,7 +255,6 @@ export const CaptureOptions: React.FC<Props> = ({
           : 'What the assistant says back'}
       />
 
-
       {/* Narration sits under Sound rather than under the camera it is
           recorded with, because what this decides is where the voice
           LANDS — its own audio track, or welded to the camera clip. */}
@@ -180,7 +274,7 @@ export const CaptureOptions: React.FC<Props> = ({
       )}
     </Group>
 
-    <Group title="Capture" icon={Monitor}>
+    <Group title="Quality" icon={Gauge} summary={`${settings.fps} fps`}>
       <Row label="Frame rate">
         <SegmentedControl
           value={String(settings.fps) as '30' | '60'}
@@ -201,7 +295,7 @@ export const CaptureOptions: React.FC<Props> = ({
         />
       </Row>
 
-      <Row label="Countdown">
+      <Row label="Countdown before it starts">
         <SegmentedControl
           value={String(settings.countdownSec) as '0' | '3' | '5'}
           options={[
@@ -220,59 +314,144 @@ export const CaptureOptions: React.FC<Props> = ({
         hint="A floating bar stays, and it is kept out of the capture"
       />
     </Group>
+  </>
+);
 
-    <Group title="Live stream" icon={Broadcast}>
-      <ToggleRow
-        label="Go live (YouTube, Twitch, RTMP)"
-        checked={settings.liveEnabled}
-        onChange={(v) => onChange('liveEnabled', v)}
-        hint="Stream directly to a third-party platform"
-      />
+/* ── Live ───────────────────────────────────────────────────────── */
 
-      {settings.liveEnabled && (
-        <div className="space-y-3 pt-1">
-          <Row label="Destination">
-            <SegmentedControl
-              value={settings.liveService}
-              options={[
-                { value: 'youtube', label: 'YouTube' },
-                { value: 'twitch', label: 'Twitch' },
-                { value: 'facebook', label: 'FB Live' },
-                { value: 'custom', label: 'Custom' },
-              ]}
-              onChange={(v) => {
-                const s = v as LiveStreamService;
-                onChange('liveService', s);
-                if (s === 'youtube') onChange('liveCustomUrl', 'rtmp://a.rtmp.youtube.com/live2');
-                else if (s === 'twitch') onChange('liveCustomUrl', 'rtmp://live.twitch.tv/app');
-                else if (s === 'facebook') onChange('liveCustomUrl', 'rtmps://live-api-s.facebook.com:443/rtmp/');
-              }}
-            />
-          </Row>
+const SERVICES: { value: LiveStreamService; label: string; url: string; keyFrom: string }[] = [
+  { value: 'youtube', label: 'YouTube', url: 'rtmp://a.rtmp.youtube.com/live2', keyFrom: 'YouTube Studio → Go live' },
+  { value: 'twitch', label: 'Twitch', url: 'rtmp://live.twitch.tv/app', keyFrom: 'Twitch Dashboard → Stream key' },
+  { value: 'facebook', label: 'Facebook', url: 'rtmps://live-api-s.facebook.com:443/rtmp/', keyFrom: 'Facebook Live Producer' },
+  { value: 'custom', label: 'Custom RTMP', url: '', keyFrom: 'Your own server' },
+];
 
-          <Row label="Stream URL">
-            <input
-              type="text"
-              value={settings.liveCustomUrl}
-              onChange={(e) => onChange('liveCustomUrl', e.target.value)}
-              placeholder="rtmp://a.rtmp.youtube.com/live2"
-              className="pro-input w-full h-7 px-2 text-ui-xs font-mono outline-none"
-            />
-          </Row>
+const LiveTab: React.FC<{
+  settings: StickySettings;
+  onChange: Props['onChange'];
+}> = ({ settings, onChange }) => {
+  const service = SERVICES.find((s) => s.value === settings.liveService) ?? SERVICES[0];
+  const ready = liveReadiness(settings);
 
-          <Row label="Stream key">
-            <StreamKeyInput
-              value={settings.liveStreamKey}
-              onChange={(k) => onChange('liveStreamKey', k)}
-              placeholder={
-                settings.liveService === 'youtube'
-                  ? 'Paste key from YouTube Studio'
-                  : 'Paste stream key'
-              }
-            />
-          </Row>
+  return (
+    <>
+      {/*
+        The arm switch is a card and not a row, and it is the first thing
+        on this tab, because arming it is the one decision here that
+        changes what the primary button does. Everything below is
+        addressing; this is the switch.
+      */}
+      <div className="px-3 py-3 border-b border-line">
+        <label
+          className={`flex items-start gap-2.5 p-2.5 rounded-squircle-sm border cursor-pointer transition-colors ${
+            settings.liveEnabled
+              ? 'border-spectrum-red/45 bg-spectrum-red/10'
+              : 'border-line bg-spectrum-sunken/60 hover:border-line-strong'
+          }`}
+        >
+          <Broadcast
+            className={`w-4 h-4 mt-px flex-shrink-0 ${settings.liveEnabled ? 'text-spectrum-red' : 'text-spectrum-textDim'}`}
+            weight={settings.liveEnabled ? 'fill' : 'regular'}
+          />
+          <span className="flex-1 min-w-0 space-y-0.5">
+            <span className="block text-ui-sm text-spectrum-text font-medium">Broadcast this take</span>
+            <span className="block text-micro text-spectrum-textFaint leading-snug">
+              {settings.liveEnabled
+                ? `Streaming to ${service.label} while it records`
+                : 'Off. The take is recorded to disk only.'}
+            </span>
+          </span>
+          <input
+            type="checkbox"
+            checked={settings.liveEnabled}
+            onChange={(e) => onChange('liveEnabled', e.target.checked)}
+            className="flex-shrink-0 mt-0.5"
+          />
+        </label>
+      </div>
 
-          <Row label="Target bitrate">
+      {!settings.liveEnabled ? (
+        <div className="px-3 py-3 space-y-2">
+          <p className="text-ui-sm text-spectrum-textDim leading-relaxed">
+            Teminali OS pushes the same frames it is recording to an RTMP endpoint, so the
+            broadcast and the file you edit afterwards are one take rather than two.
+          </p>
+          <ul className="space-y-1.5 pt-1">
+            {['A server URL — filled in for you on the three presets',
+              'A stream key from your broadcaster',
+              'Upload headroom for the bitrate you pick'].map((line) => (
+              <li key={line} className="flex items-start gap-1.5 text-micro text-spectrum-textFaint leading-snug">
+                <Info className="w-3 h-3 flex-shrink-0 mt-px" />
+                {line}
+              </li>
+            ))}
+          </ul>
+        </div>
+      ) : (
+        <>
+          <Group title="Destination" icon={Globe}>
+            <div className="grid grid-cols-2 gap-1.5">
+              {SERVICES.map((option) => (
+                <button
+                  key={option.value}
+                  type="button"
+                  onClick={() => {
+                    onChange('liveService', option.value);
+                    if (option.url) onChange('liveCustomUrl', option.url);
+                  }}
+                  aria-pressed={settings.liveService === option.value}
+                  className={`h-8 px-2 rounded-squircle-xs border text-ui-xs transition-colors truncate ${
+                    settings.liveService === option.value
+                      ? 'border-spectrum-accent bg-spectrum-accent/12 text-spectrum-text'
+                      : 'border-line bg-spectrum-sunken/60 text-spectrum-textMuted hover:border-line-strong hover:text-spectrum-text'
+                  }`}
+                >
+                  {option.label}
+                </button>
+              ))}
+            </div>
+          </Group>
+
+          <Group title="Connection" icon={KeyRound}>
+            <Row label="Server URL">
+              <input
+                type="text"
+                value={settings.liveCustomUrl}
+                onChange={(e) => onChange('liveCustomUrl', e.target.value)}
+                placeholder="rtmp://a.rtmp.youtube.com/live2"
+                className="pro-input w-full h-7 px-2 text-ui-xs font-mono outline-none"
+              />
+            </Row>
+
+            <Row label="Stream key">
+              <StreamKeyInput
+                value={settings.liveStreamKey}
+                onChange={(k) => onChange('liveStreamKey', k)}
+                placeholder="Paste stream key"
+              />
+              <span className="block text-micro text-spectrum-textFaint pt-1">From {service.keyFrom}</span>
+            </Row>
+
+            {/* Readiness said once, in the place the key was typed, and
+                again on the start button. The button is the one that
+                stops the take; this is the one that explains it. */}
+            <div className={`flex items-start gap-1.5 rounded-squircle-xs px-2 py-1.5 border ${
+              ready.ok
+                ? 'border-spectrum-green/25 bg-spectrum-green/10'
+                : 'border-spectrum-amber/25 bg-spectrum-amber/10'
+            }`}>
+              {ready.ok
+                ? <CheckCircle2 className="w-3 h-3 text-spectrum-green flex-shrink-0 mt-px" />
+                : <AlertTriangle className="w-3 h-3 text-spectrum-amber flex-shrink-0 mt-px" />}
+              <span className="text-micro text-spectrum-textMuted leading-snug">
+                {ready.ok ? 'Ready to broadcast.' : ready.reason}
+              </span>
+            </div>
+
+            <LiveTestButton />
+          </Group>
+
+          <Group title="Bandwidth" icon={Gauge} summary={`${(settings.liveBitrateKbps / 1000).toFixed(1)} Mbps`}>
             <SegmentedControl
               value={String(settings.liveBitrateKbps) as '2500' | '4500' | '8000'}
               options={[
@@ -281,29 +460,47 @@ export const CaptureOptions: React.FC<Props> = ({
                 { value: '8000', label: '1440p · 8M' },
               ]}
               onChange={(v) => onChange('liveBitrateKbps', Number(v))}
+              columns={1}
             />
-          </Row>
 
-          <ToggleRow
-            label="Record locally while streaming"
-            checked={settings.liveSaveLocal}
-            onChange={(v) => onChange('liveSaveLocal', v)}
-            hint="Saves clips to disk so you can edit the take after broadcasting"
-          />
-
-          <LiveTestButton />
-        </div>
+            <ToggleRow
+              label="Record locally while streaming"
+              checked={settings.liveSaveLocal}
+              onChange={(v) => onChange('liveSaveLocal', v)}
+              hint="Saves clips to disk so you can edit the take after broadcasting"
+            />
+          </Group>
+        </>
       )}
-    </Group>
+    </>
+  );
+};
 
-    {/*
-      The fifth group is the only one that does not describe the file
-      being written. Everything above changes what is RECORDED and is
-      therefore final the moment the take stops; everything here changes
-      what the build makes of it, and can be turned off and the take
-      rebuilt. Worth keeping visibly separate for that reason alone.
-    */}
-    <Group title="Auto edit" icon={Film}>
+/* ── Auto edit ──────────────────────────────────────────────────── */
+
+/*
+  The only tab that does not describe the file being written. Everything
+  under Capture and Live is final the moment the take stops; everything
+  here changes what the BUILD makes of that file, and can be turned off
+  and the take rebuilt. Worth keeping visibly separate for that reason
+  alone — and worth saying out loud at the top, because a switch you
+  believe is destructive is a switch you leave alone.
+*/
+const AutoEditTab: React.FC<{
+  settings: StickySettings;
+  permissions: RecorderPermissions | null;
+  onChange: Props['onChange'];
+}> = ({ settings, permissions, onChange }) => (
+  <>
+    <div className="px-3 py-2.5 border-b border-line flex items-start gap-1.5">
+      <Film className="w-3 h-3 text-spectrum-textDim flex-shrink-0 mt-0.5" />
+      <p className="text-micro text-spectrum-textFaint leading-snug">
+        Applied when the take is opened on the timeline — never to the recording itself.
+        Change any of it and rebuild; the files do not move.
+      </p>
+    </div>
+
+    <Group title="Interpretation" icon={Film}>
       <ToggleRow
         label="Push in on what you click"
         checked={settings.autoZoom}
@@ -341,18 +538,49 @@ export const CaptureOptions: React.FC<Props> = ({
         hint="A timeline marker wherever a zoom was placed"
       />
     </Group>
-  </div>
+  </>
 );
 
 /* ── Pieces ─────────────────────────────────────────────────────── */
 
-const Group: React.FC<{ title: string; icon: React.ElementType; children: React.ReactNode }> = ({
-  title, icon: Icon, children,
-}) => (
+const RailTabButton: React.FC<{
+  id: RailTab;
+  label: string;
+  tab: RailTab;
+  onSelect: (tab: RailTab) => void;
+  badge?: React.ReactNode;
+}> = ({ id, label, tab, onSelect, badge }) => (
+  <button
+    role="tab"
+    aria-selected={tab === id}
+    onClick={() => onSelect(id)}
+    className={`tab-item flex-1 justify-center gap-1.5 ${tab === id ? 'tab-item-active' : ''}`}
+  >
+    {label}
+    {badge}
+  </button>
+);
+
+const Group: React.FC<{
+  title: string;
+  icon: React.ElementType;
+  summary?: string;
+  summaryTone?: 'normal' | 'warn';
+  children: React.ReactNode;
+}> = ({ title, icon: Icon, summary, summaryTone = 'normal', children }) => (
   <div className="border-b border-line last:border-b-0 px-3 py-3 space-y-2">
     <div className="flex items-center gap-1.5">
       <Icon className="w-3 h-3 text-spectrum-textDim flex-shrink-0" />
       <span className="section-label">{title}</span>
+      {summary && (
+        <span
+          className={`ml-auto text-micro tabular truncate ${
+            summaryTone === 'warn' ? 'text-spectrum-amber' : 'text-spectrum-textFaint'
+          }`}
+        >
+          {summary}
+        </span>
+      )}
     </div>
     {children}
   </div>
@@ -364,6 +592,61 @@ const Row: React.FC<{ label: string; children: React.ReactNode }> = ({ label, ch
     {children}
   </div>
 );
+
+const EnableButton: React.FC<{ icon: React.ElementType; label: string; onClick: () => void }> = ({
+  icon: Icon, label, onClick,
+}) => (
+  <button
+    type="button"
+    onClick={onClick}
+    className="w-full h-7 px-2 text-ui-xs rounded bg-spectrum-accent/15 text-spectrum-accent hover:bg-spectrum-accent/25 transition-colors font-medium flex items-center justify-center gap-1.5"
+  >
+    <Icon className="w-3.5 h-3.5" />
+    {label}
+  </button>
+);
+
+/** The frame, with the corner filled in. See the note at its call site. */
+const CornerPicker: React.FC<{
+  value: StickySettings['cameraCorner'];
+  onChange: (corner: StickySettings['cameraCorner']) => void;
+}> = ({ value, onChange }) => {
+  const corners: { value: StickySettings['cameraCorner']; label: string; box: string }[] = [
+    { value: 'top-left', label: 'Top left', box: 'top-[5px] left-[5px]' },
+    { value: 'top-right', label: 'Top right', box: 'top-[5px] right-[5px]' },
+    { value: 'bottom-left', label: 'Bottom left', box: 'bottom-[5px] left-[5px]' },
+    { value: 'bottom-right', label: 'Bottom right', box: 'bottom-[5px] right-[5px]' },
+  ];
+
+  /* 80×50 outer, 30×17 blocks on a 5px inset: an 8px channel across and a
+     6px channel down. Measured rather than guessed, because at the first
+     attempt (72×42) the two rows met in the middle and the widget read as
+     two tall bars rather than as four corners of a frame. */
+  return (
+    <div
+      className="relative w-[80px] h-[50px] flex-shrink-0 rounded-squircle-xs border border-line bg-spectrum-sunken"
+      role="radiogroup"
+      aria-label="Camera corner"
+    >
+      {corners.map((corner) => (
+        <button
+          key={corner.value}
+          type="button"
+          role="radio"
+          aria-checked={value === corner.value}
+          aria-label={corner.label}
+          title={corner.label}
+          onClick={() => onChange(corner.value)}
+          className={`absolute w-[30px] h-[17px] rounded-[3px] transition-colors ${corner.box} ${
+            value === corner.value
+              ? 'bg-spectrum-accent'
+              : 'bg-spectrum-control hover:bg-spectrum-hover'
+          }`}
+        />
+      ))}
+    </div>
+  );
+};
 
 const DeviceSelect: React.FC<{
   value: string | null;
@@ -383,75 +666,6 @@ const DeviceSelect: React.FC<{
     ))}
   </select>
 );
-
-const CameraPreview: React.FC<{
-  deviceId: string | null;
-  mirror?: boolean;
-  onEnable?: () => void;
-}> = ({
-  deviceId, mirror = true, onEnable,
-}) => {
-  const videoRef = React.useRef<HTMLVideoElement>(null);
-  const [error, setError] = React.useState<string | null>(null);
-
-  React.useEffect(() => {
-    if (!deviceId) return;
-    let stream: MediaStream | null = null;
-    let cancelled = false;
-
-    void previewCamera(deviceId)
-      .then((result) => {
-        // The pick can change while `getUserMedia` is still resolving; a
-        // stream that arrives after that has to be closed, not shown.
-        if (cancelled) { result.getTracks().forEach((t) => t.stop()); return; }
-        stream = result;
-        setError(null);
-        if (videoRef.current) videoRef.current.srcObject = result;
-      })
-      .catch((err: Error) => { if (!cancelled) setError(err.message); });
-
-    return () => {
-      cancelled = true;
-      stream?.getTracks().forEach((track) => track.stop());
-    };
-  }, [deviceId]);
-
-  if (!deviceId) {
-    return (
-      <div
-        onClick={onEnable}
-        role="button"
-        tabIndex={0}
-        className="aspect-video rounded-squircle-sm bg-spectrum-sunken border border-line
-                   flex flex-col items-center justify-center gap-1 cursor-pointer
-                   hover:bg-spectrum-hover transition-colors p-2 text-center"
-        title="Click to enable camera"
-      >
-        <VideoOff className="w-5 h-5 text-spectrum-textFaint" />
-        <span className="text-micro text-spectrum-textDim">Click to enable camera</span>
-      </div>
-    );
-  }
-
-  return (
-    <div className="aspect-video rounded-squircle-sm bg-black border border-line overflow-hidden relative">
-      <video
-        ref={videoRef}
-        autoPlay
-        muted
-        playsInline
-        className="w-full h-full object-cover transition-transform duration-200"
-        style={{ transform: mirror ? 'scaleX(-1)' : 'none' }}
-      />
-      {error && (
-        <span className="absolute inset-0 flex items-center justify-center px-3 text-center
-                         text-micro text-spectrum-red bg-black/70">
-          {error}
-        </span>
-      )}
-    </div>
-  );
-};
 
 /**
  * A live level, not a fake one.
@@ -489,8 +703,18 @@ const MicMeter: React.FC<{ deviceId: string | null }> = ({ deviceId }) => {
           analyser.getByteTimeDomainData(buffer);
           let peak = 0;
           for (const sample of buffer) peak = Math.max(peak, Math.abs(sample - 128) / 128);
-          // Decay, so the bar reads as a level rather than as a strobe.
-          setLevel((previous) => Math.max(peak, previous * 0.86));
+          /*
+            Decay, so the bar reads as a level rather than as a strobe —
+            and only committed when the bar would actually MOVE. A room is
+            never silent enough for `peak` to be exactly zero, so this
+            re-rendered sixty times a second for the whole time the dialog
+            was open, to redraw a bar at the same width. The threshold is
+            below one pixel of a 288px rail.
+          */
+          setLevel((previous) => {
+            const next = Math.max(peak, previous * 0.86);
+            return Math.abs(next - previous) < 0.004 ? previous : next;
+          });
           frame = requestAnimationFrame(tick);
         };
         frame = requestAnimationFrame(tick);
@@ -586,12 +810,12 @@ const LiveTestButton: React.FC = () => {
         {store.testingConnection ? (
           <>
             <Loader2 className="w-3 h-3 animate-spin text-spectrum-accent" />
-            Testing RTMP handshake...
+            Testing RTMP handshake…
           </>
         ) : store.testConnectionResult?.ok ? (
           <>
             <CheckCircle2 className="w-3 h-3 text-spectrum-green" />
-            Connection verified ✓
+            Connection verified
           </>
         ) : (
           <>

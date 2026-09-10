@@ -174,7 +174,7 @@ only testable if no component is required to settle it. The difference is
 ownership: the shell gate is created per-hook (`useCommandApproval`), and this
 one is a module singleton the bridge owns, which a component subscribes to.
 
-**The prompt is drawn in `App.tsx`'s modal layer** (beside `CursorSettingsModal`
+**The prompt is drawn in `App.tsx`'s modal layer** (beside the other modals
 et al., ~line 300), not in `VideoPane`, for the reason in § "Three callers". The
 chat can render an inline row as well, the way it does for commands — but the
 app-level host is the one that has to exist, and one host means one tested path.

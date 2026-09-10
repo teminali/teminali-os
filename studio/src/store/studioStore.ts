@@ -1,11 +1,14 @@
 import { create } from "zustand";
 import { persist, createJSONStorage } from "zustand/middleware";
-import { applySessionSwitch, rememberAgentSession } from "../utils/chatSessions";
+import { applySessionSwitch, forkSession, rememberAgentSession, restampWorkspace, workspaceLabel } from "../utils/chatSessions";
 import { settleRestoredTurns } from "../services/interruption";
 import { ModelProfileId, ModelProfile, SpecialistSkill, EditorTab, FileItem, ChatMessage, ToolCall } from "../types";
 import { purgeOllamaMemory } from "../services/aiService";
 import { findTabByFileIdentity } from "./tabIdentity";
 import { DEFAULT_EXPANDED_PATHS, expandForReveal, toggleExpansion } from "./treeExpansion";
+import { applyAppearance, DEFAULT_APPEARANCE, type AppearanceSettings } from "../services/appearance";
+import { applyPreferences, DEFAULT_PREFERENCES, type Preferences } from "../services/preferences";
+import { announceTurn, latestSettledTurn } from "../services/notifications";
 
 /**
  * The two halves of a chat switch, in the shape `set` wants them.
@@ -42,13 +45,22 @@ export interface ChatSession {
    */
   agentSessionId?: string | null;
   /**
-   * Which agent that id belongs to, as `engine:model`. A Codex thread cannot
-   * be resumed by Claude Code, and resuming the wrong one fails rather than
-   * politely starting fresh, so the id is only offered back when this matches
-   * the agent selected now. Before the id was persisted a remount cleared it;
-   * now it outlives the mount, so the check has to be written down.
+   * Which engine that id belongs to — `claude` or `codex`. A Codex thread
+   * cannot be resumed by Claude Code, and resuming the wrong one fails rather
+   * than politely starting fresh, so the id is only offered back when this
+   * matches the engine selected now. The *model* is deliberately not part of
+   * it: switching model inside one CLI keeps the conversation. Before the id
+   * was persisted a remount cleared it; now it outlives the mount, so the check
+   * has to be written down.
    */
   agentSessionKey?: string | null;
+  /**
+   * Set on a chat made by forking another: its next turn resumes the parent's
+   * thread with `--fork-session` (Codex: `exec fork`), so the answer opens a new
+   * thread and the chat it was forked from keeps its own. Cleared by the turn
+   * that reports the new id.
+   */
+  agentForkPending?: boolean;
 }
 
 
@@ -75,13 +87,23 @@ export const PROFILES_LIST: ModelProfile[] = [
   },
   {
     id: "max",
-    name: "Teminali Max",
-    provider: "ollama",
-    modelName: "Teminali Max · qualification pending",
-    costLabel: "$0.00 local",
-    badge: "Locked until safety qualification",
-    badgeColor: "bg-amber-500/15 text-amber-300 border-amber-500/30",
-    description: "Uses the heavyweight local model for every request. It stays locked until its exact artifact and product path pass safety canaries.",
+    name: "Frontier Max",
+    provider: "gemini",
+    modelName: "Frontier Max · Google Gemini 3.8 Flash",
+    costLabel: "Online (Included)",
+    badge: "Gemini 3.8 Flash",
+    badgeColor: "bg-purple-500/15 text-purple-300 border-purple-500/30",
+    description: "Online flagship model powered by Google Gemini 3.8 Flash via Claude Code with Teminali OS built-in key.",
+  },
+  {
+    id: "gemini",
+    name: "Gemini Flash (BYOK)",
+    provider: "gemini",
+    modelName: "Gemini Flash · Bring Your Own Key",
+    costLabel: "Free · Online (BYOK)",
+    badge: "Free (BYOK)",
+    badgeColor: "bg-emerald-500/15 text-emerald-300 border-emerald-500/30",
+    description: "Free online tier powered by Claude Code with your own free Google AI Studio key.",
   },
 ];
 
@@ -204,6 +226,19 @@ interface StudioState {
   agentPermission: string | null;
   setAgentPermission: (permission: string | null) => void;
   /**
+   * How hard the selected agent CLI works before answering, and how much of
+   * its reasoning comes back — the composer's copy of the two knobs its own
+   * CLI already has. Null on both means "say nothing on the command line",
+   * which leaves whatever the operator configured in `~/.claude` or
+   * `~/.codex/config.toml` in force. That is the reason the default is null
+   * and not "medium": a picker that quietly overrides a config file is worse
+   * than one that offers nothing.
+   */
+  agentEffort: string | null;
+  setAgentEffort: (effort: string | null) => void;
+  agentThinking: string | null;
+  setAgentThinking: (thinking: string | null) => void;
+  /**
    * Text handed to the main composer by another surface.
    *
    * A one-way drop-box, not shared state: StudioChat takes it, puts it in the
@@ -311,12 +346,18 @@ interface StudioState {
   /**
    * Records — or clears — the agent CLI thread belonging to a chat.
    *
-   * `key` is `engine:model` for the agent that owns the id; passing a null id
-   * forgets the thread, which is what switching agents does.
+   * `key` is the engine that owns the id; passing a null id forgets the thread,
+   * which is what switching engine does and what "Start fresh" does on purpose.
    */
   setAgentSession: (sessionId: string, agentSessionId: string | null, key: string | null) => void;
   /** Start a new conversation in the current workspace and switch to it. */
   newChatSession: () => void;
+  /**
+   * Fork the active chat: a second chat holding the same transcript and the
+   * same agent thread, whose next turn branches off it rather than extending
+   * it. The chat being forked is left exactly as it was.
+   */
+  forkChatSession: () => void;
   /**
    * Where you have been, so the title bar's arrows can take you back.
    *
@@ -329,6 +370,15 @@ interface StudioState {
   goBackSession: () => void;
   goForwardSession: () => void;
   frontierMessages: ChatMessage[];
+  /**
+   * Replaces the active chat's transcript.
+   *
+   * The voice stage owns the conversation on screen and needs to write it
+   * somewhere the sidebar can read: `switchSession` swaps this array, so a
+   * stage that renders it is a stage whose chat rows open. Takes an updater so
+   * the stage's existing `setState(prev => ...)` call sites survive unchanged.
+   */
+  setFrontierMessages: (update: ChatMessage[] | ((previous: ChatMessage[]) => ChatMessage[])) => void;
   antigravityMessages: ChatMessage[];
   claudeMessages: ChatMessage[];
   codexMessages: ChatMessage[];
@@ -345,8 +395,33 @@ interface StudioState {
   browserPreviewUrl: string;
   setBrowserPreviewUrl: (url: string) => void;
   openBrowserPreview: (urlOrPath?: string) => void;
+  /* The settings surface is a page, not a dialog: the shell renders it in
+     place of the workspace, so which pane is open is shell state and belongs
+     here rather than in an `App.tsx` `useState`. The category is persisted;
+     `open` deliberately is not, because a reload should return you to your
+     work, not to the screen you were configuring it from. */
+  settingsView: { open: boolean; category: string };
+  openSettings: (category?: string) => void;
+  closeSettings: () => void;
+  setSettingsCategory: (category: string) => void;
+  /* How the shell looks. Persisted whole, and applied to the document by
+     `services/appearance.ts` — the store holds the intent, that module makes
+     it true, so the recorder window can read the same settings without the
+     store. */
+  appearance: AppearanceSettings;
+  setAppearance: (patch: Partial<AppearanceSettings>) => void;
+  resetAppearance: () => void;
+  /* What the shell *does*, as opposed to how it looks. Persisted whole and
+     settled through `services/preferences.ts`, which publishes them for the
+     callers that have no store to reach — the markdown renderer's link
+     handler and the turn announcer both run outside React. */
+  preferences: Preferences;
+  setPreferences: (patch: Partial<Preferences>) => void;
+  resetPreferences: () => void;
   isSkillsModalOpen: boolean;
   setSkillsModalOpen: (open: boolean) => void;
+  isGeminiKeyModalOpen: boolean;
+  setGeminiKeyModalOpen: (open: boolean) => void;
   isDiffViewerOpen: boolean;
   isBenchmarkModalOpen: boolean;
   setBenchmarkModalOpen: (open: boolean) => void;
@@ -363,11 +438,19 @@ export const useStudioStore = create<StudioState>()(
       // Choosing a Frontier lane is also how you leave an agent.
       setProfile: (profile) => set({ currentProfile: profile, agentSelection: null }),
       agentSelection: null,
-      // Changing agent resets the permission: the two CLIs do not share a
-      // vocabulary, so carrying "acceptEdits" onto Codex would be meaningless.
-      setAgentSelection: (agentSelection) => set({ agentSelection, agentPermission: null }),
+      // Changing agent resets the permission, the effort and the thinking: the
+      // two CLIs share no vocabulary in any of the three, so carrying
+      // "acceptEdits" or "minimal" onto the other one would be meaningless —
+      // and the server would drop it, leaving the menu showing a level that is
+      // not in force.
+      setAgentSelection: (agentSelection) =>
+        set({ agentSelection, agentPermission: null, agentEffort: null, agentThinking: null }),
       agentPermission: null,
       setAgentPermission: (agentPermission) => set({ agentPermission }),
+      agentEffort: null,
+      setAgentEffort: (agentEffort) => set({ agentEffort }),
+      agentThinking: null,
+      setAgentThinking: (agentThinking) => set({ agentThinking }),
       chatDraft: null,
       setChatDraft: (chatDraft) => set({ chatDraft }),
       
@@ -390,7 +473,7 @@ export const useStudioStore = create<StudioState>()(
       workspacePath: "",
       workspaceRootConfirmed: false,
 
-      setWorkspacePath: (workspacePath) => set({
+      setWorkspacePath: (workspacePath) => set((state) => ({
         workspacePath,
         // Every caller of this setter has the root from the gateway — a
         // projects response, an `openProject`, or an agent event. Reaching
@@ -399,7 +482,17 @@ export const useStudioStore = create<StudioState>()(
         // A new root means a new tree: paths from the old one open nothing.
         expandedPaths: new Set<string>(DEFAULT_EXPANDED_PATHS),
         revealTarget: null,
-      }),
+        /*
+          And the chat moves with it.
+
+          Placed in the setter rather than at any one caller because six routes
+          change the root — a sidebar repository row, the Projects panel, the
+          composer's recent projects, global search, the native Open Folder
+          menu, and the agent's own `open-project` — and all six funnel here.
+          Fixing them one at a time is how five of them stay broken.
+        */
+        chatSessions: restampWorkspace(state.chatSessions, state.activeSessionId, workspacePath),
+      })),
 
       files: [
         {
@@ -713,7 +806,7 @@ export const useStudioStore = create<StudioState>()(
        */
       newChatSession: () => {
         const state = get();
-        const workspace = state.workspacePath.split("/").filter(Boolean).pop() || "No Repo";
+        const workspace = workspaceLabel(state.workspacePath);
         const session: ChatSession = {
           id: `session-${Date.now().toString(36)}`,
           title: "New chat",
@@ -731,6 +824,46 @@ export const useStudioStore = create<StudioState>()(
           ],
           activeSessionId: session.id,
           frontierMessages: [],
+        });
+      },
+
+      /**
+       * The same conversation, twice, from here on.
+       *
+       * Both CLIs can branch a thread — `claude --resume <id> --fork-session`
+       * and `codex exec fork <id>` — and both write the answer to a new id
+       * without touching the one they read. Doing that in place would be
+       * invisible: the operator would press Fork, send a turn, and see nothing
+       * change. So the fork is a chat, and the sidebar shows both.
+       */
+      forkChatSession: () => {
+        const state = get();
+        const source = state.chatSessions.find((entry) => entry.id === state.activeSessionId);
+        if (!source) return;
+        /*
+          Forked from the live transcript, not the stored one.
+
+          The active chat's messages live in `frontierMessages` until a switch
+          writes them back (§6.40), so `source.messages` is the conversation as
+          it stood when this chat was last left — everything said since would be
+          missing from the copy, which is the one thing a fork must not do.
+        */
+        const fork: ChatSession = {
+          ...forkSession(source, `session-${Date.now().toString(36)}`, state.frontierMessages),
+          title: `${source.title} (fork)`,
+          timestamp: new Date().toISOString(),
+        };
+        set({
+          chatSessions: [
+            fork,
+            ...state.chatSessions.map((entry) =>
+              entry.id === state.activeSessionId ? { ...entry, messages: state.frontierMessages } : entry,
+            ),
+          ],
+          activeSessionId: fork.id,
+          // Already what is on screen; assigned rather than left alone so this
+          // reads as the switch it is instead of relying on the two matching.
+          frontierMessages: fork.messages,
         });
       },
 
@@ -804,6 +937,12 @@ export const useStudioStore = create<StudioState>()(
       ],
       isStreaming: false,
       
+      setFrontierMessages: (update) => {
+        set((state) => ({
+          frontierMessages: typeof update === "function" ? update(state.frontierMessages) : update,
+        }));
+      },
+
       addMessageToEngine: (engine, msg) => {
         const newMsg: ChatMessage = {
           ...msg,
@@ -851,7 +990,26 @@ export const useStudioStore = create<StudioState>()(
         );
       },
 
-      setStreaming: (isStreaming) => set({ isStreaming }),
+      /* The falling edge is the end of a turn, and the only place in the app
+         that knows it without being told. Announcing here rather than at the
+         eleven `setStreaming(false)` call sites keeps the streaming path — the
+         most load-bearing path we have — free of edits made for a settings
+         row; `services/notifications.ts` explains the trade in full. */
+      setStreaming: (isStreaming) => {
+        const wasStreaming = get().isStreaming;
+        set({ isStreaming });
+        if (wasStreaming && !isStreaming) {
+          const state = get();
+          announceTurn(
+            latestSettledTurn([
+              state.frontierMessages,
+              state.antigravityMessages,
+              state.claudeMessages,
+              state.codexMessages,
+            ]),
+          );
+        }
+      },
 
       isSplitOpen: false,
       setSplitOpen: (open) => set({ isSplitOpen: open }),
@@ -884,8 +1042,29 @@ export const useStudioStore = create<StudioState>()(
         });
       },
       
+      settingsView: { open: false, category: "general" },
+      openSettings: (category) =>
+        set((state) => ({
+          settingsView: { open: true, category: category ?? state.settingsView.category },
+        })),
+      closeSettings: () => set((state) => ({ settingsView: { ...state.settingsView, open: false } })),
+      setSettingsCategory: (category) =>
+        set((state) => ({ settingsView: { ...state.settingsView, category } })),
+
+      appearance: DEFAULT_APPEARANCE,
+      setAppearance: (patch) =>
+        set((state) => ({ appearance: applyAppearance({ ...state.appearance, ...patch }) })),
+      resetAppearance: () => set({ appearance: applyAppearance(DEFAULT_APPEARANCE) }),
+
+      preferences: DEFAULT_PREFERENCES,
+      setPreferences: (patch) =>
+        set((state) => ({ preferences: applyPreferences({ ...state.preferences, ...patch }) })),
+      resetPreferences: () => set({ preferences: applyPreferences(DEFAULT_PREFERENCES) }),
+
       isSkillsModalOpen: false,
-      setSkillsModalOpen: (open) => set({ isSkillsModalOpen: open }),
+      setSkillsModalOpen: (open: boolean) => void set({ isSkillsModalOpen: open }),
+      isGeminiKeyModalOpen: false,
+      setGeminiKeyModalOpen: (open) => set({ isGeminiKeyModalOpen: open }),
       
       isDiffViewerOpen: false,
       isBenchmarkModalOpen: false,
@@ -921,6 +1100,24 @@ export const useStudioStore = create<StudioState>()(
         });
         // Nothing is running in this process yet, whatever the last one was doing.
         state.isStreaming = false;
+        /* Appearance is the one persisted slice that has to reach the DOM, not
+           just the store: a restored accent or type size that nothing applies
+           is a setting the operator can see checked and cannot see working.
+           `applyAppearance` also normalises a slice persisted by an older
+           build that is missing keys this one has. */
+        state.appearance = applyAppearance(state.appearance);
+        /* Same contract for the preferences, and for the same reason: a
+           restored preference nothing has settled is one `currentPreferences()`
+           cannot see, so every non-React caller would quietly run on defaults. */
+        state.preferences = applyPreferences(state.preferences);
+        /* Start clean if that is what was asked for. Editor tabs and the tab
+           you were on are layout, so they go; chat transcripts are documents
+           and stay, because a layout preference that silently deletes work is
+           not a layout preference. */
+        if (!state.preferences.restoreSession) {
+          state.tabs = [];
+          state.activeTabId = null;
+        }
       },
       partialize: (state) => ({
         chatSessions: state.chatSessions,
@@ -934,6 +1131,11 @@ export const useStudioStore = create<StudioState>()(
         currentProfile: state.currentProfile,
         agentSelection: state.agentSelection,
         agentPermission: state.agentPermission,
+        agentEffort: state.agentEffort,
+        agentThinking: state.agentThinking,
+        settingsView: { open: false, category: state.settingsView.category },
+        appearance: state.appearance,
+        preferences: state.preferences,
         tabs: state.tabs,
         activeTabId: state.activeTabId,
       }),

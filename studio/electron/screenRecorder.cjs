@@ -878,8 +878,20 @@ function initScreenRecorder(mainWindowGetter) {
     }
     if (out.closed) return { ok: false, error: `The "${p.stream}" file is already closed.` };
 
+    /*
+      Wrapped, not copied. `Buffer.from(uint8Array)` allocates a second
+      buffer and memcpys into it; `Buffer.from(buffer, offset, length)`
+      views the bytes IPC already gave us. At the default 3s timeslice a
+      screen chunk is several megabytes, so this was a multi-megabyte
+      allocation and copy on the main process, twice a second across the
+      two streams, for no reason — the bytes are written and dropped.
+
+      The comment sits ABOVE the `try` rather than inside it:
+      `recorder-live-stream.test.mjs` pins the write to being guarded by
+      matching `try { out.handle.write`, and that pin is worth keeping.
+    */
     try {
-      out.handle.write(Buffer.from(p.bytes));
+      out.handle.write(Buffer.from(p.bytes.buffer, p.bytes.byteOffset, p.bytes.byteLength));
       out.bytes += p.bytes.byteLength;
       return { ok: true, bytes: out.bytes };
     } catch (err) {

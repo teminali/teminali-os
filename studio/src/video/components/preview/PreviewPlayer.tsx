@@ -13,6 +13,7 @@ import React, { useEffect, useMemo, useRef, useState, useCallback } from 'react'
 import { useTimelineStore, getContentEndMs } from '../../store/timelineStore';
 import { useProjectStore } from '../../store/projectStore';
 import { useLayoutStore } from '../../store/layoutStore';
+import { useRecorderStore } from '../../store/recorderStore';
 import { computeViewport, viewToCanvas, hitTestBox, getClipBox } from '../../engine/geometry';
 import { getNaturalSize } from '../../engine/compositor';
 import { getVisibleClipsAt } from '../../store/timelineStore';
@@ -69,6 +70,22 @@ export const PreviewPlayer: React.FC<{ headerNav?: React.ReactNode }> = ({ heade
   const openMenu = useAnchoredMenu();
 
   const project = useProjectStore((s) => s.project);
+  const tracksSignature = useTimelineStore((s) => s.tracks);
+  /*
+    A take that is being RECORDED owns the machine.
+
+    `electron/screenRecorder.cjs` turns background throttling off and
+    hides the window for the duration, which is right — the capture lives
+    in this renderer and a throttled rAF would drop its frames. But it
+    also means every other loop in here keeps running at full speed
+    behind a window nobody can see, and this is the expensive one: the
+    programme loop would go on compositing the LAST take at full rate
+    while the encoder for the next one is asking for the same GPU. So it
+    yields, exactly as it yields to an export.
+  */
+  const recorderPhase = useRecorderStore((s) => s.phase);
+  const isCapturing = recorderPhase === 'countdown' || recorderPhase === 'recording'
+    || recorderPhase === 'paused' || recorderPhase === 'processing';
   const setDurationMs = useProjectStore((s) => s.setDurationMs);
   const isExporting = useProjectStore((s) => s.isExporting);
   const exportProgress = useProjectStore((s) => s.exportProgress);
@@ -137,6 +154,56 @@ export const PreviewPlayer: React.FC<{ headerNav?: React.ReactNode }> = ({ heade
 
   const effectiveScale = viewport.scale;
 
+  /*
+    The canvas's BACKING STORE, which is not the sequence's size and
+    never was allowed to be.
+
+    It was `project.width x project.height`. A screen recording off a
+    3024x1964 laptop becomes a 2560x1662 sequence (`canvasFor` caps the
+    long edge), so every preview frame composited 4.25 million pixels
+    into an element the operator was looking at inside `MAX_CANVAS_WIDTH`
+    — 960 CSS px at the widest tier. Two thirds of every pixel drawn was
+    thrown away by the browser on its way to the screen.
+
+    So the surface follows what is on screen: the displayed box, times
+    the device pixel ratio, and never larger than the sequence itself
+    (upscaling a 720p take to a 4K canvas would invent detail and charge
+    for it). `DPR_CAP` is there because a 3x phone-class ratio triples the
+    fill for a difference nobody has ever reported seeing on a monitor.
+
+    Zoom is already inside `viewport.displayWidth`, so zooming to 200%
+    genuinely gets more pixels rather than a blur — which is the one
+    thing a fixed cap would have got wrong.
+  */
+  const surface = useMemo(() => {
+    const DPR_CAP = 2;
+    /*
+      `useMeasure` reports 0x0 until the box is laid out, so the first
+      frame is drawn against a viewport that does not exist yet. Without
+      a floor that is a 2px canvas stretched across the whole stage for
+      one paint — a flash of garbage rather than a soft first frame.
+    */
+    const MIN_EDGE = 320;
+    const ratio = Math.min(typeof window === 'undefined' ? 1 : window.devicePixelRatio || 1, DPR_CAP);
+    const wanted = Math.round(viewport.displayWidth * ratio);
+    const width = Math.min(project.width, Math.max(MIN_EDGE, wanted));
+    const height = Math.max(2, Math.round(width * (project.height / project.width)));
+    return { width, height };
+  }, [viewport.displayWidth, project.width, project.height]);
+
+  /*
+    The one thing `draft` gives up, said where it is given up.
+
+    Motion blur is skipped in the preview and kept in the export (see
+    `RenderQuality`). An operator who is not told that will read the
+    difference as the export having invented something.
+  */
+  const draftHidesBlur = useMemo(
+    () => tracksSignature.some((t) => t.type !== 'audio'
+      && t.clips.some((c) => c.motionBlur?.enabled && c.motionBlur.samples > 1)),
+    [tracksSignature]
+  );
+
   /* ── Render loop ──────────────────────────────────────────────
      Owned by `useProgramLoop`, and yielded while the fullscreen
      Player is open. The loop drives the audio graph and every <video>
@@ -151,11 +218,9 @@ export const PreviewPlayer: React.FC<{ headerNav?: React.ReactNode }> = ({ heade
   useProgramLoop({
     canvasRef,
     project,
-    active: !isPlayerOpen && !isExporting,
+    active: !isPlayerOpen && !isExporting && !isCapturing,
     onMeters: setMeters,
   });
-
-  const tracksSignature = useTimelineStore((s) => s.tracks);
 
   /* ── Keep project duration >= content ── */
   useEffect(() => {
@@ -373,8 +438,8 @@ export const PreviewPlayer: React.FC<{ headerNav?: React.ReactNode }> = ({ heade
           <div className="absolute inset-0 overflow-hidden bg-black rounded-squircle-md shadow-stage">
             <canvas
               ref={canvasRef}
-              width={project.width}
-              height={project.height}
+              width={surface.width}
+              height={surface.height}
               className="w-full h-full block"
             />
           </div>
@@ -406,6 +471,26 @@ export const PreviewPlayer: React.FC<{ headerNav?: React.ReactNode }> = ({ heade
             <div className="absolute inset-0 pointer-events-none z-10 flex flex-col justify-between">
               <div className="w-full bg-black/92" style={{ height: '11.6%' }} />
               <div className="w-full bg-black/92" style={{ height: '11.6%' }} />
+            </div>
+          )}
+
+          {/*
+            The preview draws at draft quality and skips motion blur, which
+            is worth roughly three times the frame rate on this timeline —
+            see `RenderQuality`. It is also the one thing an operator could
+            mistake for the export having invented something, so it is said
+            here rather than left to be discovered in the finished file.
+            Only shown when a clip under this project actually asks for it.
+          */}
+          {draftHidesBlur && (
+            <div className="absolute bottom-2 left-2 z-10 pointer-events-none">
+              <span
+                className="flex items-center gap-1 h-5 px-1.5 rounded-squircle-xs bg-black/60 border border-white/10
+                           text-micro text-white/70 backdrop-blur-sm"
+                title="Motion blur is rendered on export. The preview skips it to stay responsive."
+              >
+                Preview · motion blur off
+              </span>
             </div>
           )}
         </div>
@@ -535,6 +620,25 @@ const OverlayToggle: React.FC<{
  */
 const ScopesOverlay: React.FC<{ canvasRef: React.RefObject<HTMLCanvasElement | null> }> = ({ canvasRef }) => {
   const scopeRef = useRef<HTMLCanvasElement>(null);
+  /*
+    The scopes read pixels back off the GPU, and where they read them
+    from is the whole cost of this component.
+
+    It used to call `getImageData(0, 0, source.width, source.height)` on
+    the PROGRAM canvas — the full frame, 2560x1662 on a screen recording,
+    which is 17MB of readback eight times a second, each one a hard
+    pipeline stall while the GPU finishes everything queued. It also
+    asked that canvas for a `willReadFrequently` context, which is a
+    request to take the program canvas off the GPU permanently. The
+    comment above it read "downsample by reading a strided slice"; the
+    code did not do that and never had.
+
+    So the frame is scaled DOWN onto a 160x90 scratch first — one
+    `drawImage` the GPU does at native speed — and 57KB is read back off
+    that instead. The scopes are sampling at 160x90 either way; the only
+    thing the full-size read ever bought was the stall.
+  */
+  const sampleRef = useRef<HTMLCanvasElement | null>(null);
 
   useEffect(() => {
     let frame = 0;
@@ -548,18 +652,28 @@ const ScopesOverlay: React.FC<{ canvasRef: React.RefObject<HTMLCanvasElement | n
       const source = canvasRef.current;
       const target = scopeRef.current;
       if (!source || !target) return;
+      if (source.width === 0 || source.height === 0) return;
 
-      const sctx = source.getContext('2d', { willReadFrequently: true });
       const tctx = target.getContext('2d');
-      if (!sctx || !tctx) return;
+      if (!tctx) return;
 
       const SAMPLE_W = 160;
       const SAMPLE_H = 90;
 
+      if (!sampleRef.current) {
+        const c = document.createElement('canvas');
+        c.width = SAMPLE_W;
+        c.height = SAMPLE_H;
+        sampleRef.current = c;
+      }
+      const sample = sampleRef.current;
+      const sctx = sample.getContext('2d', { willReadFrequently: true });
+      if (!sctx) return;
+
       let data: ImageData;
       try {
-        // Downsample by reading a strided slice rather than the full frame.
-        data = sctx.getImageData(0, 0, source.width, source.height);
+        sctx.drawImage(source, 0, 0, SAMPLE_W, SAMPLE_H);
+        data = sctx.getImageData(0, 0, SAMPLE_W, SAMPLE_H);
       } catch {
         return; // tainted canvas (cross-origin media). Scopes unavailable
       }
@@ -570,18 +684,19 @@ const ScopesOverlay: React.FC<{ canvasRef: React.RefObject<HTMLCanvasElement | n
       tctx.fillStyle = 'rgba(8,9,12,0.88)';
       tctx.fillRect(0, 0, W, H);
 
-      const stepX = Math.max(1, Math.floor(source.width / SAMPLE_W));
-      const stepY = Math.max(1, Math.floor(source.height / SAMPLE_H));
-
+      /* Every pixel of the sample, because the sample IS the downsample.
+         The stride this used to walk was over the full-size frame, which
+         is no longer what was read back. */
       tctx.globalCompositeOperation = 'lighter';
 
-      for (let y = 0; y < source.height; y += stepY) {
-        for (let x = 0; x < source.width; x += stepX) {
-          const i = (y * source.width + x) * 4;
-          const r = data.data[i];
-          const g = data.data[i + 1];
-          const b = data.data[i + 2];
-          const px = (x / source.width) * W;
+      const pixels = data.data;
+      for (let y = 0; y < SAMPLE_H; y++) {
+        for (let x = 0; x < SAMPLE_W; x++) {
+          const i = (y * SAMPLE_W + x) * 4;
+          const r = pixels[i];
+          const g = pixels[i + 1];
+          const b = pixels[i + 2];
+          const px = (x / SAMPLE_W) * W;
 
           const luma = (0.2126 * r + 0.7152 * g + 0.0722 * b) / 255;
           tctx.fillStyle = 'rgba(120,220,160,0.14)';
