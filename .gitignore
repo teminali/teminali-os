@@ -26,3 +26,25 @@ studio/native/macos/bin/
 
 # The eval harness bundles the editor tool manifest here before it runs.
 studio/evals/.build/
+
+# The realtime voice pipeline (studio/realtime-voice/) is source of this repo.
+# What is excluded is everything reproducible or enormous: the 2 GB virtualenv,
+# the vendored wheels, the tuning experiments that produced the voice, and the
+# .pre-* snapshots left beside files while they were being tuned.
+studio/realtime-voice/.venv/
+studio/realtime-voice/wheels/
+studio/realtime-voice/experiments/
+studio/realtime-voice/code/scratch/
+studio/realtime-voice/**/*.pre-*
+studio/realtime-voice/**/*.bak
+studio/realtime-voice/**/*.claude_overengineered_bak
+studio/realtime-voice/.claude/
+studio/realtime-voice/.agent/
+# The voice tuning artefacts: 95 MB of rendered takes and cached renders that
+# produced Bella's timing. The measurements that came out of them are written
+# down in code comments and LOCKED_PIPELINE_SPEC.md, which is the part worth
+# versioning. The audio stays on disk, out of the history.
+studio/realtime-voice/resources/bella/.cache/
+studio/realtime-voice/**/*.wav
+studio/realtime-voice/**/*.mp3
+studio/realtime-voice/**/*.flac

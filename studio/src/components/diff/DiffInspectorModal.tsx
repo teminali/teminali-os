@@ -19,6 +19,10 @@ import { diffChunks, type DiffChunk } from "../../services/diff";
 
 export const DiffInspectorModal: React.FC = () => {
   const { isDiffViewerOpen, setDiffViewerOpen, activeDiff, setActiveDiff } = useStudioStore();
+  /* Settings > Appearance > Themed Diff Backgrounds. Off, an added line keeps
+     its green text and its left marker but loses the fill — which is what an
+     operator reading a long diff on a dark canvas usually wants. */
+  const themedDiff = useStudioStore((state) => state.appearance.themedDiffBackgrounds);
   const [viewMode, setViewMode] = useState<"unified" | "split">("unified");
   const [isCopied, setIsCopied] = useState(false);
   const [acceptedChunks, setAcceptedChunks] = useState<Record<string, boolean>>({});
@@ -56,7 +60,11 @@ export const DiffInspectorModal: React.FC = () => {
 
   return (
     <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-md flex items-center justify-center p-4 select-none font-mono text-xs">
-      <div className="lit lit-inner relative w-full max-w-4xl h-[80vh] bg-surface-sunken rounded-2xl shadow-2xl flex flex-col overflow-hidden animate-in fade-in zoom-in-95 duration-150">
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-label="Diff inspector"
+        className="lit lit-inner relative w-full max-w-4xl h-[80vh] bg-surface-sunken rounded-2xl shadow-2xl flex flex-col overflow-hidden animate-in fade-in zoom-in-95 duration-150">
         <div className="absolute top-3 right-3 z-20">
           <MacCloseButton onClose={() => setDiffViewerOpen(false)} size={14} />
         </div>
@@ -163,9 +171,9 @@ export const DiffInspectorModal: React.FC = () => {
                       key={idx}
                       className={`flex items-center py-1 px-3 ${
                         line.type === "addition"
-                          ? "bg-success/10 text-success border-l-2 border-l-[var(--success)]"
+                          ? `${themedDiff ? "bg-success/10 " : ""}text-success border-l-2 border-l-[var(--success)]`
                           : line.type === "deletion"
-                          ? "bg-danger/10 text-danger border-l-2 border-l-[var(--danger)]"
+                          ? `${themedDiff ? "bg-danger/10 " : ""}text-danger border-l-2 border-l-[var(--danger)]`
                           : "text-ink-muted hover:bg-surface-sunken"
                       }`}
                     >

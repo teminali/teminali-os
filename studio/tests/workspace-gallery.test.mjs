@@ -295,12 +295,42 @@ test("a subtitle file that is refused says which format it is and what to do", (
   assert.match(subtitleFileRefusal("show.mp4"), /Drop an \.srt or a \.vtt/);
 });
 
+test("the player's idle countdown restarts on the operator, not on the playhead", async () => {
+  /*
+    `time` was in this effect's dependency list, and so the chrome never went
+    away — not in fullscreen, not windowed. `timeupdate` fires roughly four
+    times a second; each one re-ran the effect, and the cleanup tore down the
+    pending timeout and started a fresh one. A 2.6s countdown restarted every
+    250ms never reaches the end. The bar hid only when playback stopped, which
+    is the one moment it is meant to stay.
+
+    Nothing else can catch this. It typechecks, it renders, every unit test
+    passes, and the symptom only appears to someone actually watching a film
+    with the pointer still. So the dependency list is read as text.
+  */
+  const { readFile } = await import("node:fs/promises");
+  const player = await readFile(new URL("../src/components/workspace/panels/MediaPlayer.tsx", import.meta.url), "utf8");
+
+  const effect = /setTimeout\(\(\) => setIdle\(true\), IDLE_MS\);[\s\S]{0,200}?\}, \[([^\]]*)\]\);/.exec(player);
+  assert.ok(effect, "the idle effect is still shaped the way this test reads it");
+  const deps = effect[1];
+
+  assert.doesNotMatch(deps, /\btime\b/, "the playhead must not restart the idle countdown — it would never expire");
+  assert.match(deps, /\bawake\b/, "pointer activity is what restarts it");
+  assert.match(player, /onMouseMove=\{wake\}/, "and the surface is what reports that activity");
+});
+
 test("the player leaves the window's bottom-right corner to the shared chrome that owns it", async () => {
   /*
     The version control is `fixed bottom-2 right-3` at z-40, above anything a
     panel draws. The video editor's timeline has always reserved that strip;
     the player is the second pane to draw content that far down, and it was
     reported as the version pill sitting on top of the fullscreen button.
+
+    The reservation used to be a right-indent on the controls row. The rail is
+    full-bleed and underneath everything since the layout redesign, so the
+    lowest thing in that corner is the rail, and the bar clears the badge by
+    lifting off the bottom edge instead.
 
     Source-text, like the panel-migration test above: the reservation is a
     style on a rendered div, and what is worth catching is someone deleting it
@@ -312,6 +342,6 @@ test("the player leaves the window's bottom-right corner to the shared chrome th
   const badge = await readFile(new URL("../src/components/updates/VersionControl.tsx", import.meta.url), "utf8");
 
   assert.match(badge, /fixed bottom-2 right-3 z-40/, "the strip this reserves is the one the badge occupies");
-  assert.match(player, /const VERSION_BADGE_STRIP = \d+;/);
-  assert.match(player, /paddingRight: fullscreen \? undefined : VERSION_BADGE_STRIP/);
+  assert.match(player, /const VERSION_BADGE_LIFT = \d+;/);
+  assert.match(player, /paddingBottom: fullscreen \? \d+ : VERSION_BADGE_LIFT/);
 });

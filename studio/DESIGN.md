@@ -56,12 +56,17 @@ sits over a frame of film — a snowfield in one shot and a night interior in th
 next. Every other token here is measured against a known ground, and a control
 bar tuned for `#181818` disappears over the first bright frame. So that block
 is defined against **black**: a flat scrim (`--player-scrim`), marks as white
-at fixed alphas (`--player-ink`, `--player-track`), and one hue — the brand
-green on the played span of the scrubber, because "this is ours and this is
-live" means there what it means everywhere else. It is still one flat fill, so
-§1's first rule holds on the one surface that most tempts a gradient. Reach for
-these only over picture; a component that used `--player-ink` on a panel would
-be putting pure white on grey, which is not in this system's range.
+at fixed alphas (`--player-ink`, `--player-track`), and one hue —
+`--player-accent`, the brand green, on the played span of the scrubber and on
+whichever pill is currently doing something, because "this is ours and this is
+live" means there what it means everywhere else. `--player-glass` is the
+floating family: the pills in the top corner, the episode drawer on the left
+edge, the menus. One white alpha with a blur behind it covers a bright frame
+and a black one, which is the same argument as the rest of the block. The two
+edge scrims are §1's one sanctioned gradient — see §3 — and nothing else here
+gets one. Reach for these only over picture; a component that used
+`--player-ink` on a panel would be putting pure white on grey, which is not in
+this system's range.
 
 ### Typography
 
@@ -95,7 +100,11 @@ tinted. Internalise these five and the rest follows:
 1. **No gradients.** Not on the window, not on the sidebar, not on a button, not
    as a floor glow or a top light. Every surface is one flat fill. A vertical
    wash across the canvas blurs the one tonal step that matters (the sidebar
-   sitting 3 values above it), which is the whole structure of the shell.
+   sitting 3 values above it), which is the whole structure of the shell. One
+   exception, and it is written down rather than assumed: the media player's
+   two edge scrims (§3). They sit over an arbitrary image, not over a known
+   grey, and a flat plate opaque enough to carry white text there cuts a
+   visible band out of the film.
 2. **No edge lighting.** Depth is a flat 1px border, one step lighter than the
    fill it encloses, identical on all four sides. No brighter crown, no inner
    catch, no fade around the corner, no contact shadow. `--lit-*` still exists
@@ -1237,11 +1246,58 @@ control — the buttons, the keyboard and `player_control` all call it, so
 grey strip under a letterboxed video, and the operator's verdict was the right
 one: *"the player design is not top tier… i need it 4x better, more cinematic
 and clean controls."* The video now fills the pane and the controls float on
-it, on one flat scrim — a fill, never a gradient, so §1's first rule holds on
-the one surface that most tempts one — drawn from the `--player-*` tokens §0
-describes. While a video plays and the pointer is still, the bar, the title and
-the cursor all go; movement, a menu or a pause brings them back. Audio keeps
-its chrome always: there is nothing to get out of the way of.
+it, drawn from the `--player-*` tokens §0 describes. **And it had never once
+left** until 2026-09-10: `time` was in the idle effect's dependency list, so
+every `timeupdate` — four a second — tore down the pending countdown and
+started a new one, and a 2.6s timer restarted every 250ms never expires. The
+bar hid only when playback *stopped*, which is the one moment it should stay.
+It restarts on `awake` now, bumped by pointer activity and throttled to one
+bump per 200ms, because what the countdown is waiting for is the operator
+going still, not the playhead moving. `tests/workspace-gallery.test.mjs` reads
+that dependency list as text: nothing else can catch it, since the broken
+version typechecks, renders, and passes every other test. The two scrims are §1's
+one sanctioned gradient: a flat plate dark enough to carry white text over a
+snowfield is also dark enough to cut a visible band out of the film, and this
+is the only surface in the app whose background is an arbitrary image. While a
+video plays and the pointer is still, the bar, the title and the cursor all go;
+movement, a menu or a pause brings them back. Audio keeps its chrome always:
+there is nothing to get out of the way of.
+
+**Four corners and a rail** (2026-09-10), after a reference design the operator
+handed us. Top-left is the film's name, set large and light. Top-right is the
+close button and, while it is true, the live-transcode badge — and nothing
+else. It carried a resolution pill for a day: the reference stacks *selectable*
+renditions there (2160p/1440p/1080p) and we cannot have one, because nothing
+here streams, so it became a label reading the file's real height off ffprobe.
+The operator's verdict was right and is the general rule — *"we do not need the
+video quality tag"* — a label that never changes and answers no question a
+viewer is asking is just one more thing on top of the film. Bottom-left is transport, bare
+glyphs with no plate behind them, which is why that corner reads as three marks
+on the picture rather than three widgets: back ten, play, forward ten, then the
+clock. The reference's ⏮/⏭ are the two **seeks**, not the two episodes — a seek
+is wanted on every file and an episode only on some. Bottom-right, behind a
+divider, are the settings chosen once and then left: volume, subtitles, speed,
+fullscreen. The rail runs the full width beneath both, unbroken by numbers.
+
+**The clock is scaled to the film, not to the longest film there could be.**
+`00:02:35 / 00:16:08` is nineteen characters, ten of them a zero standing in
+for an hour a sixteen-minute file does not have — and in a narrow pane the
+slashes were break opportunities, so it stacked onto three lines and shoved
+the transport sideways. `formatClock` prints `2:35 / 16:08` under an hour and
+`1:02:35` over it, unpadded at the lead, `whitespace-nowrap`. Screen readers
+still get full `hh:mm:ss` through `aria-valuetext`, where an unambiguous unit
+beats a short one. When a pane is narrower still, the transport and its clock
+hold their size and the **Subtitles pill truncates** — it is the only control
+in the bar whose width is text rather than a glyph, so it is the only one that
+can give up room without giving up a target.
+
+**A series gets a drawer on the left edge**, with a vertical tab where the
+reference puts X-Ray, and its own prev/next in the header. It replaced a pill
+at the bottom centre that opened a modal over the middle of the frame — over
+the very thing you were choosing between — and the two floating chevrons that
+used to sit over the picture are gone with it. Where the reference shows a
+face, an episode row shows its number in the same circle: a folder of episodes
+has no faces, and the number is what identifies one.
 
 The scrubber is a **real `<input type="range">` kept transparent over a track
 this pane draws**. A div with a drag handler would have looked the same and
@@ -1255,11 +1311,15 @@ once.
 is `fixed bottom-2 right-3` at z-40, above anything a panel draws — the video
 editor's timeline has reserved that strip since it shipped, and the player,
 being the second pane to draw content that far down, put the version pill
-straight on top of its fullscreen button. `VERSION_BADGE_STRIP` reserves it the
-same way rather than moving shared chrome for one pane's sake, and only when
-windowed: a fullscreen element is rendered alone, so nothing of the app's is
-over it. A test pins the reservation against the badge's own position, because
-the two are one measurement in two files.
+straight on top of its fullscreen button. It reserved it *horizontally* at
+first, indenting the right end of the controls row. The full-bleed rail ended
+that: the lowest thing in the corner is now the rail, and no right-indent short
+of shortening the rail would clear it. So `VERSION_BADGE_LIFT` raises the whole
+bar off the bottom edge instead — 8px of `bottom-2` plus the badge's 22px plus
+4px of air — which clears the badge for the rail and the controls row alike and
+costs the rail nothing. Only when windowed: a fullscreen element is rendered
+alone, so nothing of the app's is over it. A test pins the reservation against
+the badge's own position, because the two are one measurement in two files.
 
 **The timeline is virtual, and that is not an optimisation.** In `direct` mode
 the element holds the file and seeks by byte range. In a transcode ffmpeg is
@@ -5565,6 +5625,34 @@ same sentence verbatim — at this model size any speakable string in the prompt
 becomes the template for every answer, which `temi_moves.py` documents at
 length. The mechanism is the gate: with state questions delegated, few of these
 questions reach the persona at all.
+
+### 6.0.6 The shell's own directive must not return as a user turn (2026-09-10)
+
+`sendAssistantDirective` is not a user turn. But the pipeline has one way in, so
+`realtime-voice/code/server.py` wraps the line and delivers it through
+`on_final` — **the same callback a spoken turn uses** — and it comes back to the
+shell as `final_user_request`. Type alone cannot tell it from speech.
+
+Unguarded, that closes a loop, and it was observed live: the shell delegates,
+speaks "On it.", the directive returns as a user turn, `performTurn` classifies
+it as work, and it delegates again. The activity queue fills with identical
+tasks and the assistant talks to itself. **The Stop button cannot win** — each
+stop is followed by another delegation, which is why it read as a broken button
+rather than a loop.
+
+Two things were wrong per cycle: the directive was appended to
+`dialogueHistory` **as a user bubble**, captioning the operator with words they
+never said; and it reached the turn switch.
+
+`Realtime8000ProtocolManager.isAssistantDirectiveEcho()` is the guard, matching
+`server.py`'s prefix. It lives on the class that **sends** the directive, so the
+sender and the recogniser cannot drift apart, and `TemiVoiceStage` drops such
+messages on both the `partial_` and `final_user_request` paths before either
+effect happens. It is deliberately narrow: bracketed artefacts like
+`[keyboard clicking]` belong to `transcriptRepair` and must pass through.
+
+Pinned by `tests/voice-directive-echo.test.mjs`, which rebuilds the wrapper from
+`server.py`'s own wording so the test fails if either side drifts.
 
 ### 6.1 Turn semantics while a run is in flight (2026-09-05)
 

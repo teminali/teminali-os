@@ -327,12 +327,16 @@ const Heading: React.FC<{ children: React.ReactNode; count: number }> = ({ child
  * The site's icon: its own, if it has one, and otherwise its initial on a hue
  * hashed from its hostname.
  *
+ * Exported for the bookmark bar in `BrowserPane`, which shows the same
+ * bookmarks in a strip: a second mark drawn by hand there would be the same
+ * site in two colours depending on which surface it was on.
+ *
  * The favicon is asked of the site itself — never of a favicon service, which
  * would be a third party told the whole list at once. See `utils/siteMark.ts`.
  * A site that answers with nothing, or with something that is not an image,
  * falls back to the letter, so the grid never has a hole in it.
  */
-const Mark: React.FC<{
+export const Mark: React.FC<{
   url: string;
   size: number;
   round?: boolean;

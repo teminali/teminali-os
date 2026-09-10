@@ -2,6 +2,7 @@ import React, { useState } from "react";
 import { ChevronDown, ChevronUp, Maximize2, Minimize2 } from "lucide-react";
 import { CodeSnippet } from "../ui/CodeSnippet";
 import { tokenizeInline } from "../../services/markdown";
+import { openLink } from "../../services/linkOpen";
 
 export interface CursorMarkdownRendererProps {
   content: string;
@@ -178,6 +179,15 @@ const Inline: React.FC<{ text: string }> = ({ text }) => (
               href={token.href}
               target="_blank"
               rel="noreferrer noopener"
+              /* Every link in the app goes through `openLink`, which honours the
+                 Links preference — in-app panel or system browser. The href and
+                 target stay so the context menu, middle-click and "copy link
+                 address" keep working; this only intercepts the plain click. */
+              onClick={(event) => {
+                if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+                event.preventDefault();
+                openLink(token.href);
+              }}
               className="text-reason underline decoration-reason/40 underline-offset-2 hover:decoration-reason transition-colors"
             >
               {token.value}
