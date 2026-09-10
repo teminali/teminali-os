@@ -59,10 +59,10 @@ export function isVoicedFrame(frame: VoicingFrame, ducked = false): boolean {
   const speechBand = centroid > 180 && centroid < 4200;
   if (!speechBand) return false;
 
-  const loud = rms > Math.max(noiseFloor * (ducked ? 5.5 : 2.6), ducked ? 0.035 : 0.006);
+  const loud = rms > Math.max(noiseFloor * (ducked ? 6.5 : 2.8), ducked ? 0.045 : 0.012);
   if (loud) return true;
 
-  const periodic = f0 > 0 && clarity >= (ducked ? PITCH_CLARITY_DUCKED : PITCH_CLARITY);
-  const pitchFloor = ducked ? Math.max(noiseFloor * 3.2, 0.02) : Math.max(noiseFloor * 1.5, 0.004);
+  const periodic = f0 >= 80 && f0 <= 420 && clarity >= (ducked ? PITCH_CLARITY_DUCKED : PITCH_CLARITY);
+  const pitchFloor = ducked ? Math.max(noiseFloor * 2.8, 0.02) : Math.max(noiseFloor * 1.5, 0.007);
   return periodic && rms > pitchFloor;
 }

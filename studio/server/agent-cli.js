@@ -35,9 +35,11 @@ import { permissionMcpArgs } from "./permission-mcp.js";
 import { screenMcpArgs } from "./screen-mcp.js";
 import { workspaceMcpArgs } from "./workspace-mcp.js";
 import { cameraMcpArgs } from "./camera-mcp.js";
+import { browserMcpArgs } from "./browser-mcp.js";
 import { briefingArgs } from "./agent-briefing.js";
 import { closeRun, openRun } from "./permission-bridge.js";
 import { createEditWatcher } from "./agent-edits.js";
+import { removeAgentImages, writeAgentImages } from "./agent-attachments.js";
 import { resolve, sep } from "node:path";
 
 export const AGENT_LIMITS = Object.freeze({
@@ -65,12 +67,40 @@ export const AGENTS = Object.freeze({
      */
     permissions: ["manual", "acceptEdits", "bypassPermissions"],
     defaultPermission: "acceptEdits",
+    /**
+     * How hard the model works before it answers, weakest first.
+     *
+     * These are `claude --effort <level>`'s own words, copied from the
+     * installed CLI's help rather than chosen: a level we invent is a level
+     * the CLI rejects, and it rejects it by failing the whole turn. The
+     * default is null — "leave the operator's own CLI setting alone" —
+     * because an effort we pick silently overrides a config they wrote.
+     */
+    efforts: ["low", "medium", "high", "xhigh", "max"],
+    defaultEffort: null,
+    /**
+     * Claude Code has no separate thinking knob. `--effort` is it: the levels
+     * above are the thinking budget. Empty rather than absent, so the picker
+     * can render "what this agent offers" without asking which agent it is.
+     */
+    thinking: [],
+    defaultThinking: null,
   },
   codex: {
     bin: "codex",
     label: "Codex",
     permissions: ["read-only", "workspace-write", "danger-full-access"],
     defaultPermission: "workspace-write",
+    /** `-c model_reasoning_effort=`. Codex starts a rung below Claude Code. */
+    efforts: ["minimal", "low", "medium", "high", "xhigh"],
+    defaultEffort: null,
+    /**
+     * `-c model_reasoning_summary=` — how much of the reasoning comes back on
+     * the stream, which is what the transcript renders. Ordered quietest
+     * first; `auto` is last because it is the widest, not the safest.
+     */
+    thinking: ["none", "concise", "detailed", "auto"],
+    defaultThinking: null,
   },
 });
 
@@ -101,7 +131,7 @@ export function agentEnvironment(source = process.env) {
   return environment;
 }
 
-function argsFor(engine, { prompt, cwd, sessionId, model, permission, approval = null, screen = null, workspace = null, camera = null }) {
+function argsFor(engine, { prompt, cwd, sessionId, fork = false, model, permission, effort = null, thinking = null, approval = null, screen = null, workspace = null, camera = null, browser = null, imagePaths = [] }) {
   /*
     The video panel, when one is open.
 
@@ -129,9 +159,23 @@ function argsFor(engine, { prompt, cwd, sessionId, model, permission, approval =
     video: mcp.length > 0,
     workspace: (workspace?.args?.length ?? 0) > 0,
     camera: (camera?.args?.length ?? 0) > 0,
+    browser: (browser?.args?.length ?? 0) > 0,
   });
 
   if (engine === "claude") {
+    /*
+      Claude Code has no image flag. It reads images with its own Read tool, so
+      an attachment reaches it only by being named — which is why the paths go
+      in the prompt rather than in argv, and why they are named before the
+      operator's own words: an instruction that arrives after the question is
+      one the model has already started answering without.
+    */
+    const prose = imagePaths.length
+      ? `The operator attached ${imagePaths.length} image${imagePaths.length === 1 ? "" : "s"} to this message. `
+        + `Read ${imagePaths.length === 1 ? "it" : "each of them"} with your Read tool before answering:\n`
+        + `${imagePaths.join("\n")}\n\n${prompt}`
+      : prompt;
+
     /*
       Without a prompt tool, headless `claude -p` refuses anything its
       permission mode does not settle outright — there is no terminal to ask
@@ -145,8 +189,9 @@ function argsFor(engine, { prompt, cwd, sessionId, model, permission, approval =
       ...(screen?.args ?? []),
       ...(workspace?.args ?? []),
       ...(camera?.args ?? []),
+      ...(browser?.args ?? []),
       ...briefing,
-      "-p", prompt,
+      "-p", prose,
       "--output-format", "stream-json",
       "--verbose",
       // Without this, text arrives one whole assistant message at a time and
@@ -159,19 +204,60 @@ function argsFor(engine, { prompt, cwd, sessionId, model, permission, approval =
       "--append-system-prompt", AGENT_IDENTITY,
     ];
     if (model) args.push("--model", model);
+    // Omitted rather than defaulted when nothing is chosen, so the operator's
+    // own `~/.claude` setting survives a turn started from this app.
+    if (effort) args.push("--effort", effort);
     // Resuming is what makes a tab a conversation rather than a series of
     // unrelated one-shots.
-    if (sessionId) args.push("--resume", sessionId);
+    if (sessionId) {
+      args.push("--resume", sessionId);
+      /*
+        Branching instead of continuing.
+
+        `--fork-session` answers from the resumed history and writes the answer
+        to a new session id, leaving the thread it read untouched — which is
+        what lets two chats in this app share a past and not a future. It is
+        documented as "when resuming", so it goes after `--resume` and is never
+        pushed without it: on its own it modifies a flag that is not there.
+      */
+      if (fork) args.push("--fork-session");
+    }
     return args;
   }
 
+  /*
+    Codex has no flag for either knob; both are config overrides, and `-c`
+    parses its value as TOML before falling back to a literal — so the level is
+    quoted, which is the form the CLI's own help documents (`-c model="o3"`).
+    An unquoted bare word happens to work today by way of that fallback; a
+    quoted string is a TOML string on purpose.
+  */
+  const overrides = [];
+  if (effort) overrides.push("-c", `model_reasoning_effort="${effort}"`);
+  if (thinking) overrides.push("-c", `model_reasoning_summary="${thinking}"`);
+
   // `-c` before the subcommand and the positional prompt, both of which must
   // stay last: `codex exec resume <id> <prompt>` is order-sensitive.
-  const args = [...mcp, "exec", "--json", "--skip-git-repo-check", "--sandbox", permission, "-C", cwd];
+  const args = [...mcp, ...overrides, "exec", "--json", "--skip-git-repo-check", "--sandbox", permission, "-C", cwd];
+  /*
+    `codex exec -i, --image <FILE>...` takes the files as a first-class flag, so
+    Codex needs no help from the prose. The `--image=<path>` form is used rather
+    than `-i <path>`: the flag is variadic, and a variadic flag given its value
+    positionally goes on eating arguments — including the prompt, which has to
+    stay last. `=` binds exactly one value and stops.
+  */
+  for (const path of imagePaths) args.push(`--image=${path}`);
   if (model) args.push("--model", model);
   if (sessionId) {
-    // `codex exec resume <id>` is a subcommand, so the prompt follows it.
-    args.push("resume", sessionId, prompt);
+    /*
+      `codex exec resume <id>` is a subcommand, so the prompt follows it.
+
+      `fork` is the other one: `codex exec fork <SESSION_ID> [PROMPT]`, same
+      shape, same position, and it branches rather than extends — Codex's own
+      words are "fork a previous session by id into a new session". Swapping the
+      verb is the whole difference, which is why they share this line.
+    */
+    args.push(fork ? "fork" : "resume", sessionId, prompt);
     return args;
   }
   args.push(prompt);
@@ -513,9 +599,20 @@ export function runAgentTurn(options) {
     prompt,
     root,
     cwd = "",
+    images = [],
     sessionId = null,
+    /*
+      Branch the resumed thread instead of extending it.
+
+      Meaningless without a `sessionId` and ignored there rather than refused:
+      "fork nothing" is a fresh thread, which is what a turn with no id already
+      is. See `argsFor` for each CLI's spelling of it.
+    */
+    fork = false,
     model = null,
     permission,
+    effort = null,
+    thinking = null,
     runId = null,
     screenControl = false,
     onEvent,
@@ -534,6 +631,18 @@ export function runAgentTurn(options) {
   const binary = bin || agent.bin;
 
   const mode = agent.permissions.includes(permission) ? permission : agent.defaultPermission;
+  /*
+    An unrecognised level is dropped, not passed through and not an error.
+
+    Both of these reach argv, and both CLIs fail the entire turn on a level
+    they do not know — Claude Code on `--effort`, Codex on a `-c` value that
+    will not deserialise. Falling back to the agent's own default (null: say
+    nothing, let their config stand) turns a stale value from a persisted
+    store, or a newer level from a CLI since downgraded, into a normal turn
+    instead of a dead one.
+  */
+  const effortLevel = agent.efforts.includes(effort) ? effort : agent.defaultEffort;
+  const thinkingLevel = agent.thinking.includes(thinking) ? thinking : agent.defaultThinking;
   const workingDirectory = resolveAgentCwd(root, cwd);
 
   /*
@@ -579,9 +688,44 @@ export function runAgentTurn(options) {
   */
   const camera = runToken ? cameraMcpArgs(engine, runId, runToken) : null;
 
+  /*
+    The browser panel, on the same run's token again.
+
+    No `available` flag, for the camera's reason: whether a page is open is
+    answered in the window when the tool is called, and a probe here could only
+    guess. Separate from `workspace` because these seven tools ask questions
+    and wait for answers, where `browse` only shows.
+  */
+  const browser = runToken ? browserMcpArgs(engine, runId, runToken) : null;
+
+  /*
+    The attachments, on disk where a CLI can read them.
+
+    Written here rather than in the route because this is where the cwd has
+    already been resolved and boundary-checked, and because `finish()` below is
+    the one funnel every ending goes through — a normal exit, a timeout, an
+    abort — so the cleanup can be hooked once instead of on four paths.
+    Synchronous: the limits cap this at 5 MB, and a turn that has not started
+    has nothing to interleave with. See server/agent-attachments.js.
+  */
+  const attachments = writeAgentImages({ cwd: workingDirectory, runId, images });
+
   const args = argsFor(engine, {
-    prompt, cwd: workingDirectory, sessionId, model, permission: mode, approval, screen, workspace, camera,
+    prompt, cwd: workingDirectory, sessionId, fork, model, permission: mode,
+    effort: effortLevel, thinking: thinkingLevel,
+    approval, screen, workspace, camera, browser,
+    imagePaths: attachments.paths,
   });
+
+  const runEnv = { ...env };
+  if (options.frontierMax) {
+    const base = options.gatewayUrl || "http://127.0.0.1:4310";
+    runEnv.ANTHROPIC_BASE_URL = `${base}/api/gemini`;
+    const key = options.geminiApiKey || runEnv.GEMINI_API_KEY || "AIza-frontier-max";
+    runEnv.ANTHROPIC_API_KEY = key;
+    runEnv.ANTHROPIC_AUTH_TOKEN = key;
+    runEnv.ANTHROPIC_MODEL = model || "gemini-3.8-flash";
+  }
 
   return new Promise((resolvePromise) => {
     const startedAt = Date.now();
@@ -593,13 +737,21 @@ export function runAgentTurn(options) {
     let settled = false;
     let summary = null;
 
-    const child = spawnCommand(binary, args, {
-      cwd: workingDirectory,
-      env,
-      // stdin is closed rather than inherited: both CLIs block on a pipe they
-      // are never going to be written to.
-      stdio: ["ignore", "pipe", "pipe"],
-    });
+    let child;
+    try {
+      child = spawnCommand(binary, args, {
+        cwd: workingDirectory,
+        env: runEnv,
+        // stdin is closed rather than inherited: both CLIs block on a pipe they
+        // are never going to be written to.
+        stdio: ["ignore", "pipe", "pipe"],
+      });
+    } catch (error) {
+      // A turn that never started never reaches `finish()`, so the one path
+      // that bypasses the funnel cleans up on its own way out.
+      removeAgentImages(attachments.dir);
+      throw error;
+    }
 
     const finish = (reason) => {
       if (settled) return;
@@ -610,6 +762,9 @@ export function runAgentTurn(options) {
       if (runId) closeRun(runId);
       // A tool the turn never finished has no "after" and never will.
       editWatcher?.close();
+      // The attachments existed for this turn only. Nothing the operator did
+      // not put there survives it.
+      removeAgentImages(attachments.dir);
       resolvePromise({
         sessionId: state.sessionId,
         durationMs: Date.now() - startedAt,
@@ -782,6 +937,10 @@ export async function agentAvailability(env = agentEnvironment()) {
         version,
         permissions: agent.permissions,
         defaultPermission: agent.defaultPermission,
+        efforts: agent.efforts,
+        defaultEffort: agent.defaultEffort,
+        thinking: agent.thinking,
+        defaultThinking: agent.defaultThinking,
       }];
     }),
   );

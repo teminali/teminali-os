@@ -172,12 +172,19 @@ application's problem to solve, not a task to delegate to the person who bought
 it. The same rule applies to the sidecar work above: if the wizard's download
 fails, the recovery is a button that retries, never an instruction.
 
-**Before bundling, pick the licence.** The Gyan build named in that error is
-**GPL**. Shipping GPL binaries inside a product that is sold carries
-obligations — an offer of source, and care about coupling. An **LGPL** build is
-the usual answer for commercial distribution. This is the operator's decision
-and it must be made before a binary goes into the installer, not after it has
-shipped to customers.
+**The licence is picked: LGPL, built here.** The Gyan build named in that error
+is **GPL**, and shipping GPL binaries inside a product that is sold carries
+obligations — an offer of source, and care about coupling. The operator settled
+this on 2026-09-10 alongside the same question for mpv: both are built LGPL
+rather than taken prebuilt. The recipe, the obligations and the one real cost
+are in [`MEDIA_LICENSING.md`](MEDIA_LICENSING.md).
+
+That cost, before anyone drops a binary in: an LGPL FFmpeg has no `libx264` and
+no `libx265`, and those are the software encode fallback in five places
+(`server/media-probe.js:256` and four others). Hardware encoders cover most
+machines, not all, and not Linux. **The turn that bundles ffmpeg replaces those
+five call sites in the same turn** — otherwise the bundle breaks export on
+exactly the clean machines it was meant to fix.
 
 The fix is the same shape as the sidecar one, and cheaper: a Windows ffmpeg
 static build is roughly 80-120 MB against the sidecar's 573 MB, so bundling it

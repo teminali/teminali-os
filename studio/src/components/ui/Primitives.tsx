@@ -69,27 +69,64 @@ export const TrafficLights: React.FC<{
   onMaximize?: () => void;
   /** Native lights are already drawn; reserve the space without painting. */
   placeholder?: boolean;
-}> = ({ onClose, onMinimize, onMaximize, placeholder = false }) => {
+  /** Zoom becomes Restore, and says so — the platform swaps the glyph, not the disc. */
+  isMaximized?: boolean;
+  /** macOS greys the lights when the window is not key. */
+  dimmed?: boolean;
+}> = ({ onClose, onMinimize, onMaximize, placeholder = false, isMaximized = false, dimmed = false }) => {
   if (placeholder) return <div className="w-[59px] flex-shrink-0" aria-hidden />;
+  /* The glyph ink is a dark tint of each disc rather than one neutral: on
+     macOS the × is a deep red, not a black. Values read off the reference. */
   const lights = [
-    { color: "var(--tl-close)", action: onClose, label: "Close" },
-    { color: "var(--tl-min)", action: onMinimize, label: "Minimise" },
-    { color: "var(--tl-max)", action: onMaximize, label: "Zoom" },
+    { color: "var(--tl-close)", ink: "#5c0d08", action: onClose, label: "Close",
+      glyph: <path d="M4.2 4.2l3.6 3.6M7.8 4.2l-3.6 3.6" /> },
+    { color: "var(--tl-min)", ink: "#603d02", action: onMinimize, label: "Minimise",
+      glyph: <path d="M3.9 6h4.2" /> },
+    {
+      color: "var(--tl-max)", ink: "#0a4715", action: onMaximize,
+      label: isMaximized ? "Restore" : "Zoom",
+      glyph: isMaximized
+        // Restore: two arrows folding inward.
+        ? <path d="M7.6 4.4L5.2 6.8M7.6 4.4H5.9M7.6 4.4v1.7M4.4 7.6l2.4-2.4M4.4 7.6h1.7M4.4 7.6V5.9" />
+        // Zoom: two arrows pushing outward.
+        : <path d="M4.3 7.7l3.4-3.4M4.3 7.7V6M4.3 7.7H6M7.7 4.3V6M7.7 4.3H6" />,
+    },
   ];
   return (
     /* 13px discs on a 23px pitch, first centre at x=17.5 — measured off the
        reference rather than assumed, because these are the first thing the eye
        lands on and a 2px error in the pitch is visible next to a real window. */
-    <div className="flex items-center gap-[10px] flex-shrink-0" style={{ WebkitAppRegion: "no-drag" } as React.CSSProperties}>
+    <div
+      className={`group/lights flex items-center gap-[10px] flex-shrink-0 transition-opacity duration-200 ${
+        dimmed ? "opacity-45" : "opacity-100"
+      }`}
+      style={{ WebkitAppRegion: "no-drag" } as React.CSSProperties}
+    >
       {lights.map((light) => (
         <button
           key={light.label}
           type="button"
           aria-label={light.label}
+          title={light.label}
           onClick={light.action}
-          className="w-[13px] h-[13px] rounded-full transition-opacity duration-ds ease-ds hover:opacity-80"
+          className="w-[13px] h-[13px] rounded-full grid place-items-center transition-opacity duration-ds ease-ds hover:opacity-80 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white/60"
           style={{ background: light.color }}
-        />
+        >
+          {/* Glyphs stay hidden until the cluster is hovered, as on macOS: at
+              rest these are three coloured dots, and the mark appearing is the
+              confirmation that the pointer is on target. */}
+          <svg
+            viewBox="0 0 12 12"
+            aria-hidden="true"
+            className="w-full h-full opacity-0 transition-opacity duration-ds ease-ds group-hover/lights:opacity-100"
+            stroke={light.ink}
+            strokeWidth={1.4}
+            strokeLinecap="round"
+            fill="none"
+          >
+            {light.glyph}
+          </svg>
+        </button>
       ))}
     </div>
   );

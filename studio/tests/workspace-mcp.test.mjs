@@ -65,7 +65,7 @@ test("only the showing tools are pre-approved — naming the server would allow 
   const { args } = workspaceMcpArgs("claude", "run-2", "tok-2", { tmpDir, execPath: "/bin/node" });
   const allowed = args[args.indexOf("--allowedTools") + 1];
   /*
-    Eight tools now, and each widening was deliberate: `open_file` opens a file
+    Nine tools now, and each widening was deliberate: `open_file` opens a file
     the operator could open with one click, through the same route and the same
     limits, and writes nothing; `browse` shows a page the same way, and the
     three browser reads read. `player_control` is the one whose name is a verb,
@@ -86,6 +86,8 @@ test("only the showing tools are pre-approved — naming the server would allow 
     "mcp__teminali-workspace__downloads",
     "mcp__teminali-workspace__player",
     "mcp__teminali-workspace__player_control",
+    // A picture of the file they opened, in the pane they are watching — not the camera and not the screen.
+    "mcp__teminali-workspace__player_frame",
   ]);
   assert.equal(allowed.includes("mcp__teminali-workspace__bookmark,"), false);
   assert.deepEqual(allowed.split(","), [...WORKSPACE_READ_TOOLS]);
@@ -195,7 +197,7 @@ function askShim(requests) {
   });
 }
 
-test("the shim speaks MCP and offers exactly the eleven tools the design names", async () => {
+test("the shim speaks MCP and offers exactly the twelve tools the design names", async () => {
   const replies = await askShim([
     { jsonrpc: "2.0", id: 1, method: "initialize", params: {} },
     { jsonrpc: "2.0", id: 2, method: "tools/list", params: {} },
@@ -203,7 +205,7 @@ test("the shim speaks MCP and offers exactly the eleven tools the design names",
 
   assert.equal(replies.find((reply) => reply.id === 1).result.serverInfo.name, WORKSPACE_SERVER_NAME);
   const names = replies.find((reply) => reply.id === 2).result.tools.map((tool) => tool.name).sort();
-  assert.deepEqual(names, ["bookmark", "bookmarks", "browse", "browsing_history", "downloads", "open_file", "open_project", "player", "player_control", "recent_projects", "reveal"]);
+  assert.deepEqual(names, ["bookmark", "bookmarks", "browse", "browsing_history", "downloads", "open_file", "open_project", "player", "player_control", "player_frame", "recent_projects", "reveal"]);
 });
 
 test("an unknown tool is a result the agent can act on, not an aborted turn", async () => {

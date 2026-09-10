@@ -15,6 +15,22 @@
  * `tests/player-state.test.mjs` asserts the two are the same list — an action
  * the gateway accepts and the pane ignores is a tool call that reports success
  * and does nothing.
+ *
+ * ## One list, two engines
+ *
+ * Four of the actions — `frame_step`, `frame_back`, `chapter`, `audio_track` —
+ * exist because mpv can do them (`electron/mpvProcess.cjs`), and a `<video>`
+ * element cannot always do them for the file it happens to be showing.
+ * Chromium plays a container's first audio track and offers no way to choose
+ * another; it knows nothing about chapters; and it can only step a frame if
+ * something told it the frame rate.
+ *
+ * The answer is *not* a second, shorter list for the pane, which would put the
+ * same action in two contracts. It is `unsupported` in the snapshot below: the
+ * pane says, per file, what it cannot do and why, and the gateway refuses
+ * those before they are sent — so the model gets a sentence it can act on
+ * instead of a "done" that moved nothing. An engine that can do everything
+ * publishes an empty list and none of this is in the way.
  */
 
 /*
@@ -28,8 +44,9 @@
 
 export const PLAYER_ACTIONS = [
   "play", "pause", "toggle", "restart",
-  "seek", "seek_by", "volume", "mute", "unmute", "rate",
-  "subtitles", "fullscreen",
+  "seek", "seek_by", "frame_step", "frame_back", "chapter",
+  "volume", "mute", "unmute", "rate",
+  "subtitles", "audio_track", "fullscreen",
   "next", "previous", "episode", "episodes",
 ] as const;
 
@@ -74,6 +91,11 @@ export interface PlayerSnapshot {
   rate: number;
   subtitles: { available: string[]; active: string | null };
   fullscreen: boolean;
+  /**
+   * What this engine cannot do with *this* file, each with the sentence the
+   * agent is given instead. Empty is the normal case; see the header.
+   */
+  unsupported: { action: PlayerAction; reason: string }[];
   /** What the player said when it could not play, or null. */
   error: string | null;
 }

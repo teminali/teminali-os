@@ -42,6 +42,9 @@ async function startGateway(options = {}) {
     resolveFrontierMode: options.resolveFrontierMode,
     config: {
       port: 0,
+      // No test wants a 2 GB Python pipeline spawned underneath it. Adoption of
+      // an already-running one is still exercised, since that costs nothing.
+      realtimeVoiceAutostart: false,
       requestTimeoutMs: 250,
       healthTimeoutMs: 100,
       maxJsonBytes: 1024,
@@ -751,4 +754,53 @@ test("the window publishes what its player is showing, and the agent reads it ba
   await fetch(`${baseUrl}/api/workspace/player/state`, { method: "POST", headers: authHeaders(), body: JSON.stringify({ player: null }) });
   const empty = await ask("player", {});
   assert.match((await empty.json()).result.summary, /No video or audio is open/);
+});
+
+test("attached images are refused with a status code, before the agent stream opens", async (t) => {
+  const { gateway, baseUrl } = await startGateway();
+  t.after(() => gateway.close());
+
+  // Each of these returns before anything is spawned, which is the point: once
+  // the NDJSON header is out the only way left to say no is an error event
+  // inside a stream the client has already committed to reading.
+  const cases = [
+    [["https://example.com/cat.png"], "INVALID_AGENT_IMAGE"],
+    [["data:image/gif;base64,R0lGODdh"], "UNSUPPORTED_AGENT_IMAGE"],
+    [new Array(5).fill("data:image/png;base64,iVBORw0KGgo="), "TOO_MANY_AGENT_IMAGES"],
+    ["not an array", "INVALID_AGENT_IMAGES"],
+  ];
+
+  for (const [images, code] of cases) {
+    const response = await fetch(`${baseUrl}/api/agents/run`, {
+      method: "POST",
+      headers: authHeaders(),
+      body: JSON.stringify({ engine: "claude", prompt: "look at this", images }),
+    });
+    assert.equal(response.status, 400);
+    assert.equal(response.headers.get("content-type")?.startsWith("application/json"), true);
+    assert.equal((await response.json()).error.code, code);
+  }
+});
+
+test("an agent turn has its own body allowance without widening other JSON ingress", async (t) => {
+  const { gateway, baseUrl } = await startGateway({ config: { maxJsonBytes: 80, maxOllamaJsonBytes: 80, maxAgentJsonBytes: 4096 } });
+  t.after(() => gateway.close());
+
+  // Base64 is a third larger than the bytes it encodes, so an attachment that
+  // is within the image policy is well past the general 1 MB JSON cap.
+  const body = JSON.stringify({ engine: "claude", prompt: "look", images: [`data:image/png;base64,${"A".repeat(900)}`] });
+  assert.ok(body.length > 80);
+
+  const accepted = await fetch(`${baseUrl}/api/agents/run`, { method: "POST", headers: authHeaders(), body });
+  // Read far enough to be refused on the image's contents rather than on its
+  // size: reaching the validator at all is what proves the allowance applied.
+  assert.equal(accepted.status, 400);
+  assert.equal((await accepted.json()).error.code, "INVALID_AGENT_IMAGE");
+
+  const rejected = await fetch(`${baseUrl}/ollama/generate`, {
+    method: "POST",
+    headers: authHeaders(),
+    body: JSON.stringify({ model: "devstral", prompt: "x".repeat(200) }),
+  });
+  assert.equal(rejected.status, 413);
 });

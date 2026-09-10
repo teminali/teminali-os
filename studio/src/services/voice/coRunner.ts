@@ -39,6 +39,29 @@ export const MAX_SENTENCES = 3;
 const PATH_KEYS = ["file_path", "filePath", "path", "file", "target", "filename", "directory", "dir"];
 const COMMAND_KEYS = ["command", "cmd", "script", "shell"];
 
+/** How many changed files to restate. A run that edited more is not speakable anyway. */
+const MAX_CHANGED = 6;
+
+/**
+ * Tools that change a file, as opposed to ones that only look at it.
+ *
+ * A run reads the next file before it has finished narrating the last edit,
+ * so the most recent step — and the prose — are usually about a file it only
+ * *read*. Asked "which file are you changing?", a model handed an undifferen-
+ * tiated list answers with that one. Marking the writes, and restating them
+ * as a list, is what stops it.
+ */
+const WRITE_TOOLS = new Set([
+  "edit", "multiedit", "write", "notebookedit", "createfile", "writefile", "editfile",
+  "applypatch", "patch", "strreplace", "strreplaceeditor", "strreplacebasededittool",
+  "update", "updatefile", "insert", "append", "move", "rename", "delete", "remove",
+]);
+
+/** Tool names vary by engine — `notebook_edit`, `NotebookEdit`, `notebook-edit`. */
+function isWrite(name: string): boolean {
+  return WRITE_TOOLS.has(name.toLowerCase().replace(/[^a-z]/g, ""));
+}
+
 function pick(args: Record<string, unknown>, keys: string[]): string | null {
   for (const key of keys) {
     const value = args[key];
@@ -57,8 +80,23 @@ function callLine(call: RunProgress["toolCalls"][number], index: number): string
       ? " — failed"
       : call.status === "running"
         ? " — still running"
-        : "";
+        : isWrite(call.name)
+          ? " — changed this file"
+          : path
+            ? " — read only, not changed"
+            : "";
   return `${index + 1}. ${call.name}${what ? ` ${what}` : ""}${outcome}`;
+}
+
+/** Every file the run has actually written, most recent last, bounded. */
+function changedPaths(run: RunProgress): string[] {
+  const seen: string[] = [];
+  for (const call of run.toolCalls) {
+    if (!isWrite(call.name) || call.status === "error") continue;
+    const path = pick(call.arguments ?? {}, PATH_KEYS);
+    if (path && !seen.includes(path)) seen.push(path);
+  }
+  return seen.slice(-MAX_CHANGED);
 }
 
 /**
@@ -81,8 +119,20 @@ export function runDigest(run: RunProgress, now = Date.now()): string {
   } else {
     parts.push("It has not run any tools yet.");
   }
+  const changed = changedPaths(run);
+  if (changed.length > 0) {
+    parts.push(
+      `The only files it has changed are: ${changed.join(", ")}. Every other file named above was read, not changed.`,
+    );
+  } else if (lines.length > 0) {
+    parts.push("It has not changed any file yet — every step above only read something or ran a command.");
+  }
   const prose = (run.lastText ?? "").trim();
-  if (prose) parts.push(`What it last wrote:\n${prose.slice(-600)}`);
+  if (prose) {
+    parts.push(
+      `What it last said it was doing — this describes what it is reading or about to do, and is not evidence of which file it changed:\n${prose.slice(-600)}`,
+    );
+  }
   return parts.join("\n\n");
 }
 
@@ -102,7 +152,7 @@ export function explainPrompt(question: string, run: RunProgress, now = Date.now
     "",
     `They asked: "${question.trim()}"`,
     "",
-    `Answer in at most ${MAX_SENTENCES} short spoken sentences. Use only what is above; if it does not say, reply that you cannot see that part yet. Speak plainly — no markdown, no code blocks, no lists, no file paths read out character by character. Do not offer to do anything; the task is already running.`,
+    `Answer in at most ${MAX_SENTENCES} short spoken sentences. Use only what is above; if it does not say, reply that you cannot see that part yet. If they ask what is being changed or edited, name only the files listed as changed — not a file it merely read, and not whatever it last said it was doing. Speak plainly — no markdown, no code blocks, no lists, no file paths read out character by character. Do not offer to do anything; the task is already running.`,
   ].join("\n");
 }
 

@@ -335,6 +335,43 @@ contextBridge.exposeInMainWorld("teminali", {
    * it is and when it may be seen, and to ask for navigation rather than to
    * perform it. See electron/browserView.cjs for why it is not an iframe.
    */
+  /**
+   * The player panel's video, which is mpv's window rather than an element.
+   *
+   * The same shape as `browserView` below, because it is the same problem: a
+   * native window layered over the document, positioned by main from a
+   * rectangle this side measures. Every call answers `{ ok: false, reason }`
+   * on a platform that cannot embed a spawned mpv — macOS, where the picture
+   * still comes from a `<video>` element until a linked libmpv exists. See
+   * electron/mpvView.cjs.
+   */
+  mpvView: {
+    /** Claim the engine for this panel, making the window and starting mpv. */
+    ensure: (id) => ipcRenderer.invoke("mpv-view:ensure", id),
+    /** Where the video goes, in CSS pixels of this document, and whether it may be drawn. */
+    setBounds: (id, bounds, visible) => ipcRenderer.send("mpv-view:bounds", id, bounds, visible),
+    /** Play this file. A path, not a URL: mpv opens the file itself. */
+    load: (id, filePath) => ipcRenderer.invoke("mpv-view:load", id, filePath),
+    /** A `PlayerCommand`, mapped by `mpvCommand` in main — never by this side. */
+    command: (id, command, context) => ipcRenderer.invoke("mpv-view:command", id, command, context),
+    /**
+     * One frame of what mpv is showing, as base64 JPEG.
+     *
+     * While embedded the picture is mpv's own window, not a `<video>` element,
+     * so the pane cannot draw it on a canvas. Main asks mpv for
+     * `screenshot-raw` and encodes the bitmap. Always resolves; a failure is
+     * `{ ok: false, reason }`.
+     */
+    frame: (id) => ipcRenderer.invoke("mpv-view:frame", id),
+    /** Give the engine up; the next panel to ask may have it. */
+    destroy: (id) => ipcRenderer.send("mpv-view:destroy", id),
+    /** Position, duration, pause and the rest, as mpv observes them changing. */
+    onState: (handler) => {
+      const listener = (_event, state) => handler(state);
+      ipcRenderer.on("mpv-view:state", listener);
+      return () => ipcRenderer.off("mpv-view:state", listener);
+    },
+  },
   browserView: {
     /**
      * Load an http(s) address into the view for this panel, creating it on
@@ -348,6 +385,41 @@ contextBridge.exposeInMainWorld("teminali", {
     setBounds: (id, bounds, visible) => ipcRenderer.send("browser-view:bounds", id, bounds, visible),
     /** "back" | "forward" | "reload" | "stop" — the page's own history, not one we keep. */
     command: (id, command) => ipcRenderer.send("browser-view:command", id, command),
+    /**
+     * Which passkey the operator picked, when a site matched more than one.
+     *
+     * `null` cancels, which the page receives as the same `NotAllowedError` a
+     * dismissed browser sheet produces. The request id makes a late or
+     * duplicated answer harmless: main has already forgotten it.
+     */
+    chooseWebauthnAccount: (requestId, credentialId) =>
+      ipcRenderer.send("browser-view:webauthn-choice", requestId, credentialId),
+    /**
+     * Read or drive the page through the DevTools Protocol, for the assistant.
+     *
+     * `op` is a named operation — "snapshot", "read", "screenshot", "click",
+     * "type", "network", "eval" — and never a CDP method: the protocol is
+     * spoken only in electron/browserCdp.cjs, behind an allowlist that keeps
+     * `WebAuthn.*` unreachable. Always resolves; a failure is `ok: false` with
+     * a message the agent can act on.
+     */
+    cdp: (id, op, params) => ipcRenderer.invoke("browser-view:cdp", id, op, params),
+    /**
+     * A full-page PNG of this panel's page, saved where the operator chooses.
+     *
+     * The operator's screenshot, not the agent's: full page, lossless, and
+     * through Electron's own save dialog, so main never invents a path. Answers
+     * `{ ok: false, cancelled: true }` when the dialog was dismissed, which is
+     * not a failure and must not be drawn as one.
+     */
+    screenshot: (id) => ipcRenderer.invoke("browser-view:screenshot", id),
+    /**
+     * Clear "cookies" or "cache", on both browser sessions.
+     *
+     * History is not here: it is the gateway's file rather than a session's,
+     * and it is cleared through `store/browserStore.ts`.
+     */
+    clearData: (kind) => ipcRenderer.invoke("browser-view:clear-data", kind),
     /** The panel is closed for good. */
     destroy: (id) => ipcRenderer.send("browser-view:destroy", id),
     /** Every view, for a document that is about to be replaced. */
@@ -408,6 +480,7 @@ contextBridge.exposeInMainWorld("teminali", {
     /** Mirror the settings into the menu bar item. */
     setState: (state) => ipcRenderer.invoke("assistant:set-state", state),
     setHotkey: (accelerator) => ipcRenderer.invoke("assistant:set-hotkey", accelerator),
+    setTrayVisible: (visible) => ipcRenderer.invoke("assistant:set-tray-visible", visible),
     hotkeyStatus: () => ipcRenderer.invoke("assistant:hotkey-status"),
     showOverlay: (state) => ipcRenderer.invoke("assistant:show-overlay", state),
     hideOverlay: () => ipcRenderer.invoke("assistant:hide-overlay"),

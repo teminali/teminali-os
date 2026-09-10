@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
 import test from "node:test";
 
 import { readTrigger, scoreMatch } from "../src/utils/composerTrigger.ts";
@@ -65,4 +66,54 @@ test("consecutive characters score above scattered ones", () => {
   const scattered = scoreMatch("r-e-a-d-me.md", "read");
   assert.ok(together !== null && scattered !== null);
   assert.ok(together > scattered);
+});
+
+/* ── Wired to the composer people actually type into ───────────────────────
+   The menu, its trigger rules and every test above passed for six sessions
+   against `chat/Composer.tsx`, which the voice stage replaced: the live box is
+   `voice/TemiComposer.tsx` and its only key handler was Enter. Porting it is
+   what made the placeholder's promise true again, and these guard the port. */
+
+const readSource = (path) => readFile(new URL(path, import.meta.url), "utf8");
+
+test("the live composer mounts the menu and gives it the keyboard", async () => {
+  const composer = await readSource("../src/components/voice/TemiComposer.tsx");
+  assert.match(composer, /<ComposerMenu/, "the menu is mounted");
+  assert.match(composer, /readTrigger\(element\.value/, "the trigger is read off the caret");
+  // Arrows move, Enter and Tab accept, Escape closes — and while it is open
+  // Enter must not send a half-written prompt.
+  assert.match(composer, /if \(trigger && menuItems\.length > 0\) \{[\s\S]*?"ArrowDown"/);
+  assert.match(composer, /if \(trigger && menuItems\.length > 0\) \{[\s\S]*?event\.key === "Enter" \|\| event\.key === "Tab"/);
+  assert.match(composer, /if \(trigger && menuItems\.length > 0\) \{[\s\S]*?"Escape"[\s\S]*?setTrigger\(null\)/);
+});
+
+test("a skill is mounted and a file is pasted as an @-path", async () => {
+  const composer = await readSource("../src/components/voice/TemiComposer.tsx");
+  assert.match(composer, /if \(skill\) setSkill\(skill\)/, "a skill changes the next turn, it is not typed");
+  assert.match(composer, /onChange\(`\$\{before\}@\$\{item\.id\} \$\{after\}`\)/, "a file goes in as context");
+});
+
+test("Up recalls a prompt, but only where the arrow has nothing else to do", async () => {
+  const composer = await readSource("../src/components/voice/TemiComposer.tsx");
+  assert.match(composer, /atFirstLine\(value, caret\) : atLastLine\(value, caret\)/);
+  assert.match(composer, /onNavigateHistory\(event\.key === "ArrowUp" \? "older" : "newer", value\)/);
+  // The ring is the stage's, because this component is remounted when the
+  // empty screen becomes a conversation.
+  const stage = await readSource("../src/components/voice/TemiVoiceStage.tsx");
+  assert.match(stage, /const historyRef = useRef<PromptHistory>\(EMPTY_HISTORY\)/);
+  assert.match(stage, /historyRef\.current = remember\(historyRef\.current, text\)/, "sending records the prompt");
+  assert.match(stage, /historyRef\.current = stopBrowsing\(historyRef\.current\)/, "typing leaves the ring");
+});
+
+test("a second prompt queues; it does not kill the run in flight", async () => {
+  const bridge = await readSource("../src/services/voice/teminaliAgentBridge.ts");
+  assert.doesNotMatch(
+    bridge,
+    /static async delegateTask[\s\S]{0,400}?this\.activeController\?\.abort\(\)/,
+    "delegateTask no longer opens by aborting whatever was running",
+  );
+  assert.match(bridge, /if \(this\.activeController\) \{[\s\S]*?enqueueTask</);
+  assert.match(bridge, /private static drain\(\)/, "and starts the next one when the slot frees");
+  // A stop means stop. Draining after one would start the next item instead.
+  assert.match(bridge, /static stopCurrentTask\(\) \{[\s\S]*?this\.queue = \[\];/);
 });

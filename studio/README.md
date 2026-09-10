@@ -52,11 +52,11 @@ route requires it. Roughly sixty routes across:
 | Model mode & routing | `/api/frontier/status` · `/api/frontier/resolve-mode` · `/api/models/*` |
 | Entitlement | `/api/entitlement` · `/api/entitlement/{refresh,sign-in,sign-in/poll,sign-out}` · `/api/entitlement/{plans,checkout}` · `/api/entitlement/order/:id` |
 | Hosted providers | `/api/providers` · `/api/providers/key` · `/api/providers/lanes` |
-| Workspace | `/api/workspace/{tree,file,write,delete,mkdir,search,machine-search,open,projects}`, `/api/workspace/projects/{remember,forget}`, `/api/workspace/browser`, `/api/workspace/browser/{bookmark,unbookmark,visit,download}`, `/api/workspace/browser/history/clear`, `/api/workspace/browser/import`, `/api/workspace/browser/import/sources`, `/api/workspace/agent/{reveal,open-file,projects,open-project,browse,bookmarks,bookmark,browsing-history,downloads,player,player-control}`, `/api/workspace/player/state`, `/api/workspace/media/{probe,subtitle}` |
+| Workspace | `/api/workspace/{tree,file,write,delete,mkdir,search,machine-search,open,projects}`, `/api/workspace/projects/{remember,forget}`, `/api/workspace/browser`, `/api/workspace/browser/{bookmark,unbookmark,visit,download}`, `/api/workspace/browser/history/clear`, `/api/workspace/browser/import`, `/api/workspace/browser/import/sources`, `/api/workspace/agent/{reveal,open-file,projects,open-project,browse,bookmarks,bookmark,browsing-history,downloads,player,player-control,player-frame}`, `/api/workspace/agent/browser/{snapshot,read,screenshot,click,type,network,eval}`, `/api/workspace/browser-action`, `/api/workspace/player-frame`, `/api/workspace/player/state`, `/api/workspace/media/{probe,subtitle}` |
 | Terminal | `/api/terminal/exec` |
-| Agent CLIs | `/api/agents` · `/api/agents/models` · `/api/agents/run` · `/api/agents/permission` · `/api/agents/permission/resolve` |
+| Agent CLIs | `/api/agents` · `/api/agents/models` · `/api/agents/inventory` · `/api/agents/run` · `/api/agents/permission` · `/api/agents/permission/resolve` |
 | Screen assistant | `/api/assistant/{capabilities,permissions,observe,act}` · `/api/assistant/agent/{observe,act}` (the chat pane's agent, on its run's token) |
-| Voice | `/api/voice/{status,transcribe,speak}` |
+| Voice | `/api/voice/{status,transcribe,speak}`, `/api/voice/realtime/status` |
 | Guardian | `/api/guardian/{snapshot,unload,governor,storage}` |
 | Benchmark arena | `/api/arena/{sandbox,measure,measure/stream,history,cleanup}` |
 | Usage, files, device | `/api/usage` · `/api/plan` · `/api/files/{capabilities,ingest}` · `/api/system/device` |
@@ -135,8 +135,57 @@ offset and the player keeps its own timeline over it; the duration comes from
 ffprobe. Without ffmpeg installed the pane says so and names `brew install
 ffmpeg` rather than showing a control bar that never moves.
 
-**Subtitles.** A sidecar `.srt` or `.vtt` beside the video is picked up by
-name — `Episode 1.srt`, or `Episode 1.en.srt`, whose tag becomes the language's
+**A second engine is being put underneath this, and the first piece has
+landed.** `electron/mpvProcess.cjs` finds an mpv binary, spawns it idle with a
+JSON IPC socket and speaks that protocol — a hand-written client, no
+`node-mpv`, and one table (`mpvCommand`) that turns every action in the
+player's contract into mpv commands. **No build ships an mpv**, so on a machine
+without one installed it finds nothing and says so. Set `MPV_PATH` to point it
+at a binary; the search order otherwise mirrors ffmpeg's (a bundled copy, then
+the platform's package-manager prefixes, then `PATH`). Tested by
+`tests/mpv-ipc.test.mjs` (38).
+
+**Where the picture goes is `electron/mpvView.cjs`**, wired from `main.cjs` and
+reached from the renderer through the `mpvView` bridge in `preload.cjs`
+(`ensure`, `setBounds`, `load`, `command`, `frame`, `destroy`, `onState`). On **Windows
+and Linux** it makes a frameless black `BrowserWindow` of its own, hands mpv its
+native handle as `--wid`, and keeps that window over the player pane's
+rectangle — reusing the browser panel's measuring and clamping rather than
+copying it. On **macOS every call answers `{ ok: false, reason }`**: a process
+cannot embed another process's window there, so the Mac keeps the `<video>`
+element until a linked `libmpv` exists. That is the fact that decided the
+licence — see [`docs/MEDIA_LICENSING.md`](docs/MEDIA_LICENSING.md). One panel
+owns the engine at a time and a second is refused with a reason. Tested by
+`tests/mpv-view.test.mjs` (22) — the decisions only. **The window itself has
+not been run: it is Windows and Linux behaviour and this is developed on a
+Mac**, so two hand checks listed in `DESIGN.md` §3 are still outstanding, the
+sharper being whether a click on the video reaches the pane beneath it.
+
+**The pane drives it from `panels/useMpvView.ts`**, which asks for the engine,
+hands it an absolute path, reports the rectangle and relays what mpv says about
+itself. Where it succeeds the player's chrome stops hiding and stops floating:
+a native window sits above the document, so a control drawn over the video is
+drawn behind it, and mpv is given the band between the top and bottom bars
+instead of the whole pane. Playback commands go to the engine; fullscreen and
+the episode list stay with the pane. A file mpv cannot open falls back to the
+`<video>` element.
+
+**Subtitles while embedded are the engine's own.** mpv is spawned with
+`--sub-auto=exact`, which is the same rule the tree already uses to find a
+sidecar — the sibling named after the video, optionally with a language tag —
+so it opens the same files without being told about them, and it reports what
+it has as `track-list`. The pane shows that list, builds no WebVTT of its own,
+and runs no ffmpeg over the file's subtitle streams; choosing a row sends mpv
+the track's own number. Which one is on is mpv's answer, not the pane's. The
+language you last chose still comes back on the next episode: mpv opens the
+file in its own choice and reports its tracks afterwards, so the pane compares
+the two and asks again — once, and never over subtitles you deliberately turned
+off. One gap remains, and it is deliberate: a subtitle file **dropped** on the
+pane is bytes rather than a path, so while embedded it is refused with a
+sentence saying to put it beside the video instead.
+
+**Subtitles, on the element path.** A sidecar `.srt` or `.vtt` beside the
+video is picked up by name — `Episode 1.srt`, or `Episode 1.en.srt`, whose tag becomes the language's
 name in the menu — and SubRip is converted to WebVTT in the renderer, tags,
 decimal commas and coordinate suffixes and all. Subtitle *streams* inside the
 file are read out by ffmpeg on demand and appear in the same menu, labelled
@@ -145,13 +194,37 @@ no amount of ffmpeg makes them text. The chosen language is remembered and
 comes back on the next episode.
 
 **The agent has the player's controls.** The `teminali-workspace` MCP server
-carries two more tools: `player` reads what is showing — the episode and its
+carries three more tools: `player` reads what is showing — the episode and its
 number, playing or paused, position, duration, volume, speed, the subtitle
-tracks and which is on — and `player_control` plays, pauses, seeks, sets volume
-or speed, turns subtitles on, goes fullscreen, or moves to another episode.
-Both are pre-approved, because they act on a file the operator opened and write
+tracks and which is on — and `player_control` plays, pauses, seeks, steps a
+frame either way, sets volume or speed, turns subtitles on, chooses an audio
+track, goes to a chapter, goes fullscreen, or moves to another episode.
+`player_frame` is the third, and it is the one that lets the assistant *see*
+the film: one frame of what is on screen, as a picture. Asked to find the
+moment somebody arrives, it looks, seeks and looks again. All three are
+pre-approved, because they act on a file the operator opened and write
 nothing; the alternative was an agent asked to pause a video reaching for the
-pointer. `open_file` on a folder opens the gallery, so "show me what is in
+pointer. A frame of their own video is nothing the position already reported
+does not imply — for the operator themselves there is the camera, which asks,
+and for the rest of the desktop there is a screenshot.
+
+**Where mpv holds the picture, the frame is mpv's too.** The element path draws
+the `<video>` on a canvas; an embedded mpv is a native window in another
+process, which a canvas cannot read and `document.querySelector` cannot find,
+so the pane offers no element at all and main asks mpv for the frame instead
+(`screenshot-raw`, encoded to JPEG in the same window — no ffmpeg, no second
+decode, and no file left anywhere to clean up). The agent receives the same
+picture, at the same size, either way, and a burned-in caption is in it because
+what is being asked is what is on screen.
+
+Four of those actions — `frame_step`, `frame_back`, `chapter` and
+`audio_track` — exist because mpv can do them (see **A second engine** in
+`DESIGN.md` §3) and a `<video>` element cannot always. There is still one
+action list: the pane publishes, per file, what it cannot do and why, and the
+gateway refuses those with the pane's own sentence rather than sending a
+command that would report success and move nothing. Today that means Chromium
+plays the file's first audio track, reads no chapters, and steps frames only
+when ffprobe could tell it the frame rate. `open_file` on a folder opens the gallery, so "show me what is in
 that folder" and "play me the next episode" are both tool calls rather than
 descriptions of which button to press.
 
@@ -159,7 +232,7 @@ descriptions of which button to press.
 emits a ```` ```player-tool ```` fence holding `{"action":…,"value":…}` and
 `services/playerToolCalls.ts` hands it straight to the mounted pane — no
 gateway, no run stream, because the pane is in the same renderer. It accepts
-the same seventeen actions the MCP tool does, plus one the CLI lane gets as a
+the same twenty actions the MCP tool does, plus one the CLI lane gets as a
 separate `player` tool: `status`, which reads what is showing and changes
 nothing. A test asserts that is the *only* difference between the two lists. Its prompt block carries what the player is showing *right now*,
 so "play it" needs no clarifying question, and says in as many words that the
@@ -248,15 +321,35 @@ until the app is granted Full Disk Access, so it says that instead of failing.
 there would be nowhere for saved addresses or cards to go, and the dialog says
 so rather than offering a tick box that does nothing. macOS only for now.
 
-**Passkeys do not work in the panel, and it now says so.** macOS grants the
-platform authenticator — Touch ID — only to registered web browsers, so
-`isUserVerifyingPlatformAuthenticatorAvailable()` is false here and a passkey
-prompt silently does nothing — measured: the request stays pending for ever,
-which is why the page just spins. When a page asks for one, the toolbar says so
-and offers the two routes that work: another sign-in method on the page, or Open
-in default browser. The request itself is ended after 25 seconds, so the page
-falls back on its own; the wait is that long because a USB security key can
-still answer and a person needs time to reach one.
+**Passkeys work on a signed macOS build — Touch ID, and only Touch ID.**
+`app.configureWebAuthn` (Electron 44) gives the panel a platform authenticator
+backed by this Mac's Secure Enclave, turned on at startup by
+`electron/webauthn.cjs`. What it is not: not iCloud Keychain, not Windows
+Hello, not hybrid/QR phone passkeys, not USB security keys. Credentials are
+device-bound and do not sync — a passkey created here is a passkey for this
+Mac. When a site matches more than one of them, the panel asks which, in its
+own chooser (`BrowserPasskeyModal`); dismissing it reaches the page as the same
+`NotAllowedError` a dismissed browser sheet produces.
+
+It depends on the *signature*, not on the code: the credentials live in a
+keychain access group named `<TEAM_ID>.os.teminali.app.webauthn`, and macOS
+grants an app only the groups its signature claims. `build/afterPack.cjs`
+composes that group from `APPLE_TEAM_ID` at pack time and writes it into the
+entitlements being signed; at startup the app reads it back out of its own
+signature rather than recomposing it, so a build that shipped without the
+entitlement leaves Touch ID off instead of failing later at credential-store
+time. A development run and an unsigned build therefore have no passkeys, and
+neither does Windows or Linux.
+
+**Where there is no authenticator, the panel still says so.** A passkey request
+with nothing to answer it stays pending for ever — measured — which the
+operator experiences as a page that just spins. So a probe watches for it, the
+toolbar says what happened, and it offers the two routes that work: another
+sign-in method on the page, or Open in default browser. The request is ended
+after 25 seconds so the page falls back on its own; the wait is that long
+because a USB security key can still answer and a person needs time to reach
+one. On a signed Mac the probe goes quiet by itself and the notice never
+appears.
 
 **Inspect Element** is offered on a browser page only. The shell's own window
 has none — its devtools are in the View menu (`⌥⌘I`).
@@ -284,7 +377,21 @@ tab loading in the background has no pane. Downloads use **Electron's own save
 dialog** — the app never chooses a path — and "Show in Finder" reveals (never
 opens) only a path main itself watched that dialog write, remembered across
 restarts in `browser-downloads.json`. `More` also offers "Open in default
-browser" and "Clear history".
+browser".
+
+**Take screenshot** saves the **whole page** as a PNG, through the same save
+dialog a download uses — the app never chooses the path — and then offers "Show
+in Finder" for it. It is not the agent's `page_screenshot`, which is a jpeg of
+just the viewport, sized to fit in a model's context. **Clear cookies** and
+**Clear cache** run on both browser sessions, the ordinary one and the private
+one; clearing cookies also drops stored HTTP auth, so sites you were signed in
+to will ask again, and neither touches your bookmarks or history. **Clear
+history** is still separate because history is the gateway's file, the one the
+assistant can read. Each of the three says what it did, since none of them
+changes anything on screen. **Show bookmark bar** puts your bookmarks in a strip
+under the toolbar, off by default, remembered across restarts, shared by every
+tab — and not offered on a private tab, where the panel shows no bookmarks at
+all.
 
 It is also where you **drop** a file. Drag a row out of the Explorer, or a file
 out of Finder or Windows Explorer, and it opens in the panel. A file from
@@ -305,7 +412,69 @@ options rail can be a column, against the panel's 452px default. See
 [Screen recording](#screen-recording).
 
 Plus `⌘B` sidebar · `⌘L` chats · `⇧⌘E` explorer · `⇧⌘F` search · `⌘K`/`⌘P`
-command palette · `⌘,` settings · `Esc` stop the turn. My Projects and Skills
+command palette · `⌘,` settings · `Esc` stop the turn · `↑` recall the last
+prompt.
+
+**Settings is a page, not a dialog** — `⌘,` puts it where the workspace was,
+with a rail whose search matches individual rows. Nine screens; every one of
+them declares its rows to that search, and every one of them renders — the rail
+is derived from the same registry as the content, so a category with nothing
+behind it cannot be written down.
+
+**General** covers startup and how a finished turn reaches you. Restore Last
+Session reopens the editor tabs you left (your chats are kept either way — they
+are work, not layout). Turn Complete and Turn Failed post a system notification
+while the window is in the background, Completion Sound plays a two-note chime
+whether or not you are watching, and a fourth row reports whether this machine
+will actually deliver any of it — asked for from that row, never at launch.
+A turn you cancelled yourself never notifies.
+
+**Profile** is who this machine thinks you are, read from your GitHub sign-in
+and not editable here, plus a display name that is yours: what the app calls
+you, local to this machine, never sent anywhere.
+
+**Licence & Usage** is what you are licensed for and what is running — plan and
+entitlements, the gateway's real address and health, the active lane, and what
+the model weights on disk come to. Every figure is measured when the screen
+opens.
+
+**Git & PRs** carries the GitHub sign-in and Open Links In, which decides
+whether a link in a chat answer opens in a panel beside the conversation or in
+your own browser. Hold `⌘` to override either way.
+
+**Agents** is how much runs on this machine before you see it. **Run Mode** is
+the row that matters: *Ask every time* stops for every command including the
+read-only ones, *Review changes* (the default) runs reading and inspection
+straight away and stops for anything that writes, and *Run without asking* runs
+whatever the classifier does not refuse outright. A command judged destructive
+beyond recovery — privilege escalation, a disk-level write, a force push — is
+refused in all three and never offered for approval. **Always Ask Before
+Deleting** is the one exception that still stops in the unattended mode, because
+a bad edit is in the change dock and in git while a deleted file is in neither.
+**Allowed Without Asking** is where the prompts' "Always allow" answers now
+live: they are kept across restarts, and the list is editable, which is the only
+thing that makes keeping them reasonable. A statement row says what the
+workspace boundary does and does not cover — file edits cannot leave the
+workspace root, and shell commands are not bounded by anything except Run Mode.
+**Submit with ⌘+Enter** swaps Return and ⌘/Ctrl+Return in the composer.
+
+There is no sandbox mode, because there is no sandbox: commands run against the
+real filesystem with the app's own privileges. `docs/SETTINGS_AND_CHROME_PLAN.md`
+§3 names the other twelve rows Cursor's Agents screen carries and what each
+would need before it could appear here.
+
+**Appearance** is where the shell's look is set: UI and code type size and family (separate controls), the
+accent hue and intensity, word wrap in code blocks, tinted diff backgrounds,
+tool-call density in the chat, and Reduce Transparency, which clears every
+backdrop blur in the interface. Changes apply as you make them and persist.
+The accent picks its own label colour, so a fill stays legible at any hue.
+
+**The window controls are the host platform's** — traffic lights on the left on
+macOS, Windows 11 caption buttons hard right, GNOME circles on Linux — and
+Appearance > Window Chrome overrides that to any of the three. The shell is
+frameless everywhere, so all three are drawn by the app and all three work on
+whatever you are running. In the composer, `/` picks a skill and `@` picks a file to hand the
+model as context. My Projects and Skills
 are reached from the rail; neither has a shortcut. The media pool lives in the
 video editor's own rail.
 
@@ -314,7 +483,10 @@ focus — including from inside the composer, which is where the cursor actually
 is — and a **stop** control on the activity strip that stays on screen for the
 whole turn: before the first token, while tokens stream, and through a tool
 call that takes a minute. Typing a follow-up no longer replaces the composer's
-stop button with send; both are drawn, because they are two different actions.
+stop button with send; both are drawn, because they are two different actions —
+and a follow-up sent mid-turn **queues behind the running turn** rather than
+killing it, as it does in both agent CLIs. Up to eight wait; a stop drops them
+along with the run, because a stop is not a request to start the next thing.
 Stopping aborts the request itself, so the gateway drops its upstream call and
 an agent CLI is sent `SIGTERM` rather than being left running unattended; a
 command waiting on approval is denied, any speech in progress is silenced, and
@@ -330,8 +502,15 @@ each directory from the marker file on every read, so the glyph is what the
 folder is right now rather than what it was when it was last opened. Clicking
 one opens it *by its kind*: a repository rebinds the workspace root every
 workspace and terminal route reads, and a video project loads into the editor
-without touching the root. The same list, capped at four, sits under the
-composer on the empty chat screen.
+without touching the root. The same list, capped at six, is behind **Recent
+Projects** in the row under the composer on the empty chat screen.
+
+That row — *Plan New Idea*, *Screen Recorder*, *Recent Projects*, *Connect Your
+Repos* (*Open a Repository* once GitHub is connected) — is drawn on the empty
+chat and nowhere else: they are ways to start, and once the conversation exists,
+starting is over. The composer itself follows the Codex desktop box, and on the
+empty chat it is centred on the canvas rather than docked to the bottom. See
+`DESIGN.md` §6.36.
 
 ### Engines
 
@@ -402,12 +581,34 @@ heavy lane on a 24 GB machine despite the smaller file.
 they are the CLIs already installed on the machine, spawned as real processes in
 the real workspace with their own auth, tools and resumable sessions, driven
 headless and normalised to one event shape. Neither may default to its most
-permissive permission rung. A turn ends when the agent process exits: the
+permissive permission rung. The model picker carries each agent's own three
+knobs inside its branch — permission, effort, and (Codex only) how much
+reasoning comes back — rendered from what the gateway reports the installed
+binary accepts, so the menu can never offer a level that CLI would reject. All
+three ship as "CLI default", which passes no flag and leaves `~/.claude` or
+`~/.codex/config.toml` in force. Below them a **Thread** section says what the
+next turn will do with the conversation the CLI is holding — resume it, branch
+it, or open a new one — and lets you change it: **Fork this thread** opens a
+second chat on the same history whose next turn branches off it
+(`claude --fork-session`, `codex exec fork`) and leaves this one untouched, and
+**Start fresh** makes the agent forget while the transcript on screen stays. A
+chat's thread is keyed by engine, so moving between models of one CLI keeps the
+conversation; changing engine still starts fresh, because the other CLI cannot
+read that thread. A turn ends when the agent process exits: the
 gateway gives its pipes 1.5 s to drain and then closes them itself, because a
 grandchild that inherited them — an MCP server the agent spawned and left
 running — would otherwise keep the turn "Working" for as long as it lived. The
 studio, for its part, treats the gateway's `done` line as the end of the stream
 rather than waiting for the socket to close.
+
+**Which models the picker offers is yours.** Settings › Local Models & Weights
+lists the four Frontier profiles as switches, and one turned off leaves the
+composer's menu. The one you are currently using cannot be turned off, which is
+also what keeps the menu from emptying — and if a profile is selected from
+somewhere that does not consult the list, the command palette or the Gemini key
+dialog, the picker shows it anyway rather than run a model it cannot name.
+Hosted keys collapse on the same screen: the section opens itself until a key is
+configured and folds away after, still naming which providers are connected.
 
 Because they write to the working tree themselves, the studio recovers each
 edit from their tool stream rather than being handed it: the file the agent
@@ -415,6 +616,19 @@ opens in a tab, updates as it is written, and lists in the accept/reject dock
 above the composer, the same dock the chat pane uses. See
 `server/agent-edits.js` and `studio/DESIGN.md` §3 for how a `before` is
 recovered — and for the two cases where it is dropped rather than guessed.
+
+**Attachments reach every engine.** A file dropped, pasted or picked in the
+composer is split by `composePrompt` (`services/fileService.ts`): anything
+text-bearing is folded into the prompt inside an explicit `<<< attachment: … >>>`
+block, and images travel as images. Where they travel *to* differs by lane —
+Frontier inspects them locally with a vision model first, Gemini receives them
+as content blocks, and the two CLIs are handed real files, because their prompt
+is argv and bytes cannot ride in it. For those two the gateway writes the images
+under the agent's own working directory for the length of the turn, then removes
+them: Codex is given `--image=<path>` per file, and Claude Code, which has no
+such flag, is told the paths and reads them with its own Read tool. Four images
+and 5 MB per turn, enforced in the renderer and again on the server. See
+`studio/DESIGN.md` §6.35 and `server/agent-attachments.js`.
 
 **Hosted providers.** Anthropic, OpenAI and Google, each with a light lane for
 everyday turns and a heavy lane for hard ones. The flagship of each (Opus 5, o3,
@@ -483,6 +697,9 @@ your screen and either explains it or acts on it.
   64-point cursor over the system arrow so you can follow what the assistant is
   doing. It exists only while the overlay is on screen, and changes nothing
   about your Mac's own pointer settings.
+- **Settings › General › Menu Bar Icon** shows or hides the assistant's menu bar
+  item; turning it off destroys the Tray, and the shortcut and the in-window
+  panel are unaffected.
 - **A vision model is never asked where anything is.** The screenshot is
   context; positions come from the macOS accessibility tree via the Swift helper
   in `native/macos/pointer/`. `PlanStep` carries no coordinate field on any
@@ -497,6 +714,29 @@ your screen and either explains it or acts on it.
   `look` with `describe: false` is the fast path when the control names are
   enough. `look` means the screen and only the screen; the camera is a separate
   tool on a separate server, below.
+
+**The browser panel's page.** An agent CLI also gets the `teminali-browser`
+server: seven tools that read and drive the page in the browser panel, through
+Chromium's own DevTools Protocol rather than a picture of the display.
+`page_snapshot` returns the accessibility outline of the page with a `ref` on
+everything clickable, `page_read` its readable text, `page_screenshot` a JPEG of
+it; `page_click` and `page_type` act on a ref from that snapshot, `page_network`
+lists what the page has fetched, and `page_eval` evaluates an expression in the
+page's own world. The first three are pre-approved — they read a page the
+operator already has open, in front of them, and a prompt before every read
+would make reading not worth doing. The other four raise the same permission
+prompt a shell command does; `page_eval` runs the agent's own JavaScript in
+somebody else's document on the operator's session, and is the one that must
+never be pre-approved. `browse` opens the page and these read the one that is
+open, so an agent that reaches for a snapshot with no panel is told to `browse`
+first rather than having a window opened underneath it. The protocol is spoken
+in exactly one file, `electron/browserCdp.cjs`, behind an allowlist of both
+domains and methods: `WebAuthn.*` is unreachable by construction, because it
+installs virtual authenticators and would otherwise turn the passkey support
+into a way to mint one. The debugger attaches lazily on the first call and never
+per tab, so a tab the agent never touches is exactly as fast as before. Devtools
+and this are mutually exclusive — an open Inspect Element window holds the
+page's only debugger channel, and the refusal says so.
 
 **The camera.** An agent CLI also gets `mcp__teminali-camera__look_at_me`: one
 photograph from the webcam, handed back as a picture rather than a description,
@@ -526,6 +766,30 @@ independently, so a sidecar serving only synthesis still leaves recognition on
 the local tier. Push-to-talk dictation and
 hands-free conversation with barge-in. Nothing reaches the chat unreviewed — every
 utterance passes a repair pass the operator sees before it sends.
+
+In the voice stage, one assistant speaks and another works. Temi holds the
+conversation; the Teminali OS assistant does the engineering with no chat
+surface of its own, showing only a single process line under the orb. Every
+transcript passes through one switch first, so while a run is in flight
+"what's going on?" is answered from that run instead of starting a second
+conversation, "stop" lands on the run, "stop talking" stops only the voice, and
+praise is answered by carrying on. Spoken instructions reach the hands in the
+form people actually say them — "play that video", "open my downloads folder",
+"change workspace to teminaliCut", "create a folder called notes" — and Temi
+acknowledges without claiming the work is done; what actually happened is
+reported afterwards from the activity record. A question about the machine goes
+the same way: "is the server running", "did the build finish", "how many tests
+are passing" are looks for the hands, because a voice with no eyes asked such a
+question invents a plausible answer — measured, three times out of three, on the
+model the pipeline runs. Nothing spoken at the end of a run is asserted rather
+than observed: line counts are diffed, the tool count is counted, and a failed
+call is reported as one. Which assistant does that work — Frontier, Claude Code
+or Codex — is chosen from the picker in the voice composer, the same picker the
+chat used to own. Neither of them has a chat log: the stage
+shows the last exchange only, centred under the orb, held six seconds after she
+stops speaking and then faded out — long enough to check what was heard,
+never long enough to become a transcript to scroll. See
+[`DESIGN.md`](DESIGN.md) §6.0.1–§6.1.
 
 **Two gates are on by default: "Require my name" and "Only respond to my
 voice."** Anything your Mac plays through the speakers reaches the microphone
@@ -948,8 +1212,10 @@ ollama serve              # local models on 127.0.0.1:11434
 
 ```bash
 npm run typecheck   # tsc --noEmit
-npm test            # 1775 tests, 0 failures
+npm test            # 2192 tests, 0 failures
 npm run eval:local  # the local lane against the real model — a score, not a pass/fail; needs Ollama
+npm run eval:voice  # the voice co-agent's spoken answers, same discipline; needs Ollama
+npm run eval:conversation  # Temi over a whole conversation: routing, fabrication, recall; needs Ollama
 npm run build       # tsc && vite build
 npm run verify:core # all three
 ```
@@ -1143,10 +1409,21 @@ without the token.
 ### Signing — wired, pending a certificate
 
 There is no Apple Developer ID, so every build is **ad-hoc signed** by
-`build/afterPack.cjs`, inside out and with `build/entitlements.mac.plist`
-attached. That is what lets the assistant ask for Apple Events and Accessibility
-at all; the hook fails the build rather than shipping a bundle whose signature
-carries no entitlements.
+`build/afterPack.cjs`, inside out and with the entitlements attached. That is
+what lets the assistant ask for Apple Events and Accessibility at all; the hook
+fails the build rather than shipping a bundle whose signature carries no
+entitlements.
+
+The entitlements it signs with are **generated**:
+`build/entitlements.mac.generated.plist`, written by the same hook from the
+checked-in `build/entitlements.mac.plist` plus one key —
+`keychain-access-groups`, holding `<APPLE_TEAM_ID>.os.teminali.app.webauthn`,
+which is where Touch ID passkeys are stored. The team ID cannot be checked in
+(it exists as a CI secret), and `codesign` performs no `$(AppIdentifierPrefix)`
+substitution — measured, not assumed — so the literal has to be composed at
+pack time. Both signing routes use the generated file, which
+`electron-builder.yml` names for `entitlements` and `entitlementsInherit`;
+without `APPLE_TEAM_ID` it is a copy of the source and passkeys stay off.
 
 The release workflow already passes `CSC_LINK`, `CSC_KEY_PASSWORD` and
 `APPLE_ID` / `APPLE_APP_SPECIFIC_PASSWORD` / `APPLE_TEAM_ID`. An absent secret
@@ -1329,10 +1606,16 @@ Everything is optional; every default is loopback.
 | `FRONTIER_ALLOWED_ORIGINS` | `127.0.0.1`/`localhost` on ports 3000 and 3001 |
 | `OLLAMA_BASE_URL` | `http://127.0.0.1:11434` |
 | `TEMINALI_VOICE_URL` | `http://127.0.0.1:8321` |
+| `TEMINALI_REALTIME_VOICE_URL` | `http://127.0.0.1:8000` — the realtime voice pipeline; its WebSocket is derived from this |
+| `TEMINALI_REALTIME_VOICE_ROOT` | `studio/realtime-voice/` |
+| `TEMINALI_REALTIME_VOICE_PYTHON` | the checkout's `.venv` interpreter, found automatically |
+| `TEMINALI_REALTIME_VOICE_AUTOSTART` | on; set `0` to run the pipeline by hand |
+| `TEMINALI_REALTIME_VOICE_STARTUP_TIMEOUT_MS` | `300000` — weights load slowly on a cold cache |
 | `TEMINALI_ASR_ENGINE` | `auto` — `local` or `sidecar` pins which recogniser listens |
 | `TEMINALI_WHISPER_SERVER_PORT` | `8323` |
 | `TEMINALI_CUT_MCP_URL` | `http://127.0.0.1:3888` |
 | `FRONTIER_WORKSPACE_ROOT` | the repository root |
+| `FRONTIER_MAX_AGENT_JSON_BYTES` | `12582912` — `/api/agents/run` only, because an attached image arrives as base64 |
 | `TEMINALI_RELEASE_REPO` | `teminali/releases` — public; published releases are read from here |
 | `TEMINALI_SOURCE_REPO` | `teminali/teminali-os` — private; tags and the release workflow live here |
 | `TEMINALI_RUNTIME_MODE` | `local` (or `api`) |
@@ -1341,6 +1624,7 @@ Everything is optional; every default is loopback.
 | `TEMINALI_BILLING_URL` | unset — no billing service, so the app runs as free |
 | `TEMINALI_LICENCE_PUBLIC_KEYS` | unset — JSON `{"kid": "<PEM>"}`, staging and tests only |
 | `FFMPEG_PATH` | unset — an explicit ffmpeg binary, tried before every search location |
+| `MPV_PATH` | unset — an explicit mpv binary, tried before every search location (`electron/mpvProcess.cjs`) |
 
 Non-loopback values are rejected at startup rather than accepted and ignored.
 
@@ -1514,6 +1798,9 @@ resolves to free.
 - [`docs/DILIGENCE_TEST_PLAN.md`](docs/DILIGENCE_TEST_PLAN.md) — the manual plan
   that proves it.
 - [`docs/VOICE_SIDECAR.md`](docs/VOICE_SIDECAR.md) — the VibeVoice contract.
+- [`docs/MEDIA_LICENSING.md`](docs/MEDIA_LICENSING.md) — why mpv and FFmpeg ship
+  as LGPL builds made here, what that costs the encoders, and what has to
+  accompany the binaries.
 - [`src/video/P3-import-gate.md`](src/video/P3-import-gate.md) — what the media
   approval gate grants, and why reading a path is the capability it guards.
 - [`../billing/README.md`](../billing/README.md) — the billing Worker: routes,

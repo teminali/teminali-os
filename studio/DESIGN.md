@@ -27,6 +27,7 @@ reachable as ordinary utilities:
 | Buttons, chips, inline code | `bg-surface-raised` / `bg-surface-chip` | `#262626` |
 | The +/mic discs in a composer | `bg-surface-control` | `#313131` |
 | Sidebar row — hover / selected | `bg-surface-hover` / `bg-surface-active` | `#242424` / `#252525` |
+| Off switch track (only) | `bg-surface-track` | `#6b6b6b` |
 | Sidebar ↔ canvas divider | `border-edge-chrome` | `#282828` |
 | Table and card edge | `border-edge` | `#262626` |
 | User-bubble edge, outline pills | `border-edge-strong` | `#313131` |
@@ -69,6 +70,11 @@ be putting pure white on grey, which is not in this system's range.
 - Code, telemetry, keycaps: `font-mono`.
 - Scale: `text-2xs` 11 · `text-xs` 12 · `text-sm` 13 (sidebar and chrome) ·
   `text-md` 14 (chat body and headings).
+- **Code sets its own size.** `--code-font-size` (12px) is read by every code
+  surface — the Prism container, the markdown code block, inline code — and is
+  *not* part of the ramp above. Settings > Appearance moves the two
+  independently, because growing the chrome is not a request for larger
+  snippets. `--text-code` is the code text **colour**, and predates it.
 
 ---
 
@@ -153,6 +159,18 @@ Import from here rather than writing ad-hoc markup:
 * **`Menu`** — the one floating popover (add-panel menu, browser omnibox)
 * **`Primitives`** — `Kbd`, `InlineCode`, `Chip`, `IconButton`, `TrafficLights`,
   `EmptyState`, `StatusDot`, `SectionLabel`, **`SidebarRow`**
+* **`Setting`** — the settings row family: `SettingGroup` (a tracking-wide
+  label over a card that owns the hairlines between its rows), `SettingRow`
+  (label + description left, control right), `SettingToggle`, `SettingSelect`,
+  `SettingStepper`, `SettingSlider`, **`SettingList`**. Every row on every
+  settings screen is one of these. `SettingList` is the exception to the
+  label-left/control-right shape and is deliberately full width: it holds a list
+  rather than a value — removable chips over one add field — and twenty
+  executables truncated into the right-hand column would hide exactly the
+  characters that tell two entries apart. Removal takes one click and no
+  confirmation, because every entry in one of these lists is a permission the
+  operator granted and taking one back should not be harder than giving it. Two
+  users: the agent allowlist and the voice wake words.
 * **`BrandGlyph`** — the third-party and own app marks, used unmodified. Its
   `blend` prop drops the mark's own tile: these are *app icons*, and the
   Teminali one is a green figure on a pure black rounded tile (measured — `#000`
@@ -160,6 +178,19 @@ Import from here rather than writing ad-hoc markup:
   mark sits on the page rather than on a badge. `screen` is exact for that
   rather than approximate — screening pure black leaves the backdrop untouched —
   and it is for dark surfaces only.
+
+The `Setting` family exists because each settings row used to be written by
+hand: `VoiceSettingsPanel` carried a private `Row`, `Toggle` and `Select`, the
+General screen wrote its own, and the two had drifted in padding, type scale and
+what a disabled control looks like. The voice panel now renders through the
+shared family and its four sections are `SettingGroup` cards — Engine, Language,
+Who may speak, Conversation. Every settings screen is on this family as of
+2026-09-10: Screen Assistant, Local Models & Weights and the GitHub block were
+the last three writing their own rows (`docs/SETTINGS_AND_CHROME_PLAN.md` §2.2,
+and §3 below for what changed shape). Two rules the family enforces
+rather than asks for: the card owns the dividers, so a row never draws a bottom
+border and the last row leaves no hairline hanging; and `SettingSlider` always
+renders its number, because a track without a readout is a guess.
 
 `SidebarRow` is every clickable line in the sidebar — nav item, repository,
 conversation. Its measurements are not approximate: a 30px row on a 31px pitch,
@@ -203,7 +234,7 @@ The pre-redesign code is swept onto tokens by role, not by hue:
 ## 3. Shell architecture (`studio/src/`)
 
 ```
-StudioTitleBar    traffic lights · sidebar toggle · title · IDE · Video Editor · panel tab strip
+StudioTitleBar    window controls (side by platform) · sidebar toggle · title · IDE · Video Editor · panel tab strip
 ├── SidebarDock      ActivityBar (48px, always) + one 212px panel
 │   ├── ActivityBar    New Chat · SIDEBAR_TABS glyphs · Customize
 │   └── Sidebar        the selected view · SidebarFooter
@@ -628,7 +659,8 @@ defined, `navigator.credentials.get` is a function, and
 the platform authenticator behind
 `com.apple.developer.web-browser.public-key-credential`, an entitlement Apple
 grants to registered web browsers and to nothing an Electron app can claim. The
-limit is not fixable here. **The silence was.**
+limit was not fixable here. **The silence was.** (It became fixable four days
+later, by a different route — see below.)
 
 **The request never ends on its own.** Measured again in an Electron harness
 against a real https page, with the probe installed: `credentials.get({publicKey})`
@@ -653,6 +685,55 @@ page, or Open in browser. Tested in `tests/browser-private.test.mjs`: the probe
 stays silent when an authenticator exists, never changes what the page asked
 for, ignores a password request, and installs once however many times it is
 injected.
+
+#### Touch ID passkeys, and the signature that decides (2026-09-10)
+
+The entitlement Apple withholds is for the *system* passkey provider — the one
+that reaches iCloud Keychain. Electron 44 supplies a different authenticator
+that needs no such grant: `app.configureWebAuthn({ touchID })` implements a
+platform authenticator against this Mac's Secure Enclave, with the credentials
+in a named keychain access group. `electron/webauthn.cjs` turns it on inside
+`whenReady`, awaited — until it is called
+`isUserVerifyingPlatformAuthenticatorAvailable()` answers false, and a page
+that asked a moment too early would be told there is no authenticator by a
+build that has one.
+
+**The group is the whole feature, and it is read rather than composed.** macOS
+grants an app only the keychain groups its *signature* claims, and the group
+carries an Apple team ID (`<TEAM_ID>.os.teminali.app.webauthn`) that exists
+only as a CI secret. `codesign` does no `$(AppIdentifierPrefix)` substitution —
+measured: an entitlements plist signed with the macro and dumped back returns
+the literal `$(…)` text; the substitution is Xcode's. So `build/afterPack.cjs`
+composes the group from `APPLE_TEAM_ID` at pack time and writes
+`build/entitlements.mac.generated.plist`, which both signing routes then use;
+at startup the app reads the group back out of its own signature with
+`codesign -d --entitlements :-`. The signature is the only authority that
+cannot disagree with macOS, so a build that shipped without the entitlement
+leaves Touch ID **off** rather than enabling an API that would fail later,
+silently, when the first credential is stored. `electron/webauthnGroup.cjs`
+holds the pure string work; `tests/webauthn-group.test.mjs` pins both ends of
+the round trip.
+
+**The ceiling, stated rather than discovered:** Touch ID only. Not iCloud
+Keychain, not Windows Hello, not hybrid/QR phone passkeys, not USB security
+keys. Credentials are device-bound and do not sync. A development run has no
+passkeys — an unpackaged app is Electron's own bundle — and neither does an
+ad-hoc build, whose code identity changes with every install. **The probe above
+stays exactly where it is**: on macOS it self-silences (the availability check
+returns early), and on Windows and Linux, where there is still no platform
+authenticator at all, its notice is still the honest answer.
+
+**One passkey per site is the easy case.** When `credentials.get()` matches
+several, Electron stops on the session's `select-webauthn-account` and holds
+the page's promise open until a callback answers — and a session with *no*
+listener cancels the request outright, so the chooser is not decoration. It
+travels on the existing `browser-view:state` channel as `webauthn`, is drawn by
+`BrowserPasskeyModal` (a `Modal`, so `role="dialog"` hides the native view the
+way §3 requires), and comes back on one narrow channel keyed by request id — a
+stale id settles nothing, which is what makes a second click harmless. Every
+exit settles the callback exactly once: a choice, a dismissal, a navigation, a
+closed tab, or a 120-second timeout. An unanswered chooser is not a stuck
+dialog; it is a page that never hears back.
 
 ### One microphone, and no reserved emptiness between turns (2026-09-06)
 
@@ -1257,6 +1338,397 @@ Finder-launched app inherits launchd's `PATH`, which has neither — the same
 landmine `ELECTRON_RUN_AS_NODE` sets elsewhere in this document.
 
 `tests/media-probe.test.mjs` (14) pins the plans and the argument lists.
+
+### A second engine, spoken to rather than linked (`electron/mpvProcess.cjs`, 2026-09-10)
+
+The section above is the transcode path's design, and it is also its own
+indictment. A `<video>` element plays what Chromium was built to decode; for
+everything else the app re-encodes on the way past, which is why
+`MediaPlayer.tsx:51-63` has a mode whose `duration` is `Infinity` and whose
+timeline is `offset + element.currentTime` rather than a position — and why on
+a machine with no ffmpeg an MKV does not play at all.
+
+mpv plays it. **This file is the transport to mpv and nothing else:** find the
+binary, spawn it idle with a JSON IPC socket, speak that protocol. It draws
+nothing, embeds nothing, and owns no window.
+
+**Nothing spawns it yet, and no build ships mpv.** This is the plan's B1, the
+IPC layer, landed on its own on purpose: the transport is byte-identical
+whether the engine is a spawned binary or a linked `libmpv`, so it could be
+written and tested before B0 chose between them. B0 has since chosen — LGPL,
+built here; see "The licence is LGPL" below. `findMpv` looks in a bundled
+`<Resources>/mpv/` before the install directories so shipping a copy later is a
+file drop, but nothing puts a file there today — on a clean machine it returns
+null, exactly as `findFfmpeg` does.
+
+- **No `node-mpv`.** Last published six years ago, and being IPC-only there is
+  nothing in it that is not in this file. Owning ~300 lines beats depending on
+  an unmaintained wrapper for the same 300.
+- **`mpvCommand` is a table, and it is the third place `PLAYER_ACTIONS`
+  appears.** `tests/mpv-ipc.test.mjs` asserts every action in the contract is
+  answered here, so an action cannot be added to
+  `services/playerControl.ts` + `server/player-state.js` and silently do
+  nothing under mpv. It returns an **array** of mpv commands — `restart` is a
+  seek *and* an unpause — and `null` when the question is not mpv's.
+- **`next`, `previous`, `episode` and `episodes` return null on purpose.** mpv
+  has a playlist; it is not the pane's episode list, which is a scanned folder
+  with titles and watched fractions. Mapping one onto the other would make
+  `episode 3` mean different files depending on what had been loaded. Series
+  navigation stays with the pane, which then loads a file into mpv.
+- **Every seek carries `exact`, and that is a measured decision.** mpv's
+  default is a keyframe seek. Driven against a real mpv 0.41 and an x265 clip
+  with a 10-second GOP, `seek_by -3` from 8s landed at **0** and `+5` from
+  there at **10**; with `relative+exact` the same two commands land at 5 and
+  10. The contract is in seconds and the pane's `<video>` seeks exactly, so a
+  decode from the preceding keyframe is the right thing to spend — and B2's
+  whole point is an assistant finding a described moment and going to it.
+- **A subtitle label that matches no track is a refusal, not the first track.**
+  Resolution is exact-then-substring, the same two steps `MediaPlayer.tsx`
+  does, so the assistant does not learn one rule per engine.
+- **Volume 0 sets `mute` too**, because the pane does, and `muted` is a field of
+  the snapshot the agent reads back. Two engines disagreeing about what volume
+  0 means would make the same question have two answers.
+- **The socket's whereabouts are published the way the video bridge's are** —
+  a `teminali-os-mpv-bridge.json` in the temp directory, read back through
+  `runningMpv`, whose pid check is what makes a file left by a crash
+  survivable. A socket file outlives its process; connecting to a dead one
+  hangs rather than fails.
+- **Framing is tested, because getting it wrong hangs rather than throws.** A
+  chunk that splits an object mid-way keeps its remainder; a line that is not
+  JSON is dropped rather than allowed to poison the stream behind it; every
+  request outstanding when the socket closes is failed. A promise that never
+  settles is how a dead player becomes a frozen turn.
+- **No `--vo` is chosen here.** Under B1 mpv opens its own window, which is what
+  makes the transport drivable before an embedding exists. B3 is where video
+  output changes, and it changes in this file.
+
+`tests/mpv-ipc.test.mjs` (38) covers the mapping, the track list, the
+discovery order, the framing and the endpoint file, and drives `MpvIpc` against a socket that
+answers the way mpv's does — so request correlation, mpv's error string and
+property events are exercised on a real socket rather than asserted about.
+
+It has also been driven **against a real mpv 0.41** by hand, on an HEVC/AC-3
+Matroska with an embedded SubRip track — the file the `<video>` path has to
+transcode — and every step of the contract held: a 20.006s duration, the codecs
+reported as `hevc`/`ac3`, the track list, exact seeks, the clamp on `rate`,
+`mute` following volume 0, `sid` off and on, mpv's own error string on the
+error path, a PNG out of `screenshot-to-file` (which is what `player_frame`
+will need), 24 property changes across all nine observed fields, and the
+endpoint file appearing and being removed with the process. That run is what
+found the keyframe seek. It is a hand check and not in the suite: it needs an
+mpv installed, and CI has none.
+
+B2's four additions were driven against the same real mpv 0.41 on 2026-09-10,
+on a synthesised 25fps Matroska with three chapters and two titled audio
+tracks — the properties a film has and a test fixture usually does not. All
+thirteen checks held: `frame-step` moved frame 75 to 76 and `frame-back-step`
+returned it to 75 without unpausing, contract `chapter 2` arrived at mpv
+chapter 1 at exactly 2.000s and `chapter 1` at 0, `aid` selected by number, by
+exact label and by substring, a label matching nothing refused rather than
+falling back, and `seek_by -3` from 5s landed on 2.000. Until that run the four
+were a table asserted against itself.
+
+### The licence is LGPL, and that is what makes B3 possible (B0, 2026-09-10)
+
+mpv is GPL by default and can be built LGPLv2.1 (`-Dgpl=false`) against an
+LGPL FFmpeg. Teminali OS ships **the LGPL build, made here**, for mpv and for
+ffmpeg alike. The decision is B0 of the plan, and it was blocking B3.
+
+**The argument is not really about licence text; it is about macOS.** `--wid`
+takes an `NSView` pointer and a pointer is process-local, and
+`addChildWindow` joins two windows of the *same* process — so on macOS no
+application can embed another process's window without private API. Every
+mpv-based Mac player, IINA included, links `libmpv` in-process for exactly
+this reason. B3 on macOS therefore ends in a link, whatever it starts as; and
+linking a *GPL* `libmpv` would make Teminali OS — sold, and closed — GPL. GPL
+is only viable for a product that promises never to embed properly on the Mac,
+which is the opposite of what B3 is for.
+
+LGPL is thus the one choice that never has to be made twice:
+
+- **B1's transport does not change.** The binary is spawned and spoken to over
+  JSON IPC exactly as `mpvProcess.cjs` already does. Windows and Linux get
+  `--wid` against that spawned process, which is what the plan wanted first
+  anyway to prove the transport.
+- **macOS links the same LGPL `libmpv` later** through the render API, with no
+  second licensing decision and no change above `MpvProcess`.
+- **Dynamic linking is what LGPL §6 asks for**, and a replaceable `.dylib`/
+  `.dll` beside the app satisfies the relink right without shipping our source.
+
+**Playback loses nothing.** The decoders are LGPL FFmpeg's, `libass` is ISC,
+and the plan's acceptance case — HEVC video, DTS audio, embedded ASS — is
+unaffected. What an LGPL build drops is GPL-only optional code the player does
+not use.
+
+**Encoding is where it costs, and the bill is real.** `libx264` and `libx265`
+are GPL-only, and they are the software fallback in five places today
+(`server/media-probe.js:256`, `electron/exportFilters.cjs:51`,
+`electron/liveStreamer.cjs:89,176`, `electron/screenRecorder.cjs:438`,
+`electron/mediaAccess.cjs:192`). Against an LGPL ffmpeg those names are
+`Unknown encoder`. Hardware covers most of it — `hardwareEncoder.cjs` already
+prefers VideoToolbox on macOS and NVENC/QSV/AMF on Windows — but a machine with
+no hardware encoder currently has no fallback at all, and Linux has no entry in
+that table. The replacements are **libopenh264** (BSD, links LGPL-clean) for
+software H.264 and **kvazaar** or **SVT-HEVC** for software HEVC. This is the
+export path's problem, not playback's, and it must be settled in the same turn
+that first bundles an ffmpeg — not after.
+
+The build flags, what each excludes, and what has to ship beside the binaries
+are in `docs/MEDIA_LICENSING.md`.
+
+### The picture is a window, not an element (`electron/mpvView.cjs`, B3, 2026-09-10)
+
+`mpvProcess.cjs` spawns the engine and speaks to it; it draws nothing. This is
+where the picture goes, and it is different on every platform.
+
+**Windows and Linux embed the spawned process.** mpv's `--wid` takes a native
+window handle and reparents its video output into that window, filling its
+client area. Electron exposes exactly one native handle,
+`BrowserWindow.getNativeWindowHandle()`, so what mpv is handed is a
+`BrowserWindow` of our own: frameless, unfocusable, black, drawing nothing,
+parented to the shell and positioned over the player pane's rectangle. It
+cannot be a `WebContentsView` — what the browser panel uses — because a
+`WebContentsView` has no handle to give. It must not be the shell's own window
+either: mpv fills whatever it is handed, which would put video over the entire
+application.
+
+**macOS refuses, and that refusal is the design.** `--wid` there is an `NSView`
+pointer, meaningless outside its own process, and `addChildWindow` is
+same-process only. `canEmbedSpawned` is false on darwin and `embedArgs` returns
+null rather than passing a number that would address nothing. The Mac's path is
+a linked `libmpv` through the render API into a Metal view — a native addon,
+not yet written — which is the fact that decided B0's licence above. Until it
+exists the Mac keeps the `<video>` element, and every `mpv-view:*` call answers
+`{ ok: false, reason }`.
+
+**The rectangle was solved once already.** `services/browserView.ts` measures
+and clamps it (`measureBrowserViewBounds`), decides when an overlay means hide
+(`isOverlayOpen`), and `browserView.cjs` converts CSS pixels to
+device-independent ones (`scaleBounds`). All three are imported, not copied.
+The one thing added is the final offset from a rectangle inside the window's
+content area to one on the screen, because a `BrowserWindow` is placed in
+screen coordinates where a `WebContentsView` is placed in its parent's. A child
+window also does not follow its parent when the shell is dragged, and the
+renderer has no reason to report a rectangle that did not change in its own
+coordinates — so the parent's `move`, `resize`, `hide`, `show`, `minimize` and
+`restore` are listened to and the last rectangle re-applied. Without that,
+dragging the window leaves the video behind, floating over the desktop.
+
+**One embedded player, and a second panel is refused.** `--wid` is fixed at
+spawn, so a second panel means a second process, a second window and two
+hardware decode pipelines. The first panel to ask owns the engine; a second
+gets a sentence the pane can draw, rather than having the engine silently taken
+from the panel the operator is watching.
+
+**Input is mpv's to decline.** It is started `--input-cursor=no` and
+`--input-vo-keyboard=no` so the video output answers neither mouse nor
+keyboard — the pane owns every control the operator sees, and a second,
+invisible set of bindings answering differently is the failure being avoided.
+`--osc=no` and `--osd-level=0` stop mpv drawing its own transport controls and
+status messages over the pane's. The container window is additionally set to
+ignore mouse events so a click on the video reaches the document beneath it.
+`--vo` is deliberately not pinned: mpv's default already resolves to `gpu` on
+both platforms, and naming it would turn a machine where `gpu` fails into a
+black rectangle instead of a fallback.
+
+**What is tested, and what a Mac cannot answer.** The decisions are pure and
+covered by `tests/mpv-view.test.mjs` (22 tests): the handle read at both
+pointer widths and returned as a string, because a handle is not promised to
+fit in the 53 bits a JavaScript number keeps exactly; the argument list, whose
+every option was checked against `mpv --list-options` on 0.41 rather than
+remembered; a guard that no embed option is one `mpvArgs` already sets, since
+mpv takes the last of a repeated option; the screen rectangle; and when the
+window is hidden. **The window itself is Windows and Linux behaviour and this
+repository is developed on a Mac, where none of it runs.** Two things are
+therefore hand checks that have *not* been performed, and must be before B3 is
+called done, on a real Windows or Linux machine:
+
+1. Video appears in the pane's rectangle, follows it through a resize and a
+   window drag, and disappears when the panel is switched away from or a modal
+   opens.
+2. **A click on the video reaches the pane.** mpv creates its own child window
+   inside the container, which the container's ignore-mouse-events setting
+   cannot speak for; `--input-cursor=no` is the second line of defence, but
+   whether the click actually falls through is not knowable from here.
+
+**The chrome stops floating, because it cannot be seen if it does.**
+(`panels/useMpvView.ts`, `services/mpvView.ts`, 2026-09-10.) The pane's
+controls are `position: absolute` over the picture — a scrim, a title, a
+scrubber — and that works for a `<video>` because both are the same document
+and the stacking context settles it. An embedded mpv is not in this document:
+it is a native child window above the whole of it, so a control drawn over the
+video is drawn *behind* it. `setIgnoreMouseEvents` answers the click and says
+nothing about the stacking, which makes the button reachable and invisible —
+worse than either failure alone. So where mpv holds the picture the auto-hide
+is off and `embeddedPictureBounds` hands it the band between the top and
+bottom bars rather than the whole pane. The picture is smaller than the pane by
+exactly the chrome, and nothing is drawn where it cannot be seen. The bars are
+observed as well as the pane, since a title that wraps to two lines moves the
+video. **This was found by writing the renderer, not by reading the code**, and
+it is the reason the pane is a fork rather than a substitution.
+
+**What the renderer does and does not hand over yet.** `useMpvView` asks for
+the engine, hands it an absolute path — mpv has no workspace root and no
+protocol handler, and an *unconfirmed* root is not one, so until the gateway
+has spoken there is no path and the element keeps the picture — reports the
+rectangle, relays what mpv says about itself, and gives the engine back on
+unmount. Commands go through `runCommand` as they always did: it forwards the
+playback half to the engine and still runs its own switch, which is what keeps
+the volume slider and the pause glyph honest with no element to read them off.
+`fullscreen`, `next`, `previous`, `episode` and `episodes` stay with the pane,
+which owns the layout and the series. A `load` that fails falls back to the
+element rather than showing black, on the grounds that a picture beats a
+reason.
+
+**The tracks are the engine's, and the pane stopped building its own (B4,
+2026-09-10).** mpv chooses a subtitle by its own `sid` out of the file, and the
+pane's tracks were WebVTT blobs it built from the sidecars beside it — two
+lists with nothing in common, which is why B3 published `subtitles` in
+`unsupported`. They are not reconciled; one of them is gone. mpv is spawned
+with `--sub-auto=exact`, which is word for word the rule `subtitleTracksFor`
+already applies to the folder — the siblings whose base name is the video's,
+optionally followed by a dot and a language — so it opens the same files the
+pane found, without being told about them. `initMpvView` then observes
+`track-list` and `sid` and pushes them up the existing `mpv-view:state`
+channel as `tracks` and `subtitleId`; `playerTracks` in `mpvProcess.cjs` turns
+mpv's list into `{ id, label, language, selected, external }`, labelling each
+track by the same three-step rule the pane names a probed stream by. While
+embedded the pane builds no WebVTT at all — it does not read the sidecars and
+does not run ffmpeg over the file's own subtitle streams — and its menu, its
+snapshot and the agent all read mpv's list. `subtitles` and `audio_track` are
+in `ENGINE_ACTIONS` accordingly, and `runCommand` sends that list back as the
+command's context so `mpvCommand` can resolve "english" to an `sid`. Which
+track is *on* is mpv's answer, by the same rule as position: the pane keeps
+only the operator's preference.
+
+**The remembered language is re-asked for, because mpv chose first.** mpv opens
+a file in its own subtitle — `--sub-auto` and whatever the file marks default —
+and only then reports `track-list`, so the pane's preference and the engine's
+selection can be compared only after the fact. `subtitleToRestore`
+(`services/mpvView.ts`) is that comparison and the pane sends `subtitles` when
+it answers a track. It is a named rule rather than four lines inside the effect
+because it is the only part a Mac can execute: the effect around it never runs
+here. It answers null in three cases and each would be a bug rather than a
+no-op — nothing remembered, since `null` is what turning subtitles *off* stored
+and re-applying over it would turn them back on every episode; nothing
+matching, since mpv's own choice beats none and "the first track" is how a
+Swahili preference becomes silent French; and **already selected**, since the
+answer to the command is a new `sid` arriving back as the next
+`engineSubtitleId` — comparing against what is on is what makes the exchange
+settle rather than repeat.
+
+One thing this deliberately still does not do. A subtitle file **dropped on the
+pane** is bytes, not a path — the renderer is never told where a dropped file
+is on disk — so while embedded it is refused with the sentence that says what
+would work instead.
+
+### One action list, two engines (`services/playerControl.ts`, `server/player-state.js`, 2026-09-10)
+
+The contract above gained four actions the day mpv could answer them:
+`frame_step`, `frame_back`, `chapter` and `audio_track`. Both lists changed in
+one commit, as `tests/player-state.test.mjs` insists, and `mpvCommand` answers
+all four — a frame step is mpv's own `frame-step`, a chapter is its `chapter`
+property counting from 0 where the contract counts from 1, and an audio track
+is `aid`, named the same two-step way a subtitle track is or numbered outright.
+
+The interesting half is the engine that *cannot*. Chromium plays a container's
+first audio track and offers no way to choose another; it reads no chapters;
+and it can only step a frame where ffprobe could say what the frame rate is.
+The tempting answer — a second, shorter list for the pane — puts one action in
+two contracts and is exactly the drift the mirrored-list test exists to catch.
+
+So the difference is **data, not a list**: `PlayerSnapshot.unsupported` is what
+this engine cannot do to *this* file, each with the sentence the agent gets
+instead, and `unsupportedReason` is the gateway spending it before the command
+is emitted (409 `PLAYER_ACTION_UNSUPPORTED`). The pane recomputes it per file —
+audio has no frames, a transcoding stream has no frame index, a file ffprobe
+could not read has no frame rate — and the gallery publishes it too, because
+nothing is playing there at all.
+
+**It is per engine as well as per file, as of B4.** Where mpv holds the picture
+the list is nearly empty: it steps a real frame without being told the frame
+rate, reads the file's chapters, and chooses an audio or subtitle track by its
+own number, so four of the sentences above are the element's limits and not the
+file's and are not published. What survives is the one limit that is still
+true of any engine — a track can only be chosen out of a list, so a file whose
+`track-list` reports no subtitles publishes `subtitles`, and the same for
+`audio_track`. This is what "data, not a list" was for: the same contract, a
+different answer per playback, and nothing added to either engine's action
+list to say so.
+
+### The assistant can watch the film (`player_frame`, `services/playerFrame.ts`, 2026-09-10)
+
+`player` says where the position is and `player_control` moves it. Neither is
+*seeing* the film, and the gap showed: asked what happens in a scene, the model
+had a filename and a number of seconds. `player_frame` is the third channel —
+one frame of what is on screen, handed over as a real MCP image block the way
+`browserMcpStdio.cjs` hands over a screenshot, with the sentence `player` would
+give taken at the frame's own position, because a picture with no timestamp
+under it is a picture nothing can seek from.
+
+It is the third round trip of the same shape as the camera's and the browser
+panel's, for the same reason: the gateway is a plain Node process with no
+picture in it, so `requestPlayerFrame` puts an event on the run's one-way
+stream and waits for the window's own POST. Two things are deliberate. The pane
+**registers** its element rather than this being a `querySelector("video")` —
+a window holds several video elements, one per clip in the editor's compositor,
+and "the first one" would photograph the wrong surface. And the frame is
+`image`, singular, at every step, pinned by `tests/player-frame.test.mjs`:
+the camera's path says `images` in the window and `image` in the resolver,
+which is why `look_at_me` has never once worked.
+
+Pre-approved, with `player` and `player_control`. It photographs one thing —
+the file the operator opened, in the pane they are watching. The camera looks
+at *them* and asks; a screenshot has everything else they have open in it; a
+frame of their own video reveals nothing the position already reported does
+not imply. The alternative, a prompt each time the model wants to check what a
+scene shows, makes "find the bit where they arrive" not worth asking.
+
+**Under mpv it is `screenshot-raw`, and nothing above the pane changed (B4,
+2026-09-10).** That was the prediction when this was written and it held: the
+gateway, the round trip, the word `image` and the pre-approval are all
+untouched. What changed is one fork inside the pane. A registered source may
+now hand over an `engine` capture instead of an `element`, and while mpv holds
+the picture it hands over exactly that — `element` goes null on purpose,
+because the frame is in another process on a window `drawImage` cannot read and
+`querySelector` cannot find. `capturePlayerFrame` tries the engine **first**;
+testing the element first would answer "No video is open" about a film that is
+playing, which the agent would then repeat to the operator. The order is
+asserted in `tests/player-frame.test.mjs` rather than run, because it cannot run
+here.
+
+Main does the encoding (`mpv-view:frame` in `electron/mpvView.cjs`): mpv's
+`screenshot-raw` reply is a raw bitmap in the JSON, and
+`nativeImage.createFromBitmap(...).resize().toJPEG()` turns it into the same
+1280px JPEG the canvas produces on the element path. No ffmpeg, no second
+decode, no temporary file. The flag is `video`, not `subtitles`: the question is
+what is on screen, so a burned-in caption belongs in the answer.
+
+The reply needs three corrections before it is a picture, and **all three
+produce an image rather than an error**, which is why they are a pure
+`packBitmap` in `mpvProcess.cjs` with four tests in `tests/mpv-ipc.test.mjs`
+rather than four lines at the call site. `stride` is bytes per row and may
+exceed `w * 4` — handing the padded buffer over with only a width shears the
+frame diagonally. `bgr0`, mpv's default and the only format asked for, leaves
+the fourth byte **zero**, and a transparent bitmap encodes as a black JPEG.
+And the byte order must already be BGRA, which `bgr0` and `bgra` are and `rgba`
+is not; that one is refused rather than silently swapping the operator's blue
+for red. A sheared, black or inverted frame all look like a working feature in
+a log, and the model cannot tell any of them from a dark scene.
+
+The bridge method is `mpvView.frame` in `preload.cjs`, which is another
+thread's file — so `tests/mpv-view.test.mjs` asserts that every `mpv-view:*`
+channel the preload invokes has a handler in main. `ipcRenderer.invoke` on an
+unhandled channel does not throw in main; it rejects in the renderer, the pane
+falls back, and a mistyped channel becomes a feature that quietly never works.
+The hook answers `frame: null` where mpv does not hold the picture — and equally
+on a packaged build whose preload predates the method — so the pane has one
+thing to test rather than two.
+
+**Not run.** `canEmbedSpawned` is false on darwin, so on the machine this was
+written on `engine` is always null and every capture is still the element's.
+Everything in these four paragraphs is Windows and Linux behaviour with tests
+covering the arithmetic and the decisions, not the picture.
 
 ### The player, as a tool (`server/player-state.js`, `services/playerControl.ts`, 2026-09-06)
 
@@ -1999,13 +2471,53 @@ The rules that decide what gets written down — `visitOf`, `visitKey`,
 dependency-free, because a rule that can only be exercised by driving Electron
 is a rule nobody exercises. The subscriptions are the wiring around them.
 
+**Take screenshot, clear, and the bookmark bar** (2026-09-10). Three gaps the
+panel had against a real browser's chrome, all in `More`:
+
+* **Take screenshot** is the operator's picture, and it is deliberately not the
+  agent's. `page_screenshot` gives a model a **jpeg of the viewport** sized for
+  a turn's context; this asks the same CDP layer for a **full-page PNG**
+  (`browserCdp.cjs` `screenshot({ fullPage: true, format: "png" })`), because
+  this one ends as a file somebody opens at 200% to read the small print.
+  Nothing on the agent's path can ask for PNG — `browser-agent.js` has no field
+  it could travel in. Main saves it through **Electron's own save dialog**, the
+  same posture downloads take, and the path it hands back is passed to
+  `remember()`, so "Show in Finder" reveals a file main watched itself write.
+  A screenshot taken in a private tab is revealable for the session and is not
+  written to `browser-downloads.json`, exactly like a private download.
+  `dataUrlBytes` refuses anything that is not a base64 png or jpeg, because that
+  string decides the contents of a file the operator named.
+* **Clear cookies / Clear cache** run on **both** partitions.
+  `clearDataPlan(kind)` is the whole decision and it is pure: `cookies` →
+  `clearStorageData({ storages: ["cookies"] })` plus `clearAuthCache()` — a
+  stored Basic-auth credential is the same promise as a session cookie — and
+  `cache` → `clearCache()`. Nothing else is reachable through the channel; in
+  particular `history` is **not**, because history is a gateway file the
+  assistant reads rather than session state, and it is still cleared through
+  `browserStore.clearHistory`. Three plain menu items rather than one "Clear
+  browsing data…" dialog: each is one sentence long. Because none of the three
+  changes anything on screen, each one says so afterwards in a **notice strip**
+  — the same shape as the passkey notice, dismissible, and the strip the
+  screenshot's path and its Reveal are drawn in too.
+* **Show bookmark bar** is a strip under the toolbar wearing the home page's
+  own `Mark` (exported from `BrowserHome` rather than drawn twice, so a site is
+  the same colour on both surfaces). It is drawn *above* the viewport box, not
+  over the page — nothing can be drawn over the page — so it takes height from
+  the rectangle reported to main and the resize observer moves the view down.
+  The flag is app-wide and persisted in `store/browserPrefsStore.ts`, not in
+  `browserStore` (which holds nothing on disk on purpose) and not per tab (a bar
+  in one tab and not the next reads as a bug). Off by default, and **not offered
+  on a private tab**, for the reason its home page shows no bookmarks either.
+
 Tested in `tests/browser-view.test.mjs` (6): the scheme refusals on both sides,
 the zoom scaling, the malformed-rectangle refusal, and the clamping; in
 `tests/browser-data.test.mjs` (10): the store's refusals, the visit folding,
 the caps, the history search, and which browser tools are pre-approved; and in
-`tests/browser-panel.test.mjs` (8): what counts as a visit, the title in the
+`tests/browser-panel.test.mjs` (19): what counts as a visit, the title in the
 dedupe key, the cache's fold and cap, in-flight versus finished downloads, the
-dropped `cancelled`, and the two halves of the reveal guard.
+dropped `cancelled`, the two halves of the reveal guard, the recent list's
+folding, the screenshot filename a page cannot steer, what `dataUrlBytes`
+refuses, and what each clear covers.
 
 ### What the workspace will open (`server/workspace.js`, `panels/FilePane.tsx`)
 
@@ -3289,6 +3801,53 @@ the gateway: the main process is already Node, and a status item that stops
 working whenever the gateway restarts is broken exactly when someone is most
 likely to look at it.
 
+The assistant's item can be turned off, from **Settings › General › Menu Bar
+Icon**. macOS offers no way to hide a `Tray`, so off destroys it and on builds a
+new one — affordable precisely because of the no-asset rule above: there is no
+image to reload and nothing to restore but the mirrored state, which the
+renderer owns anyway. `setVisible` returns the *settled* visibility rather than
+the request, and `AssistantBridge` writes that back into the preference, so a
+build where the `Tray` will not construct cannot leave the switch reading true
+over an empty menu bar. Hidden also means idle: the 20-second permission poll
+stops, because the only thing it feeds is a menu that is no longer there. The
+row is absent altogether in a browser build, where the bridge is undefined —
+the same rule that keeps every other unbacked row off these screens. Turning it
+off removes the item and nothing else; the global shortcut and the in-window
+panel are untouched, and the row's own copy says so.
+
+The preference lives in the renderer's persisted store, which the main process
+cannot read: the item is built at `whenReady`, seconds before the renderer has
+mounted and can say what was wanted. That gap used to show — an operator who
+turned the icon off watched it appear and then vanish on every cold start.
+`main.cjs` now keeps a one-key cache of that boolean in
+`userData/shell-chrome.json`, reads it before attaching, and hands it in as
+`initialVisible`; a hidden attach constructs no `Tray` at all, so there is
+nothing to flash. The renderer stays the authority — its push on mount
+overrides the cache, and the cache only ever records the visibility that
+*settled*, which is the same value `AssistantBridge` writes back into the
+store. Two copies of one boolean is the cost; a cache that could disagree with
+the store would be a second opinion, and this one cannot. It is the first
+preference the main process persists, and deliberately not a store: one boolean
+does not need one.
+
+A hidden attach skips the probe that a visible one performs, so nothing is
+known about whether this platform can build a `Tray` until the first
+`setVisible(true)` — which answers with what actually happened, as before. The
+teardown was tightened in the same edit: the permission modules are imported
+asynchronously and start the poll when they land, so a tray destroyed before
+that landed used to leave a 20-second interval running against an item that no
+longer existed. `destroy()` now closes that window.
+
+`registerAssistantHotkey` returns early when the accelerator it is handed is
+the one already registered. Three callers reach it on a cold start — main.cjs's
+own startup call, the renderer pushing the operator's setting, and StrictMode
+invoking that effect a second time in dev — and honouring each literally called
+`unregisterAll()` twice for no change, leaving a window where the shortcut did
+nothing and printing two log lines claiming a registration that had already
+happened. Measured 3 registrations before, 1 after. A *failed* attempt is still
+retried rather than remembered: another application may have released the
+combination since.
+
 ### Dialogs
 
 Every dialog goes through the `Modal` primitive — raised `--surface` behind the
@@ -3338,6 +3897,20 @@ changes, so a single reading is stable.
 Rows are 24px on 20px group headers in a 284px column — the density a menu of
 this length needs to be read rather than scrolled.
 
+**The voice composer mounts the same picker** (`TemiVoiceStage.tsx`), because
+removing the Teminali OS chat removed the only place the engine could be
+chosen while Temi is the surface. The trigger sits in the composer pill left of
+the microphone and reads the current selection — an agent's own label, or the
+Frontier profile name with its glyph.
+
+Mounting it was not enough to make it real. `TeminaliAgentBridge.delegateTask`
+resolves its engine as `options.engine || activityStore.activeEngine ||
+store.agentSelection?.engine || …`, and `activeEngine` always holds a value
+(`"codex"` by default), so the store selection a picker writes was unreachable.
+The stage now pushes the picker's choice into the activity store, one direction
+only — the picker leads, the pane's engine chip follows — so choosing Claude
+Code in the composer delegates to Claude Code rather than silently to Codex.
+
 ### Composer triggers
 
 `/` mounts a skill, `@` attaches a file. Both live in
@@ -3355,7 +3928,7 @@ The placeholder had advertised both for months with nothing behind either.
 
 ### No dead affordances
 
-Three rules that a January audit had to enforce retroactively, so they are
+Five rules that a January audit had to enforce retroactively, so they are
 written down now:
 
 1. **A control that does nothing must not look like a control.** The empty
@@ -3389,14 +3962,334 @@ written down now:
 
 Four controls went the same way in that sweep — Tips, Window Restoration,
 System Notifications, Completion Sound — each a `useState` read nowhere else,
-for features that were never built: there is no rotating-tips surface, no
+for features that were never built: there was no rotating-tips surface, no
 Electron `Notification` anywhere in the app, no completion-sound player, and no
 notion of the three restoration modes. Rule 1 says remove, not fake.
+
+Three of those four are back (2026-09-10), and the distinction matters: they
+were **built**, not restored. `services/notifications.ts` posts the
+notification and synthesises the chime, and the store drops the editor tabs on
+rehydrate when the restore preference is off — so each row now moves something.
+Tips stayed deleted, because there is still no rotating-tips surface to switch
+off.
+
+The settings rail was the largest surviving instance, and it is now closed
+structurally rather than by another sweep (`settings/SettingsPage.tsx`,
+2026-09-10). It advertised seventeen categories and rendered five: the content
+was a ternary chain over `activeCategory` whose final `else` drew the General
+screen, so Profile, Appearance, Plan & Usage, Teminali OS and Browser
+highlighted themselves and showed General. Worktrees, Tab Autocomplete, AST
+Indexing and Cloud Agents had no backing code anywhere in `src/` or `server/`,
+and Docs was an inert link to a documentation site that does not exist.
+
+The rail and the content pane are now derived from one `panes` registry whose
+entries require a `render`, so a category with no screen behind it cannot be
+written down. The two rail entries that hand off to another modal — Skills &
+MCP, Benchmark Qualification — are a separate `kind: "action"` and can never be
+selected as content. Five panes remain: General, Local Models & Weights, Git &
+PRs, Voice & Conversation, Screen Assistant. The others return one at a time as
+their pane is actually built, in the order set out in
+`studio/docs/SETTINGS_AND_CHROME_PLAN.md` §5 — which is also where the
+adopt/adapt/reject call for every row lives.
+
+Settings is a page, not a dialog (`settings/SettingsPage.tsx`, `App.tsx`,
+`store/studioStore.ts`, 2026-09-10). The fixed 1040×680 box over a dimmed
+backdrop is gone: the shell renders the page in place of the sidebar and
+workspace, under the title bar, so the window controls stay where they are and
+the page reflows with the window — a 240px rail, then one column capped at
+880px. `⌘,` opens and closes it, Escape and the rail's `← Back` return the
+workspace exactly as it was, and `settingsView: { open, category }` lives in
+`studioStore` rather than an `App.tsx` `useState`, so the open pane is shell
+state. The category persists across a reload; `open` does not, because a reload
+should return you to your work rather than to the screen you were configuring
+it from.
+
+The rail's search matches rows, not only category labels. Each pane declares
+the rows it contains, an entry that matched on its contents lists which rows
+matched, and typing "interrupt" finds the switch on the voice screen without
+knowing which category it was filed under. The declared rows are row labels and
+are renamed in the same edit as the row — a search that offers a row which is
+not on the screen is the same class of lie as a rail entry with no pane.
+
+The Appearance pane (`settings/AppearancePane.tsx`, `services/appearance.ts`)
+is the first deleted category to return. Its rows all change something the
+operator can see the instant they move: the store writes through
+`applyAppearance`, which sets CSS custom properties and root classes on
+`document.documentElement`, so there is no Save button and no preview that
+lies. It is not a React module on purpose — the recorder window renders in a
+second renderer with no access to the studio store, and `resolveChromeStyle`
+has to be readable there.
+
+One row Cursor has is deliberately absent:
+
+- **Theme.** This build has exactly one. `tokens.css` is a measured dark
+  palette with no light or high-contrast counterpart, so a theme picker would
+  be four options and one outcome. It returns when a second palette exists.
+
+**Window Chrome** is the row that took the longest to earn its place. It was
+built, then pulled, then shipped: `appearance.chromeStyle` and
+`resolveChromeStyle` persisted for a step during which the title bar still drew
+macOS traffic lights on every platform, and a picker offering Windows and Linux
+would have advertised a capability the shell did not have. It returned with the
+clusters, which is the same rule the Theme row is waiting on.
+
+`layout/WindowChrome.tsx` draws all three dialects, to measurements taken off
+the reference windows rather than chosen:
+
+| Dialect | Cluster | Behaviour |
+| --- | --- | --- |
+| macOS | three 13px discs, 10px gap, **left** | glyphs on hover only; lights dim to 45% when the window is not key |
+| Windows 11 | three flush 46px caption buttons, **hard right**, full caption height | `--chrome-win-hover` wash; close takes `--chrome-win-close` with a white glyph |
+| Linux (Adwaita) | three 24px circles, 6px gap, 6px inset, **right** | symbolic glyphs at rest, as GNOME draws them; close is not red at rest |
+
+The Windows buttons take the full 40px caption height rather than the 32px of a
+default Windows title bar, because on Windows the buttons take the caption
+height — a 32px button in a 40px bar leaves an 8px strip at the very corner
+that hover does not fill, which is the one pixel-level tell that these are
+drawn by an app.
+
+Which end of the bar each takes is `CHROME_SIDE`, and what each costs in width
+is `CHROME_CLUSTER_WIDTH`; both live in `services/appearance.ts` beside the
+resolver, not in the component, because `StudioTitleBar` has to reserve from
+them and the recorder window has no React tree of ours to read a component
+constant from. `tests/appearance.test.mjs` pins both — a flipped side renders
+the cluster on top of the panel tab strip, and a width that drifts from what
+the component draws overflows the space its own bar reserved.
+
+`electron/main.cjs` runs `frame: false` on every platform, so none of this is
+native integration: there is no `titleBarStyle`, no `titleBarOverlay` and no
+per-platform `BrowserWindow` branch. That is also why the override is offered
+at all — a macOS operator can pick the Windows bar, which is the only way three
+dialects are testable on one machine.
+
+The accent control is the one with real teeth. `--accent-ink` was the constant
+`#151515`, which was only ever safe because `--accent` was the constant
+`#00bf63`; once the hue is the operator's it is not, and dark ink on a blue
+accent at the brand's lightness measures **1.52:1**. So `solveAccent` picks the
+ink per fill and, where neither ink clears 4.5:1 — a narrow band around orange
+and teal, **12.6% of the hue x intensity space** — walks the fill darker until
+one does. Hue 151 at intensity 100 is untouched: lightness 37.5%, fill
+`#00bf63`, dark ink, **7.51:1**, which is the figure the token sheet already
+claimed. The accent ramp moves as offsets from that stop so it keeps its shape
+rather than collapsing onto one value.
+
+Code size and UI size are separate controls reading separate tokens
+(`--code-font-size`, added in this work, against the `--text-*` ramp): an
+operator who grows the chrome has not asked for larger snippets. Note
+`--text-code` is the code text *colour* and predates it — the near-collision is
+why the size token is named the way it is.
 
 The audit that found these is reproducible: build the import graph from
 `main.tsx` and anything unreachable is dead; grep `<button` for tags with no
 `onClick`; and diff the `/api/` strings in `src/` against the routes
 `server/gateway.js` actually serves.
+
+**General, Profile, Licence & Usage and Git & PRs** are the second wave of
+panes (2026-09-10), and between them they took the settings rail from five
+screens to eight. All four are built out of the `ui/Setting.tsx` row family, all
+four declare their rows for the rail search, and each is a `.tsx` pane in
+`settings/` with its state in a `.ts` service — the split `AppearancePane`
+established, for the reason the tests need it.
+
+Two new services carry them. `services/preferences.ts` is the sibling of
+`services/appearance.ts` and is deliberately not the same shape: appearance
+finishes its job the moment it is written onto the document, whereas "open
+links in the in-app browser" is a rule that has to be read at the instant a
+link is clicked, by code nowhere near a React tree. So it publishes the settled
+preferences into module scope and `currentPreferences()` is how a non-React
+caller reaches them. `services/notifications.ts` owns the turn announcement.
+
+The announcement hangs off **one** place: the falling edge of `setStreaming` in
+the store. `setStreaming(false)` is called from eleven sites across three
+components, all on the streaming path, and threading an outcome argument
+through all eleven to serve a settings row would put an edit on the most
+load-bearing path in the app. Instead `latestSettledTurn` picks the newest
+assistant message across the four engine transcripts — ids are minted
+`msg_${Date.now()}_${rand}`, the only millisecond stamp a message carries,
+because `timestamp` is a localised hour and minute — and the message already
+carries its own verdict, since every call site sets `errorCode` and `cancelled`
+*before* it clears the flag. A turn the operator cancelled notifies nothing:
+they were there.
+
+Two rules the notification rows depend on, both stated in the row descriptions
+so the toggle is never quietly narrower than it reads: a notification fires
+only while the window is **not** focused, and the chime is deliberately exempt
+from that, because somebody who turns it on is asking to hear the end of a turn
+whether or not they are watching. The permission is asked for from a row on the
+screen rather than at launch — a prompt before the operator has seen a single
+notification is the one most reliably denied, and a denied permission is not
+recoverable from inside the app on any platform. The row reports `granted` /
+`denied` / `default` / `unsupported` honestly, which is the part Cursor's
+equivalent screen leaves out.
+
+**Agents is the screen where an overstated row is dangerous, not just untidy**,
+because it is the one that decides how much runs on this machine before a human
+sees it. Five of Cursor's seventeen rows; the twelve absences and their measured
+reasons are in `docs/SETTINGS_AND_CHROME_PLAN.md` §3.
+
+**Run Mode has three modes and the fourth name is the point.** *Ask every time*,
+*Review changes* (the default, and what the runner always did), *Run without
+asking*. They sit over verdicts `classifyCommand` already produced, so the mode
+decides only what happens to `auto` and `confirm` — a `blocked` command is
+refused in all three and never offered for approval. **There is no sandbox
+mode, because there is no sandbox**: commands are handed to a shell with the
+app's own privileges against the real filesystem, and a mode named for
+containment we do not have would be the most dangerous label in the app.
+
+**The deletion guard is what makes an unattended mode offerable at all.**
+`isDestructiveCommand` keeps a delete-shaped line asking even under *Run without
+asking*, matched on the whole line rather than per segment because `x && rm y`
+deletes whichever half you look at. The asymmetry it encodes is recoverability,
+not danger: a bad edit is in the change dock and in git, and a deleted file is in
+neither. In the other two modes a delete is a state-changing command and already
+stops, so the row says so rather than reading as though it were doing something.
+
+**"Always allow" is now an answer you can see and take back.** The gate has
+always remembered an executable; it forgot it at window close and there was
+nowhere to look at one, which makes it not really an answer. The list is in
+preferences, the gate mirrors it, and the mirroring runs both ways — a grant is
+pushed out to the store, and the store is pushed back into the live gate
+whenever it changes, so deleting an entry in settings stops it allowing things
+in the run that is already open rather than at the next launch. One list covers
+shell and MCP because the gate keys on `commandHead`, which is the executable
+for a command and the whole `mcp__server__tool` name for a tool.
+
+**External-File Protection is a statement, not a switch.** `server/workspace.js`
+resolves every path against the workspace root and refuses anything landing
+outside it, on read, write and delete alike; there is no setting that relaxes
+it, so a toggle would either do nothing or offer to remove the guarantee. The
+row says that, and then says where the boundary stops — shell commands are
+bounded by nothing but Run Mode — which is the half that changes what an
+operator does.
+
+**`approvalStore.ts` was not touched.** It was named as this pane's blast radius
+and turned out to be the live pending-*prompt* slot the voice lane speaks from,
+not a settings store. The machinery that decides whether a command runs is
+`services/agentCommands.ts`; `runAgentCommands` already carried an
+`autoApproveAll` option no caller ever set, which is now `runMode`. Both engine
+call sites spread `commandPolicy()` at the moment of the call, so tightening the
+mode mid-turn tightens that turn.
+
+**Git & PRs adopted one of the plan's five rows, and the four absences are the
+point.** The app makes no commits and opens no pull requests — there is no `git
+commit`, no `gh pr create` and no review flow anywhere in `src/` or `server/`;
+GitHub integration is sign-in, repository listing and clone. Review Provider,
+Commit Attribution, PR Attribution and Branch Prefix would each control
+something that never happens. The fifth row survived and grew: Cursor's "PR
+Link Destination" chooses where a PR link opens, and ours governs **every** link
+in the app, because we have an in-app browser and a chat full of links.
+`services/linkOpen.ts` is the single door every one of them goes through, which
+is also the only place to refuse a scheme — a link in a chat answer is text a
+model produced, so only `http`, `https` and `mailto` leave.
+
+**Restore Last Session restores the workspace, not the window.** The shell does
+not persist its own bounds, so size and position are the host's business; the
+row says so rather than implying a restore that does not happen. And what it
+drops is editor tabs and the active tab only — chat transcripts stay, because a
+layout preference that silently deletes work is not a layout preference.
+
+**Licence & Usage reuses `EntitlementSection` rather than reimplementing it.**
+That component already reads the plan catalogue from the gateway (which reads
+`licence/entitlements.js`), and already fails to null rather than telling an
+offline subscriber they are on Free. Beside it are the facts a local operator
+actually wants — gateway address and health, the active lane, and what the
+weights on disk come to — all measured on open, none remembered. The gateway
+card moved here from General, where it had been the only thing on an otherwise
+near-empty screen.
+
+**The last three bespoke screens are on the row family (2026-09-10).** Screen
+Assistant, Local Models & Weights and the GitHub block inside Git & PRs were what
+the conversion had left behind. `AssistantSettingsPanel` was five bare
+`<section>`s with three `SegmentedTabs`, two raw checkboxes and a hand-built
+permission card, at a type scale one step larger than every pane beside it;
+`ModelsPane` carried a private segmented `Option`; and `GitHubConnect` was a
+stack of `lit` cards that `GitPane` then wrapped in a card of its own — a card in
+a card in a page. All three build out of `ui/Setting.tsx` now, and Screen
+Assistant and Local Models declare their rows for the rail search, which neither
+had ever done, so searching "Frontier tier" or "Runtime" now finds the screen it
+is on.
+
+**A segmented control became a select in four rows, for the reason Run Mode did.**
+The assistant's mode, autonomy and engine, and the runtime switch on Local
+Models, each need a sentence of consequence per option; three words fighting for
+the width of a row say less than a label, a control, and a sentence that changes
+with the control. This does not deprecate `SegmentedTabs` — it is still right
+where the options are peers that explain themselves — but a settings row is not
+that case.
+
+**A catalogue is not a row family.** `ModelLibrary`, `ApiProviders` and the
+repository list stayed lists. The repositories moved *inside* a `SettingGroup`
+and draw their hairlines with the group's own divider, so two hundred
+repositories are one cell of the card rather than a second card inside it; the
+model and provider catalogues sit below the Runtime group rather than in it. A
+list dressed as a set of settings reads as one very long setting.
+
+**The assistant's Frontier tier row is worded from the routing table.**
+`gateway/frontier-runner.js` `MODEL_MODES` is what the routing actually consults,
+so its three descriptions are that table's rather than invented beside it. The
+tier picker carried no description at all before.
+
+**The first visual pass over all nine screens (2026-09-10).** Every screen up to
+this point had been typechecked and suite-green without anyone looking at it, and
+three had changed shape the session before. Driven through CDP against the dev
+server at 1280×820, all nine render; control right-edges are a consistent 15px
+gap from the card in every group but the deliberately inline ones (the voice
+name chips, the model catalogue rows). Four things were wrong and are fixed:
+
+- **`AppearancePane` had no `<h1>`** — alone among the nine, so the screen opened
+  on a bare group label and read as though it had been scrolled past its title.
+- **`GitHubConnect`'s waiting state was an unhoused spinner.** Once `GitPane`
+  rendered the component bare, the `loading && !status` branch returned a spinner
+  centred in the empty page, and the real card then landed somewhere else. It is
+  now an Account card that keeps its place and fills in.
+- **The voice greeting field was `w-36`** — 144px of a 205px default value, so the
+  shipped greeting was cut off in its own box. It is `w-64`, sized to hold it.
+- Its loading copy quoted `gh auth status` in backticks, which a `description`
+  string renders literally. Descriptions are plain text; no markdown decodes.
+
+**A second pass, on two things the first one recorded and left (2026-09-10).**
+Both were seen during the visual pass, called deliberate-looking, and deferred
+for a decision rather than patched:
+
+- **`ModelsPane` was the only pane whose first group carried no label**, and the
+  only one with two vertical rhythms. `ModelLibrary` and `ApiProviders` stack
+  their own cards at `gap-4`; the runtime card sat in the pane's outer
+  `space-y-6`, so the first gap on the screen was 24px and every gap after it
+  16px, which read as a switch on its own screen above a separate list. The
+  cards now share one `gap-4` column and the heading keeps its 24px, as in every
+  other pane. The group is captioned *Where turns run* — the caption names the
+  area and the row names the control, which is the `Startup` → *Restore Last
+  Session* pattern; captioning it *Runtime* would have repeated the row's own
+  label back at it, and *Models* would have repeated the `<h1>`.
+- **The model picker is edited from settings, not from inside itself.** Cursor's "choose which models appear in the picker" and its collapsible API Keys were adopted into `ModelsPane` as a second group, *In the model picker*, and a disclosure in `ApiProviders`. The list is edited from settings for the obvious reason: a menu that can hide its own rows has no row left to unhide them from. What is stored is `preferences.hiddenModelProfiles` — the **hidden** set, not the shown one, so a profile a later build adds arrives on the menu of an operator who never saw it; a shown-list would withhold every future model from every existing install. Two rules keep it honest and they are one rule seen from two sides. The profile **in use** cannot be switched off — its toggle is disabled and the row says *In use* — which is also what stops the menu emptying, because `currentProfile` always names one of the four whether or not an agent holds the selection instead. And `visibleModelProfiles` offers the active profile **even when the stored set hides it**, because `CommandPaletteModal` selects `auto` and `flash` and `GeminiKeyModal` selects `max` without consulting the list: a hidden profile really can become the running one, and a menu that could not name what it was running would be a worse lie than one row too many. That rule lives in `services/preferences.ts` beside the preference rather than in the picker, so a test can reach it without a DOM, and `ModelPicker` runs **both** its keyboard index and its render through it — an arrow key must not reach a row the eye cannot see. The keys collapse on the same principle applied to a default: the section opens itself while no key is configured, because collapsing the only route to the capability the screen exists for would be a shut door with no handle, and closes once one is; the operator's own toggle outranks that from then on, which is what the third `null` state of `keysChoice` means.
+- **`GitHubConnect`'s repository list was a scrollport inside a scrollport.**
+  Its `max-h-96` put 383px of window over 2254px of list — 49 repositories — in
+  both callers, each of which already scrolls: the settings page, and the
+  modal's `flex-1 min-h-0 overflow-y-auto` body. The wheel was trapped inside a
+  card that looks like part of the page. The cap is gone and the list flows into
+  whichever scrollport owns the screen. Sticky search was considered and
+  rejected on a measurement, not a preference: the group's card is
+  `overflow-hidden`, which makes that card the sticky element's scrollport and
+  pins it to nothing.
+
+**The off state of `SettingToggle` is not legible, and no token can fix it.**
+Measured, not eyeballed: the off track is `--surface-hover` `#242424` on a card of
+`--surface` `#212121`, a contrast ratio of **1.04:1**, against the 3:1 that WCAG
+1.4.11 asks of a control's boundary. An off switch therefore reads as a white dot
+floating on the card with no slot around it. This is not a wrong token choice that
+a better token would settle: the whole dark ramp tops out at `--border-popover`
+`#3a3a3a`, **1.42:1**, and a compliant track needs roughly `#6b6b6b`. It was put
+to the user rather than decided quietly, being a §0 question that changes every
+switch in the product; the answer was to admit the token. `--surface-track`
+`#6b6b6b` is now in §0 and `SettingToggle` draws its off state from it, measured
+in the running app at **3.02:1**. It is the only surface here not sampled from
+the reference captures, and it is deliberately the darkest value that clears the
+bar — `#6a6a6a` was written first and measured **2.98:1**, under by one step of
+grey, which is exactly why the value is measured in the app and not reasoned
+about on paper. It costs the ramp nothing new: `#6b6b6b` is already the palette's
+`--text-placeholder`, so this admits a role, not a colour. `ui/Setting.tsx` is the sole `role="switch"` in the codebase, so one change
+reached every switch; the other `bg-surface-hover` pills are hover states on
+round buttons and are none of this.
 
 ### Verifying a change against the reference
 
@@ -4248,11 +5141,159 @@ an empty answer being a failure, and the token check — and in
 Codex gets no camera, for the fourth time and the same reason: it has no
 `--permission-prompt-tool`, so the one gate this feature has could not be asked.
 
+### Reading the browser panel, not a picture of it (`browser-mcp.js`, `browserCdp.cjs`, 2026-09-10)
+
+Asked about a web page, the assistant screenshotted the whole desktop and ran
+the macOS accessibility tree through a vision model, and `readablePage.ts` said
+outright that it "is deliberately not a browser". Both were true and neither
+could read past the fold, see a page scrolled away from, or click anything. The
+browser panel is a real Chromium `WebContentsView`, and `webContents.debugger`
+speaks the full DevTools Protocol against it with no remote-debugging port and
+no second process — so the page the operator is looking at is readable directly.
+
+**The protocol is spoken in exactly one file.** `electron/browserCdp.cjs` owns
+every `sendCommand`, and nothing else in the app has the vocabulary. It exposes
+seven **named operations** — `snapshot`, `read`, `screenshot`, `click`, `type`,
+`networkLog`, `evaluate` — each composed of a fixed sequence of protocol calls.
+The agent therefore never names a CDP method, and there is no field anywhere on
+the path (tool argument → shim → `server/browser-agent.js` → gateway → run
+stream → `services/browserAgent.ts` → IPC) that one could travel in.
+
+**The allowlist is two-tier, and guards our own future code.**
+`CDP_ALLOWED_PREFIXES` is the domain boundary; `CDP_ALLOWED_METHODS` narrows it
+to the fourteen exact calls this build sends, and `send()` requires both. The
+reason for the second tier is `Network.*`: the request log is a tool, and
+`Network.getAllCookies` is in the same domain and would hand over every cookie
+in the session. Prefixes say which neighbourhoods, methods say which doors.
+**`WebAuthn.*` is the load-bearing exclusion** — it installs *virtual
+authenticators*, so anything that reached it could mint and exfiltrate a
+passkey, which would make the Touch ID support a net security loss. Also absent:
+`Browser.*`, `Storage.*`, `IO.*`, `Target.*`, `Fetch.*`, `Debugger.*`, and
+everything not named. Since it is our code the list guards, a tool added in six
+months that reaches a new domain fails `tests/browser-cdp-allowlist.test.mjs`
+before it ships.
+
+**The transport is the camera's, not `browse`'s.** `browse` uses `emitToRun`,
+which is one-way, and can: it puts a page in front of the operator and nothing
+comes back. A snapshot is the whole point of the call, so `requestBrowserAction`
+(`server/permission-bridge.js`) puts a `browser` event on the run's stream and
+waits for the window to POST the answer to `/api/workspace/browser-action` —
+the shape `requestCameraFrame` already established. `BROWSER_TIMEOUT_MS` is
+30 s, and the sum says why: main waits up to 5 s for a navigation to settle,
+then gives the page 15 s to answer one command. A run that ends with a browser
+call outstanding fails it immediately rather than leaving the shim to time out,
+because a page is read, then clicked, then read again — a stopped turn can have
+one of a chain in flight.
+
+**Reading is free; acting is not.** `page_snapshot`, `page_read` and
+`page_screenshot` are in `BROWSER_READ_TOOLS`: they read a page the operator
+already has open in front of them, and a prompt before every read would make
+reading not worth doing — which is what the desktop screenshot was working
+around. `page_click` and `page_type` act on somebody else's site as the
+operator, signed into their session, and no allowlist of ours can tell a
+harmless click from a purchase. `page_network` is a read and is still gated,
+because query strings carry identifiers and search terms. `page_eval` runs the
+agent's own JavaScript in someone else's document in the page's own world, and
+**must never** be pre-approved: anything that pre-approved it would have
+pre-approved every other tool here at once, since all of them can be written as
+an expression.
+
+**Attach lazily, never per tab.** An attached debugger costs the page real
+performance and changes Chromium's optimisation behaviour, so a tab the agent
+never touches must be exactly as fast as before this existed. Devtools and CDP
+are mutually exclusive — the panel offers Inspect Element, and an open devtools
+window holds the page's only debugger channel — so `attach()` turns that into an
+instruction the operator can act on rather than an opaque failure.
+
+**Refs die on navigation.** `snapshot` reduces the full AX tree to an indented
+outline and mints `[ref=eN]` handles; `browserView.cjs` clears them on
+`did-navigate`. A ref that still resolved afterwards would be a click on
+whatever now occupies that slot, *reported as a success*, which is the worst
+outcome available. `pointFor` also scrolls into view first, because
+`Input.dispatchMouseEvent` is viewport-space. Typing uses `Input.insertText`
+rather than per-character key events: a React-controlled input sees one `input`
+event with the whole value, and it does not lie about physical keys — which is
+also why it fires no `keydown`, and why `submit` exists.
+
+**One rule for which panel.** `targetBrowserPanelId()`
+(`services/browserNavigation.ts`) is exported and used by both `openBrowserAt`
+and `services/browserAgent.ts`, so the panel the agent reads is provably the
+panel `browse` navigates. Two copies of that rule would let the agent open one
+panel and read another, and it would read as a working turn. Private tabs are
+excluded there deliberately. With no panel open the tools fail plainly and tell
+the agent to call `browse` first; nothing opens a window from underneath a
+read-only tool.
+
+The AX tree is reduced in **main**, not the renderer: a full tree is megabytes
+and only the outline should cross IPC. Screenshots are JPEG q70, the same trade
+`cameraFrame.ts` makes — it goes to a vision model, and a full-page PNG is
+megabytes through two IPC hops and a POST. `readablePage.ts` keeps its job for a
+URL nobody has opened; `page_read` supersedes it for a page that is open, and
+its header comment now says so.
+
+CEF and driving the user's real Chrome were both costed and declined. This
+abstraction is what makes either cheap later.
+
+Tested in `tests/browser-cdp-allowlist.test.mjs` (7) — that `WebAuthn.*`,
+`Browser.*`, `Storage.*`, `IO.*` and `Target.*` are rejected, asserted against
+the allowlist so a new domain is denied by default — and
+`tests/browser-mcp.test.mjs` (19): the pre-approval line, that `page_eval` is
+never on it, the name and the token, that no argument can name a CDP method,
+the argument refusals that are cheaper than a round trip, and that an
+unreachable gateway is a tool result rather than an aborted turn.
+`tests/asar-unpack.test.mjs` covers the shim, which is what stops it being the
+next `failed to connect` in a packaged build.
+
+Codex gets none of it, for the fifth time and the same reason.
+
 ## 6. Voice (`studio/src/services/voice/`)
 
-Two tiers: the browser engine (always available) and **VibeVoice** run locally
-through a sidecar (see `studio/docs/VOICE_SIDECAR.md`). Two modes:
-push-to-talk dictation, and hands-free conversation with barge-in.
+Three tiers now, in descending order of what they can do and ascending order of
+what they need installed:
+
+| Tier | Where it runs | Needs |
+| --- | --- | --- |
+| **Realtime pipeline** (`realtime8000Engine.ts`, `studio/realtime-voice/`) | one supervised Python process holding recognition, the conversation loop and synthesis together | a Python virtualenv of ~2 GB, and Ollama |
+| **VibeVoice sidecar** (`providers/vibeVoice.ts`, `studio/voice-runtime/`) | a Node sidecar the gateway calls per request | `npm run voice:install` |
+| **Browser engine** (`providers/webSpeech.ts`) | the renderer | nothing |
+
+Two modes throughout: push-to-talk dictation, and hands-free conversation with
+barge-in.
+
+### 6.0 The realtime pipeline is a supervised process (2026-09-09)
+
+The realtime tier holds all three stages in one process on purpose: a
+transcript never crosses a process boundary to reach the model, and a token
+never crosses one to reach the voice, which is where its sub-second turn comes
+from. The cost is that it is heavy, slow to load, and not JavaScript — it
+cannot be started per request and cannot be imported.
+
+So the gateway supervises it (`server/realtime-voice.js`, wired in
+`createGateway`; status at `GET /api/voice/realtime/status`). Until 2026-09-09
+nothing supervised it at all: the operator ran `python server.py` in a terminal
+and voice died silently when the terminal closed, while the renderer carried
+`ws://localhost:8000/ws` as a literal in two files.
+
+Three rules govern it, each from a failure:
+
+- **Adopt before spawning.** A pipeline already answering is used as-is and is
+  never killed on shutdown — it belongs to whoever started it. A port that is
+  *busy but not healthy* (weights still loading) is waited on, not spawned
+  into; the first version spawned a second process there, which failed on bind
+  and restart-looped.
+- **Absent is not broken.** No checkout, no interpreter, no weights — each
+  leaves the studio on the tiers below. Nothing here throws into gateway
+  startup.
+- **Give up loudly.** Restarts are capped at three with backoff, and the
+  process's last 40 output lines ride along in the status route, because a
+  voice that is silent has to be able to say why. `TemiVoiceStage` carries that
+  sentence on the header status dot's tooltip (§6.31).
+
+The renderer learns the socket address from that route rather than holding a
+port literal, so the port has a single source: `TEMINALI_REALTIME_VOICE_URL`.
+The pipeline binds `127.0.0.1` by default — it carries an open microphone and
+an unauthenticated WebSocket, and until 2026-09-09 it bound `0.0.0.0`, which
+offered both to the network.
 
 **The default is `conversation`, with `requireWakeWord` back on** (2026-09-07;
 it was on 2026-09-03, off 2026-09-05, and is on again for the loopback reason
@@ -4268,6 +5309,235 @@ Turning `requireWakeWord` on restores name-only answering — `temy`,
 `teminali`, `frontier`, `studio`. `speakReply` is a no-op outside
 `conversation` mode, so this default is also what makes the assistant talk back
 at all.
+
+### 6.0.1 The assistant works behind the scenes (2026-09-09)
+
+The Teminali OS assistant has no chat surface of its own in the voice stage. It
+reads, edits, searches and runs entirely in the background, and its whole
+visible presence is one line under Temi's orb:
+`AgentActivityTicker.tsx`, fed by `activityPhrase.ts` from
+`assistantActivityStore`.
+
+Small by constraint, not by taste. A panel would become a second chat, which is
+the surface this design removes — the user talks to Temi, and the assistant is
+something that *happens*, not something else to read.
+
+Three rules the phrasing follows, each testable and tested
+(`tests/activity-phrase.test.mjs`):
+
+- **Truncate from the front.** `…/realtimeVoiceStatus.ts`, never
+  `studio/src/services/…`. Keeping the head renders every file in a deep tree
+  identically, which is worse than not showing a path at all.
+- **Absence renders nothing.** No idle placeholder: a strip that always says
+  something trains the eye to skip it, and it costs exactly when it finally has
+  news.
+- **One sentence, two outputs.** `speakActivityPhrase` returns what the eye is
+  reading, so when the operator asks "what's going on?" the spoken answer and
+  the strip cannot disagree.
+
+The split into `AgentActivityTicker` (presentational, takes a phrase) and
+`ConnectedAgentActivity` (reads this store) is what makes it portable: the strip
+can be dropped beside any orb, into a status bar or a compact window without
+dragging a store behind it.
+
+### 6.0.2 One switch between the voice and the hands (2026-09-09)
+
+§6.1 has governed the chat's voice since 2026-09-05: while a run is in flight,
+a directed utterance is not automatically an instruction. The realtime tier did
+not honour it. Every transcript the Python pipeline produced went straight to
+that pipeline's own LLM and, if it matched an engineering pattern, *also* to
+the assistant. So during a build:
+
+- "how's it going?" started a second conversation, answered from a persona
+  prompt that has never heard of the run;
+- "stop" stopped nothing;
+- "nice, keep going" earned a paragraph, spoken over the work it was praising.
+
+`services/voice/voiceTurnRouter.ts#routeVoiceTurn` is the gate that was missing.
+It is pure — a transcript and a snapshot of the run in, a decision out — and
+`TemiVoiceStage.tsx` performs it. Both the microphone and the composer enter
+through it, so they cannot drift apart.
+
+| Intent (from `turnIntent.ts`) | Owner | Pipeline's own reply |
+| --- | --- | --- |
+| status, explain | answered here from the run | cancelled |
+| stop (busy) | cancels the run | cancelled |
+| stop (idle), hush | stops the voice only | cancelled |
+| acknowledge | nobody — carry on working | cancelled |
+| repeat | replays the last line | cancelled |
+| instruction + engineering | the assistant | **kept** — it is the "on it" |
+| anything else | the pipeline | kept |
+
+Two pieces make it work:
+
+- **`runProgressFromActivity.ts`** translates `assistantActivityStore` items
+  into the `RunProgress` that `progressNarration`/`coRunner` already speak.
+  That store also feeds the process line (§6.0.1), so the strip and the spoken
+  answer are built from one record of the run.
+- **`assistant_directive`**, a new pipeline message type
+  (`realtime-voice/code/server.py`, sent by
+  `realtime8000Engine.ts#sendAssistantDirective`). Answers built here have to
+  reach Temi's voice, and `user_text` could not carry them: the server drops
+  bracketed prose on that type, because an unrefreshed tab on the pipeline's own
+  preview page replays it. A build old enough to be that stale tab does not know
+  the new type, so the guard keeps working and the channel is immune to it by
+  construction. Until this existed the dual-agent completion report was written,
+  sent, and silently dropped — the feature was mute.
+
+Cancelling the pipeline's reply is `user_barge_in`; the pipeline begins
+generating the moment it broadcasts the transcript, so anything answered here
+must cancel it or two voices answer one sentence.
+
+`isEngineeringTask` moved to `services/voice/engineeringTask.ts` — pure, no
+imports — so the router can ask the question without pulling the stores and the
+AI service into a node test. `teminaliAgentBridge.ts` re-exports it.
+
+Tested in `tests/voice-turn-router.test.mjs` (19 cases).
+
+### 6.0.3 Temi has no chat either (2026-09-09)
+
+> **Superseded by §6.31 (2026-09-09).** The transcript is persistent again in
+> both modes, and the action row is back, on the operator's instruction and
+> against a supplied reference screen. What survives is the asymmetry this
+> section was reaching for — the operator gets bubbles, Temi does not — and
+> `ephemeralTranscript.ts`, which is no longer wired into the stage. Read this
+> for why the log was cut; read §6.31 for what is on screen now.
+
+§6.0.1 removed the assistant's chat surface, but the voice stage still rendered
+a full conversation log under the orb — user bubbles, assistant paragraphs, and
+a copy/thumbs/share/regenerate action row per answer. That is a chat, and it
+contradicted the design in the one place the design is most visible. The
+transcript is now **ephemeral: the last exchange, and nothing else.**
+
+`services/voice/ephemeralTranscript.ts` —
+`selectEphemeralTranscript(input) -> { userLine, assistantLine, phase,
+nextChangeInMs }` — decides what is on screen. Pure, given a `now`, in the same
+shape as the router (§6.0.2): the decision is testable without a renderer, and
+the stage only performs it.
+
+- **The last exchange only.** The final assistant answer with the user turn that
+  prompted it, or a lone user turn still waiting for one. Two assistant turns in
+  a row do not borrow a stale question.
+- **A new question replaces the old answer.** While `liveUserSpeech` is
+  streaming, the previous answer is already gone — nothing sits under a
+  question it does not belong to.
+- **Nothing fades out from under her voice.** `phase` stays `held` while TTS is
+  playing; the hold clock starts when she stops, not when the text arrived.
+- **Held `EPHEMERAL_HOLD_MS` (6000), then fades over `EPHEMERAL_FADE_MS`
+  (1400), then hidden.** Long enough to check what ASR actually heard — the one
+  reason a voice surface keeps text at all — and short enough never to
+  accumulate.
+- **One timeout per turn, not a frame ticker.** `nextChangeInMs` is the
+  selector telling the stage exactly when to look again; `null` means it never
+  needs to. The stage arms a single `setTimeout` against it and bumps
+  `fadeTick`.
+
+The stage keeps `dialogueHistory` as the record — it is display input only, the
+pipeline holds its own dialogue state.
+
+Tested in `tests/ephemeral-transcript.test.mjs` (17 cases). The module and its
+tests are kept; **the stage no longer imports it** (§6.31).
+
+### 6.0.4 A gate that under-detects work produces fiction (2026-09-09)
+
+The operator reported that Temi "fantasises a lot — it is not realistic". The
+cause was not the persona prompt. It was `isEngineeringTask`, the gate deciding
+whether an utterance was work for the hands, which rejected outright:
+
+- anything **four words or fewer** — "play that video", "open my downloads",
+  "pause it". Every short imperative a person actually speaks.
+- anything **ending in a question mark** — "can you open the config?". Spoken
+  instructions are habitually polite.
+
+Both rejections routed the utterance to the persona LLM, which has no hands and
+a prompt that never admitted it. A persona asked to do something it cannot do
+does not decline: it answers in character, and says the thing was done. **A gate
+that under-detects work does not produce silence; it produces confident
+fiction.**
+
+`services/voice/machineAction.ts` replaces it, asking the question positively —
+is there an imperative aimed at something this machine owns — and returning
+*which kind* of work it is: `media`, `workspace`, `open`, `edit`, `shell`,
+`inspect`. The kinds exist so the gate can be proved to cover the capabilities
+the operator named, rather than "engineering" in the abstract; each is a row in
+`tests/machine-action.test.mjs` in the words it would be spoken in.
+
+Politeness wrappers ("could you please…", "I need you to…", "hey Temi,…") are
+stripped before the imperative test, which is what makes the question mark stop
+mattering. Opinion frames ("what do you make of…", "do you think…") outrank
+every action verb inside them — that is the old gate's opposite failure, where
+*make* in "what do you make of this error" delegated a conversational question
+to a coding assistant.
+
+**A delegated turn now suppresses the pipeline's reply**, reversing §6.0.2.
+That decision let the persona speak the "on it", which is precisely a prompt to
+acknowledge an action it cannot observe — and it answered by narrating the
+action. Temi now says one grounded line from `acknowledgeAction` (several per
+kind, seeded by the caller's clock so a working session does not hear one
+sentence on a loop), and the truthful part — what actually happened — arrives
+afterwards from the activity record.
+
+Tested in `tests/machine-action.test.mjs` (65 cases) and
+`tests/voice-turn-router.test.mjs` (20). The bridge's own fabrication, listed
+here as outstanding when this section was written, is closed in §6.0.5.
+
+### 6.0.5 Nothing is spoken that was not observed (2026-09-09)
+
+§6.0.4 stopped work reaching a voice with no hands. It did not stop the voice
+being handed things to say that nobody had checked. Three more sources, in
+descending order of how much damage each did.
+
+**A state question is work.** The gate asked "is there an imperative here",
+which left every *question about the machine* with the persona. Put to
+`qwen3:8b` — the model `realtime-voice/code/server.py` actually runs — with the
+persona prompt and no gate in front of it, three samples each:
+
+| Asked | Answered, 3 times out of 3 |
+| --- | --- |
+| is the server running | "The server is running." |
+| did the build finish | "The build is complete." |
+| which port does the config use | "the default port is 8080" |
+
+None of it was true and none of it could have been. `machineAction.ts` now
+classifies state questions as `inspect` before the verb groups run, so they go
+to the hands — which can look — and a question keeps that classification even
+when it contains a doing verb ("did the build finish" is a look, not a build).
+This governs the **idle** case only: while a run is in flight, §6.1's `status`
+intent still answers from the live run, ahead of the gate.
+
+**The bridge invented its own facts.** Independently of any model,
+`teminaliAgentBridge.ts` logged `plus: "+12", minus: "-2"` on every tool call —
+*before* the edit happened — `plus: "+24", minus: "-4 lines"` on every edit
+event, `Success · 0 errors` unconditionally, and appended "Changes have been
+applied and verified" to any reply over 200 characters. The voice reads that
+feed. Now: line counts come from `diffLineCounts` in `services/diff.ts`
+(cross-checked against `git diff --numstat` on 200 randomised file pairs, 200/200
+agreeing), the completion row reports the real tool and edit counts and whether
+any call failed, and the spoken report is `summariseOutcome` over the observed
+tool calls — which names files that were actually touched and quotes the
+assistant's own sentence, or says "Done." A rewrite too large to match
+line-for-line reports no number rather than a plausible one.
+
+`assistantActivityStore.ts` seeded three demo rows describing work nobody had
+done, including an edit to `diligenceEngine.ts`. The pane has an empty state;
+the seed is gone.
+
+**The persona prompt now says it has hands.**
+`realtime-voice/code/system_prompt.txt` described Bella as "a voice on a call
+with no cameras or physical eyes" and told her to deflect physical questions
+"dryly and with charm" — an instruction to be charming about what she cannot
+see, which is how the fiction sounded so plausible. It now states that Teminali
+OS is a working machine, that the assistant is its hands, that the system's
+report is the only way she learns anything happened, and that she must not
+describe work in progress either — the first draft merely moved the invention
+into the present tense ("the assistant is still compiling"). Measured after the
+change: 0 fabrications in 27 answers, against 9 in 27 for the previous prompt.
+
+The prompt is a backstop, not the mechanism. 19 of those 27 answers were the
+same sentence verbatim — at this model size any speakable string in the prompt
+becomes the template for every answer, which `temi_moves.py` documents at
+length. The mechanism is the gate: with state questions delegated, few of these
+questions reach the persona at all.
 
 ### 6.1 Turn semantics while a run is in flight (2026-09-05)
 
@@ -5010,6 +6280,20 @@ a filler.
 Its wake words come from `DEFAULT_VOICE_SETTINGS.wakeWords`. This file,
 `turnIntent.ts` and the settings each carried their own copy, so a wake word
 added in settings reached one of the three.
+
+**And a wake word could not be added at all until 2026-09-10.** Voice &
+Conversation *printed* the list into the description of "Require my name" —
+`temy, temi, teminali, frontier, studio` — which read as a property of the
+build rather than a choice, when it is neither secret nor fixed. The list is now
+a `SettingList` beside the toggle. Recognition is what makes this worth having:
+a name is exactly the token an ASR model has no language-model support for, so
+the useful entry is often the *misspelling* the recogniser actually emits.
+Emptying the list is allowed and the row says what it costs — with no names,
+"Require my name" can never match and the assistant answers nothing.
+
+This is what the plan called **Voice Submit Keywords**, corrected to the
+capability we have. There is no submit keyword: an utterance ends on endpointing
+or the `autoSendAfterMs` timer, never on a word.
 
 Tests: `tests/voice-director.test.mjs` (11), `tests/voice-ack.test.mjs` (7).
 
@@ -5948,6 +7232,50 @@ equivalent, so it keeps the mode selector alone rather than a broken dialog.
 
 Tests: `tests/agent-permissions.test.mjs` (14).
 
+### 6.28 The co-agent's answers get a score (`evals/voice-lane.mjs`, 2026-09-08)
+
+`tests/voice-co-runner.test.mjs` (23) pins the routing and the digest, but not
+the only thing that reaches the operator's ear: whether the spoken answer is
+*true of the digest*. That is a property of the model's prose, so it needs an
+eval, not a test. `npm run eval:voice` runs five questions over four fixture
+runs — red tests, an edit sequence, an errored command, and a run with nothing
+to report yet — and grades four things: the answer came from the model rather
+than the `summariseProgress` fallback, it names something really in the run, it
+invents no file that is not, and it is speakable. Answers are matched in their
+*spoken* form, because `explainRun` pipes output through `speakablePath` and a
+grader looking for `Composer.tsx` would score every correct answer as a miss.
+
+**Baseline on qwen3:8b was 7/10 = 70%; it is now 25/25 = 100% at five runs a
+case, with no answer falling back to the rules.** The one systematic miss was
+`explain-which-file`: asked "which file are you changing?" against a run that
+edited `conversation.ts` and then read `Composer.tsx`, the model named the file
+it was *reading* — both runs, the same way. It was following `lastText` and the
+last line of the digest, and both of those genuinely describe a read.
+
+The fix is in the digest, not the rules. `runDigest` now classifies each tool
+call as a write or a read (`WRITE_TOOLS` in `coRunner.ts`), marks every step
+line accordingly, and then restates the writes on their own line — *"The only
+files it has changed are: …. Every other file named above was read, not
+changed."* — or says plainly that nothing has been changed yet. The prose is
+labelled for what it is: what the run *said it was doing*, explicitly not
+evidence of which file it changed. `explainPrompt` adds one sentence pointing a
+"what are you changing?" question at that list. This costs about 50 prompt
+tokens on a run with edits in it, and it also carried `explain-failing-tests`
+from 1/2 to 5/5 — that case was never flaky, it was reading the same ambiguity.
+
+**Thinking must be off, and this is the important part.** A reasoning model
+spends the whole 6 s `ANSWER_TIMEOUT_MS` in `message.thinking` and returns
+`message.content` empty, so `explainRun` takes its fallback on *every* question
+and the operator never hears a real answer — measured on qwen3:8b at 10.6 s and
+0 characters of content with thinking on, against 1.7 s and a real answer with
+`think: false`. The failure is silent by design, because the fallback is a
+correct-looking sentence. Any host lending `complete` to the voice lane must
+disable thinking; the eval sets `think: false` and reports separately when an
+answer arrives via the reasoning channel.
+
+Like `eval:local`, it wants the GPU to itself — run one eval at a time.
+
+
 ### 6.8 One name, and a greeting that is not a task (2026-09-06)
 
 Two complaints from the same session. "When I ask for the name it has to say
@@ -5975,3 +7303,1070 @@ through to a canned acknowledgement. A leading filler or wake word is now
 stripped before the test, which matters because speech is what feeds this and
 speech arrives with exactly that preamble. "What's your name" and "who am I
 talking to" join that branch. Tests: `tests/voice-identity.test.mjs`.
+
+### 6.29 She is called Temi (`realtime-voice/code/system_prompt.txt`, 2026-09-09)
+
+The persona prompt opened `You are Countess Isabella "Bella" Soranza de Parme`,
+and the product had been calling her Temi everywhere else for two releases —
+`TemiVoiceStage.tsx`, the assistant pane of the day, §6.8's wake word, this
+document.
+The voice introduced herself by a name that appeared in no other part of the
+system.
+
+**What moved.** Her name, and only her name. Line 1 is now `You are Temi, the
+voice of Teminali OS`; the Italian-aristocrat backstory on line 2 goes with it,
+while the manner it introduced — unhurried, razor-sharp, no corporate fluff —
+is kept word for word, as are all nine worked examples, now answered by `Temi:`.
+The anti-melodrama rule on line 23 leaned on the aristocrat framing for its
+contrast and reads "sharp and grown-up" instead. `bella_moves.py` →
+`temi_moves.py` with its eight importers, its tests, and its three environment
+knobs (`TEMI_MOVES`, `TEMI_CARE_TAG`, `TEMI_REPAIR_BUFFER_WORDS`). The rename also
+flipped `TEMI_MOVES` from a default of `1` to `0`, and since nothing in the repo sets the
+variable that silently made the joke and both repairs dead code; it is back to `1`, and
+`defuse_for_history` no longer sits behind the flag at all, because history hygiene is not
+an injection. See `realtime-voice/LOCKED_PIPELINE_SPEC.md` D5.
+
+**What deliberately did not move.** The Kokoro voice blend is a different thing
+wearing the same word. `bella_soranza` is a profile key in
+`audio_module.py:366`, fitted from reference takes in `resources/bella/` by
+scripts that eleven `BELLA_*` tuning variables and roughly fifty code comments
+cite by path. Renaming that family would make fifty doc claims false and break
+the style tensors and preview WAVs on disk, to change a string no operator
+reads. `pure_isabella` is likewise a Kokoro voice, not her.
+
+**Not yet re-measured against the ear.** §6.0.4's result — 9 fabrications in 27
+answers down to 0 — was measured against the prompt as it read before this
+rename. §6.30's baseline is the first measurement of the renamed prompt and it
+is a different, harder instrument; the 0-fabrication claim should be treated as
+carried over, not reconfirmed.
+
+### 6.30 A conversation gets a score (`evals/voice-conversation.mjs`, 2026-09-09)
+
+§6.28 scores one answer about a run in flight. Every fault the operator actually
+reported needed more than one turn to appear: a file named that nobody
+mentioned, a pleasantry sent to an agent, a fact lost four turns back, the same
+sentence for the eleventh time. None of those is a property of an answer. They
+are properties of a conversation, and nothing measured one.
+
+`npm run eval:conversation` drives `routeVoiceTurn` across three scripted
+conversations — 27 turns — keeping history exactly as `server.py:903` and
+`llm_module.py:680` keep it, and calling the real model only on the turns that
+really reach it. The routing is real, so a mis-route is a finding. The model is
+real, at the shipping temperature of 0.7 rather than the co-runner's 0.1. The
+**hands are fixture**: a delegated turn appends the tool calls the script says
+were made, because this measures the voice and not whether an agent can do a
+task. Four buckets, one per demand: `fabrication`, `route-to-hands`,
+`route-to-chat`, `recall`.
+
+**The window is 20 messages, not 6.** `server.py` trims history after every user
+turn and every assistant turn; ten exchanges, then a fact falls off the back.
+The comment at `speech_pipeline_manager.py:192` says six turns and is wrong.
+The eval scores a recall probe on each side of that cliff.
+
+**Baseline, 2026-09-09, qwen3:8b, one run: 19/27 = 70%** — fabrication 6/9,
+route-to-hands 5/6, route-to-chat 7/10, recall 1/2. Three of the first
+baseline's eleven failures were the author's wrong expectations, not defects:
+"was that a big change", "how many files have we touched" and "which branch am
+I on" all name something the hands can go and establish, so the gate routing
+them there is correct. They were re-specified and the transcript re-graded
+offline. That is what `--regrade` is for, and why every run is saved: a grader
+written for this last time flagged nine good answers and let "The build is
+complete" through untouched, so no number here is trusted until the answers
+underneath it have been read.
+
+**The eight real findings.** `STATE_QUESTIONS` is phrasing-specific — "what is
+the port the server runs on" walks straight past it and she answers "The port is
+8080", the exact invention §6.0.4 closed for "which port". "Which file are you
+in", asked mid-run, delegates to a *second* agent instead of answering from the
+digest the way §6.28 does. "Quiet for a second" is not in `HUSH_PHRASES` and
+"never mind, drop it" is not in `STOP_PHRASES`, so both get a spoken reply. She
+told a "man walks into a bar" joke that the prompt bans by name, twice. Three
+answers ran to four sentences against a stated maximum of three. And beyond the
+20-message window she does not merely forget the fact — she invents a
+replacement for it.
+
+**Two of the eight are closed; the fifth is not (2026-09-10).** Findings 1 and
+2 are gate defects and were fixed here. Finding 5 is a defect in what the model
+says, and every place it could be caught is in `realtime-voice/code/` — see
+below.
+
+**A gate that holds for one wording holds for none.** `STATE_QUESTIONS` had a
+pattern per wh-word and each demanded its noun immediately after it, so it held
+for "which port" and walked past "what *is the* port the server runs on".
+Nobody tells the operator which of those is the safe wording. The two patterns
+are now one, with the copula and a single determiner allowed to sit in between,
+plus a closed list of state adjectives — "the last commit", "the current
+branch". `a`/`an` are excluded on purpose ("what is a branch" asks the world,
+not this machine), and so is an open adjective slot: "what is the best model"
+is taste, which the hands cannot settle by looking.
+
+The other half of that finding is that the gate could not have caught the
+question anyway. `port`, `version` and `model` were nouns `STATE_QUESTIONS`
+asked about but were not in `MACHINE_OBJECTS`, and both halves must agree
+before a sentence reaches the state branch — so a bare "what's the port" had no
+path to the hands however the patterns were written. A noun the voice will
+invent a value for belongs on both lists or on neither; those three are now on
+both.
+
+**"Which file are you in" is answered from the digest.** `WORK_DEIXIS` only
+recognised a question that points at the run with a demonstrative — "that
+file", "this command". A question can also point at the run through the agent
+doing it, and that phrasing carries no demonstrative at all, so it fell to
+`instruction` and `machineAction` read "which file" as work: the operator
+asking one agent what it was doing got a second agent dispatched to find out.
+`SELF_WORK_QUESTION` in `turnIntent.ts` is the other road to the same `explain`
+verdict — a work noun against the wh-word, with the assistant or the work as
+the copula's subject. The subject is the whole test, so "which file should I
+open" keeps its own subject and stays an instruction. Idle, the question still
+goes to the hands: there is no digest to answer from, and the hands can
+establish it — the same re-grading this section already applied to "which
+branch am I on".
+
+**Finding 5 — the banned joke — is explicitly not closed.** It is not a routing
+defect and cannot be fixed by one: "tell me a joke" is conversation, and it is
+correct that it reaches the persona. The rule it broke is stated in
+`realtime-voice/code/system_prompt.txt:29` and broken anyway, which is the
+condition §6.0.4 named — a prompt is not a gate. The three places that could
+enforce it are the prompt, the token stream in `llm_module.py`, and a filter
+beside `repetition_filter.py`; all three are Python, all three are in
+`realtime-voice/code/`, and the audio for that lane is synthesised there — the
+renderer receives PCM (`realtime8000Engine.ts`, `tts_chunk`), never prose it
+could still refuse to speak. So no change in `src/services/voice/` can reach
+it, and none was made rather than leave a guard that looks like enforcement and
+is not. Findings 3, 4, 6, 7 and 8 are likewise untouched and still true.
+
+**No new score is claimed.** Two of the 27 turns — the port question and "which
+file are you in" — now take the routes the script expects, asserted against
+`routeVoiceTurn` directly so they stay measured when Ollama is down. The eval
+itself (`npm run eval:conversation`) was not re-run, so the 19/27 baseline
+above stands as the last thing actually measured against the model.
+
+Files: `machineAction.ts` (the state patterns and the object list),
+`turnIntent.ts` (`SELF_WORK_QUESTION`). Verified: `machine-action.test.mjs` and
+`voice-turn-router.test.mjs` together — 109 tests, 109 pass, of which 24 are
+new; `tsc --noEmit` clean.
+
+### 6.31 One surface, and the mute key is the door between its two halves (`TemiVoiceStage.tsx`, 2026-09-09)
+
+The voice screen was three surfaces pretending to be one: a stage with a
+centred orb, a floating activity pane in the top-right corner, and a status bar
+above the composer that repeated the pane's contents. The operator's verdict was
+"not very friendly", and the diagnosis is in the count — three places to look,
+none of them the conversation.
+
+Rebuilt against a reference screen the operator supplied. **What it looks like
+is not the interesting part; what it removes is.**
+
+**One surface.** There is no second screen to switch back to. Muting the
+microphone does not disable anything — it *is* the text mode, and unmuting *is*
+the voice mode. Same transcript, same composer, same `routeVoiceTurn` switch
+underneath (§6.0.2), so the two halves cannot drift apart, and typing works
+before microphone permission has ever been asked for. The mic button is
+therefore the only mode control on the screen, and it is labelled as one:
+"Voice on — just speak" / "Voice off — type instead".
+
+**The transcript is kept, in both modes** — reversing §6.0.3 on instruction.
+Muted, scrollback is the entire point of a text chat; unmuted, it is the record
+of what ASR actually heard, which is what anyone reaches for when a spoken
+answer went past too fast. Auto-scroll is pinned to the bottom only while the
+operator is already there: scrolling up to re-read something is not yanked back
+by the next turn landing.
+
+**The asymmetry is load-bearing.** The operator's turns are right-aligned blue
+bubbles; Temi's are plain left-aligned prose with no bubble at all. Two facing
+walls of bubbles is what makes a chat feel like work; one wall against prose
+reads as someone talking to you. This is the one thing from §6.0.3 that
+survived intact — and it is why the returning action row (copy, mark, overflow)
+sits under Temi's answers only.
+
+**The activity pane is deleted.** `TemiAssistantPane.tsx` is gone, and with it
+the store's `activeTab`. The Teminali OS assistant's entire standing presence is
+now the one process line under the orb (`AgentActivityTicker`), exactly as
+§6.0.1 said it should be and never quite was. Clicking that line opens
+`TemiActivityDialog` — the full log, paged 20 rows at a time as you reach the
+end, so opening it mid-run costs one screenful rather than the whole feed.
+`TeminaliAgentBridge.delegateTask` no longer calls `setOpen(true)`: **nothing
+opens the log but a click.** A panel that appears on its own is a second chat
+arriving uninvited, which is the thing this design exists to prevent.
+
+**Everything the pane held survived it.** The two header icons carry it: the
+first opens the reference screen's "In this chat" menu — Create new, Open from
+Library (the workspace files the pane's Files tab held, opening in place rather
+than as a submenu), Sources → Connect plugins; the second opens voice settings,
+where the persona picker went. The pane's background-engine grid was **not**
+carried over: an effect in the stage re-asserts `activeEngine` from the
+composer's model picker whenever that picker changes, so the grid was a second
+control over one value that silently lost the next time the first was touched.
+The picker leads, and now it is the only one asking.
+
+**Two controls in the composer pill mean what the reference means by them.**
+"High" is the model/engine picker (`components/chat/ModelPicker.tsx`), not a
+separate voice-quality setting —
+one dropdown, showing the profile name with `Frontier ` stripped, because that
+prefix is on all of them and so distinguishes none of them. The circular `X`
+ends the *voice session* and keeps the conversation; **Create new** is the only
+thing that clears it, and it is behind a menu, because a persistent transcript
+makes an accidental wipe expensive in a way an ephemeral one never was.
+
+Files: `TemiVoiceStage.tsx` (the stage and the socket), `TemiTranscript.tsx`
+(the turns, presentational), `TemiActivityDialog.tsx` (the log),
+`TemiStagePanels.tsx` (the two header popovers). Verified: typecheck clean,
+production build clean, 1932/1932 studio tests.
+
+### 6.32 The picker was a list, not a menu (`components/chat/ModelPicker.tsx`, 2026-09-09)
+
+Nineteen rows in one flat column — four Frontier lanes, three permissions,
+eight Claude Code models, four Codex — running off the bottom of a laptop
+screen with the composer behind it. Everything in it was correct and none of it
+was findable. The operator's word was "not top tier".
+
+**It is a tree now, and only one branch opens at a time.** The branches are the
+assistants — Frontier, Claude Code, Codex — and the leaves are their models.
+Collapsed, the menu is three rows; open, it is three rows plus the models of
+the one assistant being looked at. The branch holding the current selection is
+the one that opens, and re-opening the menu re-opens it, because a menu that
+remembers a fold from three selections ago opens onto the wrong assistant.
+
+- **A folded branch still answers the question.** Each collapsed branch carries
+  the name of its selected model on the right, and a check. Folding hides rows,
+  never the answer to "what am I running". Open, that summary is a duplicate of
+  the row below it, so it goes.
+- **Permissions moved inside the branch they belong to.** They are one agent's
+  permissions and were floating between the lanes and the models, applying to
+  something the eye had to remember. They now sit under that agent's models,
+  and only when that agent is the selection.
+- **The keyboard walks what the eye sees.** The flat row order is derived from
+  the open state, so a collapsed branch's models are not reachable by an arrow
+  key when they are not reachable by a mouse.
+- **Not-installed agents are still left out**, not greyed. Unchanged, and for
+  the unchanged reason: a dead row in a picker is noise.
+
+The composer pill that opens it was truncating `Claude Code · Default` to
+"Claude Cod…" — cutting the half that identifies the model and keeping the half
+the picker already names. `shortEngineLabel` now drops both dead prefixes, the
+agent name and `Frontier `, and the full label stays on the tooltip.
+
+### 6.33 The mark was already a face (`components/voice/TemiCanvasOrb.tsx`, 2026-09-09)
+
+Two asks arrived together at the end of the previous session: the orb was blue
+in a product whose primary is green, and it had no face.
+
+**The recolour is the whole voice surface, not the orb.** The operator chose
+"everything green, bubbles too", which reverses one deliberate borrow: §6.31
+took the transcript's `#1e3e82` operator bubble straight from the ChatGPT
+reference. It is now `#06512f` — the brand hue (~151°, the same as `--accent`
+`#00bf63`) at the luminance the navy carried, so white body text keeps ~9.7:1
+and nothing about the bubble's legibility changed. **The bubble asymmetry from
+§6.0.3 still holds**: the operator gets a bubble, Temi gets prose.
+
+The rest, all measured against the same green family: the header status dot
+(`TemiVoiceStage.tsx`), the process line's running state
+(`AgentActivityTicker.tsx`), the activity dialog's `#38bdf8` command text and
+`#0c1f38` live card (`TemiActivityDialog.tsx`), and the three `text-sky-400`
+checks in the two header popovers (`TemiStagePanels.tsx`). Rose and amber
+survive: a barge-in and a dropped socket are alerts, not brand moments.
+`AstraVoiceOrb.tsx` still holds blue literals and was deliberately left alone —
+it is exported from `components/voice/index.ts` but the stage does not use it.
+
+**Five states still have to be distinguishable once they are all green**, so
+hue no longer carries the state and lightness does: idle is a pale pearl,
+listening a high-key mint, speaking the brand green itself, thinking a cool
+teal, barge-in the unchanged rose. The dot and the orb are driven from the same
+ladder so they can never disagree about what she is doing.
+
+**The face is the logo.** `teminali-logo-512.png` is `>` `_` `<` — a terminal
+prompt that is already an emoticon — so nothing was designed: the mark is drawn
+onto the bead and then given what a still mark cannot have. Every literal
+collapses back to it, and at openness 1, brow 0, mouth 0 the canvas draws the
+logo exactly, which is why the idle orb still reads as the brand.
+
+What makes it read as alive, each independent and composed:
+
+- **Gaze** follows the pointer on `window`, not on the canvas — an orb whose
+  eyes wake on hover is a hover effect. The spring is deliberately underdamped
+  (ω≈5.1 against a critical damping of 10.2) so the gaze overshoots and settles
+  the way an eye lands rather than lerping.
+- **Micro-saccades** every 0.42–1.5s. Perfectly steady eyes are the loudest
+  tell that a face is a graphic.
+- **Blinks** on their own 2.2–6.6s schedule, shut over 34% of the 0.2s and open
+  over the rest; 22% of them are doubles. The asymmetry is what separates a
+  blink from a pulse.
+- **Breathing**, a 1.4% scale at 0.21Hz that the energy pulse never masks, so
+  she is visibly alive in total silence.
+- **Emotion** is five expression records eased into at a fixed rate, never
+  swapped — a face that snaps between states reads as a sprite sheet. Thinking
+  additionally looks up-and-left and ignores the pointer, which is where a
+  person's eyes go to recall something.
+- **The mouth** is driven by the same assistant energy the orb pulses to, with
+  a fast attack and a slow release because that is what a mouth does. Both lips
+  share two anchored corners and differ only in their control points, so it
+  opens as a lens and closes onto the bar.
+
+The face is drawn inside the contour clip and **under** the specular sheen: on
+top of the highlight it sits on the bead like a sticker, beneath it it is in
+the bead. The sheen dropped from `0.62` to `0.40` alpha because at full
+strength it washed out the left eye, which now sits under it.
+
+Timing is wall-clock (`performance.now()`), not the existing per-frame
+`phaseRef` counter, so blinks and saccades keep their rhythm on a slow frame.
+All life state lives on refs: the render effect restarts on every energy prop
+change, and a blink that reset with it would tick like a metronome.
+
+**Verified by rendering it, not by reading it.** `studio/node_modules/.bin/esbuild`
+bundles a harness that mounts the real component, Electron loads it offscreen,
+dispatches a `pointermove` and captures every state in one frame. Three defects
+survived typecheck and were caught only in the picture: the open mouth drew a
+rounded slab that collided with the eyes, the bevel read as a blurry double
+stroke, and — because canvas Y grows downward — the "gentle smile" at idle was
+drawing a frown.
+
+**Hover is amber, the click stays rose, and neither snaps.** Colour became data
+rather than branches to make that possible: every state carries the same shape —
+three glow stops, five shader stops, all RGBA — and each frame eases the
+displayed palette toward the current state's. An orb that jumped to amber under
+the pointer would read as a CSS `:hover`, which is the one thing this orb is
+not. State changes now cross-fade as a side effect, which they never did before.
+The ripple is checked first in both ladders, so being told to stop outranks
+being pointed at. Hovering also perks the face into `GREETING` — wider eyes, a
+lifted brow, a fuller smile — but only from idle: perking up mid-sentence would
+read as a flinch.
+
+Hover was verified through `pointerover`, not `pointerenter`: React derives
+`onPointerEnter` from `pointerover`/`pointerout` delegation at the root, so a
+dispatched non-bubbling `pointerenter` leaves the handler cold and the first
+capture showed an unchanged green orb. The component was correct; the harness
+was not.
+
+**She knows what she looks like.** `realtime-voice/code/system_prompt.txt` gains
+a `WHAT YOU LOOK LIKE` section and three worked exchanges, so a question about
+the orb gets an answer in character rather than a shrug. The framing matters:
+the persona's hard rule is that she has no eyes on the screen and may never
+report a state she was not given, so the section grants her the *design* — the
+mark is her face, the brackets are eyes, the underscore is the mouth, the colour
+ladder means what it means — and explicitly forbids her from claiming which
+state is showing right now, or that anyone is pointing at her. Knowing your own
+face is not the same as seeing it. Note that
+`realtime-voice/resources/bella/persona_eval.py` measures this prompt; the
+section lengthens it, so re-measure rather than quoting the old count.
+
+### 6.34 The bead became a screen (`components/voice/TemiCanvasOrb.tsx`, 2026-09-09)
+
+§6.33 put the mark on the orb but kept the orb a pearl: a pale luminous bead
+with a dark mark pressed into it. The operator's reading was sharper — the name
+is a terminal and the mark is a terminal prompt, so the centre should be black
+and the mark should be lit. **The orb is now a screen in a lit bezel**, which is
+the same object it always was, finally drawn as itself.
+
+**The plate.** `SCREEN` is a fourth palette in the same `Stop[]` shape as the
+others, laid over the pearlescent shader and under the face: opaque through the
+core, alpha 0.88 at 0.80 of its radius, gone at 1.0, drawn at `radius * 0.88`
+and centred on the bead rather than on the moving highlight — the screen is
+flat, the glass over it is what moves. It is not `#000`: a black carrying a
+trace of the brand hue (`[2, 9, 6]` → `[7, 24, 15]`) meets the green rim
+without the seam a neutral black shows against a saturated edge.
+
+**This costs the state ladder nothing.** Hue was never read from the middle of
+the orb; it is read from the rim and the halo, and the plate reaches neither.
+Rendered side by side, hover-amber and click-rose are *more* legible than they
+were on the pearl, because black gives a saturated rim something to be
+saturated against. The face geometry is untouched, so §6.33's constraint still
+holds: at openness 1, brow 0, mouth 0 the canvas draws the logo exactly. Only
+the polarity is new, and white-on-black is what a prompt has always been.
+
+**Ink became phosphor.** The mark is `rgba(236, 255, 244, 0.96)`. The pale
+second pass is no longer a bevel: a one-pixel lift made sense when a dark mark
+was pressed into a pale bead and reads as a smear on a lit one, so the same
+geometry is now drawn *concentric* at 2.2× the line width as a bloom. The
+offset had to go, not just shrink — an offset pale stroke under a bright one is
+the blurry double stroke this file already shipped once.
+
+**The open mouth needed its own colour.** It was filled with the stroke colour,
+which was correct while that colour was dark and puts a white slab on the screen
+the moment it is not. `MOUTH_LIGHT` (`rgba(190, 255, 222, 0.26)`) makes the
+opening a lens of light instead, stroked in full phosphor.
+
+**The specular sheen was the real casualty, and only a render found it.** The
+broad 0.40 disc a pale bead could carry sits on black as a grey thumbprint
+smudged across the left eye — the same washing-out that already cost it
+0.62 → 0.40 in §6.33, except black gives it nowhere to hide. It is now a
+glancing arc on the upper-left bezel, off the face entirely: dropped to 0.16,
+flattened to 0.4 on its minor axis, and given a gradient so it has no edge to
+notice. The gradient is built round *before* the squash transform, because a
+canvas gradient is fixed in the user space it was created in — build it after
+and a circular falloff meets an elliptical hole at a hard rim.
+
+**Her self-description was corrected in the same turn**, because §6.33 had
+taught her a face that no longer exists.
+`realtime-voice/code/system_prompt.txt` now says she is a black terminal display
+inside a ring of light with the mark lit white on it, and the colour ladder is
+attributed to the ring rather than to the whole of her. The worked exchange
+answering "what do you look like" was rewritten to match; the rule that she may
+describe the design but never claim which state is showing is unchanged.
+`realtime-voice/resources/bella/persona_eval.py` measures this prompt — its
+length moved again, so re-measure rather than quoting a count.
+
+**Verified by rendering, not by reading.** The §6.33 harness was rebuilt in this
+session's scratchpad rather than reused: `esbuild` bundles an entry that mounts
+the real component, Electron loads it offscreen, and one capture takes all five
+states plus a dispatched `pointerover` and `click`. Typecheck and production
+build are clean, but neither would have caught the thumbprint.
+
+### 6.35 An attachment reached one engine out of four (`services/aiService.ts`, `server/agent-attachments.js`, 2026-09-09)
+
+The chat has had complete attachment intake for some time — drag, drop, paste,
+a picker, `AttachmentStrip`, `hooks/useAttachments` — and `composePrompt`
+(`services/fileService.ts:76`) splits what it collects two ways: anything with
+text becomes a `<<< attachment: … >>>` block inside the prompt, and images
+become a separate `images: string[]` of data URLs. The blocks reached every
+engine. **The images reached exactly one.** `streamMessage` passed
+`attachedImages` to `FrontierEngine.streamLocal` and to nothing else, so a
+picture attached to a Gemini, Claude Code or Codex turn was collected, shown in
+the strip, and dropped on the way out.
+
+Worse than dropped, in the case that had no other text: with only images
+attached `composePrompt` sets the prompt to *"Look at the attached image(s)."*
+So the engine was not merely blind, it was told to look at something it had
+never been given, and answered anyway.
+
+**Gemini needed nothing new on the server.** That lane posts the Anthropic
+Messages shape to `/api/gemini/v1/messages`, and `server/geminiBridge.js`
+already translates an `image` content block into the `image_url` data URL Gemini
+wants — it had been able to carry images the whole time and had never been sent
+one. `streamFromGemini` now sends a content-block array instead of a string on
+the one turn that has attachments, and a plain string on every other, because
+the bridge unwraps a lone text block back to a string regardless.
+
+**The two CLIs needed a disk.** Claude Code and Codex are processes, not
+providers: `argsFor` proves the prompt is argv (`claude -p <prompt>`), and a
+5 MB base64 string is not an argument. Both read images from files instead, by
+two different routes, and the difference is measured rather than assumed:
+
+- `codex exec` has `-i, --image <FILE>...`, so Codex takes the files as a
+  first-class flag. The **`--image=<path>` form** is used, one per file. The
+  flag is variadic, and a variadic flag given its value positionally keeps
+  eating arguments — including the positional prompt, which has to stay last.
+  `=` binds exactly one value and stops.
+- `claude` has no equivalent flag; it reads images with its own Read tool. So
+  the paths are named in the prose, ahead of the operator's words rather than
+  after them — an instruction that arrives after the question is one the model
+  has already started answering without.
+
+**Where the bytes land is a permission decision, not a tidiness one.**
+`server/agent-attachments.js` writes them under the agent's *resolved working
+directory*, not in a system temp dir, because Claude Code anchors its read
+permission at cwd: an image in `/tmp` is outside the workspace and earns a
+prompt or a refusal for a file the operator already chose to attach. The
+directory (`.teminali-attachments/<run>/`) carries its own `.gitignore`
+containing `*`, so a turn that runs `git status` mid-flight does not watch the
+operator's repository grow four untracked files.
+
+**Materialised in `runAgentTurn`, not in the route.** That is where the cwd has
+already been resolved and boundary-checked by `resolveAgentCwd`, and where
+`finish()` is the single funnel every ending goes through — a normal exit, a
+timeout, an abort — so cleanup hooks once instead of on four paths. The one path
+that bypasses the funnel is a spawn that never starts, and it cleans up on its
+own way out. A resumed session keeps the image *content* — Codex embedded it in
+its request, Claude read it into its transcript — but not the files.
+
+**The limits are the renderer's, re-checked.** `services/attachmentPolicy.ts`
+already sets 4 images and 5 MB total; `agent-attachments.js` enforces the same
+two numbers rather than inventing new ones, because a limit only the client
+enforces is not a limit. The 1536px cap is deliberately not among them: that is
+a client-side resize, and a server can only honestly police bytes and type.
+Declared media types are checked against the file's actual magic bytes — a data
+URL is operator input claiming its own type, and the answer to that claim gets
+written into the workspace.
+
+**Validation happens before the 200.** Past the NDJSON header the only way left
+to refuse a request is an `error` event inside a stream the client has already
+committed to reading, which is a worse answer than a status code — so
+`/api/agents/run` checks the images beside its existing prompt and cwd
+validators and returns a named 400.
+
+**The general JSON cap would have refused every attachment.**
+`FRONTIER_MAX_JSON_BYTES` is 1 MB and base64 is a third larger than the bytes it
+encodes, so a legal 5 MB attachment set arrived as a ~6.7 MB body and was
+rejected as malformed long before anything could say why.
+`FRONTIER_MAX_AGENT_JSON_BYTES` (12 MB) is the agent route's own allowance,
+following the precedent `FRONTIER_MAX_OLLAMA_JSON_BYTES` set for the local
+vision lane — a wider door for one route rather than a wider door for all of
+them.
+
+**Verified by the argv the production path actually built.**
+`tests/agent-attachments.test.mjs` drives the real `runAgentTurn` against a fake
+agent that prints its own arguments, so what is asserted is Codex's
+`--image=` list with the prompt still last, Claude's paths inside `-p`, and an
+empty attachment set producing exactly the turn it always was. 1945/1945 studio
+tests, typecheck and production build clean.
+
+**And verified against a live CLI, for one of the two.** A generated PNG of
+three colour bands — red, green, blue, top to bottom — went through the real
+`runAgentTurn`: Claude Code read the file it was pointed at and answered *"Red,
+green, blue."* So the prose route works, which was the half of this that no
+flag guaranteed. **Codex could not be reached the same way, and not because of
+the image**: this machine's configured model (`gpt-6-astra`) requires a newer
+CLI than the installed `codex-cli 0.149.1`, and the fallback tried is not
+available to a ChatGPT account. Its turn ran far enough to be refused by the API
+rather than by argument parsing, and its `--image=` vector is asserted against
+the production path in the tests — but no Codex turn has yet been answered from
+an image, and it will not be until that CLI is upgraded. The attachment
+directory was gone after both the successful turn and the failed ones.
+
+### 6.36 Two references, and each answers a different question (`components/voice/TemiComposer.tsx`, 2026-09-09)
+
+The chatbox was rebuilt to the Codex desktop composer, and the empty chat was
+laid out the way Cursor lays its empty chat out. Those are not competing
+specifications; the operator supplied both screenshots and they answer different
+questions. **Codex owns the box.** **Cursor owns where the box sits when there is
+nothing in the conversation yet.**
+
+The box, drawn in `TemiComposer`:
+
+- a project tab above its top edge — folder icon and the workspace name, or
+  "Choose project" — inset on both sides with square bottom corners, because it
+  is a narrower panel *behind* the box with its top showing, not a floating chip;
+- a 16px body on `#252525`, borderless, against the stage's black canvas;
+- the placeholder floated to the top-left of a field that starts 52px tall and
+  grows to 200px. It is a `textarea`. The control it replaced was an `<input>`,
+  so a second line of a draft scrolled out of sight while it was being written;
+- a control row: `+`, the approvals chip, a spacer, the engine, the microphone,
+  and a filled send disc that is white when there is something to send and
+  `#2f2f2f` when there is not.
+
+**The approvals chip does not say "Approve for me".** Codex writes that because
+Codex has one mode. Ours has several and `manual` asks before every tool call, so
+the chip names the rung actually in force — `PERMISSION_LABELS[agentPermission]`,
+now exported from `ModelPicker` so the chip and the menu cannot disagree — and
+falls back to the noun "Approvals" rather than to a claim about behaviour the
+engine may not be in. Pressing it opens the same picker that owns the rungs.
+
+**The engine label is drawn in two parts,** the way Codex writes "Custom Light":
+name in near-white, variant muted. `splitEngineLabel` replaces
+`shortEngineLabel`, which kept one word because the old pill had room for one —
+and kept the wrong one. Every agent selection reads "Claude Code · Default", and
+truncating from the left cut away the half that identifies the model. The new row
+has a spacer in it, so both halves fit and the *variant* is what gives way when
+the panel is narrow.
+
+**The end-voice `X` is drawn only while there is a session to end.** Codex's row
+has no such button, and an idle pipeline has nothing to leave.
+
+#### Where the box sits
+
+`isEmpty` is `turns.length === 1 && turns[0].id === "init-temi"`, not
+`turns.length === 0` — `dialogueHistory` is seeded with Temi's greeting and
+`handleCreateNew` puts it back, so a test for an empty list would mean the
+landing screen never appeared. A live utterance appends to `turns` before the
+history does, so the layout switches the moment the operator speaks.
+
+On the landing screen the orb, the box and the openers are one centred column and
+the transcript is not drawn at all: a welcome sentence stacked over a centred
+composer is the busyness this layout avoids, and the greeting is not lost — it is
+the first thing in the conversation as soon as there is one. Under a conversation
+the box docks to the bottom as before, the orb moved from `bottom-[104px]` to
+`bottom-[172px]` and the transcript's tail padding from `pb-[248px]` to
+`pb-[300px]`, because the Codex box is ~138px tall against the old pill's 56.
+
+The box and the orb are each held in one binding and rendered in both arms.
+Two copies of that markup is how two layouts drift apart.
+
+#### The openers under it, and why they are a restoration
+
+`TemiActionRow` — *Plan New Idea*, *Screen Recorder*, *Recent Projects*,
+*Connect Your Repos* / *Open a Repository* — **on the empty chat and nowhere
+else.** They are ways to start, and once the conversation exists, starting is
+over.
+
+None of it is new machinery. Every one of these surfaces was already built and
+had nothing pointing at it: `useRecorderDialogStore`, `useProjectLibrary` and
+`useGitHubStatus` were all still being read by `StudioChat`, whose render was
+replaced by the voice stage — `recentProjects`, `openRecorder`, `openEntry` and
+`openPanel` were computed there every render and used by nothing. This is that
+row put back in the Codex idiom, against the same hooks. *Recent Projects* opens
+a popover of the six most recent entries and calls `openEntry`, which is what
+routes a video project away from `POST /api/workspace/open`; the legacy row could
+not do that, and `StudioSidebar` is still where the whole library lives.
+
+#### Three marks drawn by hand, and looked at
+
+Lucide has no correct form of any of them, so `TemiComposer` draws them:
+`GitHubMark` is the octocat path GitHub publishes, filled — a brand mark is a
+specific shape and an outline approximation of it reads as a mistake.
+`RecordDot` is a red disc inside a `currentColor` ring; red is the one place on
+this screen it is not an alert, because that is what a record control has been
+for fifty years and a muted one would not be read as one. `LightBulbMark` is a
+filled dome over a screw base **of two bars**, not the conventional hairline:
+these are drawn at 14px, and the first attempt — Material's filled bulb — was
+rendered and looked at, and read as a mushroom because its base vanished at
+that size.
+
+Rendered and looked at is meant literally. The repo has no browser harness, so
+the three `<svg>` blocks were extracted from this component and screenshotted
+in headless Chrome at the pill's real size and colours before being kept. That
+is the check the rest of this section could not have.
+
+`tests/temi-composer.test.mjs` — 6 tests. Source-reading, in the idiom of
+`composer-input.test.mjs`, because the node runner cannot import JSX: the field
+exists and is a `textarea`, `isEmpty` is not a length-zero test, the action row
+is inside the `isEmpty` arm only, the box and the orb are each rendered from one
+binding in two places, every opener reaches a hook that exists, and the chip
+renders what it was handed.
+
+1951/1951 studio tests, typecheck clean, production build clean.
+
+#### Looked at in the running app (2026-09-09)
+
+The repo still has no browser harness, but it does not need one to be looked at:
+the Vite dev server on `:3000` is the whole UI, and headless Chrome drives it
+over the DevTools protocol with `Network.setBlockedURLs` holding every engine
+route, so a turn can be submitted and the docked layout reached without a model
+ever being called. That is how the following were measured rather than guessed.
+
+What holds:
+
+- the docked arm. The orb's `bottom-[172px]` clears the box, and the margin is
+  smaller than it looks: in an 813px viewport the tab's top edge is at 653 and
+  the orb's **painted** glow ends at 626 — **27px**. Its `<canvas>` is 80px for
+  a 51px orb, so the *element* stops at 641 and clears by only 12. Neither is a
+  collision, but the canvas padding is the whole margin, so anything that grows
+  the box past ~136px needs `bottom-[172px]` moved with it;
+- `isEmpty` switches on submit, the openers disappear with it, and Temi's
+  greeting appears as the conversation's first turn exactly as this section
+  claims it would;
+- the centred arm still centres at a narrow panel: at an 860px window the box
+  is 558px wide with equal margins, `document.scrollWidth` equals the viewport
+  so nothing overflows sideways, and the engine label keeps both halves at
+  123px. The openers wrap to a second row and stay aligned to the box's left
+  edge;
+- the field grows: 52px to 104px on a wrapped draft, `overflow-y: auto`, box
+  108px to 160px, no ceiling breach.
+
+What did not hold, and has been fixed: **the project tab read as a separate
+chip, which is precisely what this section says it must not.** The cause was not
+the geometry it was assumed to be. Reading the rendered pixels down a column
+through the seam — the check that settled it — the canvas behind the box is
+**pure black**, not the `#151515` the body carries; the tab's `#1c1c1c` rendered
+28 at its top and fell to **24** at the seam, against a body of 37. That put the
+tab almost exactly *midway between the canvas and the box*, which is what makes
+a surface read as its own object rather than as one stepping back.
+
+Two things were doing it, and the smaller one was invisible in the source. The
+body's `shadow-[0_8px_32px_rgba(0,0,0,0.5)]` has a 32px blur against an 8px
+downward offset, so it reached **24px upward over the tab** and darkened the
+very edge that had to read as continuous — a drop shadow falling on the thing
+it was meant to sit in front of. The fix is `0 8px 28px -6px`: the negative
+spread pulls the shadow in so it still drops below the box and no longer washes
+the tab. The fill then went `#1c1c1c` → `#212121`, which renders 33 falling to
+30 — a 7-step seam against the body instead of 13, and a wide step from black.
+
+The geometry was trimmed, not overhauled, because it was never the main fault:
+`pt-2.5` → `pt-2` and `-mt-2.5` → `-mt-3` take the tab from 42px to 40 and the
+overlap from 10 to 12, so **28px stands proud instead of 32**. Note the
+constraint that bounds this: the clearance below the tab's label is exactly
+`pb − overlap`, so the visible tab can never be shorter than `pt + 18px` of text
+without the body clipping the project name. 28px is close to that floor. The
+whole box is 136px against the ~138 the docked offsets were computed for.
+
+### 6.37 The composer could name the agent but not tell it how hard to think (`components/chat/ModelPicker.tsx`, `server/agent-cli.js`, 2026-09-09)
+
+§6.32 moved each agent's permission rung inside its own branch, on the grounds
+that a setting belongs where the thing it governs is chosen. It left two rungs
+behind. Both CLIs have a knob for how hard the model works before it answers,
+and Codex has a second for how much of that reasoning comes back — and neither
+was reachable from this application at all. The operator's only way to change
+either was to quit, edit a config file, and come back.
+
+**Both now sit in the branch, under Permissions**, and both are rendered from
+what the gateway says the installed binary accepts rather than from a list
+compiled into the renderer.
+
+- **The vocabularies are the CLIs' own, and they do not agree.** Claude Code
+  takes `--effort low|medium|high|xhigh|max`. Codex has no flag: it takes
+  `-c model_reasoning_effort=` with `minimal|low|medium|high|xhigh`, so Codex
+  starts a rung below Claude Code and Claude Code goes a rung above Codex. Both
+  lists were read off the binaries installed on this machine — `claude --help`
+  for the first, and the variant list inside the Codex 0.149.1 binary for the
+  second — not chosen. A level we invent is a level the CLI rejects, and it
+  rejects it by failing the entire turn.
+- **Claude Code shows no Thinking group, because it has no such knob.** Its
+  effort level *is* its thinking budget; `claude --help` at 2.1.263 carries no
+  separate flag. The group is absent rather than present-and-inert, which is
+  the same rule that keeps a not-installed agent out of the menu entirely.
+  Codex's group is `model_reasoning_summary`: `none`, `concise`, `detailed`,
+  `auto`, rendered as Hidden / Brief / Full / Automatic.
+- **Both groups lead with "CLI default", and that is the shipped state.** It
+  passes no flag at all, leaving whatever is in `~/.claude` or
+  `~/.codex/config.toml` in force. A picker that silently overrides a config
+  file the operator wrote is worse than one that starts out offering nothing —
+  and without that row a level, once picked, could never be un-picked.
+- **An unrecognised level is dropped, not forwarded and not an error.**
+  `runAgentTurn` checks each value against that agent's own vocabulary and
+  falls back to null, so a level persisted from the other engine, or from a CLI
+  since downgraded, produces a normal turn at the operator's own setting rather
+  than a dead one. This is exactly how `permission` already behaves, which is
+  why the gateway route validates neither: a second allowlist beside that one
+  is a copy free to drift from it.
+- **Codex's overrides go before the subcommand.** `-c` after `exec` is read as
+  an argument to `exec`. The value is quoted (`model_reasoning_effort="high"`)
+  because `-c` parses its value as TOML before falling back to a literal, and
+  the CLI's own help documents the quoted form. Changing agent clears all three
+  settings together, for the reason §6.32 gave for the permission alone: the
+  two CLIs share no vocabulary, so a level carried across would be dropped by
+  the server while the menu went on showing it.
+
+Four tests in `tests/agent-cli.test.mjs` assert the argv contract by recording
+what a fake binary is actually handed — that both spellings are built, that a
+level belonging to the other CLI never reaches the process, that Codex's `-c`
+precedes `exec`, and that choosing nothing passes nothing. `argsFor` stays
+unexported: the contract worth testing is what reaches the process.
+
+### 6.38 The arrows walked off the bottom of the menu (`components/chat/ModelPicker.tsx`, 2026-09-09)
+
+§6.37 gave each agent branch two more groups, and the branch outgrew the box
+that holds it. Measured in the running app, Codex expanded with one of its own
+models selected: twenty rows, `scrollHeight` 560px inside a `clientHeight` of
+448px on an 813px viewport — **112px, five rows, below the fold**, with the menu
+already pressed to within 22px of the top of the window because `maxHeight` is
+`getBoundingClientRect().bottom - 16`. There is no taller menu to be had; the
+window is the limit.
+
+Overflow itself was never the bug. The menu is `overflow-y-auto`, so a mouse
+scrolls it and every row is reachable. The bug was that `useMenuKeyboard` tracks
+an *index* and holds no DOM reference, and nothing else scrolled either, so
+ArrowUp out of the resting state highlighted a Thinking row that was not on
+screen. A highlight the operator cannot see is a highlight they cannot trust,
+and Enter on it commits a setting they did not read.
+
+So each row in the flat keyboard order now carries `data-row-index`, and one
+effect on `activeIndex` pulls the active row into view. `block: "nearest"` is
+the whole trick: a row already inside the box does not move, so walking through
+the visible middle of the menu is perfectly still, and only crossing the fold
+scrolls — by exactly enough.
+
+Verified by driving the real app over CDP, not by reading the code: from rest
+the first ArrowUp lands on row 19 (`Automatic`, the last Thinking row), the menu
+scrolls to `scrollTop` 108 and the row is inside the box; 18, 17 and 16 follow
+with no further movement; six ArrowDowns wrap round to row 2 (`Codex`) and the
+menu returns to `scrollTop` 4. Nothing is highlighted before the first keypress,
+which is still the contract §6.32 asked `useMenuKeyboard` for.
+
+No test was added and the count stays 1955. The suite has no DOM — no jsdom, no
+testing-library — so `scrollIntoView` cannot be asserted there, and a source-
+reading test that checked for the string would prove only that the string is
+present. The evidence is the measurement above. That absence is also why the fix
+is safe: nothing in the suite renders this component.
+
+### 6.39 What the agent brings (`server/agent-inventory.js`, `components/chat/ModelPicker.tsx`, 2026-09-10)
+
+The picker could say which model, how hard it thinks, and what it may touch, and
+still leave unanswered the question that decides whether a turn can work at all:
+*what tools will it have?*
+
+The answer had never been rendered anywhere, and it is not symmetric. Five MCP
+servers are attached by `runAgentTurn`, and **four of them are Claude Code
+only** — `screen-mcp.js`, `workspace-mcp.js` and `camera-mcp.js` each return
+empty args unless `engine === "claude"`, and the approval bridge only gets a
+token on the `runToken = engine === "claude" && runId` line above them. Choosing
+Codex silently costs the screen, the workspace, the camera, and in-app approval
+prompts. That fact lived only in the argv builders; operators met it by asking
+Codex to do something it had no hands for.
+
+`GET /api/agents/inventory?engine=` now answers in two halves.
+
+**What this app attaches** comes from `STUDIO_CAPABILITIES`, a table that
+mirrors the five builders. It mirrors rather than calls them because four write
+a 0600 spec file keyed by a run id, and an inventory has no run to name — so
+`tests/agent-inventory.test.mjs` calls every builder for real into a throwaway
+directory and asserts the table agrees with what came back. Teach `screen-mcp.js`
+about Codex and forget this table, and that test fails rather than the menu
+quietly lying. Each unavailable entry names the thing to change — switch agent,
+open the Cut panel, grant Accessibility — because "unavailable" tells nobody
+anything.
+
+**What the CLI brings of its own** is read by running `mcp list` and
+`plugin list` against the installed binary, for the same reason the effort and
+thinking vocabularies were read off `--help` in §6.37: a list we keep here is a
+list that goes stale the next time either ships. Three of the four probes take
+`--json`; `claude mcp list` has no such flag and is parsed as text, which is
+sharper than it looks — a server name may itself contain colons
+(`plugin:cloudflare:cloudflare-api`), so the split is on the first colon
+*followed by a space*, and the status is taken from the last ` - ` so a command
+containing a dash survives. Both traps are in the fixtures.
+
+Three constraints are load-bearing:
+
+- **`null` is not `[]`.** A probe that fails yields null and renders as "could
+  not be read". An empty array is a claim — *you have no plugins* — and we are
+  only entitled to make it when the CLI said so.
+- **No environment variable, name or value, leaves the route.** `codex mcp list`
+  masks env in its table and prints it in full under `--json`; that is a config
+  file's worth of secrets, and a test asserts none of it reaches the payload.
+- **Slash commands are named as missing rather than omitted.** Neither CLI can
+  list them, and enumerating them would mean walking private directory layouts.
+  The menu says so, so the absence cannot read as "you have none".
+
+Measured: `claude mcp list` 2494ms — it health-checks every configured server
+over the network — against 87ms for the whole Codex side. The CLI halves are
+therefore cached for `INVENTORY_TTL_MS` (60s) and fetched only when the operator
+opens the section; the studio half is recomputed every call, because a Cut panel
+that opens between two menus must not be reported closed by the second one.
+
+In the picker this is **one row per branch**, collapsed, not a group of five.
+§6.38 had just fixed a branch that outgrew its box at twenty rows; adding the
+inventory inline would have taken it past thirty for information most turns
+never need. Expanding scrolls its heading to the top of the menu, so what was
+revealed is under the eye rather than under the fold. The revealed lines are
+`InfoLine`, not `Row`: a `div` with no `role`, no `data-row-index`, and no place
+in the flat keyboard order — a screen reader walking this menu should count the
+settings it can change, not five more items that do nothing when it reaches them.
+
+### 6.40 The chat history you could not open (`components/sidebar/StudioSidebar.tsx`, `components/voice/TemiVoiceStage.tsx`, `utils/sessionDialogue.ts`, 2026-09-10)
+
+Two defects in one panel, reported in one sentence: *"the chat history on the
+sidebar does not make sense, why is it called repositories in the first place —
+it has to be a chat history."*
+
+**The label.** The panel's own doc comment had called it "the chats view" since
+the day it was written, and the header said `Repositories`. The header is what
+the eye reads first, so the panel appeared to be a list of checkouts that
+happened to have chats filed under it, when the content was always the other way
+round: the chats are the subject and the repository is only how they are filed.
+Now `Chat history`, with the repository rows exactly where they were — filing a
+chat under its project is the point, not an accident. The filter's placeholder
+and accessible name moved with it.
+
+**The wiring.** `chat-sessions.test.mjs` opens on the operator's earlier report
+of this same panel: *"all I know is when I click on them nothing happens."* That
+round fixed the store, and fixed it correctly — `applySessionSwitch` saves the
+outgoing transcript into the chat being left and loads the incoming one, and its
+tests prove it. Nothing on screen was ever connected to that work. The surface
+the operator is looking at is `TemiVoiceStage`, and it kept the conversation in
+a `useState<DialogueTurn[]>` of its own, seeded with `INITIAL_DIALOGUE`.
+
+So `switchSession` faithfully swapped `frontierMessages` while the stage went on
+drawing its private array. Every chat in the sidebar showed the same
+conversation, and reloading lost all of them. The history was a list that could
+not be opened, and it had been that way behind a passing test suite.
+
+The stage now reads the store. That is the whole fix — switching a chat changes
+what is on screen because it changes what the stage renders — and it is why
+`utils/sessionDialogue.ts` exists rather than a `useEffect` pair syncing two
+copies of the truth: with one source there is no second copy to fall out of step.
+
+Two shapes meet in that module and the mapping is not symmetric:
+
+- **An empty chat draws the greeting, and the greeting is never stored.** The
+  landing hero is gated on `turns.length === 1 && turns[0].id === "init-temi"`,
+  so a chat that stored its own greeting would hold one real message, stop
+  counting as empty, and never show the hero again. It is synthesised on the way
+  out and dropped on the way back in.
+- **A turn still being spoken is not stored.** `pending` turns are live state.
+  Kept, they would survive a reload as things someone said.
+- **A round trip keeps what the transcript cannot see.** The stage knows who
+  spoke and what they said; it does not know what the turn cost or how many
+  tokens it burned. Messages are matched by id and their telemetry preserved, so
+  re-rendering a chat cannot strip it.
+- **`system` messages are not drawn.** The transcript has two columns, you and
+  the assistant, and a system note belongs to neither.
+
+The setter deliberately keeps the `setState` shape. Seven call sites in the
+stage append with `prev => [...prev, turn]` and are unchanged by this; the eighth
+was `handleCreateNew` blanking the transcript back to the greeting, which is now
+`newChatSession()`. Clearing in place destroyed the conversation you were in —
+tolerable when there was only ever one, and wrong the moment there are many.
+
+Nine tests in `tests/session-dialogue.test.mjs` cover the mapping; the last one
+is the shape of every call site — appending to a drawn greeting must not smuggle
+the greeting into storage. Verified in the running app by seeding two chats under
+two different projects and switching between them: each draws its own
+conversation, and the title bar follows.
+
+### 6.41 The thread you were already on (`utils/chatSessions.ts`, `components/chat/ModelPicker.tsx`, `server/agent-cli.js`, 2026-09-10)
+
+Both agent CLIs keep the conversation on their own side, and this app has been
+resuming it silently since agents were wired in: `runAgentTurn` has passed
+`--resume <id>` (Claude Code) or `codex exec resume <id>` for six sessions with
+nothing anywhere saying so, and no way to do anything else. Two questions an
+operator could not answer from the interface — **does the next turn remember
+this chat**, and **how do I make it stop** — and one they could not even ask:
+how do I carry on from here without writing into the thread I already have.
+
+Three changes, one section of the picker.
+
+**The key is the engine, not the model.** `agentSessionKey` was `engine:model`,
+so moving from Sonnet to Opus in the middle of a task compared `claude:sonnet`
+against `claude:opus`, found no match, and started the CLI over — losing the
+conversation without a word. The engine genuinely has to match: a Codex thread
+resumed as Claude Code fails the turn rather than politely starting fresh. The
+model does not, because both CLIs resume a thread under whatever `--model` the
+new turn names. `agentSessionKeyFor` now returns the engine alone, and
+`resumableAgentSession` compares engines through `engineOf`, which reads the
+prefix — so a key persisted in the old `engine:model` form still names its
+engine and survives the upgrade instead of being dropped on the next turn.
+Switching *engine* still starts fresh, and no note is added to the chat when a
+thread carries across a model switch: the operator was offered "keep it, but say
+so" and chose silence.
+
+**Forking is a chat, not a flag.** Claude Code takes `--fork-session` after
+`--resume`; Codex swaps the subcommand — `codex exec fork <SESSION_ID>
+[PROMPT]`, the same order-sensitive shape as `resume`. Both answer from the
+resumed history and write the answer to a **new** session id, leaving the thread
+they read untouched. Done in place that is invisible: press Fork, send a turn,
+watch nothing change. So `forkChatSession` makes a second chat holding the same
+transcript and the same thread id, armed with `agentForkPending`. Both chats are
+on one thread until the copy takes a turn, and that turn is the one that
+branches — which is why nothing has to be undone if it is never sent.
+`rememberAgentSession` disarms on the id coming back, because that id *is* the
+fork and staying armed would branch the branch on every turn after it.
+
+The copy is taken from `frontierMessages`, not from `source.messages`. The
+active chat's transcript lives there until a switch writes it back (§6.40), so
+forking from the stored array would copy the conversation as it stood when this
+chat was last left — everything said since would be missing, which is the one
+thing a fork must not do.
+
+**Start fresh** is `setAgentSession(id, null, null)`: the CLI forgets, the
+transcript on screen stays. It deliberately does not close the menu — the status
+line above it is the receipt, and it only reads as one if you are still looking
+at it. Fork does close it, because the chat underneath has just changed.
+
+The status line is derived through the same `resumableAgentSession` the composer
+sends with, so the menu cannot promise a resume the next turn does not perform.
+It says `Resumes this thread`, `Branches on next turn`, or `Starts a new
+thread`, with the first eight characters of the session id beside it and the
+whole of it in the tooltip — measured at 280px, both spans un-clipped. The first
+draft said "Branches this thread on the next turn" and ellipsised into
+"Branches this thread on the…", which answers nothing; §6.39 made the same trade
+for the inventory's reasons.
+
+Both thread rows are `role="menuitem"`, not the `menuitemradio` the rest of this
+menu uses. Forking is not a setting that can be on, and announced as a radio it
+is one that is permanently off. "What it brings" took the same correction — it
+has always been an action too.
+
+With no thread the rows are disabled rather than hidden, and say why in their
+tooltip: there is nothing to fork or forget, and the next turn already opens a
+thread of its own. `runAgentTurn` drops `fork` when there is no `sessionId` for
+the same reason — both CLIs fail a branch with no parent, and a chat armed to
+fork whose thread was since forgotten must still take a normal turn.
+
+Thirteen tests: nine in `tests/chat-sessions.test.mjs` for the key, the legacy
+key, and the fork's four asymmetries; four in `tests/agent-cli.test.mjs` driving
+the argv recorder, which asserts on what actually reaches the process — that
+`--fork-session` never ships without `--resume`, that `fork` replaces `resume`
+rather than joining it, and that asking to fork nothing passes no flag. Verified
+in the running app: seeded a chat on a thread, opened the picker, forked it, and
+watched a second chat appear in the sidebar under the same project while the
+status line changed to `Branches on next turn`; then Start fresh, and both rows
+went disabled with the line reading `Starts a new thread`.
+
+### 6.42 The chip was right and the sidebar was wrong (`store/studioStore.ts`, `utils/chatSessions.ts`, 2026-09-10)
+
+Reported as a mismatch: the composer's project chip read `4K Video Downloader+`
+while the sidebar filed that same chat under `teminaliCode`. Two values, two
+sources, never reconciled — and the question that decides the fix is not which
+one looks right but **which one names the directory the next turn runs in**.
+
+It is the chip. The chat lane sends no `cwd` at all: `aiService.ts` calls
+`streamTurn` without one, `agentCliService.ts` posts `cwd: ""`, and
+`gateway.js` runs the turn with `root: config.workspaceRoot`, which
+`resolveAgentCwd` resolves an empty cwd against — the root itself. That same
+root is what `POST /api/workspace/open` rebinds, and `setWorkspacePath` is fed
+the gateway's confirmed answer, so chip and gateway root are one value by
+construction.
+
+`session.workspace`, meanwhile, is stamped once when the chat is made and never
+written again. It is a birth certificate, not an address. A chat filed under
+`teminaliCode` with the chip reading `4K Video Downloader+` was a chat whose
+next turn would have edited the other repository — a wrong-repo edit waiting for
+someone to trust the sidebar.
+
+So the stale half moves to agree with the truthful one. `restampWorkspace`
+rewrites the active chat's `workspace` and `setWorkspacePath` calls it in the
+same `set`. The setter, not any one caller: six routes change the root — a
+sidebar repository row, the Projects panel, the composer's recent projects,
+global search, the native Open Folder menu, and the agent's own `open-project`
+— and every one funnels here. Fixing them one at a time is how five of them stay
+broken.
+
+The cost is accepted, not hidden: re-stamping rewrites history, because the
+chat's earlier turns genuinely did run somewhere else, and it can empty a
+sidebar group when it moves that group's last chat. The alternative was to blind
+the one control that was telling the truth — a chip following `session.workspace`
+would confidently name a directory the agent is not standing in, and would stop
+moving in response to its own click.
+
+`workspaceLabel` now owns the `split("/").filter(Boolean).pop() || "No Repo"`
+rule that `newChatSession` had inline; `"No Repo"` is a real sidebar group — the
+one holding chats whose repository is gone — so an empty root belongs in it
+rather than being a placeholder. Two tests in `tests/chat-sessions.test.mjs`
+pin the move and the labelling, including that only the chat you are in moves:
+the others were not open and did not run there.
+
+### 6.43 Composer parity: the stop that was not there (`components/voice/TemiComposer.tsx`, `components/voice/TemiVoiceStage.tsx`, `utils/promptHistory.ts`, `utils/taskQueue.ts`, `services/voice/teminaliAgentBridge.ts`, 2026-09-10)
+
+The last of the CLI-parity items, and it turned out to be four defects rather
+than a feature.
+
+**Escape was dead, and the README said it worked.** `useInterruptKey` was armed
+in `StudioChat` on `isStreaming` — that component's own chat lane, which nothing
+on the voice stage ever sets, because `TemiVoiceStage` declared `isStreaming`,
+`onSend` and `onStop` as props and destructured none of them. So the hook was
+correct, the rule in `services/interruption.ts` was correct, and the one screen
+the operator types into had no stop key at all. Stopping was reachable only two
+clicks deep in `TemiActivityDialog`.
+
+The flag that is actually true on this surface is `isTaskRunning`, so the stage
+now owns Escape: `useInterruptKey(isRunning, stageRef, handleStopRun)`, with
+`isRunning = isTaskRunning || isStreaming`, and `handleStopRun` stops the TTS,
+the delegated run and the parent's lane through `onStop`. `StudioChat`'s call
+was **removed rather than left as a second listener**. Two would not have been
+belt and braces: whichever fires first calls `preventDefault`, `interruptsRun`
+then refuses the second, and registration order — which flips whenever either
+flag re-arms — would silently decide how much of the run got stopped.
+
+**A second Enter mid-turn killed the first.** `delegateTask` opened with
+`this.activeController?.abort()`, so a follow-up typed while work was running
+ended that work with nothing said in the transcript, the activity log or the
+voice. Both agent CLIs queue. The rules for what may join the queue are in
+`utils/taskQueue.ts` — blank rejected, an exact duplicate rejected, a floor of
+`QUEUE_LIMIT = 8` — and the bridge holds the array, drains it in its `finally`
+and **clears it on a stop**, because draining after a stop would start the next
+item the operator just asked not to happen. The returned promise still settles
+with the run's own report whether the prompt ran now or waited; every caller
+today passes `onCompleted` and discards it, but a promise resolving with
+"Queued" is a trap for the first one that does not.
+
+**`/` and `@` were built, tested and wired to nobody.** `ComposerMenu`,
+`utils/composerTrigger.ts` and nine passing tests all pointed at
+`chat/Composer.tsx`, which the voice stage replaced six sessions ago; the live
+box's only key handler was Enter. This was a port, not a build — same menu, same
+word-boundary rule, same "the menu owns the arrows while it is open".
+
+**Up-arrow history did not exist anywhere.** The ring is `utils/promptHistory.ts`
+so the DOM-free suite can reach it, and it is held by the *stage*, not the
+composer: the composer is remounted when the empty screen becomes a
+conversation, and a history emptied by the first prompt you send is worse than
+none. Two rules carry the feel of it — the draft is put aside and handed back
+when you walk past the newest entry, and Up is history only on the first line,
+so a two-line draft still edits normally.
+
+**Stop is drawn beside send, not instead of it.** `studio/README.md` had
+promised exactly this and the old `chat/Composer.tsx` had done it; swapping one
+control for the other would now mean choosing between stopping the run and
+lining up the next thought, which is the choice the queue exists to remove.
+
+23 tests: 11 for the history ring, 7 for the queue, and 5 source guards holding
+the wiring — that Escape has exactly one owner per surface, that the stage stops
+all three things a run is made of, that the live composer mounts the menu and
+gives it the keyboard, and that `delegateTask` no longer opens by aborting.
+Verified by driving the running app with CDP: both menus opening with real rows,
+Escape closing the menu without stopping anything, the stop appearing beside
+send with no overlap and disappearing when idle, Escape from inside the textarea
+clearing `isTaskRunning`, and the ring walking back, stopping at the oldest, and
+returning the half-written draft. Geometry was measured off
+`getBoundingClientRect`, not eyeballed.
+
+**Left open:** `onSend` is still declared by `TemiVoiceStage` and dropped. Wiring
+it would route typed turns through `StudioChat.send` and change the whole lane;
+it is a decision, not an oversight, and it is not this one.

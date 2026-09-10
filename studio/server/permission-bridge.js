@@ -24,7 +24,7 @@ import { randomBytes, timingSafeEqual } from "node:crypto";
 /** A prompt nobody answers must not hold the agent open indefinitely. */
 export const APPROVAL_TIMEOUT_MS = 5 * 60_000;
 
-/** runId -> { token, emit, pending, cameras, remembered, closed } */
+/** runId -> { token, emit, pending, cameras, browser, playerFrames, remembered, closed } */
 const runs = new Map();
 
 /**
@@ -60,7 +60,7 @@ export function approvalKey(toolName, input) {
 /** Begin a run. `emit` puts an event on that run's NDJSON stream. */
 export function openRun(runId, emit) {
   const token = randomBytes(32).toString("base64url");
-  runs.set(runId, { token, emit, pending: new Map(), cameras: new Map(), remembered: new Set(), closed: false });
+  runs.set(runId, { token, emit, pending: new Map(), cameras: new Map(), browser: new Map(), playerFrames: new Map(), remembered: new Set(), closed: false });
   return token;
 }
 
@@ -78,6 +78,25 @@ export function closeRun(runId) {
     entry.settle({ behavior: "deny", message: "The agent turn ended before this was answered." });
   }
   run.pending.clear();
+  /*
+    A browser action outstanding when the turn ends is failed now rather than
+    left to time out. The camera does not do this and does not need to: it is
+    one call at the end of a thought, and half a minute of silence after a
+    stopped turn costs nobody anything. A page is read, then clicked, then read
+    again — so a stopped turn can have one of a chain in flight, and the shim
+    holding it would sit there for the full timeout before the CLI could exit.
+  */
+  for (const entry of run.browser.values()) {
+    clearTimeout(entry.timer);
+    entry.settle(new Error("The agent turn ended before the browser answered."));
+  }
+  run.browser.clear();
+  /* A frame is asked for in the same kind of chain — look, seek, look again — so it is failed now for the same reason. */
+  for (const entry of run.playerFrames.values()) {
+    clearTimeout(entry.timer);
+    entry.settle(new Error("The agent turn ended before the player answered."));
+  }
+  run.playerFrames.clear();
   runs.delete(runId);
   endedRuns.add(runId);
   if (endedRuns.size > ENDED_RUNS_REMEMBERED) endedRuns.delete(endedRuns.values().next().value);
@@ -232,6 +251,175 @@ export function resolveCameraFrame({ runId, id, images, error, warm = false, too
     entry.settle(new Error(String(error || "The window could not take a photograph.")));
   } else {
     entry.settle(null, { images: list, warm: Boolean(warm), tookMs: Number(tookMs) || 0, capturedAt: new Date().toISOString() });
+  }
+  return { ok: true };
+}
+
+/**
+ * How long the agent waits for a frame of what is playing.
+ *
+ * Shorter than the camera's, and the difference is the hardware: a camera has
+ * to be opened and has to settle, where the player's picture is already on
+ * screen and the whole capture is a canvas draw. Long enough only for a pane
+ * mid-reload — a transcoded stream reloads its element on a seek — to come
+ * back with a frame rather than be declared missing.
+ */
+const PLAYER_FRAME_TIMEOUT_MS = 10_000;
+
+/**
+ * Ask the window holding this run for one frame of what is playing.
+ *
+ * The third of these, and the same shape for the same reason: the gateway is
+ * a plain Node process with no picture in it. The frame is in a pane only the
+ * renderer that owns the run can reach, so the request goes out on the run's
+ * one-way NDJSON stream and the answer comes back on its own POST.
+ *
+ * Rejects rather than resolving to a failure shape, as the camera and the
+ * browser do: "nothing is playing" is a tool error the agent reports and
+ * works around, not a verdict to hand the operator.
+ */
+export function requestPlayerFrame({ runId, token }) {
+  const run = runs.get(runId);
+  if (!run || run.closed) return Promise.reject(new Error("That agent turn is no longer running."));
+  if (!constantTimeEqual(token, run.token)) return Promise.reject(new Error("The player bridge rejected the caller."));
+
+  const id = randomBytes(9).toString("base64url");
+  return new Promise((resolve, reject) => {
+    let settled = false;
+    const settle = (error, frame) => {
+      if (settled) return;
+      settled = true;
+      if (error) reject(error); else resolve(frame);
+    };
+    const timer = setTimeout(() => {
+      run.playerFrames.delete(id);
+      settle(new Error("The window did not send a frame of the player in time."));
+    }, PLAYER_FRAME_TIMEOUT_MS);
+    if (typeof timer.unref === "function") timer.unref();
+
+    run.playerFrames.set(id, { settle, timer });
+    const delivered = run.emit?.({ type: "player-frame", id, expiresInMs: PLAYER_FRAME_TIMEOUT_MS });
+    if (delivered === false) {
+      run.playerFrames.delete(id);
+      clearTimeout(timer);
+      settle(new Error("This turn's stream is closed, so no window could be asked for a frame."));
+    }
+  });
+}
+
+/**
+ * The frame, arriving on its own request because the run's stream only goes
+ * one way.
+ *
+ * **`image`, singular, and the same word at both ends.** The camera's path
+ * says `image` here and `images` in the window, which is why `look_at_me`
+ * fails every time; `tests/player-frame.test.mjs` pins this one so the same
+ * typo cannot be made twice.
+ */
+export function resolvePlayerFrame({ runId, id, image, error, time = null, duration = null, title = null }) {
+  const run = runs.get(runId);
+  if (!run) return { ok: false, reason: "No such agent run." };
+  const entry = run.playerFrames.get(id);
+  if (!entry) return { ok: false, reason: "That frame was already sent, or nothing asked for it." };
+
+  run.playerFrames.delete(id);
+  clearTimeout(entry.timer);
+  const picture = typeof image === "string" ? image : "";
+  if (error || !picture) {
+    entry.settle(new Error(String(error || "The player could not produce a picture.")));
+  } else {
+    entry.settle(null, {
+      image: picture,
+      time: Number.isFinite(time) ? time : null,
+      duration: Number.isFinite(duration) ? duration : null,
+      title: typeof title === "string" ? title : null,
+      capturedAt: new Date().toISOString(),
+    });
+  }
+  return { ok: true };
+}
+
+/**
+ * How long the agent waits for the browser panel to answer.
+ *
+ * Longer than a camera frame, and the sum says why: `browser-view:cdp` will
+ * wait up to 5s for a navigation to settle before it starts, and then gives
+ * the page 15s to answer one protocol command. A timeout shorter than
+ * 5 + 15 would report "the window did not answer" for a page that was about
+ * to, which is the least useful thing this could say.
+ */
+const BROWSER_TIMEOUT_MS = 30_000;
+
+/**
+ * Ask the window holding this run to read or drive its browser panel.
+ *
+ * The same shape as `requestCameraFrame`, and for the same reason: the gateway
+ * is a plain Node process with no browser panel in it. The panel is a
+ * `WebContentsView` owned by main, reachable only from the renderer that owns
+ * the run — so the request goes out on the run's own NDJSON stream and the
+ * answer comes back on its own POST.
+ *
+ * **Not `emitToRun`.** That is one-way, which is why `browse` can use it: it
+ * puts a page in front of the operator and nothing comes back. A snapshot is
+ * the whole point of the call, so this waits.
+ *
+ * `op` is a named operation — never a CDP method. The protocol is spoken in
+ * exactly one file (electron/browserCdp.cjs) and nothing on this path knows
+ * its vocabulary.
+ *
+ * Rejects rather than resolving to a failure shape, as the camera does: there
+ * is no useful "no" to hand the model. A page that could not be read is a tool
+ * error the agent reports and works around, not a verdict.
+ */
+export function requestBrowserAction({ runId, token, op, params = {} }) {
+  const run = runs.get(runId);
+  if (!run || run.closed) return Promise.reject(new Error("That agent turn is no longer running."));
+  if (!constantTimeEqual(token, run.token)) return Promise.reject(new Error("The browser bridge rejected the caller."));
+
+  const id = randomBytes(9).toString("base64url");
+  return new Promise((resolve, reject) => {
+    let settled = false;
+    const settle = (error, result) => {
+      if (settled) return;
+      settled = true;
+      if (error) reject(error); else resolve(result);
+    };
+    const timer = setTimeout(() => {
+      run.browser.delete(id);
+      settle(new Error("The browser panel did not answer in time. The page may be showing a dialog."));
+    }, BROWSER_TIMEOUT_MS);
+    if (typeof timer.unref === "function") timer.unref();
+
+    run.browser.set(id, { settle, timer });
+    const delivered = run.emit?.({ type: "browser", id, op, params, expiresInMs: BROWSER_TIMEOUT_MS });
+    if (delivered === false) {
+      run.browser.delete(id);
+      clearTimeout(timer);
+      settle(new Error("This turn's stream is closed, so no window could be asked about its browser."));
+    }
+  });
+}
+
+/**
+ * The browser's answer, arriving on its own request because the run's stream
+ * only goes one way. An `error` is the window saying why it could not — no
+ * panel open, devtools holding the debugger, a ref that has gone — and that
+ * reaches the agent as the tool's failure rather than as a silent timeout.
+ */
+export function resolveBrowserAction({ runId, id, result, error }) {
+  const run = runs.get(runId);
+  if (!run) return { ok: false, reason: "No such agent run." };
+  const entry = run.browser.get(id);
+  if (!entry) return { ok: false, reason: "That browser request was already answered, or nothing asked for it." };
+
+  run.browser.delete(id);
+  clearTimeout(entry.timer);
+  if (error) {
+    entry.settle(new Error(String(error)));
+  } else if (!result || typeof result !== "object") {
+    entry.settle(new Error("The browser panel answered with nothing this build could read."));
+  } else {
+    entry.settle(null, result);
   }
   return { ok: true };
 }

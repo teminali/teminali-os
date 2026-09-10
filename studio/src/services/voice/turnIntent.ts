@@ -73,10 +73,17 @@ const STOP_PHRASES = [
   "stop", "stop stop", "stop stop stop", "stop it", "stop that", "stop there", "stop talking", "stop now",
   "cancel", "cancel that", "cancel it", "abort", "halt", "kill it",
   "wait", "wait wait", "wait wait wait", "hold on", "hang on", "hold up", "hold it",
-  "never mind", "nevermind", "forget it", "forget that", "scratch that", "leave it",
+  "never mind", "nevermind", "never mind that", "forget it", "forget that", "scratch that", "leave it",
+  // Abandonment said the other way round. "never mind" was here and "drop
+  // it" was not, so "never mind, drop it" — one of the plainest ways to call
+  // a run off — was consumed halfway, failed, and fell through to
+  // `instruction`: the operator asking for the work to end got more of it.
+  "drop it", "drop that", "drop this", "forget about it", "forget about that",
+  "skip it", "skip that", "leave that", "leave it be", "let it go",
+  "don't bother", "dont bother", "do not bother", "no need", "not needed",
   "that's enough", "thats enough", "enough", "enough enough", "pause", "pause that",
   "no no", "no no no", "no stop", "no wait",
-  "acha", "achana nayo", "simama", "subiri", "ngoja", "tosha", "wacha",
+  "acha", "achana nayo", "acha hiyo", "wacha hiyo", "sahau", "simama", "subiri", "ngoja", "tosha", "wacha",
 ];
 
 /**
@@ -173,6 +180,25 @@ const WORK_DEIXIS = new RegExp(
     `|\\b(that|this|it|those|these)\\b(?=\\s*$|\\s+(is|was|are|were|do|does|did|mean|means|meant|for|about|again|now|then|running|doing|going|${WORK_NOUN}))`,
 );
 
+/**
+ * The other way a question points at the run: through the agent doing it.
+ *
+ * `WORK_DEIXIS` only recognises pointing with a demonstrative — "that file",
+ * "this command". §6.30's second finding is what that misses. "Which file are
+ * you in", asked mid-run, contains no demonstrative at all, so it fell through
+ * to `instruction`, and `machineAction` read "which file" as work and started a
+ * *second* agent to answer a question about the first one. The operator gets
+ * two runs and no answer, when the digest under the orb already knew.
+ *
+ * The subject is the whole test: a work noun immediately after the wh-word,
+ * and a copula whose subject is the assistant or the work itself. "Which file
+ * should I open" keeps its subject and stays an instruction; "what file do you
+ * want" is not a copula and stays one too.
+ */
+const SELF_WORK_QUESTION = new RegExp(
+  `\\b(what|which)\\s+(${WORK_NOUN})\\s+(are|is|was|were)\\s+(you|it|that|this)\\b`,
+);
+
 /** An utterance shaped like a question, by opener or by punctuation. */
 const QUESTION_OPENERS =
   /^(what|why|which|who|whose|where|when|how|is|are|was|were|do|does|did|can|could|should|would|will|nini|kwa\s?nini|vipi|lini|wapi|nani|gani|kwa\s?ajili)\b/;
@@ -195,6 +221,53 @@ function normalise(text: string): string[] {
 
 function withoutFillers(words: string[]): string[] {
   return words.filter((word) => !FILLERS.has(word));
+}
+
+/**
+ * Tails that qualify a request without changing what is being asked.
+ *
+ * §6.30's third and fourth findings read like two missing entries and are one
+ * missing rule. `consumedBy` must consume the *whole* utterance, so a phrase
+ * set only holds for an utterance made of nothing else — and "for a second" is
+ * the most formulaic thing anyone appends to a request for quiet. "quiet" was
+ * a hush and "quiet for a second" was a new task; "wait" stopped the run and
+ * "wait a second" started one. Adding those two literals would have fixed two
+ * wordings and left "for a sec" and "for a minute" broken, which is precisely
+ * the failure §6.30 named: a gate that holds for one wording holds for none.
+ *
+ * Stripped from the end only, and never down to nothing. A bare "for a second"
+ * qualifies a request nobody has made yet, and must not be read as silence or
+ * as a stop on its own.
+ */
+const QUALIFIER_TAILS = [
+  "for a second", "for a sec", "for a minute", "for a moment", "for a bit", "for a while",
+  "for a second or two", "for the moment", "for now",
+  "a second", "a sec", "a minute", "a moment", "a bit",
+  "kidogo", "kwa muda",
+  // Residue, not a phrase. Fillers come off first, so "cancel that for now"
+  // reaches here as "cancel that for" — the tail is already half gone and
+  // what is left of it must not be what fails the match.
+  "for",
+];
+
+function withoutQualifierTail(words: string[]): string[] {
+  let rest = words;
+  for (let stripped = true; stripped; ) {
+    stripped = false;
+    for (const tail of QUALIFIER_TAILS) {
+      const parts = tail.split(" ");
+      // `>=`, not `>`: an utterance that is only a tail keeps it and matches
+      // nothing, which is the point.
+      if (parts.length >= rest.length) continue;
+      const at = rest.length - parts.length;
+      if (parts.every((part, offset) => rest[at + offset] === part)) {
+        rest = rest.slice(0, at);
+        stripped = true;
+        break;
+      }
+    }
+  }
+  return rest;
 }
 
 /**
@@ -231,12 +304,17 @@ function consumedBy(words: string[], phrases: string[]): boolean {
 export function classifyTurnIntent(text: string, context: TurnIntentContext): TurnIntentVerdict {
   const words = normalise(text);
   const core = withoutFillers(words);
+  // What the phrase sets are matched against: the core with any duration
+  // qualifier taken off the end, so "quiet for a second" is the same request
+  // as "quiet". Only the whole-utterance sets use it; the regex gates below
+  // still read the full text, where the tail may carry meaning.
+  const stem = withoutQualifierTail(core);
   const joined = words.join(" ");
   const engaged = context.busy || context.speaking;
 
   // Before the stop set, because every one of these opens with a word that
   // would otherwise cancel the run. Silence is the whole request.
-  if (consumedBy(core, HUSH_PHRASES) || (core.length === 0 && consumedBy(words, HUSH_PHRASES))) {
+  if (consumedBy(stem, HUSH_PHRASES) || (core.length === 0 && consumedBy(words, HUSH_PHRASES))) {
     return { intent: "hush", reason: "Asked for quiet, not for the work to end." };
   }
 
@@ -250,7 +328,7 @@ export function classifyTurnIntent(text: string, context: TurnIntentContext): Tu
 
   // A bare stop is a stop whether or not anything is running; "stop the
   // server" is not, because something follows the verb.
-  if (consumedBy(core, STOP_PHRASES) || (core.length === 0 && consumedBy(words, STOP_PHRASES))) {
+  if (consumedBy(stem, STOP_PHRASES) || (core.length === 0 && consumedBy(words, STOP_PHRASES))) {
     return { intent: "stop", reason: "Asked to stop." };
   }
   // "no, stop" / "okay stop now" — a short utterance that contains a stop word
@@ -272,7 +350,7 @@ export function classifyTurnIntent(text: string, context: TurnIntentContext): Tu
 
   // Encouragement must be genuinely consumed by acknowledgement phrases; an
   // empty core caused by attention words like "hey" or "temy" is not praise.
-  if ((core.length > 0 && consumedBy(core, ACK_PHRASES)) || (core.length === 0 && consumedBy(words, ACK_PHRASES))) {
+  if ((stem.length > 0 && consumedBy(stem, ACK_PHRASES)) || (core.length === 0 && consumedBy(words, ACK_PHRASES))) {
     return { intent: "acknowledge", reason: "Encouragement — carrying on." };
   }
 
@@ -288,12 +366,18 @@ export function classifyTurnIntent(text: string, context: TurnIntentContext): Tu
     narrating, one item of it is unclear, and the question is about that item.
     It is answered from the run rather than sent to the chat, because sending
     it would replace the very work the question is about.
+
+    `SELF_WORK_QUESTION` is the same case reached by the other road — the
+    question points at the run through the agent rather than through a
+    demonstrative. Both are tested against `joined` rather than the core,
+    because "you" is a filler here (it is half of "thank you") and stripping it
+    turns "which file are you in" into something with no subject left to test.
   */
   const coreJoined = core.join(" ");
   if (
     !IMPERATIVE_OPENERS.test(coreJoined) &&
     (QUESTION_OPENERS.test(coreJoined) || /\?\s*$/.test(text.trim())) &&
-    WORK_DEIXIS.test(joined)
+    (WORK_DEIXIS.test(joined) || SELF_WORK_QUESTION.test(joined))
   ) {
     return { intent: "explain", reason: "Asked about something the run is doing." };
   }

@@ -1,4 +1,4 @@
-export type ModelModeId = "flash" | "auto" | "max";
+export type ModelModeId = "flash" | "auto" | "max" | "gemini";
 export type ModelProfileId = ModelModeId;
 
 export interface ModelProfile {
