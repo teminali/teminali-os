@@ -13,6 +13,8 @@ const { initVideoProjects, shutdownVideoProjects } = require("./videoProjects.cj
 const { initVideoExport, shutdownVideoExport } = require("./videoExport.cjs");
 const { registerWorkspaceMediaScheme, initWorkspaceMedia, stopWorkspaceTranscodes } = require("./workspaceMedia.cjs");
 const { initBrowserViews } = require("./browserView.cjs");
+const { initMpvView } = require("./mpvView.cjs");
+const { configureTouchIdWebAuthn } = require("./webauthn.cjs");
 const { attachContextMenu } = require("./contextMenu.cjs");
 
 // The file pane's video and audio come over `teminali-media://`, and Electron
@@ -319,6 +321,8 @@ let mainWindow = null;
 let videoRpc = null;
 
 let browserViews = null;
+/* The player panel's embedded mpv, on the platforms that can hold one. See electron/mpvView.cjs. */
+let mpvView = null;
 
 const DEV_URL = "http://localhost:3000";
 
@@ -426,6 +430,9 @@ function createWindow() {
     if (!isMainFrame || isInPlace) return;
     try {
       browserViews?.destroyAllBrowserViews();
+      // The video window belongs to the document that asked for it too, and the
+      // fresh page has never heard of it — see electron/mpvView.cjs.
+      mpvView?.shutdownMpvView();
     } catch (error) {
       log("Browser views could not be cleared on navigation:", error?.message ?? error);
     }
@@ -447,6 +454,9 @@ function createWindow() {
     // contents no one can reach.
     try {
       browserViews?.destroyAllBrowserViews();
+      // mpv is a separate process: nothing else would end it, and it would keep
+      // a black window over a desktop whose application has closed.
+      mpvView?.shutdownMpvView();
     } catch (error) {
       log("Browser views could not be torn down:", error?.message ?? error);
     }
@@ -483,6 +493,46 @@ function createWindow() {
    disagree about what mode you are in.
    ────────────────────────────────────────────────────────────────────────── */
 
+/**
+ * The menu bar item's last known preference, cached where this process can read
+ * it before any window exists.
+ *
+ * The renderer owns this preference — it lives in the persisted store with all
+ * the others — but the Tray is built at `whenReady`, long before the renderer
+ * has mounted and can say what the operator wanted. Without a copy on this side
+ * the item appears and then vanishes on every cold start for anyone who turned
+ * it off. The renderer is still the authority: its push on mount overrides this
+ * file, which only ever records what that push last settled on. It is the first
+ * preference this process persists; there is deliberately nothing general here,
+ * because one boolean does not need a store.
+ */
+const menuBarIconCache = () => path.join(app.getPath("userData"), "shell-chrome.json");
+
+function readMenuBarIcon() {
+  try {
+    const cached = JSON.parse(fs.readFileSync(menuBarIconCache(), "utf8"));
+    // Anything but an explicit false means the item is wanted: no file, an
+    // unreadable one, or one written by a build that did not know this key.
+    return !(cached && cached.menuBarIcon === false);
+  } catch {
+    return true;
+  }
+}
+
+/**
+ * Records the visibility that actually settled, not the one requested, so this
+ * cache and the renderer's preference always hold the same boolean — the
+ * renderer writes the settled answer back into its own store for the same
+ * reason. A cache that disagreed with the store would be a second opinion.
+ */
+function writeMenuBarIcon(visible) {
+  try {
+    fs.writeFileSync(menuBarIconCache(), JSON.stringify({ menuBarIcon: visible }), "utf8");
+  } catch (error) {
+    log("Menu bar icon preference could not be cached:", error.message);
+  }
+}
+
 let assistantTray = null;
 let assistantOverlay = null;
 const DEFAULT_ASSISTANT_HOTKEY = "CommandOrControl+Shift+Space";
@@ -516,6 +566,20 @@ function activateAssistant() {
  */
 function registerAssistantHotkey(accelerator) {
   const next = typeof accelerator === "string" && accelerator.trim() ? accelerator.trim() : DEFAULT_ASSISTANT_HOTKEY;
+
+  // Asking again for the shortcut we already hold is not free if it is honoured
+  // literally: unregisterAll() drops it, and until register() takes it back the
+  // hotkey does nothing. Three callers reach here on a cold start - this file's
+  // own startup call, the renderer pushing the operator's setting, and (in dev)
+  // StrictMode invoking that effect a second time - so the literal reading tore
+  // the shortcut down twice for no change and printed two lines claiming a
+  // registration that had already happened, which is exactly the noise that
+  // hides a registration that genuinely failed.
+  //
+  // A failed attempt is still retried rather than remembered: another
+  // application may have released the combination since we last asked.
+  if (next === assistantHotkey.accelerator && assistantHotkey.registered) return assistantHotkey;
+
   try {
     globalShortcut.unregisterAll();
   } catch (error) {
@@ -545,6 +609,15 @@ ipcMain.handle("assistant:set-state", (_event, state) => {
 ipcMain.handle("assistant:set-hotkey", (_event, accelerator) => registerAssistantHotkey(accelerator));
 
 ipcMain.handle("assistant:hotkey-status", () => assistantHotkey);
+
+// Returns the settled visibility, not the request. A Tray that will not
+// construct on this platform must not leave the settings row claiming an item
+// the menu bar does not have, so the renderer writes back whatever it is told.
+ipcMain.handle("assistant:set-tray-visible", (_event, visible) => {
+  const settled = Boolean(assistantTray?.setVisible(visible !== false));
+  writeMenuBarIcon(settled);
+  return settled;
+});
 
 ipcMain.handle("assistant:show-overlay", (_event, state) => {
   if (!assistantOverlay || !state || typeof state !== "object") return false;
@@ -1045,12 +1118,42 @@ app.whenReady().then(async () => {
     log("Workspace media protocol could not be registered:", error?.stack || error?.message || error);
   }
 
+  /*
+    Touch ID passkeys, before the first page can ask for one.
+
+    Awaited rather than left to finish on its own: until
+    `configureWebAuthn` has been called,
+    `isUserVerifyingPlatformAuthenticatorAvailable()` answers false, and a page
+    that asked a moment too early would be told there is no authenticator by a
+    build that has one. It costs one `codesign` read, bounded and only on
+    macOS, on a path that has already waited for a gateway. See
+    electron/webauthn.cjs.
+  */
+  try {
+    await configureTouchIdWebAuthn({ app, log });
+  } catch (error) {
+    log("Touch ID passkeys could not be configured:", error?.stack || error?.message || error);
+  }
+
   // The browser panel's pages, which are views layered over the window rather
   // than frames inside it. See electron/browserView.cjs.
   try {
     browserViews = initBrowserViews({ getMainWindow: () => mainWindow, log });
   } catch (error) {
     log("Browser views could not be initialised:", error?.stack || error?.message || error);
+  }
+
+  /*
+    The player panel's video output, which on Windows and Linux is a window of
+    its own that mpv draws into rather than anything in the document. On macOS
+    every call answers "not on this platform" — a spawned process cannot be
+    embedded there and the Mac's path is a linked libmpv. See
+    electron/mpvView.cjs and docs/MEDIA_LICENSING.md.
+  */
+  try {
+    mpvView = initMpvView({ getMainWindow: () => mainWindow, log });
+  } catch (error) {
+    log("The mpv view could not be initialised:", error?.stack || error?.message || error);
   }
 
   /*
@@ -1131,6 +1234,9 @@ app.whenReady().then(async () => {
   // either one a submenu away.
   try {
     assistantTray = attachAssistantTray({
+      // Read before the item is built, so an operator who turned it off gets no
+      // cold-start flash of an icon on its way to being destroyed.
+      initialVisible: readMenuBarIcon(),
       getWindow: () => mainWindow,
       onCreateWindow: createWindow,
       onCommand: () => {},

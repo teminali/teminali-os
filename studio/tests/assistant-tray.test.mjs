@@ -1,5 +1,5 @@
 /**
- * The assistant tray's glyph, under plain Node.
+ * The assistant tray's glyph and its visibility, under plain Node.
  *
  * The menu bar item draws the product mark by rasterising the geometry of
  * `build/mark.svg` rather than loading a file, which buys a packaged build with
@@ -10,9 +10,17 @@
  * off-centre — neither of which throws, and both of which only ever show up in
  * a screenshot of somebody's menu bar.
  *
+ * The second group pins when a `Tray` is constructed at all. macOS cannot hide
+ * a menu bar item, so "off" is a destroyed Tray — which means the preference has
+ * to be known *before* the item is built, or an operator who turned it off sees
+ * it appear and vanish on every cold start. These tests count constructions,
+ * because that flash is the one thing a screenshot would catch and no assertion
+ * about the settled boolean ever will.
+ *
  * Electron cannot run in the test process, so `require("electron")` is answered
  * with a stand-in that keeps the buffers the real `nativeImage` would have been
- * handed.
+ * handed, and — for the visibility tests — records every Tray it is asked to
+ * build.
  */
 
 import assert from "node:assert/strict";
@@ -69,6 +77,62 @@ function alphaGrid({ buffer, width, height }) {
     rows.push(row);
   }
   return rows;
+}
+
+/**
+ * Attaches a tray against a stand-in Electron, and hands back the list of Trays
+ * that were actually constructed.
+ *
+ * Every attach must be destroyed by its test: the permission modules are
+ * imported asynchronously and start a 20s poll when they land, which would
+ * otherwise outlive the test file and hang the suite.
+ */
+function attachTray(options = {}) {
+  const built = [];
+  class Tray {
+    constructor() {
+      this.destroyed = false;
+      built.push(this);
+    }
+    setToolTip() {}
+    setTitle() {}
+    setContextMenu() {}
+    on() {}
+    destroy() {
+      this.destroyed = true;
+    }
+    isDestroyed() {
+      return this.destroyed;
+    }
+  }
+
+  const electron = {
+    Tray,
+    Menu: { buildFromTemplate: () => ({}) },
+    app: { getName: () => "Teminali OS", on: () => {} },
+    nativeImage: {
+      createFromBuffer: () => ({ addRepresentation() {}, setTemplateImage() {} }),
+    },
+  };
+
+  const realLoad = Module._load;
+  Module._load = function load(request, parent, isMain) {
+    if (request === "electron") return electron;
+    return realLoad.call(this, request, parent, isMain);
+  };
+  try {
+    delete require_.cache[require_.resolve(TRAY)];
+    const tray = require_(TRAY).attachAssistantTray({
+      getWindow: () => null,
+      onCreateWindow: () => {},
+      onCommand: () => {},
+      getHotkeyStatus: () => ({}),
+      ...options,
+    });
+    return { built, tray };
+  } finally {
+    Module._load = realLoad;
+  }
 }
 
 /* ── Tests ────────────────────────────────────────────────────────────────── */
@@ -137,5 +201,45 @@ test("nothing is painted into the square's margins", () => {
       assert.equal(row[0], 0, `@${scale}x painted the left edge column`);
       assert.equal(row[row.length - 1], 0, `@${scale}x painted the right edge column`);
     }
+  }
+});
+
+/* ── Visibility ───────────────────────────────────────────────────────────── */
+
+test("the item is built at attach when nothing asks for it to be hidden", () => {
+  const { built, tray } = attachTray();
+  try {
+    assert.equal(built.length, 1, "the default is an assistant you can see");
+  } finally {
+    tray.destroy();
+  }
+});
+
+test("attaching hidden builds no Tray at all, so there is nothing to flash", () => {
+  const { built, tray } = attachTray({ initialVisible: false });
+  try {
+    assert.equal(built.length, 0, `attaching hidden constructed ${built.length} Tray(s)`);
+    assert.equal(tray.isVisible(), false);
+  } finally {
+    tray.destroy();
+  }
+});
+
+test("an item that started hidden can still be turned on", () => {
+  const { built, tray } = attachTray({ initialVisible: false });
+  try {
+    // Not the degraded stand-in returned when a Tray will not construct: that
+    // one answers false forever, and would strand the operator with a switch
+    // that does nothing.
+    assert.equal(tray.setVisible(true), true, "turning it on must report the item is up");
+    assert.equal(built.length, 1, "turning it on must build exactly one Tray");
+
+    assert.equal(tray.setVisible(true), true, "a second on is not a second item");
+    assert.equal(built.length, 1);
+
+    assert.equal(tray.setVisible(false), false);
+    assert.equal(built[0].destroyed, true, "off is a destroy; macOS cannot hide a Tray");
+  } finally {
+    tray.destroy();
   }
 });

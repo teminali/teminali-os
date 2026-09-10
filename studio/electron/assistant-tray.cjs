@@ -164,15 +164,26 @@ function attachAssistantTray({
   getHotkeyStatus,
   isOverlayMinimised = () => false,
   onToggleOverlayMinimised = () => {},
+  initialVisible = true,
   log = () => {},
 }) {
   let tray = null;
   let timer = null;
+  // Torn down. The permission modules are imported asynchronously, so an attach
+  // that is destroyed before they land would otherwise start a poll with
+  // nothing left to poll — and a 20s interval nothing ever clears.
+  let destroyed = false;
   let permissions = null;
   let pointer = null;
   // Rebuilding an open context menu closes it under the cursor.
   let menuOpen = false;
   let pendingRebuild = false;
+  // Whether the operator wants the item at all. macOS offers no way to hide a
+  // Tray, so "off" is a destroyed Tray and "on" builds a new one. Attaching
+  // already hidden is the same state a `setVisible(false)` reaches, only
+  // without building the item first — which is the whole point: the operator
+  // who turned it off should never see it at all.
+  let visible = initialVisible !== false;
 
   /** Mirrored from the renderer, which owns the settings. */
   let state = {
@@ -185,14 +196,48 @@ function attachAssistantTray({
     phase: "idle",
   };
 
-  try {
-    tray = new Tray(assistantIcon());
-  } catch (error) {
-    log("Assistant tray unavailable:", error && error.message ? error.message : String(error));
-    return { destroy() {}, setState() {}, refresh() {}, rebuildMenu() {} };
+  /**
+   * Builds the Tray and wires the one handler that belongs to the item itself
+   * rather than to its menu.
+   *
+   * Called at attach, and again whenever the operator turns the menu bar icon
+   * back on. Rebuilding from the same rasterised glyph is why turning it off
+   * can be a destroy: there is no asset to reload and nothing to restore but
+   * the mirrored state, which the renderer owns anyway.
+   */
+  function openTray() {
+    if (tray && !tray.isDestroyed()) return true;
+    try {
+      tray = new Tray(assistantIcon());
+    } catch (error) {
+      log("Assistant tray unavailable:", error && error.message ? error.message : String(error));
+      tray = null;
+      return false;
+    }
+    tray.setToolTip("Teminali Assistant");
+    tray.on("double-click", () => reveal({ activate: true }, { focus: false }));
+    return true;
   }
 
-  tray.setToolTip("Teminali Assistant");
+  /* Only a platform that was asked for the item can report that it cannot
+     build one. Attaching hidden therefore skips this probe entirely and keeps
+     the full surface: nothing is known about the Tray until `setVisible(true)`
+     asks for it, and that call answers with what actually happened. */
+  if (visible && !openTray()) {
+    return {
+      destroy() {},
+      setState() {},
+      refresh() {},
+      rebuildMenu() {},
+      rebuild() {},
+      setVisible() {
+        return false;
+      },
+      isVisible() {
+        return false;
+      },
+    };
+  }
 
   /**
    * Brings the window back, and decides whether to take focus doing it.
@@ -429,7 +474,7 @@ function attachAssistantTray({
   let screenRecordingModule = null;
 
   async function refresh() {
-    if (!pointer) return;
+    if (!pointer || !visible) return;
     try {
       permissions = await pointer.pointerPermissions();
       applyTitle();
@@ -476,6 +521,7 @@ function attachAssistantTray({
     import(pathToFileURL(path.join(__dirname, "..", "server", "screen-recording.js")).href),
   ])
     .then(([pointerModule, assistant, screenRecording]) => {
+      if (destroyed) return;
       pointer = pointerModule;
       assistantModule = assistant;
       screenRecordingModule = screenRecording;
@@ -487,11 +533,46 @@ function attachAssistantTray({
       applyMenu();
     });
 
-  tray.on("double-click", () => reveal({ activate: true }, { focus: false }));
   applyTitle();
   applyMenu();
 
+  /**
+   * Shows or hides the item, and reports what actually happened.
+   *
+   * The return value is the settled state rather than the request: a Tray that
+   * will not construct leaves the preference on while the menu bar stays empty,
+   * and the row would then be showing the operator an intention instead of a
+   * fact. The caller writes back what it is told.
+   */
+  function setVisible(next) {
+    const wanted = next !== false;
+    if (wanted === visible) return wanted && Boolean(tray) && !tray.isDestroyed();
+    visible = wanted;
+
+    if (!wanted) {
+      if (tray && !tray.isDestroyed()) tray.destroy();
+      tray = null;
+      // A menu that was open when the item vanished never gets its close
+      // event, and a stuck `menuOpen` would defer every rebuild forever.
+      menuOpen = false;
+      pendingRebuild = false;
+      return false;
+    }
+
+    if (!openTray()) {
+      visible = false;
+      return false;
+    }
+    applyTitle();
+    applyMenu();
+    // The permissions may have changed while the item was gone, and the menu
+    // just rebuilt from whatever was last polled.
+    void refresh();
+    return true;
+  }
+
   function destroy() {
+    destroyed = true;
     if (timer) clearInterval(timer);
     timer = null;
     if (tray && !tray.isDestroyed()) tray.destroy();
@@ -503,6 +584,8 @@ function attachAssistantTray({
   return {
     destroy,
     refresh,
+    setVisible,
+    isVisible: () => visible && Boolean(tray) && !tray.isDestroyed(),
     /** Redraw the menu when something outside the mirrored state changes. */
     rebuildMenu: applyMenu,
     /** The renderer owns the settings; the tray mirrors them. */

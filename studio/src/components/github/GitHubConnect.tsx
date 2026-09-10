@@ -6,6 +6,7 @@ import { GitHubService, type GitHubRepo, type GitHubStatus } from "../../service
 import { useStudioStore } from "../../store/studioStore";
 import { WorkspaceService } from "../../services/workspaceService";
 import { refreshGitHubStatus } from "../../hooks/useGitHubStatus";
+import { SettingGroup, SettingRow } from "../ui/Setting";
 import { IconButton, StatusDot } from "../ui";
 
 /**
@@ -18,12 +19,21 @@ import { IconButton, StatusDot } from "../ui";
  *
  * Cloning writes beside the current workspace root rather than inside it, so a
  * clone never nests one project within another.
+ *
+ * **Shape.** The account is a `SettingGroup` of rows, because sign-in state and
+ * the token field are settings. The repository list is a second group but not a
+ * row family inside it: a catalogue of two hundred repositories is a list, and
+ * a list dressed as a set of settings reads as one very long setting. The group
+ * gives it the card and the hairlines; the rows inside it are repositories.
+ * Before this it was neither — a private stack of `lit` cards that the settings
+ * page then wrapped in a card of its own.
+ *
+ * Two callers, one shape: `GitPane` renders it directly into the settings page,
+ * and `GitHubModal` renders it in a dialog for the sidebar and the empty state.
+ * The groups are self-contained cards, so they sit correctly in both.
  */
 
-export const GitHubConnect: React.FC<{ compact?: boolean; onCloned?: (path: string) => void }> = ({
-  compact = false,
-  onCloned,
-}) => {
+export const GitHubConnect: React.FC<{ onCloned?: (path: string) => void }> = ({ onCloned }) => {
   const [status, setStatus] = useState<GitHubStatus | null>(null);
   const [repos, setRepos] = useState<GitHubRepo[]>([]);
   const [loading, setLoading] = useState(true);
@@ -104,45 +114,77 @@ export const GitHubConnect: React.FC<{ compact?: boolean; onCloned?: (path: stri
     }
   };
 
+  /*
+    The waiting state is a row inside the Account card, not a bare spinner on the
+    page. GitPane renders this component directly now, so anything returned here
+    is the whole screen: an unhoused spinner floats in the middle of empty space
+    and then the real card lands somewhere else entirely. A card that keeps its
+    place and fills in is the same wait without the jump.
+  */
   if (loading && !status) {
     return (
-      <div className="flex items-center justify-center py-10 text-ink-muted">
-        <Loader2 size={16} className="animate-spin" />
+      <div className="space-y-6">
+        <SettingGroup label="Account">
+          <SettingRow
+            label={
+              <span className="flex items-center gap-2 text-ink-muted">
+                <Loader2 size={14} className="flex-shrink-0 animate-spin" />
+                Checking your GitHub CLI sign-in…
+              </span>
+            }
+            description="Asking the GitHub CLI who it is already signed in as. Nothing is sent anywhere."
+          />
+        </SettingGroup>
       </div>
     );
   }
 
   return (
-    <div className="flex flex-col gap-3">
+    <div className="space-y-6">
       {/* ── Account ──────────────────────────────────────────────────────── */}
-      <div className="lit lit-inner rounded-lg bg-surface px-3 py-2.5 flex items-center gap-3">
-        <Github size={16} className="text-ink-prose flex-shrink-0" />
+      <SettingGroup label="Account">
         {status?.connected ? (
-          <>
-            <div className="min-w-0 flex-1">
-              <div className="text-xs text-ink-bright truncate">
-                {status.name ? `${status.name} · ` : ""}
-                <span className="font-mono text-ink-prose">@{status.login}</span>
-              </div>
-              <div className="text-3xs text-ink-faint font-mono truncate">
+          <SettingRow
+            label={
+              <span className="flex items-center gap-2">
+                <Github size={14} className="flex-shrink-0 text-ink-muted" />
+                <span className="truncate">
+                  {status.name ? `${status.name} · ` : ""}
+                  <span className="font-mono text-ink-prose">@{status.login}</span>
+                </span>
+              </span>
+            }
+            description={
+              <span className="font-mono">
                 {status.method === "cli" ? status.cliVersion : "personal access token"}
                 {status.scopes?.length ? ` · ${status.scopes.join(", ")}` : ""}
-              </div>
-            </div>
-            <span className="flex items-center gap-1.5 text-2xs text-success flex-shrink-0">
+              </span>
+            }
+          >
+            <span className="flex items-center gap-1.5 text-2xs text-success">
               <StatusDot tone="success" />
               Connected
             </span>
             <IconButton onClick={() => void refresh()} title="Re-check" size={24}>
               {loading ? <Loader2 size={12} className="animate-spin" /> : <RefreshCw size={12} />}
             </IconButton>
-          </>
+          </SettingRow>
         ) : (
-          <div className="min-w-0 flex-1 flex flex-col gap-2">
-            <p className="text-2xs text-ink-faint leading-relaxed">
-              {status?.detail ?? "Not connected."}
-            </p>
-            <div className="flex items-center gap-2">
+          <>
+            <SettingRow
+              label={
+                <span className="flex items-center gap-2">
+                  <Github size={14} className="flex-shrink-0 text-ink-muted" />
+                  GitHub sign-in
+                </span>
+              }
+              description={status?.detail ?? "Not connected."}
+            />
+            {/* The token field is a full-width cell rather than a control in the
+                right-hand column: a password field, a button and a link to
+                create the token do not fit beside a label, and truncating the
+                field is truncating the only part that matters. */}
+            <div className="flex items-center gap-2 px-3.5 py-3">
               <input
                 type="password"
                 value={token}
@@ -151,15 +193,16 @@ export const GitHubConnect: React.FC<{ compact?: boolean; onCloned?: (path: stri
                   if (event.key === "Enter") void connect();
                 }}
                 placeholder="ghp_… personal access token"
+                aria-label="Personal access token"
                 autoComplete="off"
                 spellCheck={false}
-                className="lit lit-inner flex-1 min-w-0 h-7 px-2.5 bg-surface-sunken rounded-md font-mono text-2xs text-ink-high placeholder:text-ink-placeholder outline-none"
+                className="lit lit-inner h-7 min-w-0 flex-1 rounded-md bg-surface-sunken px-2.5 font-mono text-2xs text-ink-high placeholder:text-ink-placeholder outline-none"
               />
               <button
                 type="button"
                 onClick={connect}
                 disabled={!token.trim() || loading}
-                className="h-7 px-3 rounded-md bg-accent text-frame-top text-2xs font-medium hover:bg-accent-hover disabled:opacity-40 transition-colors duration-ds ease-ds flex-shrink-0"
+                className="h-7 flex-shrink-0 rounded-md bg-accent px-3 text-2xs font-medium text-frame-top transition-colors duration-ds ease-ds hover:bg-accent-hover disabled:opacity-40"
               >
                 Connect
               </button>
@@ -168,32 +211,49 @@ export const GitHubConnect: React.FC<{ compact?: boolean; onCloned?: (path: stri
                 target="_blank"
                 rel="noreferrer"
                 title="Create a token"
-                className="text-ink-faint hover:text-ink-dim flex-shrink-0"
+                className="flex-shrink-0 text-ink-faint hover:text-ink-dim"
               >
                 <ExternalLink size={12} />
               </a>
             </div>
+          </>
+        )}
+
+        {status?.connected && status.canClone === false && (
+          <div className="flex items-start gap-2 bg-warning/5 px-3.5 py-3 text-2xs text-warning">
+            <AlertTriangle size={13} className="mt-px flex-shrink-0" />
+            <span>
+              This connection has no <span className="font-mono">repo</span> scope, so private repositories cannot be
+              cloned.
+            </span>
           </div>
         )}
-      </div>
+      </SettingGroup>
 
       {error && (
-        <div className="flex items-start gap-2 rounded-lg bg-danger/10 border border-danger/25 px-3 py-2 text-2xs text-danger">
-          <AlertTriangle size={13} className="flex-shrink-0 mt-px" />
+        <div className="flex items-start gap-2 rounded-lg border border-danger/25 bg-danger/10 px-3 py-2 text-2xs text-danger">
+          <AlertTriangle size={13} className="mt-px flex-shrink-0" />
           {error}
         </div>
       )}
 
       {/* ── Repositories ─────────────────────────────────────────────────── */}
       {status?.connected && (
-        <>
-          <div className="relative">
-            <Search size={12} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-ink-faint pointer-events-none" />
+        <SettingGroup
+          label="Repositories"
+          description="Clones land beside your current project, shallow by default, and appear in the project switcher."
+        >
+          <div className="relative px-3.5 py-2.5">
+            <Search
+              size={12}
+              className="pointer-events-none absolute left-6 top-1/2 -translate-y-1/2 text-ink-faint"
+            />
             <input
               value={query}
               onChange={(event) => setQuery(event.target.value)}
               placeholder={`Search ${repos.length} repositories`}
-              className="lit lit-inner w-full h-7 pl-7 pr-2 bg-surface rounded-md text-xs text-ink-high placeholder:text-ink-placeholder outline-none"
+              aria-label="Search repositories"
+              className="lit lit-inner h-7 w-full rounded-md bg-surface-sunken pl-7 pr-2 text-xs text-ink-high placeholder:text-ink-placeholder outline-none"
             />
           </div>
 
@@ -202,33 +262,43 @@ export const GitHubConnect: React.FC<{ compact?: boolean; onCloned?: (path: stri
               <Loader2 size={16} className="animate-spin" />
             </div>
           ) : (
-            <div
-              className={`rounded-lg border border-edge overflow-y-auto divide-y divide-edge-chrome ${
-                compact ? "max-h-64" : "max-h-96"
-              }`}
-            >
+            /* The list draws its own hairlines with the same divider the group
+               uses, so a hundred repositories are one cell of the card rather
+               than a second card inside it.
+
+               It does not scroll on its own. Both callers already own a
+               scrollport — the settings page, and the modal's `flex-1 min-h-0
+               overflow-y-auto` body — so the `max-h-96` this used to carry put
+               383px of window over 2254px of list and trapped the wheel inside
+               a card that looked like part of the page. One scrollport per
+               screen; the list is long because the account is, and a long list
+               on a page that scrolls is not a problem that needs solving twice.
+               Sticky search was considered and does not work here: the group's
+               card is `overflow-hidden`, which makes it the sticky element's
+               scrollport and pins it to nothing. */
+            <div className="divide-y divide-edge-chrome">
               {visible.map((repo) => (
                 <div
                   key={repo.fullName}
-                  className="px-3 py-2 flex items-center gap-3 bg-surface hover:bg-surface-hover transition-colors duration-ds ease-ds"
+                  className="flex items-center gap-3 px-3.5 py-2 transition-colors duration-ds ease-ds hover:bg-surface-hover"
                 >
                   <div className="min-w-0 flex-1">
-                    <div className="flex items-center gap-2 min-w-0">
-                      <span className="font-mono text-2xs text-ink-bright truncate">{repo.fullName}</span>
-                      {repo.private && <Lock size={9} className="text-ink-disabled flex-shrink-0" />}
+                    <div className="flex min-w-0 items-center gap-2">
+                      <span className="truncate font-mono text-2xs text-ink-bright">{repo.fullName}</span>
+                      {repo.private && <Lock size={9} className="flex-shrink-0 text-ink-disabled" />}
                       {repo.stars > 0 && (
-                        <span className="flex items-center gap-0.5 text-3xs text-ink-disabled flex-shrink-0">
+                        <span className="flex flex-shrink-0 items-center gap-0.5 text-3xs text-ink-disabled">
                           <Star size={9} />
                           {repo.stars}
                         </span>
                       )}
                     </div>
                     {repo.description && (
-                      <div className="text-3xs text-ink-faint truncate mt-0.5">{repo.description}</div>
+                      <div className="mt-0.5 truncate text-3xs text-ink-faint">{repo.description}</div>
                     )}
                   </div>
                   {repo.language && (
-                    <span className="text-3xs text-ink-muted font-mono flex-shrink-0 w-20 text-right truncate">
+                    <span className="w-20 flex-shrink-0 truncate text-right font-mono text-3xs text-ink-muted">
                       {repo.language}
                     </span>
                   )}
@@ -236,7 +306,7 @@ export const GitHubConnect: React.FC<{ compact?: boolean; onCloned?: (path: stri
                     type="button"
                     onClick={() => void clone(repo)}
                     disabled={cloning !== null}
-                    className="h-6 px-2 inline-flex items-center gap-1.5 rounded-md bg-surface-chip text-ink-dim text-3xs hover:bg-surface-hover hover:text-ink-high disabled:opacity-40 transition-colors duration-ds ease-ds flex-shrink-0"
+                    className="inline-flex h-6 flex-shrink-0 items-center gap-1.5 rounded-md bg-surface-chip px-2 text-3xs text-ink-dim transition-colors duration-ds ease-ds hover:bg-surface-hover hover:text-ink-high disabled:opacity-40"
                   >
                     {cloning === repo.fullName ? (
                       <>
@@ -253,24 +323,12 @@ export const GitHubConnect: React.FC<{ compact?: boolean; onCloned?: (path: stri
                 </div>
               ))}
               {visible.length === 0 && (
-                <p className="px-3 py-6 text-center text-2xs text-ink-faint">No repository matches that search.</p>
+                <p className="px-3.5 py-6 text-center text-2xs text-ink-faint">No repository matches that search.</p>
               )}
             </div>
           )}
-
-          <p className="text-3xs text-ink-disabled">
-            Clones land beside your current project, shallow by default, and appear in the project switcher.
-          </p>
-        </>
+        </SettingGroup>
       )}
-
-      {status?.connected && status.canClone === false && (
-        <div className="flex items-start gap-2 rounded-lg bg-warning/10 border border-warning/25 px-3 py-2 text-2xs text-warning">
-          <AlertTriangle size={13} className="flex-shrink-0 mt-px" />
-          This connection has no <span className="font-mono">repo</span> scope, so private repositories cannot be cloned.
-        </div>
-      )}
-
     </div>
   );
 };
