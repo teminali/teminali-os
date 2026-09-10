@@ -84,7 +84,7 @@ Windows packaged in **2m05s** at v1.2.7, when the payload was ~200 MB. It has
 never finished since the sidecar was added. That correlation is the strongest
 evidence we have.
 
-## The stop-gap, currently on branch `win-trim-clean`
+## The stop-gap — landed on `master` for 0.0.6
 
 Windows drops `voice-runtime/node_modules` from `extraResources` entirely. One
 commit off `master`, two files: `studio/electron-builder.yml` and
@@ -98,6 +98,15 @@ state (`whisper.cpp is not installed`). Local speech degrades; nothing crashes.
 `tests/packaging-resources.test.mjs` was updated: the sidecar-pruning assertion
 was `blocks.length === 3` and is now `>= 2` plus an explicit assertion that
 `win` has no block. **Restore it to 3 when the real fix lands.**
+
+**Status, 2026-09-10:** this is no longer on a branch. `win-trim-clean` was cut
+on 2026-09-07 and is now ~58,000 lines behind `master`, so merging it would
+revert three days of work; the one commit's *intent* was applied to `master`
+directly instead, with its evidence rewritten into the `win:` comment. 0.0.6 is
+therefore the first release whose Windows job is expected to finish. If it does
+not, the instrumentation below is already on, and the theory to test first is
+whatever `DEBUG: electron-builder` prints after `makensis` — not the four
+hypotheses ruled out above.
 
 ## The real fix — download the sidecar in the installer wizard
 
