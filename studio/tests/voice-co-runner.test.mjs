@@ -124,6 +124,42 @@ test("the digest is bounded, because a local window is small", () => {
   assert.equal((text.match(/^\d+\. /gm) ?? []).length, MAX_CALLS);
 });
 
+test("the digest separates the file it changed from the file it is reading", () => {
+  // The failure this exists for: a run edits one file, then reads the next, and
+  // the answer names the one it is reading. Both are in the list; only one was
+  // written, and the digest has to say which.
+  const text = runDigest(
+    run({
+      toolCalls: [
+        call({ id: "1", name: "Read", arguments: { file_path: "src/voice/conversation.ts" } }),
+        call({ id: "2", name: "Edit", arguments: { file_path: "src/voice/conversation.ts" } }),
+        call({ id: "3", name: "Read", arguments: { file_path: "src/chat/Composer.tsx" } }),
+      ],
+      lastText: "Reading the composer to see how it commits a turn.",
+    }),
+    1000,
+  );
+  assert.match(text, /only files it has changed are: src\/voice\/conversation\.ts\./);
+  assert.equal(text.includes("changed are: src/chat/Composer.tsx"), false, "a read file is not a changed one");
+  assert.match(text, /3\. Read src\/chat\/Composer\.tsx — read only, not changed/);
+  assert.match(text, /2\. Edit src\/voice\/conversation\.ts — changed this file/);
+});
+
+test("a run that has only looked around says so, rather than leaving it open", () => {
+  const text = runDigest(run({ toolCalls: [call({}), call({ id: "2", name: "Grep", arguments: { pattern: "x" } })] }), 1000);
+  assert.match(text, /has not changed any file yet/);
+});
+
+test("a failed write is not reported as a change", () => {
+  const text = runDigest(run({ toolCalls: [call({ name: "Write", status: "error" })] }), 1000);
+  assert.match(text, /has not changed any file yet/);
+  assert.match(text, /failed/);
+});
+
+test("the prompt points a question about changes at the changed files", () => {
+  assert.match(explainPrompt("which file are you changing?", run({}), 1000), /name only the files listed as changed/);
+});
+
 test("the prompt forbids inventing what the digest does not contain", () => {
   const prompt = explainPrompt("why that file?", run({}), 1000);
   assert.match(prompt, /why that file\?/);

@@ -94,6 +94,8 @@ export interface ProviderInfo {
   configured: boolean;
   source: "stored" | "environment" | null;
   hint: string | null;
+  backupConfigured?: boolean;
+  backupHint?: string | null;
   enabled: boolean;
   lanes: { light: ProviderLane; heavy: ProviderLane };
   flagship: ProviderLane;
@@ -166,8 +168,8 @@ export const ModelService = {
 
 export const ProviderService = {
   list: (signal?: AbortSignal) => getJson<ProvidersResponse>("/api/providers", signal),
-  setKey: (provider: string, key: string | null, signal?: AbortSignal) =>
-    postJson<ProvidersResponse>("/api/providers/key", { provider, key }, signal),
+  setKey: (provider: string, key: string | null, backupKey?: string | null, signal?: AbortSignal) =>
+    postJson<ProvidersResponse>("/api/providers/key", { provider, key, backupKey }, signal),
   setLanes: (
     provider: string,
     lanes: { lightModel?: string; heavyModel?: string; enabled?: boolean },

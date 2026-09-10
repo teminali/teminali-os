@@ -1675,7 +1675,9 @@ a window holds several video elements, one per clip in the editor's compositor,
 and "the first one" would photograph the wrong surface. And the frame is
 `image`, singular, at every step, pinned by `tests/player-frame.test.mjs`:
 the camera's path says `images` in the window and `image` in the resolver,
-which is why `look_at_me` has never once worked.
+which is why `look_at_me` never once worked until the gateway hop was
+corrected to `images` (2026-09-10) and `tests/camera-frame.test.mjs` was given
+the round trip and the forwarding to hold.
 
 Pre-approved, with `player` and `player_control`. It photographs one thing —
 the file the operator opened, in the pane they are watching. The camera looks

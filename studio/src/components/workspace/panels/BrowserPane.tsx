@@ -2,9 +2,13 @@ import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useSta
 import {
   ArrowLeft,
   ArrowRight,
+  Bookmark,
+  Camera,
+  Cookie,
   ExternalLink,
   EyeOff,
   Globe,
+  HardDrive,
   House,
   Import,
   KeyRound,
@@ -16,17 +20,20 @@ import {
   X,
 } from "lucide-react";
 import { IconButton, Menu } from "../../ui";
-import { BrowserHome } from "./BrowserHome";
+import { BrowserHome, Mark } from "./BrowserHome";
 import { usePanelStore, type PanelTab } from "../../../store/panelStore";
 import { addressLabel, normaliseAddress } from "../../../utils/address";
 import { isBookmarked, useBrowserStore } from "../../../store/browserStore";
+import { useBrowserPrefsStore } from "../../../store/browserPrefsStore";
 import { BrowserImportModal } from "../../modals/BrowserImportModal";
+import { BrowserPasskeyModal } from "../../modals/BrowserPasskeyModal";
 import { useSearchEngine } from "../../../store/searchStore";
 import {
   boundsEqual,
   browserViewBridge,
   isOverlayOpen,
   measureBrowserViewBounds,
+  type BrowserClearKind,
   type BrowserViewBounds,
   type BrowserViewState,
 } from "../../../services/browserView";
@@ -94,6 +101,16 @@ export const BrowserPane: React.FC<{ panel: PanelTab }> = ({ panel }) => {
   // The passkey notice, once read, is not news any more. Kept per page: main
   // clears `state.passkey` on the next navigation, and that resets this too.
   const [passkeyRead, setPasskeyRead] = useState(false);
+  /*
+    Something happened where the operator cannot see it.
+
+    A screenshot is written outside the app, and a session emptied leaves the
+    page it was emptied under looking exactly as it did. Both need saying, and
+    neither is an error, so they get their own strip rather than the red one.
+    Dismissed rather than timed out: a path is worth reading twice, and it is
+    what the reveal button acts on.
+  */
+  const [notice, setNotice] = useState<{ text: string; path?: string } | null>(null);
 
   /*
     History.
@@ -118,6 +135,11 @@ export const BrowserPane: React.FC<{ panel: PanelTab }> = ({ panel }) => {
   const addBookmark = useBrowserStore((state) => state.bookmark);
   const removeBookmark = useBrowserStore((state) => state.unbookmark);
   const clearHistory = useBrowserStore((state) => state.clearHistory);
+
+  // The bar is one choice for every tab, and it survives a restart — which is
+  // why it is not in `browserStore`. See store/browserPrefsStore.ts.
+  const bookmarkBar = useBrowserPrefsStore((state) => state.bookmarkBar);
+  const toggleBookmarkBar = useBrowserPrefsStore((state) => state.toggleBookmarkBar);
 
   useEffect(() => {
     // The star has to know before it is first drawn, and a pane opened straight
@@ -286,6 +308,50 @@ export const BrowserPane: React.FC<{ panel: PanelTab }> = ({ panel }) => {
     else setReloadKey((key) => key + 1);
   };
 
+  /*
+    The operator's screenshot, which is not the agent's.
+
+    `page_screenshot` gives a model a jpeg of the viewport; this is the whole
+    page, lossless, in a file somebody will open at 200% to read the small
+    print. Main takes it and main saves it — through Electron's own save dialog,
+    so the app never invents a path in the operator's home — and all that comes
+    back here is where it went. A dismissed dialog is `cancelled`, and the right
+    response to a cancelled dialog is to say nothing at all.
+  */
+  const takeScreenshot = async () => {
+    if (!bridge) return;
+    const answer = await bridge.screenshot(panel.id);
+    if (answer?.cancelled) return;
+    if (!answer?.ok || !answer.path) {
+      setError(answer?.error ?? "The screenshot could not be saved.");
+      return;
+    }
+    setNotice({ text: `Screenshot saved to ${answer.path}`, path: answer.path });
+  };
+
+  /*
+    Clearing cookies or the cache.
+
+    Said out loud afterwards, because neither changes anything on screen: an
+    operator who clears cookies and sees the page they are signed in to still
+    sitting there has no reason to believe it worked. What each word covers is
+    main's `clearDataPlan`, not this component's to decide.
+  */
+  const clear = async (kind: BrowserClearKind) => {
+    if (!bridge) return;
+    const answer = await bridge.clearData(kind);
+    if (!answer?.ok) {
+      setError(answer?.error ?? "That could not be cleared.");
+      return;
+    }
+    setNotice({
+      text:
+        kind === "cookies"
+          ? "Cookies cleared on both browser sessions — sites you were signed in to will ask again."
+          : "Cached files cleared on both browser sessions.",
+    });
+  };
+
   const display = useMemo(() => shown ?? "Open any file, URL, …", [shown]);
   const starred = isBookmarked(bookmarks, shown);
 
@@ -427,6 +493,28 @@ export const BrowserPane: React.FC<{ panel: PanelTab }> = ({ panel }) => {
             items={[
               { id: "home", label: "Home", icon: <House size={13} />, onSelect: () => setHome(true), disabled: home },
               {
+                id: "bookmark-bar",
+                label: bookmarkBar ? "Hide bookmark bar" : "Show bookmark bar",
+                icon: <Bookmark size={13} />,
+                // Not offered on a private tab, for the reason its home page
+                // shows no bookmarks either: a strip of the shared list across
+                // the top of a tab labelled private says the opposite of what
+                // the label does. The choice itself is app-wide, so the bar is
+                // back the moment an ordinary tab is in front.
+                disabled: isPrivate,
+                onSelect: toggleBookmarkBar,
+              },
+              {
+                id: "screenshot",
+                label: "Take screenshot",
+                icon: <Camera size={13} />,
+                // Nothing to photograph while home is up: the page is still
+                // loaded behind it, and a picture of a page the operator is not
+                // looking at is not what this button appears to promise.
+                disabled: !shown || !bridge || home,
+                onSelect: () => void takeScreenshot(),
+              },
+              {
                 id: "external",
                 label: "Open in default browser",
                 icon: <ExternalLink size={13} />,
@@ -454,11 +542,35 @@ export const BrowserPane: React.FC<{ panel: PanelTab }> = ({ panel }) => {
                 // `role="dialog"` exactly as it does for every other dialog.
                 onSelect: () => setImportOpen(true),
               },
+              /*
+                Three clears, and they are three different things.
+
+                History is a gateway file the assistant reads
+                (`browserStore.clearHistory`); cookies and the cache are session
+                state in main, on both partitions. Kept as three plain items
+                rather than one "Clear browsing data…" dialog because each is
+                one sentence long and a dialog with three checkboxes would be
+                more chrome than the choice deserves.
+              */
               {
                 id: "clear",
                 label: "Clear history",
                 icon: <Trash2 size={13} />,
-                onSelect: () => void clearHistory(),
+                onSelect: () => void clearHistory().then(() => setNotice({ text: "Browsing history cleared." })),
+              },
+              {
+                id: "cookies",
+                label: "Clear cookies",
+                icon: <Cookie size={13} />,
+                disabled: !bridge,
+                onSelect: () => void clear("cookies"),
+              },
+              {
+                id: "cache",
+                label: "Clear cache",
+                icon: <HardDrive size={13} />,
+                disabled: !bridge,
+                onSelect: () => void clear("cache"),
               },
             ]}
           />
@@ -467,21 +579,75 @@ export const BrowserPane: React.FC<{ panel: PanelTab }> = ({ panel }) => {
 
       {error && <div className="px-3 py-2 text-2xs text-danger border-b border-edge-chrome">{error}</div>}
 
+      {/* Something done, rather than something wrong. See `notice` above. */}
+      {notice && (
+        <div className="px-3 py-2 flex items-center gap-2 border-b border-edge-chrome text-2xs text-ink-dim">
+          <span className="min-w-0 truncate" title={notice.text}>
+            {notice.text}
+          </span>
+          {notice.path && bridge && (
+            <button
+              type="button"
+              // The same reveal the downloads list uses, and it works for the
+              // same reason: main watched this exact file being written, which
+              // is the only thing that makes a path revealable.
+              onClick={() => void bridge.revealDownload(notice.path as string)}
+              className="flex-shrink-0 ml-auto text-accent hover:underline"
+            >
+              Show in Finder
+            </button>
+          )}
+          <IconButton size={20} title="Dismiss" onClick={() => setNotice(null)}>
+            <X size={11} />
+          </IconButton>
+        </div>
+      )}
+
+      {/*
+        The bookmark bar.
+
+        Drawn above the viewport rather than over the page, because nothing can
+        be drawn over the page: the strip takes height from the box whose
+        rectangle is reported to main, and the resize observer below moves the
+        view down to match. Hidden on a private tab — see the menu item.
+      */}
+      {bookmarkBar && !isPrivate && (
+        <div className="h-8 flex-shrink-0 flex items-center gap-1 px-2 border-b border-edge-chrome overflow-x-auto no-scrollbar">
+          {bookmarks.length === 0 ? (
+            <span className="px-1.5 text-2xs text-ink-faint">Star a page and it appears here.</span>
+          ) : (
+            bookmarks.map((bookmark) => (
+              <button
+                key={bookmark.url}
+                type="button"
+                onClick={() => go(bookmark.url)}
+                title={bookmark.url}
+                className="flex-shrink-0 h-6 max-w-[180px] pl-1 pr-2 rounded-md flex items-center gap-1.5 text-2xs text-ink-dim hover:bg-surface-raised hover:text-ink-high"
+              >
+                {/* The home page's mark, so a site is the same colour on both. */}
+                <Mark url={bookmark.url} size={14} round icon />
+                <span className="truncate">{bookmark.title || addressLabel(bookmark.url)}</span>
+              </button>
+            ))
+          )}
+        </div>
+      )}
+
       {/*
         The page asked for a passkey and nothing answered.
 
-        macOS grants the platform authenticator only to registered web
-        browsers, so Touch ID cannot work in this panel and no amount of work
-        here will change that (see electron/browserView.cjs). What was wrong
-        was the silence: the operator pressed a button and the app said
-        nothing, which reads as a bug rather than as a limit. This is the whole
-        fix — one line, and the two routes that do work.
+        On a signed macOS build this no longer appears: Touch ID answers, and
+        the probe that raises this goes quiet (see electron/webauthn.cjs).
+        Windows and Linux have no platform authenticator here at all, and
+        neither does an unsigned build, so the notice is still the honest
+        answer there — and the silence it replaced, an operator pressing a
+        button and being told nothing, read as a bug rather than as a limit.
       */}
       {viewState?.passkey && !passkeyRead && (
         <div className="px-3 py-2 flex items-center gap-2 border-b border-edge-chrome text-2xs text-ink-dim">
           <KeyRound size={12} className="text-ink-faint flex-shrink-0" />
           <span className="min-w-0">
-            This page asked for a passkey. Touch ID is not available inside this panel — choose
+            This page asked for a passkey and no authenticator on this machine answered — choose
             another sign-in method on the page, or open it in your browser.
           </span>
           {shown && bridge && (
@@ -531,6 +697,19 @@ export const BrowserPane: React.FC<{ panel: PanelTab }> = ({ panel }) => {
         page rather than under it. See services/browserView.ts.
       */}
       <BrowserImportModal isOpen={importOpen} onClose={() => setImportOpen(false)} />
+
+      {/*
+        A page is blocked on this one: main holds its promise open until the
+        answer comes back, so it is drawn from view state rather than from
+        anything this pane decides. See electron/browserView.cjs.
+      */}
+      <BrowserPasskeyModal
+        request={viewState?.webauthn ?? null}
+        onChoose={(credentialId) => {
+          const request = viewState?.webauthn;
+          if (request && bridge) bridge.chooseWebauthnAccount(request.requestId, credentialId);
+        }}
+      />
     </div>
   );
 };

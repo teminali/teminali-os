@@ -26,8 +26,17 @@
  * measurement rather than a guess bolted on here.
  *
  * This is deliberately not a browser. It does not run scripts, so a page that
- * renders entirely on the client still yields little; that is a known limit,
- * not a bug to fix by adding a headless browser to a local-first product.
+ * renders entirely on the client still yields little.
+ *
+ * That limit is no longer the end of the story, and which tool to reach for
+ * now depends on where the page is. The browser panel is a real Chromium view,
+ * and the agent CLI reads it through `page_read` and `page_snapshot` (see
+ * server/browser-mcp.js) — scripts have run, the DOM is the one the operator
+ * is looking at, and a client-rendered page reads properly. **`page_read`
+ * supersedes this for a page open in a panel.** This one stays for the case it
+ * was written for: a URL nobody has opened, fetched by the local lane, on a
+ * machine where the whole point is that nothing heavier is running. It is not
+ * a headless browser and is still not going to become one.
  */
 
 /** The entities worth decoding: the ones that survive tag-stripping as noise. */

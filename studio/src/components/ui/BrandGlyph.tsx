@@ -13,16 +13,17 @@ import React from "react";
  * this component takes no colour prop.
  */
 
-export type Brand = "teminali" | "claude" | "codex";
+export type Brand = "teminali" | "claude" | "codex" | "gemini";
 
 const SOURCES: Record<Brand, { src: string; label: string }> = {
   // Relative, not absolute. The packaged renderer is loaded over file://, where
   // a leading slash resolves to the filesystem root instead of the app bundle,
   // so "/brand/..." 404s and every engine row draws a broken image. Vite rewrites
   // the hrefs it can see in index.html; it cannot rewrite a string literal.
-  teminali: { src: "teminali-logo-128.png", label: "Teminali" },
+  teminali: { src: "teminali-logo-transparent-128.png", label: "Teminali" },
   claude: { src: "brand/claude-code-128.png", label: "Claude Code" },
   codex: { src: "brand/codex-128.png", label: "Codex" },
+  gemini: { src: "brand/Google_Gemini_icon_2025.png", label: "Google Gemini" },
 };
 
 export const BrandGlyph: React.FC<{
