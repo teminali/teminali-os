@@ -51,7 +51,13 @@ dependency: `audio_module.py:113` passes it as the Coqui XTTS reference voice.
 A fresh clone can run the Kokoro engine, whose voice is the committed `*.pt`
 embeddings, and cannot run Coqui without that file. Measured 2026-09-10; left
 as it is because the `.gitignore` belongs to another lane's staged work, and
-Kokoro is the engine the pipeline actually serves. The measurements those takes produced are written down in
+Kokoro is the engine the pipeline actually serves.
+
+`training/` is not in git either, and unlike everything above it is not ignored
+either: 108 files, **372 MB**, the dataset and the MLX runs behind `temi:r2`.
+Nothing at runtime reads it — the model is served by ollama — but it is the
+provenance of her judgement, and it is one `git add -A` away from the history.
+That is a decision nobody has taken yet, not a rule anybody has written. The measurements those takes produced are written down in
 code comments and `LOCKED_PIPELINE_SPEC.md`, which is the part worth versioning.
 The Kokoro voice embeddings (`*.pt`) *are* committed: they are small, they are
 the voice itself, and they cannot be regenerated without repeating the tuning.
