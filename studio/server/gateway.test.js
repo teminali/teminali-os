@@ -168,6 +168,31 @@ test("health is public, session bootstrap is origin-bound, and proxy routes requ
   assert.equal((await unauthenticated.json()).error.code, "AUTH_REQUIRED");
 });
 
+test("about names the build and needs a bearer to do it", async (t) => {
+  const { gateway, baseUrl } = await startGateway();
+  t.after(() => gateway.close());
+
+  /* The disclosure is not privileged, but nothing outside the session gets to
+     enumerate the machine's runtime versions either. */
+  const unauthenticated = await fetch(`${baseUrl}/api/about`);
+  assert.equal(unauthenticated.status, 401);
+  assert.equal((await unauthenticated.json()).error.code, "AUTH_REQUIRED");
+
+  const response = await fetch(`${baseUrl}/api/about`, { headers: authHeaders() });
+  assert.equal(response.status, 200);
+  const body = await response.json();
+  assert.equal(body.app.name, "Teminali OS");
+  assert.equal(body.app.platform, process.platform);
+  /* Under the test runner there is no `<Resources>`, and the honest answer is
+     that this build carries nothing — not an error, and not a claim. */
+  assert.equal(body.mediaStack.bundled, false);
+  assert.deepEqual(body.mediaStack.components, []);
+
+  const missing = await fetch(`${baseUrl}/api/about/licence?bundle=ffmpeg&file=COPYING`, { headers: authHeaders() });
+  assert.equal(missing.status, 404);
+  assert.equal((await missing.json()).error.code, "LICENCE_NOT_FOUND");
+});
+
 test("workspace endpoints expose a bounded real tree and safe file reads", async (t) => {
   const workspaceRoot = await mkdtemp(join(tmpdir(), "frontier-workspace-"));
   await mkdir(join(workspaceRoot, "src"));

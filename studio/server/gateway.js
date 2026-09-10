@@ -42,6 +42,7 @@ import { CAPABILITIES, PLANS, PROFILE_CAPABILITY } from "../../licence/entitleme
 import { isValidLogin, readAdmins, requireAdmin, whoami, writeAdmins } from "./admin.js";
 import { appendRun, createSandbox, measureSandbox, readRuns, removeRun } from "./arena.js";
 import { currentVersion, publishRelease, validateNextVersion } from "./releases.js";
+import { aboutPayload, readLicence } from "./about.js";
 import { checkForUpdate, downloadAsset, listReleases } from "./updates.js";
 import { lstat as lstatNodeFile, readdir as readNodeDir, readFile as readNodeFile, stat as statNodeFile } from "node:fs/promises";
 import { join as joinPath } from "node:path";
@@ -2695,6 +2696,38 @@ export async function createGateway(options = {}) {
           send({ type: "error", code, message: "The update could not be downloaded." });
         }
         response.end();
+        return;
+      }
+
+      /*
+        What this build is, and what it ships that somebody else wrote.
+
+        Not an ornament: the installers carry an LGPL-2.1 FFmpeg we built, and
+        §6 of that licence is met only when the components are named with their
+        versions and the corresponding source is offered. `docs/MEDIA_LICENSING.md`
+        is the governing spec; `about.js` reads the manifest the build script
+        wrote beside the binaries, so this can never describe a different ffmpeg
+        from the one the app will spawn.
+      */
+      if (request.method === "GET" && route === "/api/about") {
+        replyJson(response, 200, await aboutPayload({ appRoot: config.appRoot }));
+        return;
+      }
+
+      /*
+        One shipped licence text, verbatim.
+
+        `bundle` and `file` are matched against the directory listing rather
+        than sanitised — they can only name a file the bundle really has, so
+        there is no path for `../` to take.
+      */
+      if (request.method === "GET" && route === "/api/about/licence") {
+        const query = new URL(request.url, "http://127.0.0.1").searchParams;
+        const text = await readLicence(query.get("bundle") ?? "", query.get("file") ?? "");
+        if (text === null) {
+          throw new GatewayError(404, "LICENCE_NOT_FOUND", "This build ships no such licence text.");
+        }
+        replyJson(response, 200, { text });
         return;
       }
 

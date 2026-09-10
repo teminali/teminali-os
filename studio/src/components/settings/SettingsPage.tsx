@@ -10,6 +10,7 @@ import { LicencePane, LICENCE_ROWS } from "./LicencePane";
 import { ProfilePane, PROFILE_ROWS } from "./ProfilePane";
 import { GitPane, GIT_ROWS } from "./GitPane";
 import { AgentsPane, AGENTS_ROWS } from "./AgentsPane";
+import { AboutPane, ABOUT_ROWS } from "./AboutPane";
 import type { LucideIcon } from "lucide-react";
 import {
   ArrowLeft,
@@ -18,6 +19,7 @@ import {
   CreditCard,
   FlaskConical,
   GitBranch,
+  Info,
   Layers,
   Mic,
   MousePointer2,
@@ -189,6 +191,18 @@ export const SettingsPage: React.FC = () => {
       icon: MousePointer2,
       rows: ASSISTANT_ROWS,
       render: () => <AssistantSection />,
+    },
+    /* Last, and not optional. The installers carry an LGPL FFmpeg we built,
+       and §6 of that licence is met by this pane naming the components with
+       their versions and offering the source — see `docs/MEDIA_LICENSING.md`.
+       It is the one settings screen whose absence is a licence breach rather
+       than a missing feature. */
+    {
+      id: "about",
+      label: "About",
+      icon: Info,
+      rows: ABOUT_ROWS,
+      render: () => <AboutPane />,
     },
   ];
 
