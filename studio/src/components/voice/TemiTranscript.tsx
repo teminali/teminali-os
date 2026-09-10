@@ -1,0 +1,169 @@
+/**
+ * The conversation, rendered the way the reference voice screen renders it.
+ *
+ * The asymmetry is the whole point and is not decoration: **the operator's
+ * turns are bubbles, Temi's are not.** Two facing walls of bubbles is what
+ * makes a chat feel busy; one wall against plain prose reads as someone
+ * talking to you. Everything else here — the width, the spacing, the muted
+ * action row — exists to keep Temi's side looking like speech rather than
+ * like a message.
+ *
+ * Presentational on purpose. It takes turns and callbacks and owns no store,
+ * no socket and no scrolling: the stage positions it, because the stage is
+ * what has an orb and a composer floating over it.
+ */
+
+import React, { useCallback, useState } from "react";
+import { Check, Copy, MoreHorizontal, ThumbsUp } from "lucide-react";
+
+export interface DialogueTurn {
+  id: string;
+  role: "user" | "assistant";
+  content: string;
+  /** A turn still being spoken or transcribed. Renders with a live caret. */
+  pending?: boolean;
+}
+
+export interface TemiTranscriptProps {
+  turns: DialogueTurn[];
+  /** Speak an earlier answer again. Absent hides the option. */
+  onRepeat?: (text: string) => void;
+  onCopied?: () => void;
+  className?: string;
+}
+
+const LiveCaret: React.FC<{ tone: "user" | "assistant" }> = ({ tone }) => (
+  <span
+    aria-hidden
+    className={`ml-1 inline-block h-[0.9em] w-[2px] translate-y-[2px] animate-pulse ${
+      tone === "user" ? "bg-white/70" : "bg-[#8f8f8f]"
+    }`}
+  />
+);
+
+/** The muted row under one of Temi's answers: copy, mark, overflow. */
+const AssistantActions: React.FC<{
+  text: string;
+  onRepeat?: (text: string) => void;
+  onCopied?: () => void;
+}> = ({ text, onRepeat, onCopied }) => {
+  const [copied, setCopied] = useState(false);
+  const [liked, setLiked] = useState(false);
+  const [menuOpen, setMenuOpen] = useState(false);
+
+  const copy = useCallback(() => {
+    void navigator.clipboard.writeText(text).then(
+      () => {
+        setCopied(true);
+        onCopied?.();
+        window.setTimeout(() => setCopied(false), 1600);
+      },
+      () => undefined
+    );
+  }, [text, onCopied]);
+
+  const button =
+    "flex h-7 w-7 items-center justify-center rounded-md text-[#8f8f8f] transition-colors hover:bg-[#212121] hover:text-[#ececec]";
+
+  return (
+    <div className="mt-1.5 flex items-center gap-0.5 opacity-60 transition-opacity duration-150 group-hover:opacity-100 focus-within:opacity-100">
+      <button type="button" onClick={copy} className={button} title="Copy" aria-label="Copy answer">
+        {copied ? <Check size={15} className="text-emerald-400" /> : <Copy size={15} />}
+      </button>
+
+      <button
+        type="button"
+        onClick={() => setLiked((previous) => !previous)}
+        aria-pressed={liked}
+        className={`${button} ${liked ? "text-[#ececec]" : ""}`}
+        title={liked ? "Marked as a good answer" : "Good answer"}
+        aria-label="Good answer"
+      >
+        <ThumbsUp size={15} className={liked ? "fill-current" : ""} />
+      </button>
+
+      <div className="relative">
+        <button
+          type="button"
+          onClick={() => setMenuOpen((previous) => !previous)}
+          aria-haspopup="menu"
+          aria-expanded={menuOpen}
+          className={button}
+          title="More"
+          aria-label="More actions"
+        >
+          <MoreHorizontal size={15} />
+        </button>
+        {menuOpen && (
+          <>
+            {/* Click-away. Sits under the menu, over everything else. */}
+            <div className="fixed inset-0 z-40" onClick={() => setMenuOpen(false)} />
+            <div
+              role="menu"
+              className="absolute bottom-full left-0 z-50 mb-1 w-[176px] overflow-hidden rounded-xl border border-[#3a3a3a] bg-[#2f2f2f] py-1 shadow-[0_16px_48px_rgba(0,0,0,0.6)]"
+            >
+              {onRepeat && (
+                <button
+                  type="button"
+                  role="menuitem"
+                  onClick={() => {
+                    setMenuOpen(false);
+                    onRepeat(text);
+                  }}
+                  className="w-full px-3 py-2 text-left text-[13px] text-[#ececec] transition-colors hover:bg-[#3f3f3f]"
+                >
+                  Say that again
+                </button>
+              )}
+              <button
+                type="button"
+                role="menuitem"
+                onClick={() => {
+                  setMenuOpen(false);
+                  copy();
+                }}
+                className="w-full px-3 py-2 text-left text-[13px] text-[#ececec] transition-colors hover:bg-[#3f3f3f]"
+              >
+                Copy text
+              </button>
+            </div>
+          </>
+        )}
+      </div>
+    </div>
+  );
+};
+
+export const TemiTranscript: React.FC<TemiTranscriptProps> = ({
+  turns,
+  onRepeat,
+  onCopied,
+  className = "",
+}) => (
+  <div className={`flex flex-col gap-8 ${className}`}>
+    {turns.map((turn) =>
+      turn.role === "user" ? (
+        // The operator: a bubble, right-aligned, never wider than 70% of the
+        // column so the ragged left edge stays legible.
+        <div key={turn.id} className="flex justify-end">
+          <div className="max-w-[70%] whitespace-pre-wrap break-words rounded-3xl bg-[#06512f] px-5 py-3.5 text-[16px] leading-[1.6] text-white">
+            {turn.content}
+            {turn.pending && <LiveCaret tone="user" />}
+          </div>
+        </div>
+      ) : (
+        <div key={turn.id} className="group flex flex-col items-start">
+          <p className="max-w-full whitespace-pre-wrap break-words text-[16px] leading-[1.75] text-[#f3f3f3]">
+            {turn.content}
+            {turn.pending && <LiveCaret tone="assistant" />}
+          </p>
+          {/* No actions on a half-spoken answer — there is nothing settled to
+              copy yet, and the row would jump as the text grows. */}
+          {!turn.pending && turn.content.trim() && (
+            <AssistantActions text={turn.content} onRepeat={onRepeat} onCopied={onCopied} />
+          )}
+        </div>
+      )
+    )}
+  </div>
+);

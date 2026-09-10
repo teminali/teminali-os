@@ -119,3 +119,79 @@ function makeChunk(index: number, lines: DiffLine[], _start: number): DiffChunk 
     lines,
   };
 }
+
+/* ── Counting ─────────────────────────────────────────────────────────────── */
+
+/** How many lines an edit actually added and removed. */
+export interface LineCounts {
+  added: number;
+  removed: number;
+  /** False when the file was too large to match line-for-line — see below. */
+  exact: boolean;
+}
+
+/** Split as a diff tool does: no phantom last line from a trailing newline. */
+function toLines(code: string | null | undefined): string[] {
+  if (!code) return [];
+  return code.replace(/\r\n/g, "\n").replace(/\n$/, "").split("\n");
+}
+
+/** Above this many lines *of change*, matching line-for-line stops paying. */
+const MAX_MATCHED_WINDOW = 2_000;
+
+/**
+ * The `+N / -N` of an edit, measured rather than asserted.
+ *
+ * The activity feed used to show `+12 / -2` on every edit regardless of what
+ * changed, and the voice read the feed — so Temi reported line counts nobody
+ * had counted. This counts them.
+ *
+ * Identical head and tail lines are trimmed first, which is what keeps this
+ * cheap: an edit to one function in a 20,000-line file leaves a window of a
+ * few dozen lines to match. Only if that window is still enormous on both
+ * sides does it give up on matching and report the window itself as replaced
+ * — the same answer `diff` gives when nothing inside a hunk lines up. That
+ * case reports `exact: false` so a caller can decline to say the number.
+ */
+export function diffLineCounts(oldCode: string | null | undefined, newCode: string | null | undefined): LineCounts {
+  const before = toLines(oldCode);
+  const after = toLines(newCode);
+
+  let head = 0;
+  while (head < before.length && head < after.length && before[head] === after[head]) head += 1;
+  let tail = 0;
+  while (
+    tail < before.length - head &&
+    tail < after.length - head &&
+    before[before.length - 1 - tail] === after[after.length - 1 - tail]
+  ) {
+    tail += 1;
+  }
+
+  const oldWindow = before.slice(head, before.length - tail);
+  const newWindow = after.slice(head, after.length - tail);
+  if (oldWindow.length === 0 || newWindow.length === 0) {
+    return { added: newWindow.length, removed: oldWindow.length, exact: true };
+  }
+  if (oldWindow.length > MAX_MATCHED_WINDOW && newWindow.length > MAX_MATCHED_WINDOW) {
+    return { added: newWindow.length, removed: oldWindow.length, exact: false };
+  }
+
+  // LCS length only — two rolling rows, because nothing here backtracks.
+  let previous = new Array<number>(newWindow.length + 1).fill(0);
+  let current = new Array<number>(newWindow.length + 1).fill(0);
+  for (let i = 1; i <= oldWindow.length; i += 1) {
+    for (let j = 1; j <= newWindow.length; j += 1) {
+      current[j] =
+        oldWindow[i - 1] === newWindow[j - 1]
+          ? previous[j - 1] + 1
+          : Math.max(previous[j], current[j - 1]);
+    }
+    const swap = previous;
+    previous = current;
+    current = swap;
+    current.fill(0);
+  }
+  const common = previous[newWindow.length];
+  return { added: newWindow.length - common, removed: oldWindow.length - common, exact: true };
+}
