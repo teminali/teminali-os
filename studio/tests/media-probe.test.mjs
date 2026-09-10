@@ -90,7 +90,10 @@ test("no probe at all: a native container is Chromium's to judge, anything else 
 });
 
 test("the ffmpeg line seeks before the input and writes a fragmented MP4", () => {
-  const args = transcodeArgs({ input: "/films/a.mkv", start: 90, plan: { mode: "transcode", video: "h264", audio: "aac" } });
+  const args = transcodeArgs({
+    input: "/films/a.mkv", start: 90, plan: { mode: "transcode", video: "h264", audio: "aac" },
+    videoArgs: ["-c:v", "libx264", "-crf", "23", "-preset", "veryfast"],
+  });
   const line = args.join(" ");
   // Before -i, or ffmpeg decodes everything up to the seek point first.
   assert.ok(args.indexOf("-ss") < args.indexOf("-i"));
@@ -100,6 +103,19 @@ test("the ffmpeg line seeks before the input and writes a fragmented MP4", () =>
   assert.match(line, /-c:a aac/);
   // Subtitles reach the player as text tracks, not burned into the picture.
   assert.ok(args.includes("-sn"));
+});
+
+test("a transcode with no probed encoder refuses rather than guessing a name", () => {
+  /*
+    The bundled ffmpeg is LGPL and has no libx264, the developer's Homebrew one
+    does. A default here would be a line that works on one machine and is
+    `Unknown encoder` on the other, which is the failure bundling was meant to
+    end. See `docs/MEDIA_LICENSING.md`.
+  */
+  assert.throws(
+    () => transcodeArgs({ input: "/films/a.mkv", start: 0, plan: { mode: "transcode", video: "h264", audio: "aac" } }),
+    /videoArgs/,
+  );
 });
 
 test("a remux copies both streams, and no seek means no -ss", () => {

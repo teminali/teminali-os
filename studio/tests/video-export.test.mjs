@@ -38,33 +38,48 @@ const filterFor = (c) => {
 /* ── Encoder argv ───────────────────────────────────────────────── */
 
 test("h264 without a bitrate encodes at CRF 18", () => {
-  const args = encoderArgs({ codec: "h264", height: 1080 }, null);
+  const args = encoderArgs({ codec: "h264", height: 1080 }, "libx264");
   assert.deepEqual(args, ["-c:v", "libx264", "-crf", "18", "-preset", "medium", "-pix_fmt", "yuv420p"]);
 });
 
+test("the LGPL encoder is given a bitrate, because it has no CRF at all", () => {
+  const args = encoderArgs({ codec: "h264", height: 1080 }, "libopenh264");
+  assert.ok(!args.includes("-crf"), "openh264 rejects -crf and the whole run dies");
+  assert.ok(!args.includes("-preset"), "-preset is an x264 private option");
+  assert.ok(!args.includes("-profile:v"), "openh264 does not spell profiles the way x264 does");
+  assert.ok(args.includes("-b:v"), "a quality request has to become a number somewhere");
+});
+
 test("a bitrate replaces CRF rather than joining it", () => {
-  const args = encoderArgs({ codec: "h264", height: 1080, bitrateMbps: 20 }, null);
-  assert.ok(args.includes("-b:v") && args.includes("20M"));
+  const args = encoderArgs({ codec: "h264", height: 1080, bitrateMbps: 20 }, "libx264");
+  assert.ok(args.includes("-b:v") && args.includes("20000k"));
   assert.ok(!args.includes("-crf"), "CRF and -b:v together let the last one silently win");
 });
 
 test("hevc is tagged hvc1, or QuickTime and Safari refuse the file", () => {
-  assert.ok(encoderArgs({ codec: "hevc", height: 1080 }, null).join(" ").includes("-tag:v hvc1"));
+  assert.ok(encoderArgs({ codec: "hevc", height: 1080 }, "libx265").join(" ").includes("-tag:v hvc1"));
+  assert.ok(encoderArgs({ codec: "hevc", height: 1080 }, "libkvazaar").join(" ").includes("-tag:v hvc1"));
   assert.ok(encoderArgs({ codec: "hevc", height: 1080 }, "hevc_videotoolbox").join(" ").includes("-tag:v hvc1"));
+});
+
+test("an hevc request answered in h264 is NOT tagged hvc1", () => {
+  // Reachable since the LGPL swap: no kvazaar and no hardware means H.264.
+  const args = encoderArgs({ codec: "hevc", height: 1080 }, "libopenh264");
+  assert.ok(!args.join(" ").includes("hvc1"), "hvc1 on an H.264 stream is a file QuickTime opens and cannot play");
 });
 
 test("a hardware encoder gets a bitrate, because CRF means nothing to it", () => {
   const hd = encoderArgs({ codec: "h264", height: 1080, hardware: true }, "h264_videotoolbox");
-  assert.deepEqual(hd, ["-c:v", "h264_videotoolbox", "-b:v", "12M", "-pix_fmt", "yuv420p"]);
+  assert.deepEqual(hd, ["-c:v", "h264_videotoolbox", "-b:v", "12000k", "-pix_fmt", "yuv420p"]);
   assert.ok(!hd.includes("-crf"));
 
   const uhd = encoderArgs({ codec: "h264", height: 2160, hardware: true }, "h264_videotoolbox");
-  assert.ok(uhd.includes("40M"), "4K needs the higher default");
+  assert.ok(uhd.includes("40000k"), "4K needs the higher default");
 });
 
 test("an explicit bitrate still beats the hardware default", () => {
   const args = encoderArgs({ codec: "h264", height: 2160, hardware: true, bitrateMbps: 8 }, "h264_nvenc");
-  assert.ok(args.includes("8M") && !args.includes("40M"));
+  assert.ok(args.includes("8000k") && !args.includes("40000k"));
 });
 
 test("prores ignores hardware and bitrate alike", () => {

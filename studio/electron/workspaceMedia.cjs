@@ -43,6 +43,7 @@ const { randomBytes } = require("crypto");
 const fs = require("fs");
 const path = require("path");
 const { Readable } = require("stream");
+const { encoderLine } = require("./encoderProbe.cjs");
 
 const WORKSPACE_MEDIA_SCHEME = "teminali-media";
 const nonce = randomBytes(16).toString("hex");
@@ -178,12 +179,19 @@ async function transcode({ root, relativePath, start, method, signal, request, l
     mediaModule ??= import(require("url").pathToFileURL(path.join(__dirname, "..", "server", "workspace-media.js")).href);
     probeModule ??= import(require("url").pathToFileURL(path.join(__dirname, "..", "server", "media-probe.js")).href);
     const { resolveMediaPath } = await mediaModule;
-    resolved = resolveMediaPath(root, relativePath);
+    // Awaited: it is async, and an unawaited promise has no `ok`, so every
+    // transcode answered 200 with an empty body and the pane said the stream
+    // stopped. `status` must be a number here — `{ status: undefined }` is a
+    // 200, which is how that failure stayed silent.
+    resolved = await resolveMediaPath(root, relativePath);
   } catch (error) {
     log(`Media transcode refused: ${error?.message || error}`);
     return new Response(null, { status: 404 });
   }
-  if (!resolved.ok) return new Response(null, { status: resolved.status });
+  if (!resolved.ok) {
+    log(`Media transcode ${resolved.status} ${resolved.reason}: ${relativePath}`);
+    return new Response(null, { status: resolved.status });
+  }
 
   const { mediaTools, playbackPlan, probeMedia, transcodeArgs, transcodeHeaders } = await probeModule;
   const tools = await mediaTools();
@@ -209,7 +217,22 @@ async function transcode({ root, relativePath, start, method, signal, request, l
   if (method === "HEAD") return new Response(null, { status: 200, headers });
 
   const { spawn } = require("child_process");
-  const args = transcodeArgs({ input: resolved.path, start, plan });
+  /*
+    `transcodeArgs` is pure and deliberately knows no encoder names, so the
+    line comes from here — probed against the ffmpeg that will actually run it.
+    Software, which is what this path has always used: a playback transcode
+    that changes character with the GPU is a support case nobody can reproduce.
+  */
+  const line = plan.video === null || plan.video === "copy"
+    ? null
+    : encoderLine({
+        codec: "h264", ff: tools.ffmpeg, allowHardware: false,
+        crf: 23, speed: "veryfast", profile: "high", gop: 48,
+      });
+  if (plan.video !== null && plan.video !== "copy" && !line) {
+    return new Response(null, { status: 503 });
+  }
+  const args = transcodeArgs({ input: resolved.path, start, plan, videoArgs: line?.args ?? null });
   const child = spawn(tools.ffmpeg, args, { stdio: ["ignore", "pipe", "pipe"], windowsHide: true });
   const id = ++encoderId;
   encoders.set(id, child);

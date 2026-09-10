@@ -1,0 +1,12 @@
+
+# The bundled media stack is built, not committed — see media-stack/README.md.
+media-stack/ffmpeg/*
+media-stack/mpv/*
+!media-stack/ffmpeg/README.md
+!media-stack/mpv/README.md
+# Written by the build with a timestamp in it, and copied into both staged
+# directories. Committing it would describe binaries that are not committed.
+media-stack/manifest.json
+
+# The build tree the media stack is made in.
+.media-stack-build/

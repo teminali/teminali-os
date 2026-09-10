@@ -20,11 +20,11 @@
 const fs = require("node:fs");
 const os = require("node:os");
 const path = require("node:path");
-const { spawn, execFile, execFileSync } = require("node:child_process");
+const { spawn, execFile } = require("node:child_process");
 const { app, dialog, ipcMain, powerSaveBlocker } = require("electron");
 
 const { findFfmpeg, ffmpegInstallHint } = require("./mediaAccess.cjs");
-const { pickHardwareEncoder, parseEncoders } = require("./hardwareEncoder.cjs");
+const { chooseEncoder } = require("./encoderProbe.cjs");
 const { encoderArgs, mixArgsFor } = require("./exportFilters.cjs");
 
 function getVideosPath() {
@@ -45,40 +45,6 @@ function getTempPath() {
   } catch {
     return os.tmpdir();
   }
-}
-
-/* ── Encoder discovery ──────────────────────────────────────────── */
-
-let encoderCache = null;
-
-/**
- * The set of encoder names this ffmpeg was built with.
- *
- * Cached for the life of the process: the binary does not grow encoders while
- * the app is open, and the probe costs a process spawn. A throw caches an
- * EMPTY set rather than nothing, because an ffmpeg that cannot answer
- * `-encoders` is simply one with no hardware to offer — software still works,
- * and re-asking a broken binary once per export is a stall, not a recovery.
- * A missing binary is the one case that is NOT cached; there is nothing to
- * learn from it and the path may appear later.
- */
-function availableEncoders(ff) {
-  if (!ff) return new Set();
-  if (encoderCache) return encoderCache;
-  try {
-    const stdout = execFileSync(ff, ["-hide_banner", "-encoders"], {
-      encoding: "utf8", timeout: 5000, stdio: ["ignore", "pipe", "ignore"],
-      windowsHide: true,
-    });
-    encoderCache = parseEncoders(stdout);
-  } catch {
-    encoderCache = new Set();
-  }
-  return encoderCache;
-}
-
-function hardwareEncoderFor(codec, ff) {
-  return pickHardwareEncoder(codec, process.platform, availableEncoders(ff));
 }
 
 /* ── Sessions ───────────────────────────────────────────────────── */
@@ -157,6 +123,18 @@ function startExport(options, sender) {
     );
   }
 
+  /*
+    Which encoder, decided against what this ffmpeg actually has rather than
+    assumed. ProRes is the one codec that does not ask: `prores_ks` is in every
+    build, LGPL or not, and `encoderArgs` ignores the name for it.
+  */
+  const encoder = opts.codec === "prores"
+    ? "prores_ks"
+    : chooseEncoder(opts.codec === "hevc" ? "hevc" : "h264", ff, { allowHardware: opts.hardware });
+  if (!encoder) {
+    return { error: "This ffmpeg build has no usable video encoder. Reinstall Teminali OS, or set FFMPEG_PATH to a full ffmpeg." };
+  }
+
   const id = `exp_${Date.now().toString(36)}_${++counter}`;
   const workDir = fs.mkdtempSync(path.join(getTempPath(), "teminali-export-"));
   const videoPath = path.join(workDir, opts.codec === "prores" ? "video.mov" : "video.mp4");
@@ -167,9 +145,7 @@ function startExport(options, sender) {
 
   const args = [
     "-y", ...speedFlags, "-f", "image2pipe", "-framerate", String(opts.fps), "-i", "pipe:0",
-    ...encoderArgs(opts, opts.hardware
-      ? hardwareEncoderFor(opts.codec === "hevc" ? "hevc" : "h264", ff)
-      : null),
+    ...encoderArgs(opts, encoder),
     "-r", String(opts.fps), videoPath,
   ];
 
@@ -489,7 +465,7 @@ function shutdownVideoExport() {
 }
 
 module.exports = {
-  availableEncoders, buildAudioMix, probeSource,
+  buildAudioMix, probeSource,
   startExport, writeFrame, finishExport, cancelExport, materialiseSource, chooseExportPath,
   initVideoExport, shutdownVideoExport, sessions,
 };

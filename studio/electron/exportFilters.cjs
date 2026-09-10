@@ -10,6 +10,8 @@
   would put that beyond a plain `node --test`.
 */
 
+const { encoderFamily, videoEncoderArgs } = require("./hardwareEncoder.cjs");
+
 /**
  * The video encoder half of the ffmpeg argv.
  *
@@ -17,12 +19,17 @@
  * as a property of the finished file — the container, whether it plays on an
  * iPhone, whether the bitrate flag means anything at all — and those are
  * cheaper to assert than to discover in a player.
+ *
+ * `encoder` is the name the caller PROBED for, not a preference: since the
+ * bundled ffmpeg is LGPL and has no `libx264`, there is no name this can
+ * safely assume. `encoderProbe.chooseEncoder` produces it; a null means that
+ * ffmpeg can encode nothing and the caller should not have got this far.
  */
-function encoderArgs(options, hardwareName) {
+function encoderArgs(options, encoder) {
   const { codec, bitrateMbps, height, superSpeed } = options;
 
   /*
-    ProRes ignores both `hardware` and `bitrateMbps`: it is a constant-quality
+    ProRes ignores `encoder` and `bitrateMbps` both: it is a constant-quality
     intra codec with no rate control to hand a number to, and no platform
     ships a hardware ProRes encoder ffmpeg can reach. Profile 3 is 422 HQ.
   */
@@ -30,33 +37,45 @@ function encoderArgs(options, hardwareName) {
     return ["-c:v", "prores_ks", "-profile:v", "3", "-pix_fmt", "yuv422p10le"];
   }
 
-  if (hardwareName) {
-    /*
-      CRF is meaningless to a hardware encoder — VideoToolbox and NVENC take a
-      bitrate — so a request for "quality" has to become a number. 40 Mbps
-      above 2000 lines, 12 below, which is roughly where each stops being the
-      limiting factor against a screen recording's flat colour.
-    */
-    const hwBitrate = bitrateMbps ?? (height >= 2000 ? 40 : 12);
-    const turboHw = superSpeed && hardwareName.includes("videotoolbox") ? ["-realtime", "0"] : [];
-    return [
-      "-c:v", hardwareName, "-b:v", `${hwBitrate}M`, "-pix_fmt", "yuv420p",
-      ...turboHw,
-      ...(codec === "hevc" ? ["-tag:v", "hvc1"] : []),
-    ];
-  }
+  const family = encoderFamily(encoder);
+  const hardware = family === "hardware";
 
-  const speedPreset = superSpeed ? "faster" : "medium";
+  /*
+    `hvc1` follows the ENCODER, not the request. Without it QuickTime and
+    Safari refuse an HEVC file outright — they accept only that branding, and
+    ffmpeg's default `hev1` is legal but unplayable on exactly the platforms
+    most likely to open the export. Putting it on an H.264 stream is the same
+    mistake in reverse, and that is reachable now: an LGPL ffmpeg with no
+    kvazaar answers a request for HEVC with H.264.
+  */
+  const isHevc = /^(libx265|libkvazaar|hevc_)/.test(String(encoder));
+  const tag = isHevc ? ["-tag:v", "hvc1"] : [];
+
+  /*
+    CRF is meaningless to a hardware encoder — VideoToolbox and NVENC take a
+    bitrate — so a request for "quality" has to become a number. 40 Mbps
+    above 2000 lines, 12 below, which is roughly where each stops being the
+    limiting factor against a screen recording's flat colour. The same is true
+    of openh264, but `videoEncoderArgs` derives that one from the CRF and the
+    frame height rather than from this pair of constants.
+  */
+  const bitrateKbps = bitrateMbps
+    ? bitrateMbps * 1000
+    : hardware ? (height >= 2000 ? 40000 : 12000) : undefined;
+
+  const turboHw = superSpeed && String(encoder).includes("videotoolbox") ? ["-realtime", "0"] : [];
+
   return [
-    "-c:v", codec === "hevc" ? "libx265" : "libx264",
-    ...(bitrateMbps ? ["-b:v", `${bitrateMbps}M`] : ["-crf", "18"]),
-    "-preset", speedPreset, "-pix_fmt", "yuv420p",
-    /*
-      Without `hvc1` QuickTime and Safari refuse an HEVC file outright: they
-      accept only that branding, and ffmpeg's default `hev1` is legal but
-      unplayable on exactly the platforms most likely to open the export.
-    */
-    ...(codec === "hevc" ? ["-tag:v", "hvc1"] : []),
+    ...videoEncoderArgs({
+      encoder,
+      bitrateKbps,
+      crf: bitrateKbps ? undefined : 18,
+      speed: hardware ? undefined : (superSpeed ? "faster" : "medium"),
+      height,
+      pixFmt: "yuv420p",
+    }),
+    ...turboHw,
+    ...tag,
   ];
 }
 

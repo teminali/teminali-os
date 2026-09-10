@@ -122,6 +122,39 @@ extraResources:
     filter:
       - "*.js"
       - "package.json"
+  # ── The media stack: LGPL ffmpeg and mpv, built by us ──────────────
+  #
+  # `npm run build:media-stack` populates media-stack/ before packaging; the
+  # release workflow runs it per platform, next to `build:pointer`. The
+  # directories are committed EMPTY (a README, which the filters exclude) so
+  # that a build made without the script warns about nothing and simply ships
+  # no bundle — which is what every release up to and including v0.0.6 did.
+  # The app then falls back to a system ffmpeg exactly as it used to;
+  # `findFfmpeg` and `findMpv` both probe these paths first and treat absence
+  # as a real answer.
+  #
+  # `to:` is not optional and is not decoration — see the licence entry above
+  # for what happens when an entry inherits the one written before it.
+  #
+  # Not in `asarUnpack`, and it would be wrong there: extraResources copies
+  # land beside the archive, not inside it, and a path under
+  # app.asar.unpacked is not where either finder looks.
+  #
+  # No filter on the contents. These are directories of binaries and shared
+  # libraries whose names are decided by the build (`libavcodec.62.dylib`
+  # today, `.63` after the next bump), and an allowlist written against
+  # today's soname is an app that ships an ffmpeg it cannot start. The README
+  # is excluded by name instead.
+  - from: media-stack/ffmpeg
+    to: ffmpeg
+    filter:
+      - "**/*"
+      - "!README.md"
+  - from: media-stack/mpv
+    to: mpv
+    filter:
+      - "**/*"
+      - "!README.md"
 
 
 publish:

@@ -13,9 +13,9 @@
  *
  * Nothing here spawns anything unless asked: `playbackPlan` and
  * `transcodeArgs` are pure, `probeMedia` and `extractSubtitleVtt` run a binary
- * the caller has found. `findBinary` looks in the PATH *and* in Homebrew's
- * two prefixes, because a Finder-launched app inherits launchd's PATH, which
- * has neither.
+ * the caller has found. `findBinary` looks in the app's own bundled copy
+ * first, then the PATH, then Homebrew's two prefixes — a Finder-launched app
+ * inherits launchd's PATH, which has neither of those last two.
  */
 
 import { spawn } from "node:child_process";
@@ -43,11 +43,25 @@ const HOMEBREW_BINS = ["/opt/homebrew/bin", "/usr/local/bin"];
 const binaries = new Map();
 
 /** An executable by name, from the PATH or a Homebrew prefix; null when absent. Cached per process. */
-export async function findBinary(name, { env = process.env } = {}) {
+export async function findBinary(name, { env = process.env, resourcesPath = process.resourcesPath } = {}) {
   if (binaries.has(name)) return binaries.get(name);
   const pathKey = Object.keys(env).find((k) => k.toUpperCase() === "PATH") || "PATH";
   const pathVal = env[pathKey] || "";
   const pathDirs = String(pathVal).split(delimiter).filter(Boolean);
+  /*
+    The copy inside the app comes FIRST, ahead of PATH.
+
+    This is the second ffmpeg finder in the tree — `electron/mediaAccess.cjs`
+    has the other, for the main process — and the two now agree on which copy
+    wins. They did not have to before bundling: whatever PATH held was the only
+    ffmpeg there was. Now the app ships a known one, and the player deciding it
+    can remux while the exporter decides it cannot, because they resolved
+    different binaries, is a bug with no symptom until a customer hits it.
+
+    `process.resourcesPath` is Electron's and is undefined under plain Node, so
+    a checkout and the test suite skip this entry and behave exactly as before.
+  */
+  const bundledDir = resourcesPath ? [join(resourcesPath, "ffmpeg")] : [];
   const fixedDirs = process.platform === "win32"
     ? [
         join(env.ProgramFiles || "C:\\Program Files", "ffmpeg", "bin"),
@@ -57,7 +71,7 @@ export async function findBinary(name, { env = process.env } = {}) {
         "C:\\ProgramData\\chocolatey\\bin",
       ].filter(Boolean)
     : HOMEBREW_BINS;
-  const dirs = [...pathDirs, ...fixedDirs];
+  const dirs = [...bundledDir, ...pathDirs, ...fixedDirs];
   const extensions = process.platform === "win32"
     ? (env.PATHEXT ? env.PATHEXT.split(";").filter(Boolean) : [".exe", ".cmd", ".bat"])
     : [""];
@@ -245,15 +259,28 @@ export function playbackPlan(probe, { ffmpeg = null, path = "" } = {}) {
  * and first audio stream only, each optional, so an audio file and a silent
  * clip both produce something the element accepts.
  */
-export function transcodeArgs({ input, start = 0, plan, hardware = null }) {
+export function transcodeArgs({ input, start = 0, plan, videoArgs = null }) {
   const at = Number.isFinite(start) && start > 0 ? ["-ss", String(Math.max(0, start))] : [];
+  /*
+    `videoArgs` rather than an encoder name, and none of the encoder table
+    here: this module is ESM and the policy that decides between `libx264`,
+    `libopenh264` and VideoToolbox is CJS (`electron/hardwareEncoder.cjs`),
+    shared with four other call sites. One table that every caller reads beats
+    two that agree until they do not.
+
+    It is required rather than defaulted because there is no name that is safe
+    to guess any more — the bundled ffmpeg is LGPL and has no x264 — and a
+    default would be a working line on the developer's machine and `Unknown
+    encoder` on a customer's.
+  */
+  if (plan.video !== null && plan.video !== "copy" && !videoArgs) {
+    throw new Error("transcodeArgs needs videoArgs: the caller probes ffmpeg for an encoder it actually has.");
+  }
   const video = plan.video === null
     ? ["-vn"]
     : plan.video === "copy"
       ? ["-c:v", "copy"]
-      : hardware === "videotoolbox"
-        ? ["-c:v", "h264_videotoolbox", "-b:v", "6M", "-pix_fmt", "yuv420p", "-g", "48"]
-        : ["-c:v", "libx264", "-preset", "veryfast", "-crf", "23", "-pix_fmt", "yuv420p", "-profile:v", "high", "-g", "48"];
+      : videoArgs;
   const audio = plan.audio === null
     ? ["-an"]
     : plan.audio === "copy"

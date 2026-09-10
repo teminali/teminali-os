@@ -23,6 +23,7 @@ const fs = require("fs");
 const os = require("os");
 const path = require("path");
 const { execFile } = require("child_process");
+const { encoderLine } = require("./encoderProbe.cjs");
 const { fileURLToPath } = require("url");
 
 /**
@@ -81,8 +82,7 @@ const FFMPEG_BINARY = process.platform === "win32" ? "ffmpeg.exe" : "ffmpeg";
  * put it somewhere different, and only winget's Links directory is reliably
  * on a GUI process's PATH.
  */
-function fixedFfmpegDirs() {
-  const env = process.env;
+function fixedFfmpegDirs(env = process.env) {
   if (process.platform === "win32") {
     const programFiles = env.ProgramFiles || "C:\\Program Files";
     const programFilesX86 = env["ProgramFiles(x86)"] || "C:\\Program Files (x86)";
@@ -126,23 +126,49 @@ function fixedFfmpegDirs() {
  * a miss costs a `statSync` per candidate.
  */
 let ffmpegPath;
-function findFfmpeg() {
-  if (ffmpegPath !== undefined) return ffmpegPath;
+function findFfmpeg(options) {
+  if (!options && ffmpegPath !== undefined) return ffmpegPath;
+  const {
+    env = process.env,
+    resourcesPath = process.resourcesPath,
+    exists = (candidate) => {
+      try { return fs.statSync(candidate).isFile(); } catch { return false; }
+    },
+  } = options || {};
 
-  const fromPath = String(process.env.PATH || "")
+  const fromPath = String(env.PATH || "")
     .split(path.delimiter)
     .filter(Boolean);
 
   const candidates = [
-    process.env.FFMPEG_PATH,
-    ...fixedFfmpegDirs().map((dir) => path.join(dir, FFMPEG_BINARY)),
+    env.FFMPEG_PATH,
+    /*
+      The copy inside the app, ahead of anything installed.
+      -----------------------------------------------------
+      Second, not first: `FFMPEG_PATH` stays the operator's override, and it is
+      also the escape hatch for anyone who wants their own build back.
+
+      Ahead of the install directories on purpose, which is the opposite of
+      what a "use the system tool if there is one" instinct suggests. What the
+      app ships is a KNOWN ffmpeg — a known version, a known encoder list, a
+      known set of muxers — and what it finds on PATH is whatever four package
+      managers and one operating system happen to have left there. Preferring
+      the found one means an export that succeeds on the developer's machine
+      and fails on the customer's, which is precisely the failure bundling
+      exists to end. The cost is that a Homebrew ffmpeg's GPL x264 stops being
+      used; `hardwareEncoder.cjs` is what makes that survivable.
+
+      Same shape and same order as `findMpv` in `mpvProcess.cjs` — override,
+      bundled, installed, PATH.
+    */
+    resourcesPath ? path.join(resourcesPath, "ffmpeg", FFMPEG_BINARY) : null,
+    ...fixedFfmpegDirs(env).map((dir) => path.join(dir, FFMPEG_BINARY)),
     ...fromPath.map((dir) => path.join(dir, FFMPEG_BINARY)),
   ].filter(Boolean);
 
-  ffmpegPath = candidates.find((candidate) => {
-    try { return fs.statSync(candidate).isFile(); } catch { return false; }
-  }) ?? null;
-  return ffmpegPath;
+  const found = candidates.find((candidate) => exists(candidate)) ?? null;
+  if (!options) ffmpegPath = found;
+  return found;
 }
 
 /**
@@ -189,7 +215,20 @@ function processWithFfmpeg(options = {}) {
     args.push("-vn", "-c:a", "pcm_s16le", "-ar", "48000");
   } else {
     args.push("-c:a", "aac", "-b:a", "256k");
-    args.push("-c:v", "libx264", "-crf", "16", "-preset", "medium", "-pix_fmt", "yuv420p");
+    /*
+      Software on purpose, as it has always been: this is a filtergraph pass
+      over somebody's file, where a predictable result matters more than the
+      speed a hardware encoder would buy. WHICH software encoder is no longer
+      assumable — the bundled ffmpeg is LGPL and has no x264 — so it is probed.
+    */
+    const line = encoderLine({ codec: "h264", ff: binary, allowHardware: false, crf: 16, speed: "medium" });
+    if (!line) {
+      return Promise.resolve({
+        ok: false,
+        error: "This ffmpeg build has no usable video encoder. Reinstall Teminali OS, or set FFMPEG_PATH to a full ffmpeg.",
+      });
+    }
+    args.push(...line.args);
   }
   args.push(outPath);
 

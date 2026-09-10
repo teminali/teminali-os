@@ -78,11 +78,40 @@ test("a resource is copied to the directory its from: is named after", () => {
   // `from: ../gateway` landing anywhere but `gateway` is the shape of the
   // failure: it is what putting one entry above another's to: produces.
   for (const { from, to } of extraResources()) {
+    /*
+      The media stack is the one exception, and it is an exception because the
+      rule is about IMPORTS. `server/gateway.js` imports "../../gateway/…", so
+      that entry's `to:` has to spell what module resolution will look for.
+      Nothing imports an ffmpeg: it is spawned, by an absolute path the finders
+      build at runtime. `media-stack/` is a staging directory whose whole job is
+      to become those two names, so the test below asserts the thing that
+      actually matters — that they are the names the finders probe.
+    */
+    if (from.startsWith("media-stack/")) continue;
     assert.equal(
       to, from.replace(/^\.\.\//, ""),
       `"${from}" is copied to "${to}", so an import of "../../${from.replace(/^\.\.\//, "")}/…" will not resolve`,
     );
   }
+});
+
+test("the staged media binaries land where the finders actually look", () => {
+  const staged = extraResources().filter((entry) => entry.from.startsWith("media-stack/"));
+  assert.deepEqual(
+    staged.map((entry) => entry.to).sort(),
+    ["ffmpeg", "mpv"],
+    "the LGPL bundle is staged from media-stack/ and must arrive under these two names",
+  );
+  /*
+    Asserted against the source rather than trusted, because the failure is
+    silent: an installer that carries a perfectly good ffmpeg under a name
+    nothing probes is a 61 MB download that changes nothing, and it looks
+    identical to a working one until a customer with no ffmpeg opens an export.
+  */
+  const mediaAccess = readFileSync(join(root, "electron", "mediaAccess.cjs"), "utf8");
+  assert.match(mediaAccess, /path\.join\(resourcesPath, "ffmpeg"/, "findFfmpeg must probe <Resources>/ffmpeg");
+  const mpvProcess = readFileSync(join(root, "electron", "mpvProcess.cjs"), "utf8");
+  assert.match(mpvProcess, /path\.join\(resourcesPath, "mpv"/, "findMpv must probe <Resources>/mpv");
 });
 
 test("every cross-package import has a resource that carries it", () => {

@@ -16,6 +16,8 @@
 
 const { spawn } = require("child_process");
 const { findFfmpeg, ffmpegInstallHint } = require("./mediaAccess.cjs");
+const { chooseEncoder, encoderLine } = require("./encoderProbe.cjs");
+const { videoEncoderArgs } = require("./hardwareEncoder.cjs");
 
 /** Standard RTMP / RTMPS endpoints per service. */
 const SERVICE_DEFAULTS = {
@@ -79,6 +81,22 @@ function testLiveConnection({ service = "youtube", rtmpUrl, streamKey }) {
       return;
     }
 
+    /*
+      Software, as the live path has always been: a hardware encoder would cost
+      less CPU but this is a two-second black frame proving a stream key, and
+      the answer must not depend on the graphics card. No rate control is
+      requested, which leaves x264 on its default and openh264 on its own —
+      neither matters for 640x360 of black.
+    */
+    const testEncoder = encoderLine({
+      codec: "h264", ff: bin, allowHardware: false,
+      speed: "ultrafast", lowLatency: true, pixFmt: null,
+    });
+    if (!testEncoder) {
+      resolve({ ok: false, error: "This FFmpeg build has no usable video encoder, so the connection cannot be tested." });
+      return;
+    }
+
     const destination = buildDestinationUrl(service, rtmpUrl, key);
     const args = [
       "-y",
@@ -86,9 +104,7 @@ function testLiveConnection({ service = "youtube", rtmpUrl, streamKey }) {
       "-t", "2",
       "-f", "lavfi", "-i", "color=c=black:s=640x360:r=30",
       "-f", "lavfi", "-i", "anullsrc=r=44100:cl=stereo",
-      "-c:v", "libx264",
-      "-preset", "ultrafast",
-      "-tune", "zerolatency",
+      ...testEncoder.args,
       "-c:a", "aac",
       "-f", "flv",
       "-flvflags", "no_duration_filesize",
@@ -164,6 +180,22 @@ function createLiveStream(options, onStatus) {
     bitrateKbps = 4500,
   } = options;
 
+  /*
+    Software for the same reason the test broadcast is: a live encode that
+    changes character with the machine's GPU is a support case nobody can
+    reproduce. Which software encoder is probed, not assumed — an LGPL ffmpeg
+    has no x264.
+  */
+  const encoder = chooseEncoder("h264", bin, { allowHardware: false });
+  if (!encoder) {
+    onStatus?.({
+      active: false,
+      status: "error",
+      error: "This FFmpeg build has no usable video encoder, so there is nothing to stream with.",
+    });
+    return null;
+  }
+
   const destination = buildDestinationUrl(service, rtmpUrl, streamKey);
   const targetFps = Math.min(60, Math.max(15, fps));
   const gop = targetFps * 2; // 2s GOP required by YouTube and Twitch
@@ -173,15 +205,16 @@ function createLiveStream(options, onStatus) {
     "-nostats",
     "-f", "webm",
     "-i", "pipe:0",
-    "-c:v", "libx264",
-    "-preset", "veryfast",
-    "-tune", "zerolatency",
-    "-b:v", `${bitrateKbps}k`,
-    "-maxrate", `${Math.round(bitrateKbps * 1.25)}k`,
-    "-bufsize", `${Math.round(bitrateKbps * 2)}k`,
-    "-pix_fmt", "yuv420p",
-    "-g", String(gop),
-    "-keyint_min", String(targetFps),
+    ...videoEncoderArgs({
+      encoder,
+      speed: "veryfast",
+      lowLatency: true,
+      bitrateKbps,
+      maxrateKbps: Math.round(bitrateKbps * 1.25),
+      bufsizeKbps: Math.round(bitrateKbps * 2),
+      gop,
+      keyintMin: targetFps,
+    }),
     "-c:a", "aac",
     "-b:a", "160k",
     "-ar", "44100",

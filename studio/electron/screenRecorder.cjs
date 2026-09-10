@@ -50,6 +50,7 @@ const { pathToFileURL } = require("url");
 const { execFile, spawn } = require("child_process");
 
 const { findFfmpeg, ffmpegInstallHint } = require("./mediaAccess.cjs");
+const { encoderLine } = require("./encoderProbe.cjs");
 const { writeSealed, readMaybeSealed, makePrivateDir } = require("./recorderVault.cjs");
 const { canStreamCopy, videoCodecFromFfmpeg } = require("./remuxPlan.cjs");
 const { readProgress, aggregatePercent } = require("./convertProgress.cjs");
@@ -449,14 +450,30 @@ async function toMp4(input, tryCopy, watch) {
     }
   }
 
+  /*
+    Software: this is the pass that rescues a take the stream copy could not
+    take, and a take that comes back subtly different on every machine is worse
+    than one that takes longer. The encoder is probed because the bundled
+    ffmpeg is LGPL and has no x264 — `-crf 18` becomes a bitrate when the
+    encoder that answers has no constant-quality mode.
+  */
+  const encodeLine = encoderLine({
+    codec: "h264", ff: bin, allowHardware: false, crf: 18, speed: "veryfast",
+  });
+  if (!encodeLine) {
+    return {
+      ok: false,
+      path: input,
+      raw: true,
+      error: "This FFmpeg build has no usable video encoder, so the take is still a .webm.",
+    };
+  }
+
   const encoded = await runFfmpegWatched(
     bin,
     [
       ...base,
-      "-c:v", "libx264",
-      "-crf", "18",
-      "-preset", "veryfast",
-      "-pix_fmt", "yuv420p",
+      ...encodeLine.args,
       "-fps_mode", "cfr",
       ...tail,
     ],

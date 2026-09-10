@@ -15,6 +15,7 @@
     "dev:full": "concurrently -k \"node --watch server/api-server.js\" \"vite --port 3000 --host\"",
     "build": "tsc && vite build",
     "build:pointer": "node scripts/build-pointer-helper.mjs",
+    "build:media-stack": "bash scripts/build-media-stack.sh",
     "typecheck": "tsc --noEmit",
     "test": "node --test server/gateway.test.js agent-runtime/runtime.test.js tests/*.test.mjs performance-runtime/metrics.test.js mcp-runtime/mcp-runtime.test.mjs visual-runtime/tests/visual-runtime.test.mjs quality-runtime/tests/orchestrator.test.mjs voice-runtime/tests/*.test.mjs",
     "test:gateway": "node --test server/gateway.test.js",
