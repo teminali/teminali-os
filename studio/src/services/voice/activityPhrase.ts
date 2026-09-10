@@ -145,9 +145,20 @@ export function currentActivityPhrase(
   return { verb: "Thinking", target: "", icon: "think", state: "running" };
 }
 
-/** The same line as a sentence Temi can speak, when asked what is going on. */
-export function speakActivityPhrase(phrase: ActivityPhrase | null): string {
-  if (!phrase) return "Nothing is running right now.";
-  if (!phrase.target) return `${phrase.verb} now.`;
-  return `${phrase.verb} ${phrase.target}.`;
-}
+/*
+ * A `speakActivityPhrase` stood here, turning the line above into a sentence
+ * for Temi to say "when asked what is going on". It was exported, tested, and
+ * called by nothing, and it should stay deleted. Being asked what is going on
+ * is the `status` intent, and `voiceTurnRouter` already answers it from
+ * `summariseProgress` — which reads these same items through
+ * `runProgressFromActivity` and makes more of them than a verb and a target
+ * can: elapsed time, the files read, the commands run, the call in flight.
+ *
+ * The one sentence it had that the router lacked was its empty case, for when
+ * nothing is running at all. That now lives in the router as
+ * `IDLE_STATUS_ANSWER`, beside the question it answers. Two answers to one
+ * question is the shape drift arrives in.
+ *
+ * What is left here is the ticker under the orb: a phrase to read, not a
+ * sentence to speak.
+ */

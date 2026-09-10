@@ -81,6 +81,18 @@ export interface VoiceTurnDecision {
 /** Said when the operator asks about a run whose steps have not arrived yet. */
 export const EMPTY_RUN_ANSWER = "It's still going — nothing to report yet.";
 
+/**
+ * Said when the operator asks how it is going and nothing is going at all.
+ *
+ * Reachable only by interrupting: `status` requires `busy || speaking`, so with
+ * `busy` false the question arrived over Temi's own voice. `EMPTY_RUN_ANSWER`
+ * was answering that case too, and "it's still going" was then simply untrue.
+ * It is the only wrong sentence this branch could produce, because
+ * `summariseProgress` never returns empty — it opens with elapsed time — so an
+ * empty answer never meant a quiet run, it only ever meant no run.
+ */
+export const IDLE_STATUS_ANSWER = "Nothing is running right now.";
+
 /** Said when a run is cancelled by voice. Short on purpose: the ask was for it to end. */
 export const STOP_ACKNOWLEDGEMENT = "Stopped.";
 
@@ -141,12 +153,16 @@ export function routeVoiceTurn(text: string, state: VoiceTurnState): VoiceTurnDe
     case "status":
     case "explain": {
       const answer = run ? summariseProgress(run, now).trim() : "";
+      // Which sentence is true when there is nothing to summarise depends on
+      // why we got here: busy means a run younger than its first tool call,
+      // and not busy means no run at all and a question asked over Temi.
+      const fallback = state.busy ? EMPTY_RUN_ANSWER : IDLE_STATUS_ANSWER;
       return decision(
         intent,
         reason,
-        { kind: "answer", text: answer || EMPTY_RUN_ANSWER },
+        { kind: "answer", text: answer || fallback },
         true,
-        answer || EMPTY_RUN_ANSWER,
+        answer || fallback,
       );
     }
 
