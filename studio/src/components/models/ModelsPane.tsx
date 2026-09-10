@@ -1,5 +1,7 @@
 import React, { useEffect, useState } from "react";
-import { SettingGroup, SettingRow, SettingSelect } from "../ui/Setting";
+import { SettingGroup, SettingRow, SettingSelect, SettingToggle } from "../ui/Setting";
+import { PROFILES_LIST, useStudioStore } from "../../store/studioStore";
+import { PROFILE_PICKER_COPY } from "../chat/ModelPicker";
 import { ModelLibrary } from "./ModelLibrary";
 import { ApiProviders } from "./ApiProviders";
 
@@ -18,7 +20,13 @@ import { ApiProviders } from "./ApiProviders";
  * need a sentence of consequence reads better as a label, a control, and a
  * sentence that changes with the control than as three words in a segment.
  *
- * What sits below the switch is deliberately not a row family. `ModelLibrary`
+ * The second group is the composer's menu, edited from here rather than from
+ * inside itself: a menu that can hide its own rows has no row left to unhide
+ * them from. It is a row family and not a catalogue because each entry is a
+ * switch over a fixed, named thing — which is exactly what the rows on every
+ * other settings screen are.
+ *
+ * What sits below both groups is deliberately not a row family. `ModelLibrary`
  * and `ApiProviders` are catalogues — a searchable list of weights, a card per
  * provider — and a catalogue in a divided card would be a list pretending to be
  * a set of settings.
@@ -37,6 +45,9 @@ const RUNTIME_COPY: Record<RuntimeMode, string> = {
 };
 
 export const ModelsPane: React.FC = () => {
+  const currentProfile = useStudioStore((state) => state.currentProfile);
+  const preferences = useStudioStore((state) => state.preferences);
+  const setPreferences = useStudioStore((state) => state.setPreferences);
   const [mode, setMode] = useState<RuntimeMode>(() => {
     try {
       return localStorage.getItem(STORAGE_KEY) === "api" ? "api" : "local";
@@ -82,11 +93,47 @@ export const ModelsPane: React.FC = () => {
           </SettingRow>
         </SettingGroup>
 
+        {/* The one profile that cannot be hidden is the one in use, which is
+            also what keeps the menu from emptying: `currentProfile` always
+            names one of these four, whether or not an agent currently holds the
+            selection instead. */}
+        <SettingGroup
+          label="In the model picker"
+          description="Which of these the composer's picker offers. The one you are using stays on the menu."
+        >
+          {PROFILES_LIST.map((profile) => {
+            const inUse = profile.id === currentProfile;
+            const hidden = preferences.hiddenModelProfiles.includes(profile.id);
+            return (
+              <SettingRow key={profile.id} label={profile.name} description={PROFILE_PICKER_COPY[profile.id]}>
+                {inUse && <span className="text-2xs text-ink-faint">In use</span>}
+                <SettingToggle
+                  checked={!hidden}
+                  disabled={inUse}
+                  label={`Show ${profile.name} in the model picker`}
+                  onChange={(shown) =>
+                    setPreferences({
+                      hiddenModelProfiles: shown
+                        ? preferences.hiddenModelProfiles.filter((id) => id !== profile.id)
+                        : [...preferences.hiddenModelProfiles, profile.id],
+                    })
+                  }
+                />
+              </SettingRow>
+            );
+          })}
+        </SettingGroup>
+
         {mode === "local" ? <ModelLibrary /> : <ApiProviders />}
       </div>
     </div>
   );
 };
 
-/** The row labels this pane carries, for the settings rail's search. */
-export const MODELS_ROWS = ["Runtime"];
+/**
+ * The row labels this pane carries, for the settings rail's search.
+ *
+ * Derived from the profile list rather than typed out, so a profile added to
+ * the picker becomes searchable in settings without anyone remembering to.
+ */
+export const MODELS_ROWS = ["Runtime", ...PROFILES_LIST.map((profile) => profile.name)];

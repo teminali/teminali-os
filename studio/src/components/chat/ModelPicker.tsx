@@ -1,15 +1,18 @@
 import React, { useEffect, useState } from "react";
-import { Check, Loader2, Lock, ShieldAlert, Sparkles, Zap } from "lucide-react";
+import { Brain, Check, ChevronRight, Gauge, GitBranch, KeyRound, Link2, Loader2, Plug, Puzzle, RotateCcw, ShieldAlert, Sparkles, Wrench, Zap } from "lucide-react";
 import { BrandGlyph } from "../ui";
-import { ModelService, formatBytes, type RoutingPlan } from "../../services/modelService";
+import { ModelService, ProviderService, formatBytes, type RoutingPlan } from "../../services/modelService";
 import {
   AgentCliService,
   type AgentDescriptor,
   type AgentEngine,
+  type AgentInventory,
   type AgentModelSet,
 } from "../../services/agentCliService";
 import { PROFILES_LIST, useStudioStore } from "../../store/studioStore";
 import { useMenuKeyboard } from "../../hooks/useMenuKeyboard";
+import { agentSessionKeyFor, resumableAgentSession } from "../../utils/chatSessions";
+import { visibleModelProfiles } from "../../services/preferences";
 import type { ModelProfileId } from "../../types";
 
 /**
@@ -21,13 +24,21 @@ import type { ModelProfileId } from "../../types";
  * this machine can carry. If Auto would escalate to a heavier model on a hard
  * prompt, that model is named too.
  *
- * Below the Frontier lanes sit the two agent CLIs, when they are installed.
- * Picking one of those does not swap a model behind the same engine — it sends
- * the conversation to Claude Code or Codex as a process, with that CLI's own
- * tools and permissions. The list keeps the same discipline as the lanes above:
- * an alias is shown with what it actually resolves to, and the interface says
- * whether that resolution was observed on this machine or is only our shipped
- * best knowledge. See server/agent-models.js for why that distinction exists.
+ * **One assistant open at a time.** The menu is a tree: the assistants are the
+ * branches — Frontier, Claude Code, Codex — and their models are the leaves.
+ * Flat, it ran to nineteen rows and off the bottom of a laptop screen, which is
+ * a list you scroll rather than a menu you read. Collapsed, it is three rows
+ * plus the models of the one assistant you are actually looking at, and each
+ * collapsed branch still says on its right which of its models is selected, so
+ * folding a branch away hides no answer.
+ *
+ * Picking an agent does not swap a model behind the same engine — it sends the
+ * conversation to Claude Code or Codex as a process, with that CLI's own tools
+ * and permissions, which is why that agent's permission rung lives inside its
+ * branch. The list keeps the same discipline throughout: an alias is shown with
+ * what it actually resolves to, and the interface says whether that resolution
+ * was observed on this machine or is only our shipped best knowledge. See
+ * server/agent-models.js for why that distinction exists.
  */
 
 export interface ModelPickerProps {
@@ -35,8 +46,12 @@ export interface ModelPickerProps {
   onClose: () => void;
 }
 
-/** Shared with AgentPane — the same rung must read the same in both places. */
-const PERMISSION_LABELS: Record<string, string> = {
+/**
+ * The rungs, named once. The voice stage's composer shows the one in force on
+ * its approvals chip, so the chip and this menu can never disagree about what
+ * the engine is currently allowed to do.
+ */
+export const PERMISSION_LABELS: Record<string, string> = {
   manual: "Ask first",
   acceptEdits: "Accept edits",
   bypassPermissions: "Full access",
@@ -55,43 +70,137 @@ const PERMISSION_DETAIL: Record<string, string> = {
 };
 
 /**
- * One glyph per profile, and the only place they are chosen.
+ * The other two rungs each CLI already has, named once for the same reason the
+ * permissions are.
  *
- * The composer's own trigger reads from this map rather than drawing its own,
- * because it drew a hardcoded `Lock` — Max's glyph — beside whichever profile
- * was actually selected, so Flash and Auto both wore a padlock and read as
- * unavailable. Max's lock is real (it stays locked until safety
- * qualification); the other two never were.
+ * Both vocabularies are the CLIs' own — `claude --effort` and Codex's
+ * `model_reasoning_effort` — and they do not agree: Codex starts at `minimal`,
+ * Claude Code tops out at `max`. One table covers both because the union is
+ * still six words, and the picker only ever renders the levels the gateway says
+ * the installed binary accepts.
  */
+const EFFORT_LABELS: Record<string, string> = {
+  minimal: "Minimal",
+  low: "Low",
+  medium: "Medium",
+  high: "High",
+  xhigh: "Extra high",
+  max: "Max",
+};
+
+const EFFORT_DETAIL: Record<string, string> = {
+  minimal: "Answers almost without reasoning. Fastest and cheapest",
+  low: "A little reasoning before answering",
+  medium: "The usual balance of thought and speed",
+  high: "Thinks longer. Slower turns, better on hard problems",
+  xhigh: "Thinks a great deal longer. For work that is worth waiting for",
+  max: "Everything the model has. The slowest and most expensive setting",
+};
+
+/**
+ * How much of the reasoning comes back on the stream — Codex's
+ * `model_reasoning_summary`. Claude Code has no equivalent knob: its effort
+ * level *is* its thinking budget, so its branch shows no Thinking group at all
+ * rather than a control that would do nothing.
+ */
+const THINKING_LABELS: Record<string, string> = {
+  none: "Hidden",
+  concise: "Brief",
+  detailed: "Full",
+  auto: "Automatic",
+};
+
+const THINKING_DETAIL: Record<string, string> = {
+  none: "Reasoning is not summarised; only the answer arrives",
+  concise: "A short summary of the reasoning, as it happens",
+  detailed: "The full reasoning summary in the transcript",
+  auto: "Let Codex choose how much reasoning to show",
+};
+
+/** The row meaning "pass no flag; leave the operator's own CLI config alone". */
+const CLI_DEFAULT_LABEL = "CLI default";
+
 export const PROFILE_ICONS: Record<ModelProfileId, React.ReactNode> = {
   flash: <Zap size={13} className="text-accent" strokeWidth={2.2} />,
-  auto: <Sparkles size={13} className="text-reason" />,
-  max: <Lock size={13} className="text-ink-muted" />,
+  auto: <Sparkles size={13} className="text-reason" strokeWidth={2} />,
+  max: <BrandGlyph brand="teminali" size={14} blend={false} />,
+  gemini: <BrandGlyph brand="gemini" size={14} />,
 };
 
 const ICONS = PROFILE_ICONS;
 
-export const ModelPicker: React.FC<ModelPickerProps> = ({ open, onClose }) => {
-  const { currentProfile, setProfile, agentSelection, setAgentSelection, agentPermission, setAgentPermission } =
-    useStudioStore();
-  const ref = React.useRef<HTMLDivElement>(null);
-  /*
-    How tall this menu may be, in pixels, and why it is measured.
+/**
+ * What each profile actually does, in one line.
+ *
+ * Exported because the settings pane offers the same four profiles as a list of
+ * switches, and two surfaces describing the same model in two different
+ * sentences is how an operator ends up believing they are two models.
+ */
+export const PROFILE_PICKER_COPY: Record<ModelProfileId, string> = {
+  flash: "The lightest installed model, every turn",
+  auto: "Light model for everyday turns, heavier one when a task is hard",
+  max: "Frontier Max online model with built-in key",
+  gemini: "Google Gemini 3.8 Flash (Free BYOK)",
+};
 
-    The menu is `bottom-11` off the composer, so it grows UPWARDS from a
-    fixed edge. A `vh` cap cannot know where that edge is: on the empty
-    chat the composer is vertically centred, which left `62vh` of list
-    running off the TOP of the window with its first rows unreachable —
-    scrolling does not help when the scroll container itself has gone off
-    screen. The bottom edge does not move when the height changes, so
-    reading it once after layout is stable, and `resize` is the only
-    thing that can invalidate it.
-  */
+/** A branch of the tree. `frontier` is always present; the agents come and go. */
+type BranchId = "frontier" | AgentEngine;
+
+const AGENT_ORDER: AgentEngine[] = ["claude", "codex"];
+
+export const ModelPicker: React.FC<ModelPickerProps> = ({ open, onClose }) => {
+  const {
+    currentProfile,
+    setProfile,
+    agentSelection,
+    setAgentSelection,
+    agentPermission,
+    setAgentPermission,
+    agentEffort,
+    setAgentEffort,
+    agentThinking,
+    setAgentThinking,
+    chatSessions,
+    activeSessionId,
+    setAgentSession,
+    forkChatSession,
+    setGeminiKeyModalOpen,
+    preferences,
+  } = useStudioStore();
+  const ref = React.useRef<HTMLDivElement>(null);
   const [maxHeight, setMaxHeight] = useState<number | undefined>(undefined);
   const [routing, setRouting] = useState<RoutingPlan | null>(null);
   const [loading, setLoading] = useState(false);
+  const [googleConfigured, setGoogleConfigured] = useState<boolean>(false);
   const [agents, setAgents] = useState<Record<AgentEngine, AgentDescriptor> | null>(null);
   const [agentModels, setAgentModels] = useState<Record<AgentEngine, AgentModelSet> | null>(null);
+  const [expanded, setExpanded] = useState<BranchId | null>(null);
+  /* The inventory is collapsed by default and fetched only when opened. An
+     agent branch is already twenty rows and overflows the menu (§6.38); five
+     more capabilities plus whatever the operator has configured would double
+     it, for information most turns never need. One row, opened on demand. */
+  const [inventoryOpen, setInventoryOpen] = useState<AgentEngine | null>(null);
+  const [inventory, setInventory] = useState<Partial<Record<AgentEngine, AgentInventory | null>>>({});
+  const [inventoryLoading, setInventoryLoading] = useState<AgentEngine | null>(null);
+
+  /** The branch holding the current selection. Opening on anything else would
+   *  hide the one row the operator came to check. */
+  const selectedBranch: BranchId = agentSelection ? agentSelection.engine : "frontier";
+
+  /* ── The thread this chat is on ──────────────────────────────────────────
+     Derived from exactly what the composer sends, through the same function,
+     so the menu cannot promise a resume the next turn does not perform. Null
+     here means the next turn opens a new thread — which is the truth whether
+     the chat has never had one or has one belonging to the other CLI. */
+  const activeChat = chatSessions.find((session) => session.id === activeSessionId);
+  const threadId = resumableAgentSession(chatSessions, activeSessionId, agentSessionKeyFor(agentSelection));
+  const forkArmed = Boolean(threadId && activeChat?.agentForkPending);
+
+  // Re-opening the menu re-opens that branch: a menu that remembers a fold from
+  // three selections ago opens onto the wrong assistant.
+  useEffect(() => {
+    if (open) setExpanded(selectedBranch);
+  }, [open, selectedBranch]);
 
   useEffect(() => {
     if (!open) return;
@@ -103,6 +212,13 @@ export const ModelPicker: React.FC<ModelPickerProps> = ({ open, onClose }) => {
       .finally(() => {
         if (!controller.signal.aborted) setLoading(false);
       });
+    ProviderService.list(controller.signal)
+      .then((res) => {
+        if (controller.signal.aborted) return;
+        const google = res.providers.find((p) => p.id === "google");
+        setGoogleConfigured(Boolean(google?.configured));
+      })
+      .catch(() => setGoogleConfigured(false));
     return () => controller.abort();
   }, [open]);
 
@@ -131,7 +247,7 @@ export const ModelPicker: React.FC<ModelPickerProps> = ({ open, onClose }) => {
     measure();
     window.addEventListener("resize", measure);
     return () => window.removeEventListener("resize", measure);
-  }, [open]);
+  }, [open, expanded]);
 
   useEffect(() => {
     if (!open) return;
@@ -154,41 +270,99 @@ export const ModelPicker: React.FC<ModelPickerProps> = ({ open, onClose }) => {
     };
   }, [open, onClose]);
 
+  /** One branch at a time: opening one closes whichever was open. */
+  const toggle = (id: BranchId) => setExpanded((current) => (current === id ? null : id));
+
+  const installedAgents = AGENT_ORDER.filter((engine) => agents?.[engine]?.installed && agentModels?.[engine]);
+
+  /** The Frontier profiles this menu offers. The rule, and why, is in
+   *  `services/preferences.ts` beside the preference it reads. */
+  const visibleProfiles = visibleModelProfiles(PROFILES_LIST, preferences.hiddenModelProfiles, currentProfile);
+
   /**
-   * Every selectable row, in visual order.
+   * Every focusable row, in visual order.
    *
-   * The menu is three groups — Frontier lanes, an agent's permissions, each
-   * agent's models — but the keyboard has to walk it as one list, so the flat
-   * index is derived here and each group renders against it. Building it in
-   * render order is what keeps the arrows matching what the eye sees.
+   * The keyboard walks the tree as one list, so the flat index is derived here
+   * from exactly what is on screen — branch headers always, their contents only
+   * while open. Building it in render order is what keeps the arrows matching
+   * what the eye sees; a collapsed branch's models must not be reachable by an
+   * arrow key when they are not reachable by a mouse.
    */
   const rows: { key: string; run: () => void; disabled?: boolean }[] = [];
-  for (const profile of PROFILES_LIST) {
-    rows.push({
-      key: `profile:${profile.id}`,
-      disabled: profile.id === "max" && !routing?.heavy,
-      run: () => {
-        setProfile(profile.id);
-        onClose();
-      },
-    });
-  }
-  if (agentSelection && agents?.[agentSelection.engine]) {
-    for (const value of agents[agentSelection.engine].permissions ?? []) {
-      rows.push({ key: `perm:${value}`, run: () => setAgentPermission(value) });
+  rows.push({ key: "branch:frontier", run: () => toggle("frontier") });
+  if (expanded === "frontier") {
+    for (const profile of visibleProfiles) {
+      rows.push({
+        key: `profile:${profile.id}`,
+        run: () => {
+          if (profile.id === "gemini" && !googleConfigured) {
+            setGeminiKeyModalOpen(true);
+            onClose();
+            return;
+          }
+          setProfile(profile.id);
+          onClose();
+        },
+      });
     }
   }
-  for (const engine of ["claude", "codex"] as AgentEngine[]) {
-    const descriptor = agents?.[engine];
-    const set = agentModels?.[engine];
-    if (!descriptor?.installed || !set) continue;
-    for (const model of set.models) {
+  for (const engine of installedAgents) {
+    rows.push({ key: `branch:${engine}`, run: () => toggle(engine) });
+    if (expanded !== engine) continue;
+    const descriptor = agents![engine];
+    for (const model of agentModels![engine].models) {
       rows.push({
         key: `${engine}:${model.id ?? "default"}`,
         run: () => {
           setAgentSelection({ engine, model: model.id, label: `${descriptor.label} · ${model.label}` });
           onClose();
         },
+      });
+    }
+    if (agentSelection?.engine === engine) {
+      for (const value of descriptor.permissions ?? []) {
+        rows.push({ key: `perm:${value}`, run: () => setAgentPermission(value) });
+      }
+      // The "leave it alone" row leads each group and is reachable by the
+      // keyboard like any other: a level you cannot un-pick is a trap.
+      if ((descriptor.efforts ?? []).length > 0) {
+        rows.push({ key: "effort:default", run: () => setAgentEffort(null) });
+        for (const value of descriptor.efforts ?? []) {
+          rows.push({ key: `effort:${value}`, run: () => setAgentEffort(value) });
+        }
+      }
+      if ((descriptor.thinking ?? []).length > 0) {
+        rows.push({ key: "thinking:default", run: () => setAgentThinking(null) });
+        for (const value of descriptor.thinking ?? []) {
+          rows.push({ key: `thinking:${value}`, run: () => setAgentThinking(value) });
+        }
+      }
+      /* Both thread controls act on a thread, so with none they are dead rows.
+         Registered anyway and marked disabled: the keyboard skips them, and they
+         stay visible to say what this chat has rather than vanishing. */
+      rows.push({
+        key: "thread:fork",
+        disabled: !threadId,
+        run: () => {
+          forkChatSession();
+          // The chat underneath the menu just changed. Leaving it open would
+          // leave it describing a conversation the operator is no longer in.
+          onClose();
+        },
+      });
+      rows.push({
+        key: "thread:fresh",
+        disabled: !threadId,
+        // Deliberately does not close: the status line above it is the receipt,
+        // and it only reads as one if the operator is still looking at it.
+        run: () => setAgentSession(activeSessionId, null, null),
+      });
+      /* Only the heading is a keyboard stop. What it reveals is a report, not a
+         list of choices, and arrowing through rows that cannot be chosen is how
+         a menu stops feeling like one. */
+      rows.push({
+        key: `inventory:${engine}`,
+        run: () => setInventoryOpen((current) => (current === engine ? null : engine)),
       });
     }
   }
@@ -202,18 +376,58 @@ export const ModelPicker: React.FC<ModelPickerProps> = ({ open, onClose }) => {
   });
   const indexOf = (key: string) => rows.findIndex((row) => row.key === key);
 
+  /* An agent branch carrying models, permissions, effort and thinking is taller
+     than the menu's own maxHeight — measured at 560px of rows inside 445px on a
+     813px viewport, five rows below the fold. The arrows happily walk onto those
+     rows, and a highlight the operator cannot see is a highlight they cannot
+     trust, so the active row is pulled into view. `block: "nearest"` scrolls the
+     menu only when the row is actually out of it; a visible row does not move. */
+  useEffect(() => {
+    if (activeIndex < 0) return;
+    ref.current
+      ?.querySelector<HTMLElement>(`[data-row-index="${activeIndex}"]`)
+      ?.scrollIntoView({ block: "nearest" });
+  }, [activeIndex]);
+
+  /* Read the agent's kit the first time it is asked for, and remember it.
+     `claude mcp list` health-checks every configured server over the network
+     and takes ~2.4s, so this cannot sit in the menu's open path — it would
+     stall a menu whose whole job is to be quicker than a config file. The
+     gateway caches for a minute on top of this. */
+  useEffect(() => {
+    const engine = inventoryOpen;
+    if (!engine || inventory[engine] !== undefined) return;
+    const controller = new AbortController();
+    setInventoryLoading(engine);
+    void AgentCliService.inventory(engine, controller.signal).then((result) => {
+      if (controller.signal.aborted) return;
+      setInventory((current) => ({ ...current, [engine]: result }));
+      setInventoryLoading((current) => (current === engine ? null : current));
+    });
+    return () => controller.abort();
+  }, [inventoryOpen, inventory]);
+
+  /* Opening the inventory adds rows below a row that is often already near the
+     bottom of the menu, so the thing just revealed can land entirely out of
+     sight. Pulling its heading to the top of the box shows the list under it
+     without moving anything the operator was looking at. */
+  useEffect(() => {
+    if (!inventoryOpen) return;
+    ref.current?.querySelector<HTMLElement>("[data-inventory-anchor]")?.scrollIntoView({ block: "start" });
+  }, [inventoryOpen, inventory]);
+
   if (!open) return null;
 
   /** What each lane will actually run, so the label is never a promise. */
   const runs = (id: ModelProfileId) => {
+    if (id === "max" || id === "gemini") return { tag: "gemini-3.8-flash", bytes: 0 };
     if (!routing) return null;
     if (id === "flash") return routing.light;
-    if (id === "max") return routing.heavy;
     return routing.light;
   };
 
   /* ── One row, for every model in the menu ───────────────────────────────
-     Every entry here is the same object: a 28px line with a glyph, a name, and
+     Every entry here is the same object: a 24px line with a glyph, a name, and
      the concrete thing it will run on the right. Detail that used to sit under
      each label — the lane description, where a resolution came from — moved
      into the tooltip. Fourteen models each explaining themselves in three lines
@@ -226,163 +440,552 @@ export const ModelPicker: React.FC<ModelPickerProps> = ({ open, onClose }) => {
     title?: string;
     active: boolean;
     disabled?: boolean;
+    /**
+     * A row that *does* something rather than one that selects something.
+     *
+     * Most of this menu is a set of radio groups — one model, one permission,
+     * one effort — and `menuitemradio` says so. Forking a thread is not a
+     * setting that can be on: announced as a radio it is one that is
+     * permanently off, which is a worse answer for a screen reader than no
+     * answer at all.
+     */
+    action?: boolean;
     onSelect: () => void;
     /** Position in the flat keyboard order. */
     rowKey: string;
-  }> = ({ icon, label, meta, title, active, disabled = false, onSelect, rowKey }) => {
+  }> = ({ icon, label, meta, title, active, disabled = false, action = false, onSelect, rowKey }) => {
     const index = indexOf(rowKey);
     const highlighted = index >= 0 && index === activeIndex;
     return (
-    <button
-      type="button"
-      role="menuitemradio"
-      aria-checked={active}
-      disabled={disabled}
-      title={title}
-      onMouseEnter={() => index >= 0 && setActiveIndex(index)}
-      onClick={onSelect}
-      className={`w-full h-6 px-2 rounded-md flex items-center gap-2 text-sm transition-colors duration-ds ease-ds disabled:opacity-40 ${
-        active
-          ? "bg-surface-active text-ink-strong"
-          : highlighted
-            ? "bg-surface-hover text-ink-body"
-            : "text-ink-body hover:bg-surface-hover"
-      }`}
-    >
-      <span className="flex-shrink-0 flex items-center">{icon}</span>
-      <span className="truncate">{label}</span>
-      <span className="flex-1" />
-      {meta && <span className="text-2xs text-ink-soft truncate max-w-[128px]">{meta}</span>}
-      {active && <Check size={12} className="text-ink-muted flex-shrink-0" />}
-    </button>
+      <button
+        type="button"
+        role={action ? "menuitem" : "menuitemradio"}
+        {...(action ? {} : { "aria-checked": active })}
+        data-row-index={index}
+        disabled={disabled}
+        title={title}
+        onMouseEnter={() => index >= 0 && setActiveIndex(index)}
+        onClick={onSelect}
+        className={`w-full h-6 pl-7 pr-2 rounded-md flex items-center gap-2 text-sm transition-colors duration-ds ease-ds disabled:opacity-40 ${
+          active
+            ? "bg-surface-active text-ink-strong"
+            : highlighted
+              ? "bg-surface-hover text-ink-body"
+              : "text-ink-body hover:bg-surface-hover"
+        }`}
+      >
+        <span className="flex-shrink-0 flex items-center">{icon}</span>
+        <span className="truncate">{label}</span>
+        <span className="flex-1" />
+        {meta && <span className="text-2xs text-ink-soft truncate max-w-[112px]">{meta}</span>}
+        {active && <Check size={12} className="text-ink-muted flex-shrink-0" />}
+      </button>
     );
   };
 
-  const Group: React.FC<{ children: React.ReactNode; trailing?: string }> = ({ children, trailing }) => (
-    <div className="flex items-center justify-between h-5 px-2 mt-0.5 first:mt-0">
+  /* ── A branch header ────────────────────────────────────────────────────
+     Reads as one row whether it is open or shut. When shut it carries the name
+     of whichever of its models is selected, so collapsing never costs the
+     answer to "what am I running"; when open, that name is visible below it
+     anyway and the summary would be a duplicate, so it goes. */
+  const Branch: React.FC<{
+    id: BranchId;
+    icon: React.ReactNode;
+    label: string;
+    trailing?: string;
+    summary?: string;
+    holdsSelection: boolean;
+  }> = ({ id, icon, label, trailing, summary, holdsSelection }) => {
+    const isOpen = expanded === id;
+    const index = indexOf(`branch:${id}`);
+    const highlighted = index >= 0 && index === activeIndex;
+    return (
+      <button
+        type="button"
+        role="menuitem"
+        aria-expanded={isOpen}
+        data-row-index={index}
+        onMouseEnter={() => index >= 0 && setActiveIndex(index)}
+        onClick={() => toggle(id)}
+        title={trailing ? `${label} ${trailing}` : label}
+        className={`w-full h-7 px-2 rounded-md flex items-center gap-1.5 text-sm transition-colors duration-ds ease-ds ${
+          highlighted ? "bg-surface-hover text-ink-strong" : "text-ink-strong hover:bg-surface-hover"
+        }`}
+      >
+        <ChevronRight
+          size={12}
+          className={`flex-shrink-0 text-ink-muted transition-transform duration-ds ease-ds ${
+            isOpen ? "rotate-90" : ""
+          }`}
+        />
+        <span className="flex-shrink-0 flex items-center">{icon}</span>
+        <span className="truncate font-medium">{label}</span>
+        <span className="flex-1" />
+        {!isOpen && summary && (
+          <span className="text-2xs text-ink-soft truncate max-w-[112px]">{summary}</span>
+        )}
+        {!isOpen && holdsSelection && <Check size={12} className="text-ink-muted flex-shrink-0" />}
+      </button>
+    );
+  };
+
+  const SubGroup: React.FC<{ children: React.ReactNode }> = ({ children }) => (
+    <div className="h-5 pl-7 pr-2 flex items-center">
       <span className="text-2xs text-ink-faint">{children}</span>
-      {trailing && <span className="text-2xs text-ink-disabled truncate max-w-[120px]">{trailing}</span>}
     </div>
   );
+
+  /* A reported fact, not a choice.
+     Deliberately not a `Row`: it is a `div`, carries no `role="menuitem"`, takes
+     no `data-row-index` and cannot be arrowed onto. A screen reader walking this
+     menu should count the settings it can change, and find five more "items"
+     that do nothing when it reaches the inventory. */
+  const InfoLine: React.FC<{
+    icon?: React.ReactNode;
+    text: string;
+    trailing?: string;
+    title?: string;
+    muted?: boolean;
+    /** A sentence rather than a label: let it use two lines instead of an ellipsis. */
+    wrap?: boolean;
+  }> = ({ icon, text, trailing, title, muted = false, wrap = false }) => (
+    <div
+      title={title}
+      className={`min-h-6 pl-7 pr-2 flex items-center gap-2 text-2xs ${muted ? "text-ink-faint" : "text-ink-muted"}`}
+    >
+      {icon ? <span className="shrink-0 flex items-center justify-center w-[11px]">{icon}</span> : <span className="w-[11px] shrink-0" />}
+      <span className={wrap ? "py-1 leading-snug" : "truncate"}>{text}</span>
+      {trailing ? <span className="ml-auto pl-2 shrink-0 truncate max-w-[45%] text-ink-faint">{trailing}</span> : null}
+    </div>
+  );
+
+  const frontierHoldsSelection = !agentSelection;
+  const frontierSummary = PROFILES_LIST.find((profile) => profile.id === currentProfile)?.name;
 
   return (
     <div
       ref={ref}
       role="menu"
-      className="lit lit-strong absolute bottom-11 left-0 z-30 w-[284px] overflow-y-auto rounded-xl bg-surface-popover shadow-popover p-1 animate-in"
+      className="lit lit-strong absolute bottom-11 right-0 z-[100] w-[284px] overflow-y-auto rounded-xl bg-surface-popover shadow-popover p-1 animate-in"
       style={{ maxHeight }}
     >
-      <Group>Frontier</Group>
-      {PROFILES_LIST.map((profile) => {
-        const model = runs(profile.id);
-        const locked = profile.id === "max" && !routing?.heavy;
-        const active = currentProfile === profile.id && !agentSelection;
-        const description =
-          profile.id === "auto"
-            ? "Light model for everyday turns, heavier one when a task is hard"
-            : profile.id === "flash"
-              ? "The lightest installed model, every turn"
-              : "The heaviest model that fits, every turn";
+      <Branch
+        id="frontier"
+        icon={<BrandGlyph brand="teminali" size={14} blend={false} />}
+        label="Frontier"
+        summary={frontierHoldsSelection ? frontierSummary?.replace(/^Frontier\s+/i, "") : undefined}
+        holdsSelection={frontierHoldsSelection}
+      />
 
-        return (
-          <Row
-            key={profile.id}
-            rowKey={`profile:${profile.id}`}
-            icon={ICONS[profile.id]}
-            label={profile.name}
-            active={active}
-            disabled={locked}
-            title={[
-              description,
-              model ? `runs ${model.tag} (${formatBytes(model.bytes)})` : null,
-              // Auto's escalation target used to have a line of its own. It is
-              // still named — a lane that can silently switch models must say
-              // what it switches to — but as a footnote rather than a row.
-              profile.id === "auto" && routing?.heavy && routing.heavy.tag !== routing.light?.tag
-                ? `escalates to ${routing.heavy.tag}`
-                : null,
-            ].filter(Boolean).join(" · ")}
-            meta={
-              loading ? (
-                <Loader2 size={9} className="animate-spin inline" />
-              ) : model ? (
-                <span className="font-mono">{model.tag}</span>
-              ) : (
-                <span className="text-warning">no model fits</span>
-              )
-            }
-            onSelect={() => {
-              setProfile(profile.id);
-              onClose();
-            }}
-          />
-        );
-      })}
+      {expanded === "frontier" &&
+        visibleProfiles.map((profile) => {
+          const model = runs(profile.id);
+          const active = currentProfile === profile.id && !agentSelection;
+          const description = PROFILE_PICKER_COPY[profile.id];
 
-      {/* An agent selected in the composer used to run at the CLI default with
-          no way to change it — the permission selector existed only in the
-          agent tabs. It belongs wherever the agent is chosen. */}
-      {agentSelection && agents?.[agentSelection.engine] && (
-        <div className="mt-1 pt-1 border-t border-edge">
-          <Group>Permissions</Group>
-          {(agents[agentSelection.engine].permissions ?? []).map((value) => {
-            const active = (agentPermission ?? agents[agentSelection.engine].defaultPermission) === value;
-            const danger = value === "bypassPermissions" || value === "danger-full-access";
-            return (
-              <Row
-                key={value}
-                rowKey={`perm:${value}`}
-                icon={<ShieldAlert size={13} className={danger ? "text-warning" : "text-ink-muted"} />}
-                label={PERMISSION_LABELS[value] ?? value}
-                active={active}
-                title={PERMISSION_DETAIL[value] ?? value}
-                onSelect={() => setAgentPermission(value)}
-              />
+          let metaNode: React.ReactNode;
+          if (profile.id === "max") {
+            metaNode = <span className="font-mono text-purple-300">gemini-3.8-flash</span>;
+          } else if (profile.id === "gemini") {
+            metaNode = googleConfigured ? (
+              <span
+                role="button"
+                tabIndex={0}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setGeminiKeyModalOpen(true);
+                  onClose();
+                }}
+                className="font-mono text-emerald-300 hover:text-emerald-100 cursor-pointer inline-flex items-center gap-1 group/key"
+                title="Click to configure or change your Google Gemini API key"
+              >
+                <span>gemini-3.8-flash</span>
+                <KeyRound size={10} className="text-emerald-400 group-hover/key:text-emerald-200 transition-colors" />
+              </span>
+            ) : (
+              <span
+                role="button"
+                tabIndex={0}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setGeminiKeyModalOpen(true);
+                  onClose();
+                }}
+                className="text-emerald-400 hover:underline cursor-pointer font-medium"
+              >
+                Free (BYOK)
+              </span>
             );
-          })}
-        </div>
-      )}
+          } else if (loading) {
+            metaNode = <Loader2 size={9} className="animate-spin inline" />;
+          } else if (model) {
+            metaNode = <span className="font-mono">{model.tag}</span>;
+          } else {
+            metaNode = <span className="text-warning">no model fits</span>;
+          }
 
-      {(["claude", "codex"] as AgentEngine[]).map((engine) => {
-        const descriptor = agents?.[engine];
+          return (
+            <Row
+              key={profile.id}
+              rowKey={`profile:${profile.id}`}
+              icon={ICONS[profile.id]}
+              label={profile.name.replace(/^Frontier\s+/i, "")}
+              active={active}
+              disabled={false}
+              title={[
+                description,
+                profile.id === "max"
+                  ? "runs gemini-3.8-flash (Built-in Key)"
+                  : profile.id === "gemini"
+                    ? googleConfigured
+                      ? "runs gemini-3.8-flash with your Google key"
+                      : "Requires Google Gemini API key (click to add your free key)"
+                    : model
+                      ? `runs ${model.tag} (${formatBytes(model.bytes)})`
+                      : null,
+                profile.id === "auto" && routing?.heavy && routing.heavy.tag !== routing.light?.tag
+                  ? `escalates to ${routing.heavy.tag}`
+                  : null,
+              ]
+                .filter(Boolean)
+                .join(" · ")}
+              meta={metaNode}
+              onSelect={() => {
+                if (profile.id === "gemini" && !googleConfigured) {
+                  setGeminiKeyModalOpen(true);
+                  onClose();
+                  return;
+                }
+                setProfile(profile.id);
+                onClose();
+              }}
+            />
+          );
+        })}
+
+      {installedAgents.map((engine) => {
         // An agent that is not installed is left out rather than shown greyed:
         // the pane already explains the install when you open its tab, and a
         // dead row in a picker is just noise.
-        if (!descriptor?.installed) return null;
-        const set = agentModels?.[engine];
-        if (!set) return null;
+        const descriptor = agents![engine];
+        const set = agentModels![engine];
+        const holdsSelection = agentSelection?.engine === engine;
+        const selectedModel = holdsSelection
+          ? set.models.find((model) => model.id === agentSelection?.model)
+          : undefined;
 
         return (
           <div key={engine}>
-            <Group trailing={descriptor.version ?? undefined}>{descriptor.label}</Group>
-            {set.models.map((model) => {
-              const active = agentSelection?.engine === engine && agentSelection.model === model.id;
-              // Provenance still matters, but it is a footnote, not a headline.
-              // It lives in the tooltip beside the detail it qualifies.
-              const provenance =
-                model.source === "observed"
-                  ? "confirmed by the CLI"
-                  : model.source === "config"
-                    ? "from your config"
-                    : model.resolves
-                      ? "not yet confirmed"
-                      : null;
-              return (
-                <Row
-                  key={`${engine}:${model.id ?? "default"}`}
-                  rowKey={`${engine}:${model.id ?? "default"}`}
-                  icon={<BrandGlyph brand={engine} size={14} />}
-                  label={model.label}
-                  active={active}
-                  title={[model.detail, model.resolves, provenance].filter(Boolean).join(" · ")}
-                  meta={model.resolves ? <span className="font-mono">{model.resolves}</span> : undefined}
-                  onSelect={() => {
-                    setAgentSelection({ engine, model: model.id, label: `${descriptor.label} · ${model.label}` });
-                    onClose();
-                  }}
-                />
-              );
-            })}
+            <Branch
+              id={engine}
+              icon={<BrandGlyph brand={engine} size={14} />}
+              label={descriptor.label}
+              trailing={descriptor.version ?? undefined}
+              summary={selectedModel?.label}
+              holdsSelection={holdsSelection}
+            />
+
+            {expanded === engine && (
+              <>
+                {set.models.map((model) => {
+                  const active = holdsSelection && agentSelection?.model === model.id;
+                  // Provenance still matters, but it is a footnote, not a
+                  // headline. It lives in the tooltip beside the detail it
+                  // qualifies.
+                  const provenance =
+                    model.source === "observed"
+                      ? "confirmed by the CLI"
+                      : model.source === "config"
+                        ? "from your config"
+                        : model.resolves
+                          ? "not yet confirmed"
+                          : null;
+                  return (
+                    <Row
+                      key={`${engine}:${model.id ?? "default"}`}
+                      rowKey={`${engine}:${model.id ?? "default"}`}
+                      icon={<BrandGlyph brand={engine} size={14} />}
+                      label={model.label}
+                      active={Boolean(active)}
+                      title={[model.detail, model.resolves, provenance].filter(Boolean).join(" · ")}
+                      meta={model.resolves ? <span className="font-mono">{model.resolves}</span> : undefined}
+                      onSelect={() => {
+                        setAgentSelection({
+                          engine,
+                          model: model.id,
+                          label: `${descriptor.label} · ${model.label}`,
+                        });
+                        onClose();
+                      }}
+                    />
+                  );
+                })}
+
+                {/* An agent selected in the composer used to run at the CLI
+                    default with no way to change it — the permission selector
+                    existed only in the agent tabs. It belongs wherever the
+                    agent is chosen, which is inside that agent's branch. */}
+                {holdsSelection && (
+                  <>
+                    {(descriptor.permissions ?? []).length > 0 && (
+                      <>
+                        <SubGroup>Permissions</SubGroup>
+                        {(descriptor.permissions ?? []).map((value) => {
+                          const active = (agentPermission ?? descriptor.defaultPermission) === value;
+                          const danger = value === "bypassPermissions" || value === "danger-full-access";
+                          return (
+                            <Row
+                              key={value}
+                              rowKey={`perm:${value}`}
+                              icon={<ShieldAlert size={13} className={danger ? "text-warning" : "text-ink-muted"} />}
+                              label={PERMISSION_LABELS[value] ?? value}
+                              active={active}
+                              title={PERMISSION_DETAIL[value] ?? value}
+                              onSelect={() => setAgentPermission(value)}
+                            />
+                          );
+                        })}
+                      </>
+                    )}
+
+                    {/* ── The other two rungs the CLI already has ─────────────
+                        A turn from this composer ran at whatever `~/.claude` or
+                        `~/.codex/config.toml` said, with the app offering no way
+                        to say otherwise: the operator had to leave, edit a
+                        config file, and come back. Both knobs now sit where the
+                        agent is chosen, beside its permissions, and both are
+                        rendered from what the gateway reports the installed
+                        binary accepts — so the menu can never offer a level the
+                        CLI would reject and fail the turn on.
+
+                        Each group leads with "CLI default", which passes no flag
+                        at all, and that is the shipped state on purpose: a
+                        picker that silently overrides a config file the operator
+                        wrote is worse than one that starts out offering
+                        nothing. */}
+                    {(descriptor.efforts ?? []).length > 0 && (
+                      <>
+                        <SubGroup>Effort</SubGroup>
+                        <Row
+                          rowKey="effort:default"
+                          icon={<Gauge size={13} className="text-ink-muted" />}
+                          label={CLI_DEFAULT_LABEL}
+                          active={!agentEffort}
+                          title={`Pass no effort flag; ${descriptor.label}'s own setting stands`}
+                          onSelect={() => setAgentEffort(null)}
+                        />
+                        {(descriptor.efforts ?? []).map((value) => (
+                          <Row
+                            key={`effort:${value}`}
+                            rowKey={`effort:${value}`}
+                            icon={<Gauge size={13} className="text-ink-muted" />}
+                            label={EFFORT_LABELS[value] ?? value}
+                            active={agentEffort === value}
+                            title={EFFORT_DETAIL[value] ?? value}
+                            onSelect={() => setAgentEffort(value)}
+                          />
+                        ))}
+                      </>
+                    )}
+
+                    {(descriptor.thinking ?? []).length > 0 && (
+                      <>
+                        <SubGroup>Thinking</SubGroup>
+                        <Row
+                          rowKey="thinking:default"
+                          icon={<Brain size={13} className="text-ink-muted" />}
+                          label={CLI_DEFAULT_LABEL}
+                          active={!agentThinking}
+                          title={`Pass no reasoning flag; ${descriptor.label}'s own setting stands`}
+                          onSelect={() => setAgentThinking(null)}
+                        />
+                        {(descriptor.thinking ?? []).map((value) => (
+                          <Row
+                            key={`thinking:${value}`}
+                            rowKey={`thinking:${value}`}
+                            icon={<Brain size={13} className="text-ink-muted" />}
+                            label={THINKING_LABELS[value] ?? value}
+                            active={agentThinking === value}
+                            title={THINKING_DETAIL[value] ?? value}
+                            onSelect={() => setAgentThinking(value)}
+                          />
+                        ))}
+                      </>
+                    )}
+
+                    {/* ── The thread ──────────────────────────────────────────
+                        Both CLIs keep the conversation on their own side, and
+                        this app has been resuming it silently ever since agents
+                        were wired in: nothing said so, and nothing could stop
+                        it. Two questions an operator could not answer from the
+                        interface — does the next turn remember this chat, and
+                        how do I make it forget.
+
+                        The status line answers the first through the very
+                        function the composer sends with, so the menu cannot
+                        promise a resume that then does not happen. */}
+                    <SubGroup>Thread</SubGroup>
+                    <InfoLine
+                      icon={<Link2 size={11} />}
+                      /* Short enough to survive beside the id. A line that
+                         ellipsises into "Branches this thread on the…" answers
+                         nothing, and the sentence it came from is one hover
+                         away in the tooltip — the same trade §6.39 made for the
+                         inventory's reasons. */
+                      text={forkArmed ? "Branches on next turn" : threadId ? "Resumes this thread" : "Starts a new thread"}
+                      trailing={threadId ? threadId.slice(0, 8) : undefined}
+                      title={
+                        forkArmed
+                          ? `The next turn answers from this thread and writes a new one, leaving ${threadId} as it is`
+                          : threadId
+                            ? `${descriptor.label} continues session ${threadId}`
+                            : `${descriptor.label} has no thread for this chat; the next turn opens one`
+                      }
+                      muted={!threadId}
+                    />
+                    <Row
+                      rowKey="thread:fork"
+                      icon={<GitBranch size={13} className="text-ink-muted" />}
+                      label="Fork this thread"
+                      active={false}
+                      action
+                      disabled={!threadId}
+                      title={
+                        threadId
+                          ? "Opens a second chat holding this conversation. Its next turn branches off this thread and leaves this one where it is"
+                          : "There is no thread to fork yet — the next turn will start one"
+                      }
+                      onSelect={() => {
+                        forkChatSession();
+                        onClose();
+                      }}
+                    />
+                    <Row
+                      rowKey="thread:fresh"
+                      icon={<RotateCcw size={13} className="text-ink-muted" />}
+                      label="Start fresh"
+                      active={false}
+                      action
+                      disabled={!threadId}
+                      title={
+                        threadId
+                          ? `${descriptor.label} forgets this conversation and the next turn opens a new thread. The transcript on screen stays`
+                          : "The next turn already starts a new thread"
+                      }
+                      onSelect={() => setAgentSession(activeSessionId, null, null)}
+                    />
+
+                    {/* ── What it brings ──────────────────────────────────────
+                        The picker could say which model, how hard it thinks and
+                        what it may touch, and still not answer the question that
+                        decides whether a turn can work at all: what tools will
+                        it have? Four of the five servers this app attaches are
+                        Claude Code only, so choosing Codex quietly costs the
+                        screen, the workspace, the camera and the in-app approval
+                        prompts — an asymmetry that lived only in the argv
+                        builders until now, and that operators discovered by
+                        asking Codex to do something it had no hands for.
+
+                        Read from the gateway, which reads it from the installed
+                        binaries, for the same reason the effort and thinking
+                        vocabularies are: a list we keep here is a list that goes
+                        stale the next time either CLI ships. */}
+                    <Row
+                      rowKey={`inventory:${engine}`}
+                      icon={<Wrench size={13} className="text-ink-muted" />}
+                      label="What it brings"
+                      active={false}
+                      action
+                      title={`The tools, servers and plugins ${descriptor.label} will have on the next turn`}
+                      meta={
+                        <ChevronRight
+                          size={12}
+                          className={`text-ink-faint transition-transform duration-ds ease-ds ${
+                            inventoryOpen === engine ? "rotate-90" : ""
+                          }`}
+                        />
+                      }
+                      onSelect={() => setInventoryOpen((current) => (current === engine ? null : engine))}
+                    />
+
+                    {inventoryOpen === engine && (
+                      <div data-inventory-anchor className="pb-1">
+                        {inventoryLoading === engine && !inventory[engine] ? (
+                          <InfoLine icon={<Loader2 size={11} className="animate-spin" />} text="Reading the CLI…" />
+                        ) : !inventory[engine] ? (
+                          /* Null is not "nothing". The gateway could not read the
+                             binary, and saying "no tools" would be a lie that
+                             sends someone debugging the wrong thing. */
+                          <InfoLine text="Could not read this agent's tools." />
+                        ) : (
+                          <>
+                            <SubGroup>From Teminali OS</SubGroup>
+                            {inventory[engine]!.studio.map((capability) => (
+                              <InfoLine
+                                key={capability.id}
+                                icon={
+                                  capability.available
+                                    ? <Check size={11} className="text-accent" />
+                                    : <span className="w-[11px] text-center text-ink-faint">–</span>
+                                }
+                                text={capability.label}
+                                muted={!capability.available}
+                                title={capability.available
+                                  ? `${capability.detail} · ${capability.tools.join(", ")}`
+                                  : `${capability.detail} — not available: ${capability.reason ?? "unknown"}`}
+                                trailing={capability.available ? undefined : capability.reason ?? undefined}
+                              />
+                            ))}
+
+                            <SubGroup>From {descriptor.label}</SubGroup>
+                            {inventory[engine]!.mcp === null ? (
+                              <InfoLine text="MCP servers could not be read." muted />
+                            ) : inventory[engine]!.mcp!.length === 0 ? (
+                              <InfoLine text="No MCP servers configured." muted />
+                            ) : (
+                              inventory[engine]!.mcp!.map((server) => (
+                                <InfoLine
+                                  key={server.name}
+                                  icon={<Plug size={11} className={server.enabled ? "text-ink-muted" : "text-ink-faint"} />}
+                                  text={server.name}
+                                  muted={!server.enabled}
+                                  title={`${server.transport}${server.status ? ` · ${server.status}` : ""}`}
+                                  trailing={server.status ?? undefined}
+                                />
+                              ))
+                            )}
+                            {inventory[engine]!.plugins?.map((plugin) => (
+                              <InfoLine
+                                key={plugin.name}
+                                icon={<Puzzle size={11} className={plugin.enabled ? "text-ink-muted" : "text-ink-faint"} />}
+                                text={plugin.name}
+                                muted={!plugin.enabled}
+                                title={[plugin.version, plugin.servers ? `${plugin.servers} MCP servers` : null]
+                                  .filter(Boolean)
+                                  .join(" · ")}
+                                trailing={plugin.version ?? undefined}
+                              />
+                            ))}
+
+                            {/* An inventory that quietly omits something is worse
+                                than one that names the gap. Neither CLI can list
+                                its slash commands, so this one says so rather
+                                than letting the absence read as "you have none". */}
+                            {inventory[engine]!.unlisted.length > 0 && (
+                              <InfoLine
+                                muted
+                                wrap
+                                text={`Not listed: ${inventory[engine]!.unlisted.join(", ")} — neither CLI can report them.`}
+                              />
+                            )}
+                          </>
+                        )}
+                      </div>
+                    )}
+                  </>
+                )}
+              </>
+            )}
           </div>
         );
       })}

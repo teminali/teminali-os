@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from "react";
-import { AlertTriangle, Check, ExternalLink, Eye, EyeOff, KeyRound, Loader2, Sparkles, Trash2, Zap } from "lucide-react";
+import { AlertTriangle, Check, ChevronRight, ExternalLink, Eye, EyeOff, KeyRound, Loader2, Sparkles, Trash2, Zap } from "lucide-react";
 import { ProviderService, type ProviderInfo, type ProvidersResponse } from "../../services/modelService";
 import { StatusDot } from "../ui";
 
@@ -13,12 +13,20 @@ import { StatusDot } from "../ui";
  * The flagship of each provider is listed and deliberately never auto-selected.
  * A router that quietly reaches for Opus on an ambiguous prompt produces a bill
  * nobody can predict, so it stays a manual choice.
+ *
+ * The keys themselves collapse, because entering one is a thing you do once and
+ * the cards are two thirds of this screen. The section opens itself while no key
+ * is configured — collapsing the only route to the capability the screen exists
+ * for would be a shut door with no handle — and closes once one is, until the
+ * operator says otherwise. Their choice outranks the rule from then on.
  */
 
 export const ApiProviders: React.FC = () => {
   const [data, setData] = useState<ProvidersResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  /** Null until the operator opens or closes it themselves; then it is theirs. */
+  const [keysChoice, setKeysChoice] = useState<boolean | null>(null);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -40,6 +48,10 @@ export const ApiProviders: React.FC = () => {
       </div>
     );
   }
+
+  const providers = data?.providers ?? [];
+  const connected = providers.filter((provider) => provider.configured);
+  const keysOpen = keysChoice ?? connected.length === 0;
 
   return (
     <div className="flex flex-col gap-4">
@@ -80,22 +92,50 @@ export const ApiProviders: React.FC = () => {
         </div>
       )}
 
-      <div className="flex flex-col gap-2">
-        {data?.providers.map((provider) => (
-          <ProviderCard
-            key={provider.id}
-            provider={provider}
-            onChange={setData}
-            onError={setError}
+      <section className="flex flex-col gap-1">
+        {/* Collapsed, the header still answers the question the section exists
+            to answer — which providers have a key — so folding it away hides
+            the fields and none of the state. */}
+        <button
+          type="button"
+          onClick={() => setKeysChoice(!keysOpen)}
+          aria-expanded={keysOpen}
+          className="group flex items-center gap-2 px-0.5 py-0.5 text-left"
+        >
+          <ChevronRight
+            size={11}
+            className={`flex-shrink-0 text-ink-faint transition-transform duration-ds ease-ds ${keysOpen ? "rotate-90" : ""}`}
           />
-        ))}
-      </div>
+          <span className="text-2xs uppercase tracking-wider text-ink-faint group-hover:text-ink-high">API Keys</span>
+          <span className="font-mono text-3xs text-ink-disabled">
+            {connected.length}/{providers.length}
+          </span>
+          {!keysOpen && (
+            <span className="truncate text-3xs text-ink-disabled">
+              {connected.length > 0 ? connected.map((provider) => provider.label).join(" · ") : "none connected"}
+            </span>
+          )}
+        </button>
 
-      <p className="text-3xs text-ink-disabled leading-relaxed">
-        Keys are written to disk on this machine with owner-only permissions and are never sent to the renderer or
-        written to the audit log. An <span className="font-mono">API_KEY</span> already in your environment is picked up
-        automatically.
-      </p>
+        {keysOpen && (
+          <div className="flex flex-col gap-2">
+            {providers.map((provider) => (
+              <ProviderCard
+                key={provider.id}
+                provider={provider}
+                onChange={setData}
+                onError={setError}
+              />
+            ))}
+
+            <p className="text-3xs text-ink-disabled leading-relaxed">
+              Keys are written to disk on this machine with owner-only permissions and are never sent to the renderer or
+              written to the audit log. An <span className="font-mono">API_KEY</span> already in your environment is
+              picked up automatically.
+            </p>
+          </div>
+        )}
+      </section>
     </div>
   );
 };
@@ -176,6 +216,14 @@ const ProviderCard: React.FC<{
         {provider.configured ? (
           <>
             <span className="font-mono text-2xs text-ink-muted truncate">{provider.hint}</span>
+            {provider.backupConfigured && (
+              <span
+                className="text-3xs text-emerald-400 bg-emerald-950/40 px-1.5 py-0.5 rounded border border-emerald-800/40 font-mono flex-shrink-0"
+                title={`Auto-failover backup key: ${provider.backupHint}`}
+              >
+                backup: {provider.backupHint}
+              </span>
+            )}
             <span className="text-3xs text-ink-disabled flex-shrink-0">
               {provider.source === "environment" ? `from ${provider.envVar}` : "stored on this machine"}
             </span>
