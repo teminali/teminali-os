@@ -1,8 +1,8 @@
 import React, { useEffect, useState } from "react";
 import { AlertTriangle, Check, ExternalLink } from "lucide-react";
 import { Button } from "../ui/Button";
-import { SegmentedTabs } from "../ui/SegmentedTabs";
 import { StatusDot } from "../ui/Primitives";
+import { SettingGroup, SettingRow, SettingSelect, SettingToggle } from "../ui/Setting";
 import type { AssistantAutonomy, AssistantEngine, AssistantFrontierMode, AssistantMode } from "../../services/assistant/types";
 import type { UseAssistantResult } from "../../hooks/useAssistant";
 import type { AssistantHotkeyStatus } from "../layout/WindowControls";
@@ -19,6 +19,14 @@ import type { AssistantHotkeyStatus } from "../layout/WindowControls";
  * rather than a single "grant access" that would say neither. Neither can be
  * granted from here — they are System Settings toggles that only a person can
  * flip — so the honest offer is the system's own prompt and a link to the pane.
+ *
+ * **Shape.** This was the last screen in settings still writing its own rows:
+ * five bare `<section>`s, three `SegmentedTabs`, two raw checkboxes and a
+ * hand-built permission card, at a type scale a step larger than every pane
+ * beside it. It is the `Setting` row family now. The three segmented controls
+ * became `SettingSelect`s for the reason Run Mode did on the Agents screen —
+ * each option needs a sentence of consequence, and a sentence that changes with
+ * the control says more than three words fighting for the width of a row.
  */
 
 /** What {@link Window.electronBridge} reports back from a reveal attempt. */
@@ -56,7 +64,15 @@ const ENGINES: Array<{ id: AssistantEngine; label: string; detail: string }> = [
   { id: "codex", label: "Codex", detail: "Your own CLI, invoked read-only for the question." },
 ];
 
-const FRONTIER_MODES: AssistantFrontierMode[] = ["flash", "auto", "max"];
+/**
+ * The tiers, worded from `gateway/frontier-runner.js` `MODEL_MODES` rather than
+ * invented here — that table is what the routing actually consults.
+ */
+const FRONTIER_MODES: Array<{ id: AssistantFrontierMode; label: string; detail: string }> = [
+  { id: "flash", label: "Flash", detail: "The lightweight local model for every question, however hard." },
+  { id: "auto", label: "Auto", detail: "Routes between the lightweight and heavyweight local models by what the question needs." },
+  { id: "max", label: "Max", detail: "The heavyweight local model for every question, however simple." },
+];
 
 export const AssistantSettingsPanel: React.FC<{ assistant: UseAssistantResult }> = ({ assistant }) => {
   const { settings, capabilities, update } = assistant;
@@ -113,224 +129,266 @@ export const AssistantSettingsPanel: React.FC<{ assistant: UseAssistantResult }>
   return (
     <div className="space-y-6">
       {/* ── Permissions ─────────────────────────────────────────────────── */}
-      <section className="space-y-2">
-        <h2 className="text-sm text-ink-bright">Screen access</h2>
-
+      <SettingGroup
+        label="Screen access"
+        description="Neither switch can be flipped by an application. Both live in System Settings › Privacy & Security, and macOS requires a person to grant them."
+      >
         {!capabilities ? (
-          <p className="text-2xs text-ink-faint">Checking…</p>
+          <p className="px-3.5 py-3 text-2xs text-ink-faint">Checking…</p>
         ) : !capabilities.supported ? (
-          <p className="text-2xs text-ink-faint">{capabilities.detail ?? "Screen control is macOS-only."}</p>
+          <p className="px-3.5 py-3 text-2xs text-ink-faint">
+            {capabilities.detail ?? "Screen control is macOS-only."}
+          </p>
         ) : !capabilities.helperBuilt ? (
-          <div className="rounded-xl border border-edge bg-surface-sunken p-3 space-y-1.5">
-            <p className="flex items-center gap-2 text-sm text-warning">
+          <div className="space-y-1.5 bg-warning/5 px-3.5 py-3">
+            <p className="flex items-center gap-2 text-xs text-warning">
               <AlertTriangle size={13} strokeWidth={1.8} />
               The pointer helper has not been built
             </p>
-            <p className="text-2xs text-ink-muted leading-relaxed">
+            <p className="text-2xs leading-relaxed text-ink-muted">
               It is a small Swift program in <code className="text-ink-dim">native/macos/pointer</code>, compiled on
               demand rather than shipped as a binary. Build it with{" "}
               <code className="text-ink-dim">npm run build:pointer</code>, then reopen this panel.
             </p>
           </div>
         ) : (
-          <div className="rounded-xl border border-edge divide-y divide-edge overflow-hidden">
-            {permissionRows.map((row) => (
-              <div key={row.label} className="p-3">
-                <div className="flex items-start gap-3">
-                  <span className="mt-0.5">
-                    {row.granted ? <Check size={14} className="text-success" /> : <StatusDot tone="warning" />}
+          permissionRows.map((row) => (
+            <React.Fragment key={row.id}>
+              <SettingRow
+                label={
+                  <span className="flex items-center gap-2">
+                    {row.granted ? <Check size={13} className="text-success" /> : <StatusDot tone="warning" />}
+                    {row.label} — {row.granted ? "granted" : "not granted"}
                   </span>
-                  <div className="flex-1 min-w-0">
-                    <p className="text-sm text-ink-high">
-                      {row.label} — {row.granted ? "granted" : "not granted"}
-                    </p>
-                    {!row.granted && <p className="text-2xs text-ink-faint mt-0.5 leading-relaxed">{row.lost}</p>}
-                  </div>
-                  {!row.granted && (
-                    <div className="flex items-center gap-1.5 flex-shrink-0">
-                      {row.id === "accessibility" && (
-                        <Button variant="secondary" size="xs" onClick={() => void assistant.requestPermissions()}>
-                          Ask macOS
-                        </Button>
-                      )}
-                      {/* Screen Recording has no prompt to ask with, so the
-                          offer is the list and the thing to drag into it. The
-                          browser build has no bridge and falls back to the
-                          link, which is all it can honestly do. */}
-                      {row.id === "screen" && bridge?.revealForScreenRecording ? (
-                        <Button variant="secondary" size="xs" onClick={() => void showScreenRecordingList()}>
-                          Show me both
-                        </Button>
-                      ) : (
-                        <Button
-                          variant="ghost"
-                          size="xs"
-                          icon={<ExternalLink size={11} />}
-                          // Not "_self": that would navigate the studio itself to
-                          // an x-apple.systempreferences: URL and leave a blank
-                          // window. A plain window.open goes through the shell's
-                          // open handler, which hands it to the operating system.
-                          onClick={() => window.open(row.pane)}
-                        >
-                          Settings
-                        </Button>
-                      )}
-                    </div>
-                  )}
-                </div>
-
-                {row.id === "screen" && !row.granted && bridge?.revealForScreenRecording && (
-                  <div className="mt-2.5 ml-[26px] rounded-lg border border-edge bg-surface-sunken p-2.5 space-y-1.5">
-                    <p className="text-2xs text-ink-muted leading-relaxed">
-                      macOS will not let me add myself to this list — no application can. Open it and drag me in.
-                    </p>
-                    <p className="text-2xs text-ink-faint leading-relaxed">
-                      If you have installed me before, there is already an older me in that list under a code identity
-                      this build no longer has. Dropping me on top of it replaces that row. Flipping its switch does
-                      not, which is why the permission can read as granted while the screen stays black.
-                    </p>
-                    {reveal && (
-                      <p className="text-2xs leading-relaxed pt-0.5" role="status">
-                        {reveal.ok ? (
-                          <span className="text-ink-muted">
-                            Opened the list, and revealed{" "}
-                            <code className="text-ink-dim">{bundleName(reveal.bundlePath)}</code> in Finder. Drag it in,
-                            then recheck.
-                            {reveal.isDevelopmentBundle && (
-                              <>
-                                {" "}
-                                This is a development run, so the bundle is the Electron shell rather than Teminali OS
-                                — that is the one macOS is being asked to trust here.
-                              </>
-                            )}
-                          </span>
-                        ) : (
-                          <span className="text-warning">{reveal.reason}</span>
-                        )}
-                      </p>
-                    )}
-                    <div className="flex items-center gap-1.5 pt-0.5">
-                      <Button variant="ghost" size="xs" onClick={() => void assistant.refreshCapabilities()}>
-                        Recheck
+                }
+                description={row.granted ? undefined : row.lost}
+                className={row.granted ? undefined : "bg-warning/5"}
+              >
+                {!row.granted && (
+                  <>
+                    {row.id === "accessibility" && (
+                      <Button variant="secondary" size="xs" onClick={() => void assistant.requestPermissions()}>
+                        Ask macOS
                       </Button>
-                    </div>
-                  </div>
+                    )}
+                    {/* Screen Recording has no prompt to ask with, so the offer
+                        is the list and the thing to drag into it. The browser
+                        build has no bridge and falls back to the link, which is
+                        all it can honestly do. */}
+                    {row.id === "screen" && bridge?.revealForScreenRecording ? (
+                      <Button variant="secondary" size="xs" onClick={() => void showScreenRecordingList()}>
+                        Show me both
+                      </Button>
+                    ) : (
+                      <Button
+                        variant="ghost"
+                        size="xs"
+                        icon={<ExternalLink size={11} />}
+                        // Not "_self": that would navigate the studio itself to
+                        // an x-apple.systempreferences: URL and leave a blank
+                        // window. A plain window.open goes through the shell's
+                        // open handler, which hands it to the operating system.
+                        onClick={() => window.open(row.pane)}
+                      >
+                        Settings
+                      </Button>
+                    )}
+                  </>
                 )}
-              </div>
+              </SettingRow>
+
+              {/* The drag-me-in explainer is its own full-width cell rather than
+                  a paragraph inside the row above: it is four sentences and a
+                  status line, and the right-hand column is for a control. */}
+              {row.id === "screen" && !row.granted && bridge?.revealForScreenRecording && (
+                <div className="space-y-1.5 px-3.5 py-3">
+                  <p className="text-2xs leading-relaxed text-ink-muted">
+                    macOS will not let me add myself to this list — no application can. Open it and drag me in.
+                  </p>
+                  <p className="text-2xs leading-relaxed text-ink-faint">
+                    If you have installed me before, there is already an older me in that list under a code identity
+                    this build no longer has. Dropping me on top of it replaces that row. Flipping its switch does not,
+                    which is why the permission can read as granted while the screen stays black.
+                  </p>
+                  {reveal && (
+                    <p className="pt-0.5 text-2xs leading-relaxed" role="status">
+                      {reveal.ok ? (
+                        <span className="text-ink-muted">
+                          Opened the list, and revealed{" "}
+                          <code className="text-ink-dim">{bundleName(reveal.bundlePath)}</code> in Finder. Drag it in,
+                          then recheck.
+                          {reveal.isDevelopmentBundle && (
+                            <>
+                              {" "}
+                              This is a development run, so the bundle is the Electron shell rather than Teminali OS —
+                              that is the one macOS is being asked to trust here.
+                            </>
+                          )}
+                        </span>
+                      ) : (
+                        <span className="text-warning">{reveal.reason}</span>
+                      )}
+                    </p>
+                  )}
+                  <div className="flex items-center gap-1.5 pt-0.5">
+                    <Button variant="ghost" size="xs" onClick={() => void assistant.refreshCapabilities()}>
+                      Recheck
+                    </Button>
+                  </div>
+                </div>
+              )}
+            </React.Fragment>
+          ))
+        )}
+      </SettingGroup>
+
+      {/* ── What it does ────────────────────────────────────────────────── */}
+      <SettingGroup label="What it does">
+        <SettingRow
+          label="What the microphone does"
+          description={MODES.find((mode) => mode.id === settings.mode)?.detail}
+        >
+          <SettingSelect
+            value={settings.mode}
+            aria-label="What the microphone does"
+            onChange={(event) => update({ mode: event.target.value as AssistantMode })}
+          >
+            {MODES.map((mode) => (
+              <option key={mode.id} value={mode.id}>
+                {mode.label}
+              </option>
             ))}
-          </div>
-        )}
-        <p className="text-2xs text-ink-faint leading-relaxed">
-          Neither switch can be flipped by an application. Both live in System Settings › Privacy &amp; Security, and
-          macOS requires a person to grant them.
-        </p>
-      </section>
+          </SettingSelect>
+        </SettingRow>
 
-      {/* ── Mode ────────────────────────────────────────────────────────── */}
-      <section className="space-y-2">
-        <h2 className="text-sm text-ink-bright">What the microphone does</h2>
-        <SegmentedTabs
-          tabs={MODES.map((mode) => ({ id: mode.id, label: mode.label }))}
-          activeTab={settings.mode}
-          onChange={(mode) => update({ mode })}
-        />
-        <p className="text-2xs text-ink-faint leading-relaxed">
-          {MODES.find((mode) => mode.id === settings.mode)?.detail}
-        </p>
-      </section>
+        <SettingRow
+          label="When it acts"
+          description={
+            <>
+              {AUTONOMY.find((rung) => rung.id === settings.autonomy)?.detail}
+              {settings.mode !== "agent" && " This only applies in Agent mode."}
+            </>
+          }
+        >
+          <SettingSelect
+            value={settings.autonomy}
+            aria-label="When it acts"
+            onChange={(event) => update({ autonomy: event.target.value as AssistantAutonomy })}
+          >
+            {AUTONOMY.map((rung) => (
+              <option key={rung.id} value={rung.id}>
+                {rung.label}
+              </option>
+            ))}
+          </SettingSelect>
+        </SettingRow>
 
-      {/* ── Autonomy ────────────────────────────────────────────────────── */}
-      <section className="space-y-2">
-        <h2 className="text-sm text-ink-bright">When it acts</h2>
-        <SegmentedTabs
-          tabs={AUTONOMY.map((rung) => ({ id: rung.id, label: rung.label }))}
-          activeTab={settings.autonomy}
-          onChange={(autonomy) => update({ autonomy })}
-        />
-        <p className="text-2xs text-ink-faint leading-relaxed">
-          {AUTONOMY.find((rung) => rung.id === settings.autonomy)?.detail}
-          {settings.mode !== "agent" && " This only applies in Agent mode."}
-        </p>
-      </section>
+        <SettingRow
+          label="Which engine answers"
+          description={
+            <>
+              {ENGINES.find((engine) => engine.id === settings.engine)?.detail} All three are asked the same question
+              and held to the same rules about what they may name, so changing this changes who answers and nothing
+              else.
+            </>
+          }
+        >
+          <SettingSelect
+            value={settings.engine}
+            aria-label="Which engine answers"
+            onChange={(event) => update({ engine: event.target.value as AssistantEngine })}
+          >
+            {ENGINES.map((engine) => (
+              <option key={engine.id} value={engine.id}>
+                {engine.label}
+              </option>
+            ))}
+          </SettingSelect>
+        </SettingRow>
 
-      {/* ── Engine ──────────────────────────────────────────────────────── */}
-      <section className="space-y-2">
-        <h2 className="text-sm text-ink-bright">Which engine answers</h2>
-        <SegmentedTabs
-          tabs={ENGINES.map((engine) => ({ id: engine.id, label: engine.label }))}
-          activeTab={settings.engine}
-          onChange={(engine) => update({ engine })}
-        />
-        <p className="text-2xs text-ink-faint leading-relaxed">
-          {ENGINES.find((engine) => engine.id === settings.engine)?.detail} All three are asked the same question and
-          held to the same rules about what they may name, so changing this changes who answers and nothing else.
-        </p>
         {settings.engine === "frontier" && (
-          <div className="pt-1">
-            <SegmentedTabs
-              tabs={FRONTIER_MODES.map((mode) => ({ id: mode, label: mode[0].toUpperCase() + mode.slice(1) }))}
-              activeTab={settings.frontierMode}
-              onChange={(frontierMode) => update({ frontierMode })}
-            />
-          </div>
+          <SettingRow
+            label="Frontier tier"
+            description={FRONTIER_MODES.find((mode) => mode.id === settings.frontierMode)?.detail}
+          >
+            <SettingSelect
+              value={settings.frontierMode}
+              aria-label="Frontier tier"
+              onChange={(event) => update({ frontierMode: event.target.value as AssistantFrontierMode })}
+            >
+              {FRONTIER_MODES.map((mode) => (
+                <option key={mode.id} value={mode.id}>
+                  {mode.label}
+                </option>
+              ))}
+            </SettingSelect>
+          </SettingRow>
         )}
-      </section>
+      </SettingGroup>
 
       {/* ── Output ──────────────────────────────────────────────────────── */}
-      <section className="space-y-2">
-        <h2 className="text-sm text-ink-bright">How it answers</h2>
-        <label className="flex items-start gap-2.5 text-sm text-ink-muted cursor-pointer">
-          <input
-            type="checkbox"
+      <SettingGroup label="How it answers">
+        <SettingRow label="Read answers aloud" description="Uses the same voice tier as dictation.">
+          <SettingToggle
             checked={settings.speak}
-            onChange={(event) => update({ speak: event.target.checked })}
-            className="mt-0.5"
+            onChange={(speak) => update({ speak })}
+            label="Read answers aloud"
           />
-          <span>
-            Read answers aloud
-            <span className="block text-2xs text-ink-faint">Uses the same voice tier as dictation.</span>
-          </span>
-        </label>
-        <label className="flex items-start gap-2.5 text-sm text-ink-muted cursor-pointer">
-          <input
-            type="checkbox"
+        </SettingRow>
+        <SettingRow
+          label="Draw on the screen"
+          description="A ring around the control it means, over whatever application it belongs to. Desktop only."
+        >
+          <SettingToggle
             checked={settings.overlay}
-            onChange={(event) => update({ overlay: event.target.checked })}
-            className="mt-0.5"
+            onChange={(overlay) => update({ overlay })}
+            label="Draw on the screen"
           />
-          <span>
-            Draw on the screen
-            <span className="block text-2xs text-ink-faint">
-              A ring around the control it means, over whatever application it belongs to. Desktop only.
-            </span>
-          </span>
-        </label>
-      </section>
+        </SettingRow>
+      </SettingGroup>
 
       {/* ── Shortcut ────────────────────────────────────────────────────── */}
-      {window.teminali?.assistant && (
-        <section className="space-y-2">
-          <h2 className="text-sm text-ink-bright">Shortcut</h2>
-          <div className="flex items-center gap-2">
+      {bridge && (
+        <SettingGroup label="Shortcut">
+          <SettingRow
+            label="Open the assistant with"
+            description={
+              <>
+                An Electron accelerator, for example{" "}
+                <code className="text-ink-dim">CommandOrControl+Shift+Space</code>. If another application already owns
+                the combination it cannot be registered, and the line beside it says so rather than leaving you with a
+                key that quietly does nothing.
+              </>
+            }
+          >
             <input
               value={settings.hotkey}
               onChange={(event) => update({ hotkey: event.target.value })}
+              aria-label="Assistant shortcut"
               spellCheck={false}
-              className="lit lit-inner flex-1 min-w-0 px-2.5 py-1.5 bg-surface rounded-lg text-xs font-mono text-ink-bright focus:outline-none"
+              className="lit lit-inner h-7 w-[190px] rounded-md bg-surface-raised px-2 font-mono text-xs text-ink-body outline-none"
             />
             {hotkey && (
-              <span className={`text-2xs flex-shrink-0 ${hotkey.registered ? "text-ink-faint" : "text-warning"}`}>
+              <span className={`text-2xs ${hotkey.registered ? "text-ink-faint" : "text-warning"}`}>
                 {hotkey.registered ? "Registered" : (hotkey.reason ?? "Not registered")}
               </span>
             )}
-          </div>
-          <p className="text-2xs text-ink-faint leading-relaxed">
-            An Electron accelerator, for example <code className="text-ink-dim">CommandOrControl+Shift+Space</code>. If
-            another application already owns the combination it cannot be registered, and the line above says so rather
-            than leaving you with a key that quietly does nothing.
-          </p>
-        </section>
+          </SettingRow>
+        </SettingGroup>
       )}
     </div>
   );
 };
+
+/** The row labels this pane carries, for the settings rail's search. */
+export const ASSISTANT_ROWS = [
+  "Screen Recording",
+  "Accessibility",
+  "What the microphone does",
+  "When it acts",
+  "Which engine answers",
+  "Frontier tier",
+  "Read answers aloud",
+  "Draw on the screen",
+  "Open the assistant with",
+];

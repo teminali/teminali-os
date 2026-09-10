@@ -4,9 +4,9 @@
  * A store of its own, and it holds exactly one boolean, because the two
  * things that open the recorder are nowhere near each other in the tree:
  * the File menu listener in `App.tsx` and the pill on the empty-chat
- * screen in `StudioChat.tsx`. Drilling a callback from `App` down to the
- * pill would thread it through four components that have no other reason
- * to know the recorder exists.
+ * screen, now `TemiActionRow` in `components/voice/TemiComposer.tsx`.
+ * Drilling a callback from `App` down to the pill would thread it through
+ * four components that have no other reason to know the recorder exists.
  *
  * NOT persisted, and that is the difference from `panelStore`. A workspace
  * panel is somewhere you left the app; a modal is something you are doing.

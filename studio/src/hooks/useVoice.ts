@@ -99,6 +99,7 @@ export function useVoice(host: VoiceHost): UseVoiceResult {
         // missing, so "how's it going?" got the canned line, never the run.
         progressSummary: () => hostRef.current.progressSummary?.() ?? null,
         runProgress: () => hostRef.current.runProgress?.() ?? null,
+        onSpeechProgress: (event) => hostRef.current.onSpeechProgress?.(event),
       }),
     [],
   );

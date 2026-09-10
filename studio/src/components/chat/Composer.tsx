@@ -90,6 +90,24 @@ function voiceCaption(voice: UseVoiceResult, streaming: boolean): string | null 
   return null;
 }
 
+/**
+ * Does this keystroke mean "send"?
+ *
+ * Two composers ask, so the rule lives in one place. Under the default a bare
+ * Return sends and Shift+Return breaks the line; under `submitWithModEnter`
+ * they swap, so Return is free for the paragraph and ⌘/Ctrl+Return is the send
+ * — which is what somebody writing a long prompt turns on. Shift+Return never
+ * sends in either mode: it has meant "newline" everywhere for long enough that
+ * making it send would be a trap.
+ */
+export function isSubmitKey(
+  event: Pick<React.KeyboardEvent, "key" | "shiftKey" | "metaKey" | "ctrlKey">,
+  submitWithModEnter: boolean,
+): boolean {
+  if (event.key !== "Enter" || event.shiftKey) return false;
+  return submitWithModEnter ? event.metaKey || event.ctrlKey : !event.metaKey && !event.ctrlKey;
+}
+
 export const Composer: React.FC<ComposerProps> = ({
   value,
   onChange,
@@ -168,7 +186,7 @@ export const Composer: React.FC<ComposerProps> = ({
       }
     }
 
-    if (event.key === "Enter" && !event.shiftKey) {
+    if (isSubmitKey(event, submitWithModEnter)) {
       event.preventDefault();
       onSubmit();
     }
@@ -187,6 +205,7 @@ export const Composer: React.FC<ComposerProps> = ({
   const setSkill = useStudioStore((state) => state.setSkill);
   // Which engine this composer is actually on, for the trigger's glyph.
   const currentProfile = useStudioStore((state) => state.currentProfile);
+  const submitWithModEnter = useStudioStore((state) => state.preferences.submitWithModEnter);
 
   const syncTrigger = (element: HTMLTextAreaElement) => {
     const next = readTrigger(element.value, element.selectionStart ?? element.value.length);
@@ -295,7 +314,7 @@ export const Composer: React.FC<ComposerProps> = ({
               onChange(e.target.value);
             }}
             onKeyDown={(e) => {
-              if (e.key === "Enter" && !e.shiftKey) {
+              if (isSubmitKey(e, submitWithModEnter)) {
                 e.preventDefault();
                 onSubmit();
               }
@@ -484,7 +503,7 @@ export const Composer: React.FC<ComposerProps> = ({
               />
             )}
 
-            <div className="relative flex-shrink-0">
+            <div className="relative z-30 flex-shrink-0">
               <button
                 type="button"
                 onClick={() => {
@@ -505,8 +524,11 @@ export const Composer: React.FC<ComposerProps> = ({
 
             {/* Live transcript lands in the field as it is spoken, so dictation
                 and typing are visibly the same input. */}
-            {voice.state === "hearing" && voice.transcript && (
-              <span className="text-2xs text-ink-faint truncate max-w-[180px]">{voice.transcript}</span>
+            {(voice.state === "hearing" || voice.state === "deciding") && voice.transcript && (
+              <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-2xs bg-primary/10 text-primary border border-primary/20 truncate max-w-[220px] animate-pulse">
+                <span className="w-1.5 h-1.5 rounded-full bg-primary" />
+                {voice.transcript}
+              </span>
             )}
 
             {streaming ? (

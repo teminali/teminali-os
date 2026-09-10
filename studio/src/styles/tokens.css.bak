@@ -1,0 +1,373 @@
+/* =============================================================================
+   TEMINALI DESIGN SYSTEM — TOKEN SHEET
+   Cursor Obsidian Dark, measured.
+
+   Every value below was sampled pixel-for-pixel out of Cursor's own agent
+   window (macOS, 2x retina, four reference captures) rather than eyeballed.
+   Where a comment says "measured", that hex came off a screenshot; the rest
+   are interpolations that keep a ramp monotonic between measured stops.
+
+   The governing observation: Cursor is *achromatic*. Five flat greys carry the
+   whole interface — #151515 canvas, #181818 sidebar, #212121 raised, #262626
+   chip, #313131/#3a3a3a hairline — and colour appears exactly once, on the
+   Update pill. No gradients, no edge lighting, no glow, no tinted surfaces.
+   Depth comes from a flat 1px border one step lighter than the fill, and from
+   nothing else. Resist the urge to add a highlight; that is the whole look.
+
+   This file is the ONLY place a raw hex, radius or duration may appear.
+   Everything else reads var(--*). See DESIGN.md §0.
+   ============================================================================= */
+
+:root {
+  /* ---------------------------------------------------------------------
+     GROUND — the app frame.
+
+     Cursor paints two flat planes and no gradient anywhere. The frame/rail/
+     panel triplets below are kept (components interpolate them into
+     `linear-gradient(...)` calls) but every stop within a triplet is the same
+     colour, so those gradients resolve to flat fills. That is deliberate: it
+     lets the shell stay gradient-free without every consumer being rewritten.
+     --------------------------------------------------------------------- */
+  --ground: #151515;                /* behind the window and under the canvas */
+
+  --frame-top: #151515;             /* window: flat, all three stops equal */
+  --frame-mid: #151515;
+  --frame-bot: #151515;
+
+  --rail-top: #181818;              /* left sidebar — measured */
+  --rail-mid: #181818;
+  --rail-bot: #181818;
+
+  --panel-top: #151515;             /* right panel — measured, no distinct fill */
+  --panel-mid: #151515;
+  --panel-bot: #151515;
+
+  /* ---------------------------------------------------------------------
+     SURFACES — raised planes, darkest to lightest.
+
+     Cursor inverts the usual convention: an inset card (the Getting Started
+     box) is *darker* than the sidebar it sits in, while a raised control (the
+     composer, a message bubble) is lighter than the canvas. Both read as
+     recessed/raised because the border does the work, not a gradient.
+     --------------------------------------------------------------------- */
+  --surface-sunken: #151515;        /* code blocks, getting-started card */
+  --surface: #212121;               /* composer, user bubble, inputs — measured */
+  --surface-raised: #262626;        /* buttons, +/chip circles — measured */
+  --surface-popover: #212121;       /* floating menus */
+  --surface-chip: #262626;          /* meta chips, inline code — measured */
+  --surface-control: #313131;       /* the +/mic discs inside a composer — measured */
+  --surface-hover: #242424;         /* hover on a sidebar row — measured */
+  --surface-active: #252525;        /* selected nav row — measured */
+  /*
+    The one surface not sampled from the reference. A switch that is off has to
+    show its slot, and WCAG 1.4.11 asks 3:1 of a control's boundary; every other
+    surface and border here tops out at 1.42:1 against --surface, so none of them
+    can carry it. #6a6a6a is 3.02:1 on #212121 — the darkest value that clears the
+    bar, chosen so it intrudes on this ramp as little as compliance allows.
+    Switch tracks only. It is not a hover, a fill or a border.
+  */
+  --surface-track: #6a6a6a;         /* off switch track — computed, not measured */
+  --surface-tab-active: #262626;    /* active panel tab, menu row hover */
+  --surface-skeleton: #262626;      /* canvas placeholder, strong */
+  --surface-skeleton-dim: #1e1e1e;  /* canvas placeholder, weak */
+
+  /* ---------------------------------------------------------------------
+     BORDERS — flat hairlines. This is Cursor's only depth cue.
+
+     Each step is the fill it sits on, lightened by roughly 0x10. A border is
+     never a gradient and never fades around a corner.
+     --------------------------------------------------------------------- */
+  --border-chrome: #282828;         /* sidebar/canvas divider — measured */
+  --border-subtle: #232323;         /* inner card rules */
+  --border: #262626;                /* table and card edge — measured */
+  --border-strong: #313131;         /* user bubble edge — measured */
+  --border-popover: #3a3a3a;        /* composer edge, popover edge — measured */
+  /* Code and shell cards break the "lightened by 0x10" rule on purpose. A
+     transcript stacks many of them, and at 0x10 the run of edges reads as a
+     ladder of bright rectangles down the page — the operator sees the frames
+     before the code. Against the #151515 sunken fill this is barely a step,
+     which is the whole intent: the block is defined by its darker fill, and
+     the hairline only closes the shape. */
+  --border-code: #1c1c1c;           /* code block and shell card edge */
+
+  /* ---------------------------------------------------------------------
+     TEXT — a 10-step ramp. Pick by role, not by lightness.
+
+     Cursor runs a much shorter ramp than most dark UIs: body copy and headings
+     are the same #f0f0f0, and everything secondary drops straight to #b8b8b8.
+     There is no "slightly dimmer body text" tier — a thing is either what you
+     are reading or it is chrome.
+     --------------------------------------------------------------------- */
+  --text-bright: #f0f0f0;           /* headings — measured */
+  --text-strong: #f0f0f0;           /* active labels — measured */
+  --text-high: #f0f0f0;             /* filenames, labels on a dark fill */
+  --text: #ededed;                  /* default body on frame */
+  --text-body: #e0e0e0;             /* menu rows, list items */
+  /* Paragraphs in chat. The one deliberate departure from the Cursor
+     measurement in this ramp: it was #f0f0f0, the same value as a heading, and
+     a wall of near-white body text at 13px is the loudest thing in a window
+     otherwise built from five greys. Dropping it one step puts the emphasis
+     back where the markup asks for it — a heading and a `strong` still resolve
+     to --text-bright, and now they read as emphasis instead of as more of the
+     same. 11.5:1 on --ground, so this is a contrast the eye can rest on, not a
+     contrast it is fighting. */
+  --text-prose: #cbcbcb;            /* paragraphs in chat */
+  --text-code: #d4d4d4;             /* code, terminal output */
+  --text-dim: #c4c4c4;              /* secondary chrome */
+  --text-muted: #b8b8b8;            /* sidebar rows, icons, captions — measured */
+  --text-soft: #9f9f9f;             /* timestamps — measured */
+  --text-faint: #989898;            /* section labels — measured */
+  --text-placeholder: #6b6b6b;      /* input placeholders — measured */
+  --text-ghost: #6b6b6b;            /* empty-state copy */
+  --text-disabled: #5a5a5a;         /* line numbers, disabled glyphs */
+
+  /* ---------------------------------------------------------------------
+     ACCENT — the DukaBot green. This is the brand primary.
+
+     Cursor's own chrome is achromatic: it paints the send button as a white
+     disc and lets an emphasised glyph simply be brighter than its neighbours.
+     We keep every other part of that doctrine — flat fills, hairline borders,
+     no glow — but we do NOT keep the white accent. An interface with no hue at
+     all is not neutral, it is unbranded, and the product reads as pure black
+     and white. So the accent is DukaBot's logo green, and every `text-accent` /
+     `bg-accent` in the app resolves to it.
+
+     #00bf63 is the DukaBot logo green, taken from that product's own palette
+     (`dukabot/apps/mobile-app/lib/theme/colors.ts`, `brand.primary`). It clears
+     7.5:1 against the #151515 ground, so it is legible as a glyph, and it is
+     light enough to carry dark text when used as a fill — see --action-ink and
+     the video slice's --on-accent, both #151515.
+
+     Hover lightens within the same hue rather than shifting toward white;
+     --accent-dim is DukaBot's `brand.primaryDeep`, the pressed/gradient-end
+     stop, which serves the chevron/glyph role at 4.9:1.
+
+     Still achromatic on purpose: --accent-code*. Inline code is not a brand
+     surface, and tinting it would make every backtick look like a link.
+     --------------------------------------------------------------------- */
+  --accent: #00bf63;                /* DukaBot logo green — brand primary */
+  --accent-hover: #00d66f;
+  --accent-ink: #151515;            /* text ON an accent fill — 7.5:1, never --text-high */
+  --accent-dim: #00994f;            /* chevrons, file-card glyphs — DukaBot primaryDeep */
+  --accent-code: #f0f0f0;           /* inline code text — measured */
+  --accent-code-bg: #262626;        /* inline code fill — measured */
+  --accent-code-border: #262626;    /* inline code edge — flush, no ring */
+  --accent-wash: transparent;       /* no floor glow in Cursor */
+  --accent-orb: transparent;        /* no empty-state orb in Cursor */
+
+  /* ---------------------------------------------------------------------
+     STATUS — never decorative; each one means one thing.
+
+     --action is the primary call to action — the Update pill and anything that
+     wears the same weight. It follows the brand, so it is the accent green; it
+     carries dark text, hence --action-ink. It is a *role*, not a spare accent:
+     reach for --accent when you want the brand, and --action only when the
+     thing is the one action on the surface.
+
+     --info stays blue on purpose. It marks links and hostnames, and holding it
+     apart from the brand hue is what keeps "this navigates somewhere" from
+     reading the same as "this is our button".
+     --------------------------------------------------------------------- */
+  --success: #65c466;               /* live, listening, exit 0 */
+  --info: #86aee4;                  /* links, hostnames — deliberately not the brand */
+  --action: #00bf63;                /* the Update pill — the brand green */
+  --action-hover: #00d66f;
+  --action-ink: #151515;            /* dark text on the light action fill */
+  --warning: #f2ca44;
+  --danger: #ec6765;
+  /* Reasoning and plan mode. Cursor keeps this achromatic too — "the model is
+     thinking" is signalled by dimness and motion, not by a hue. */
+  --reason: #b8b8b8;
+  --info-orb: transparent;
+
+  /* ---------------------------------------------------------------------
+     DATA
+     One hue for magnitude, because the usage panel plots one series at a time
+     and a categorical palette has no job in a near-monochrome interface. It is
+     a step brighter than --action so a bar reads as data rather than as more
+     chrome, while staying in the brand hue; it clears the 3:1 floor against the
+     #151515 surface comfortably.
+     --------------------------------------------------------------------- */
+  --chart: #00cf72;
+  --chart-track: #212121;           /* the unfilled part of a bar — chrome, not data */
+
+  /* macOS traffic lights — measured off the window chrome */
+  --tl-close: #ec6765;
+  --tl-min: #f2ca44;
+  --tl-max: #65c466;
+
+  /* ---------------------------------------------------------------------
+     WINDOW CHROME — the two non-macOS control clusters.
+
+     The shell runs frameless on every platform, so these are ours to draw.
+     They are deliberately NOT expressed in brand tokens: an operator on
+     Windows recognises the Fluent close-red the way a macOS operator
+     recognises #ec6765, and re-tinting either to the accent would make the
+     cluster look like an app widget rather than the window's own controls.
+     --------------------------------------------------------------------- */
+
+  /* Windows 11 caption buttons: a near-invisible wash on hover, except close,
+     which takes the Fluent destructive red with a white glyph. */
+  --chrome-win-hover: rgba(255, 255, 255, 0.06);
+  --chrome-win-close: #c42b1c;
+
+  /* GNOME/Adwaita: circular buttons that carry their glyph at rest, so the
+     fill only has to separate the circle from the header bar behind it. */
+  --chrome-gnome-btn: rgba(255, 255, 255, 0.10);
+  --chrome-gnome-btn-hover: rgba(255, 255, 255, 0.15);
+
+  /* ---------------------------------------------------------------------
+     PLAYER — chrome that sits over picture, not over the app's greys.
+
+     The one surface in this interface whose background is unknown: a frame of
+     film, which may be a snowfield in one shot and a night interior in the
+     next. Every other token in this sheet is calibrated against a known grey,
+     and using those here would leave a control bar that vanishes over a bright
+     frame. So the player's chrome is defined against BLACK — a flat scrim, one
+     fill, no gradient — and its marks are white at fixed alphas, which is the
+     only pair that holds over both extremes.
+
+     `--player-accent` is the brand green, unchanged: the played span of the
+     scrubber is the same "this is ours and this is live" the accent means
+     everywhere else. It is the one hue on this surface.
+     --------------------------------------------------------------------- */
+  --player-scrim: rgb(0 0 0 / 0.62);      /* the control bar's own plate */
+  --player-veil: rgb(0 0 0 / 0.34);       /* over the picture while paused */
+  --player-track: rgb(255 255 255 / 0.22);
+  --player-buffered: rgb(255 255 255 / 0.38);
+  --player-ink: rgb(255 255 255 / 0.96);
+  --player-ink-dim: rgb(255 255 255 / 0.62);
+  --player-hover: rgb(255 255 255 / 0.14);
+  --player-edge: rgb(255 255 255 / 0.12);
+  --player-cue: rgb(0 0 0 / 0.78);        /* the caption plate */
+
+  /* ---------------------------------------------------------------------
+     SYNTAX — Cursor's dark editor theme.
+     --------------------------------------------------------------------- */
+  --syn-keyword: #c586c0;
+  --syn-type: #4ec9b0;
+  --syn-string: #ce9178;
+  --syn-func: #dcdcaa;
+  --syn-attr: #9cdcfe;
+  --syn-tag: #569cd6;
+  --syn-comment: #6a9955;
+  --syn-plain: #d4d4d4;
+
+  /* ---------------------------------------------------------------------
+     TYPE — the system UI face, as Cursor uses it.
+
+     Cursor ships no custom UI font; it renders in the platform face, which is
+     what makes it feel like part of the OS rather than a web page in a window.
+     --------------------------------------------------------------------- */
+  --font-sans: -apple-system, BlinkMacSystemFont, "Inter", "Segoe UI", Roboto, "Helvetica Neue", sans-serif;
+  --font-mono: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
+
+  --text-3xs: 10px;   /* keycaps, badge text */
+  --text-2xs: 11px;   /* timestamps, counts */
+  --text-xs: 12px;    /* mono meta, tab labels */
+  --text-sm: 13px;    /* sidebar rows, chrome — measured */
+  --text-md: 14px;    /* chat body and headings — measured */
+  --text-lg: 16px;
+
+  /* Code sets its own size, independent of the UI ramp above: an operator who
+     grows the chrome has not asked for larger snippets, and vice versa. Every
+     code surface reads this one token — see the Appearance pane's Code Font
+     Size row, and `services/appearance.ts`. Note --text-code above is the code
+     text *colour*; this is its size. */
+  --code-font-size: 12px;
+
+  /* ---------------------------------------------------------------------
+     RADII — measured off the reference.
+     --------------------------------------------------------------------- */
+  --r-xs: 4px;
+  --r-sm: 6px;        /* panel tabs */
+  --r-md: 8px;        /* sidebar rows, buttons, inputs — measured */
+  --r-lg: 10px;       /* chips, small cards */
+  --r-xl: 12px;       /* user bubble, tables, popovers — measured */
+  --r-2xl: 16px;      /* the tall composer — measured */
+  --r-full: 999px;    /* the follow-up composer and every pill */
+
+  /* ---------------------------------------------------------------------
+     STRUCTURE — the three-pane skeleton.
+     --------------------------------------------------------------------- */
+  --titlebar-h: 40px;               /* measured: canvas content starts at y41 */
+  --rail-w: 259px;                  /* measured, incl. its 1px divider */
+  --rail-w-min: 200px;
+  --rail-w-max: 480px;
+  --rail-w-collapsed: 0px;          /* Cursor's agent window has no icon rail */
+  --panel-w: 452px;
+  /* Expanded means EXPANDED: the panel takes everything the conversation was
+     using, out to the sidebar's edge. It was a flat 736px, which is most of a
+     1280px window and a third of a 5K one — the same gesture meaning "most of
+     the screen" and "a corner of it". `--shell-left-inset` is published by
+     `App.tsx` and follows the sidebar as it is dragged or collapsed. */
+  --panel-w-expanded: calc(100vw - var(--shell-left-inset, 260px));
+  /* The conversation's floor. Below this the composer's affordances wrap and
+     the transcript stops being a reading column; a drag that would go past it
+     moves the panel's edge no further. */
+  --chat-min-w: 420px;
+  --composer-max: 760px;            /* measured: the chat reading column */
+  /* Cursor gives the empty state a *narrower* composer than the conversation
+     one — 608 against 760. It reads as a place to start rather than as the
+     foot of a column that is not there yet, and it is the reason the empty
+     screen feels composed rather than merely centred. */
+  --composer-max-empty: 608px;      /* measured */
+  --control-disc: 24px;             /* the +/mic discs — measured, both variants */
+  --row-h: 30px;                    /* sidebar nav row — measured pitch 31 */
+  --row-h-lg: 32px;                 /* new chat, repo rows */
+  --control-h: 26px;                /* small pills */
+
+  /* ---------------------------------------------------------------------
+     EDGE LIGHTING — retired.
+
+     The previous system drew a masked gradient ring that was bright at the top
+     edge and faded around the corner, so a card read as a lit physical plane.
+     Cursor does the opposite: one flat colour, all four sides, no inner catch.
+     The variables survive because ~30 components consume them through the
+     `.lit` classes in index.css; collapsing every stop onto the same flat
+     border is what turns that whole system into a Cursor hairline at once.
+     --------------------------------------------------------------------- */
+  --lit-top: #313131;
+  --lit-mid: #313131;
+  --lit-bottom: #313131;
+  --lit-inner: none;                /* no inner highlight */
+
+  --lit-top-strong: #3a3a3a;
+  --lit-inner-strong: none;
+
+  /* Focus and active states now TINT the hairline rather than merely raising
+     its value. Cursor brightens a grey edge to #4a4a4a and stops there, which
+     is legible but says nothing about which control is live — on a dark panel
+     a grey ring and a slightly-less-grey ring are the same ring. Focus is the
+     one moment the operator needs answered instantly, so it wears the brand.
+
+     --focus-ring is the soft outer wash that sits behind that hairline. It is
+     a flat 14% fill, not a glow: no blur, no falloff, no second stop. It
+     widens the focus target visually without reintroducing edge lighting. */
+  --lit-accent-top: #00bf63;
+  --lit-accent-mid: #00bf63;
+  --focus-ring: rgba(0, 191, 99, 0.14);
+
+  /* ---------------------------------------------------------------------
+     ELEVATION — Cursor floats things on shadow alone, with no lit edge.
+     --------------------------------------------------------------------- */
+  --shadow-popover: 0 12px 32px rgba(0, 0, 0, 0.55);
+  --shadow-modal: 0 24px 60px rgba(0, 0, 0, 0.6);
+  --shadow-lift: none;              /* flat surfaces do not cast a contact shadow */
+  --shadow-lift-lg: 0 8px 28px rgba(0, 0, 0, 0.35);
+  --inset-rail: none;
+  --inset-panel: none;
+
+  /* ---------------------------------------------------------------------
+     MOTION — one curve, three speeds.
+     --------------------------------------------------------------------- */
+  --ease: cubic-bezier(0.2, 0.7, 0.2, 1);
+  --dur-fast: 0.1s;
+  --dur: 0.15s;
+  --dur-slow: 0.2s;
+}
+
+/* Respect the OS setting. */
+@media (prefers-reduced-motion: reduce) {
+  :root { --dur-fast: 0s; --dur: 0s; --dur-slow: 0s; }
+}
