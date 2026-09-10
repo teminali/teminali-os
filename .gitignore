@@ -26,3 +26,48 @@ studio/native/macos/bin/
 
 # The eval harness bundles the editor tool manifest here before it runs.
 studio/evals/.build/
+
+# The realtime voice pipeline (studio/realtime-voice/) is source of this repo.
+# What is excluded is everything reproducible or enormous: the 2 GB virtualenv,
+# the vendored wheels, the tuning experiments that produced the voice, and the
+# .pre-* snapshots left beside files while they were being tuned.
+studio/realtime-voice/.venv/
+studio/realtime-voice/wheels/
+studio/realtime-voice/experiments/
+studio/realtime-voice/code/scratch/
+studio/realtime-voice/**/*.pre-*
+studio/realtime-voice/**/*.bak
+studio/realtime-voice/**/*.claude_overengineered_bak
+studio/realtime-voice/.claude/
+studio/realtime-voice/.agent/
+# The voice tuning artefacts: 95 MB of rendered takes and cached renders that
+# produced Bella's timing. The measurements that came out of them are written
+# down in code comments and LOCKED_PIPELINE_SPEC.md, which is the part worth
+# versioning. The audio stays on disk, out of the history.
+studio/realtime-voice/resources/bella/.cache/
+studio/realtime-voice/**/*.wav
+studio/realtime-voice/**/*.mp3
+studio/realtime-voice/**/*.flac
+
+# ── Things that reached the working tree and must not reach the history ──────
+# Scratch left beside a file while it was being edited. Three of these appeared
+# in one night (DESIGN.md.bak, .bak3, .bak4; tokens.css.bak, .bak2, .bak3).
+*.bak
+*.bak[0-9]
+
+# The upstream clone the realtime-voice pipeline was vendored from, 32 MB. Its
+# history is preserved outside the repository — see
+# studio/realtime-voice/PROVENANCE.md, "What is not in git".
+RealtimeVoiceChat_original/
+
+# The dataset and MLX runs behind temi:r2 — 108 files, 372 MB. Nothing reads it
+# at runtime; ollama serves the model. It stays on disk and out of the history,
+# which is the decision PROVENANCE.md recorded as open.
+studio/realtime-voice/training/
+
+# A backup taken against a working tree, byte-identical to the voice embeddings
+# beside it, in a history that already keeps every earlier version of them.
+studio/realtime-voice/resources/bella/audio_samples/_backup_*/
+
+# Reading material that landed in the project root.
+/claude-code-with-gemini.pdf
