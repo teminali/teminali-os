@@ -13,7 +13,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import {
-  createPlayerRegistry, describePlayer, parsePlayerCommand, sanitisePlayerSnapshot,
+  createPlayerRegistry, describePlayer, parsePlayerCommand, sanitisePlayerSnapshot, unsupportedReason,
   PLAYER_ACTIONS, PLAYER_RATE, PlayerCommandError,
 } from "../server/player-state.js";
 import { PLAYER_ACTIONS as PANE_ACTIONS } from "../src/services/playerControl.ts";
@@ -34,7 +34,7 @@ test("an unknown action is refused with the list, not a code", () => {
 });
 
 test("the actions that take nothing take nothing", () => {
-  for (const action of ["play", "pause", "toggle", "restart", "mute", "unmute", "next", "previous", "episodes"]) {
+  for (const action of ["play", "pause", "toggle", "restart", "mute", "unmute", "frame_step", "frame_back", "next", "previous", "episodes"]) {
     assert.deepEqual(parsePlayerCommand({ action, value: 42 }), { action }, action);
   }
 });
@@ -45,6 +45,27 @@ test("a seek is seconds, and a backwards one is `seek_by`", () => {
   assert.deepEqual(parsePlayerCommand({ action: "seek_by", value: -30 }), { action: "seek_by", value: -30 });
   assert.throws(() => parsePlayerCommand({ action: "seek" }), /number of seconds/);
   assert.throws(() => parsePlayerCommand({ action: "seek", value: -5 }), /use `seek_by`/);
+});
+
+test("a chapter is numbered from 1, like an episode and unlike mpv", () => {
+  assert.deepEqual(parsePlayerCommand({ action: "chapter", value: 4 }), { action: "chapter", value: 4 });
+  assert.deepEqual(parsePlayerCommand({ action: "chapter", value: "4" }), { action: "chapter", value: 4 });
+  // The refusal has to say which chapter is chapter one, because mpv's own answer is 0.
+  assert.throws(() => parsePlayerCommand({ action: "chapter", value: 0 }), /counting from 1/);
+  assert.throws(() => parsePlayerCommand({ action: "chapter", value: 1.5 }), /counting from 1/);
+  assert.throws(() => parsePlayerCommand({ action: "chapter" }), /chapter/);
+  // `episode` still names the list the agent read the number off, not just the rule.
+  assert.throws(() => parsePlayerCommand({ action: "episode", value: 0 }), /`player` lists/);
+});
+
+test("an audio track is a number or a name, and either survives the parser", () => {
+  assert.deepEqual(parsePlayerCommand({ action: "audio_track", value: 2 }), { action: "audio_track", value: 2 });
+  assert.deepEqual(parsePlayerCommand({ action: "audio_track", value: "2" }), { action: "audio_track", value: 2 }, "a model often sends a string");
+  assert.deepEqual(parsePlayerCommand({ action: "audio_track", value: "Japanese" }), { action: "audio_track", value: "Japanese" });
+  // Resolving a name against the file's real tracks is the engine's job; refusing an empty one is this one's.
+  assert.throws(() => parsePlayerCommand({ action: "audio_track" }), /track number counting from 1/);
+  assert.throws(() => parsePlayerCommand({ action: "audio_track", value: "  " }), /track number counting from 1/);
+  assert.throws(() => parsePlayerCommand({ action: "audio_track", value: 0 }), /counting from 1/);
 });
 
 test("volume is a fraction and rate is bounded, both said in the refusal", () => {
@@ -97,6 +118,30 @@ test("a snapshot is bounded: no unbounded strings, no unbounded episode list", (
   assert.equal(snapshot.series.episodes[0].watched, 1);
   assert.equal(sanitisePlayerSnapshot(null), null);
   assert.equal(sanitisePlayerSnapshot("playing"), null);
+});
+
+test("the engine's own limits are data, not a second action list", () => {
+  /*
+    One list, two engines: a `<video>` cannot switch audio tracks and mpv can.
+    The pane says so per file, the gateway refuses those before forwarding —
+    without which the tool call reports success and moves nothing, the exact
+    failure the mirrored-list test above exists to prevent.
+  */
+  const snapshot = sanitisePlayerSnapshot({
+    view: "player",
+    unsupported: [
+      { action: "audio_track", reason: "Chromium plays the file's first audio track and offers no way to choose another." },
+      { action: "eject", reason: "not an action at all" },
+      { action: "chapter", reason: "y".repeat(5000) },
+    ],
+  });
+  assert.deepEqual(snapshot.unsupported.map((item) => item.action), ["audio_track", "chapter"]);
+  assert.equal(snapshot.unsupported[1].reason.length, 512, "a reason is a sentence, not a payload");
+  assert.match(unsupportedReason(snapshot, "audio_track"), /first audio track/);
+  assert.equal(unsupportedReason(snapshot, "seek"), null);
+  // The normal case, and the one mpv will publish: nothing is out of reach.
+  assert.deepEqual(sanitisePlayerSnapshot({ view: "player" }).unsupported, []);
+  assert.equal(unsupportedReason(null, "chapter"), null);
 });
 
 test("the registry holds one player, and an unmount clears it", () => {

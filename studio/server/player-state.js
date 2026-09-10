@@ -13,12 +13,19 @@
  * and `tests/player-state.test.mjs` asserts they match: an action the gateway
  * accepts and the pane does not know is a tool call that says "done" and does
  * nothing.
+ *
+ * One list covers two engines — a `<video>` element today, mpv next — and they
+ * do not have the same reach over every file. That difference is data, not a
+ * second list: the window publishes `unsupported` in its snapshot and
+ * `unsupportedReason` is the gateway asking it before forwarding. See the
+ * header of `src/services/playerControl.ts`.
  */
 
 export const PLAYER_ACTIONS = Object.freeze([
   "play", "pause", "toggle", "restart",
-  "seek", "seek_by", "volume", "mute", "unmute", "rate",
-  "subtitles", "fullscreen",
+  "seek", "seek_by", "frame_step", "frame_back", "chapter",
+  "volume", "mute", "unmute", "rate",
+  "subtitles", "audio_track", "fullscreen",
   "next", "previous", "episode", "episodes",
 ]);
 
@@ -26,11 +33,23 @@ export const PLAYER_ACTIONS = Object.freeze([
 const VALUE_OF = Object.freeze({
   seek: "seconds",
   seek_by: "seconds",
+  chapter: "index",
   volume: "fraction",
   rate: "rate",
   subtitles: "label",
+  audio_track: "track",
   fullscreen: "optional-boolean",
   episode: "index",
+});
+
+/**
+ * What `index` is counting, for the refusal. Both are 1-based because both are
+ * read off a list the agent was shown, and a model told "counting from 1" for
+ * one list and "from 0" for the other gets one of them wrong.
+ */
+const INDEX_OF = Object.freeze({
+  episode: "the episode's number, counting from 1 — the numbers `player` lists",
+  chapter: "the chapter's number, counting from 1",
 });
 
 export const PLAYER_RATE = Object.freeze({ min: 0.25, max: 3 });
@@ -106,8 +125,27 @@ export function parsePlayerCommand(body) {
     }
     case "index": {
       const index = finite(typeof raw === "string" ? Number(raw) : raw);
-      if (index === null || !Number.isInteger(index) || index < 1) throw new PlayerCommandError("PLAYER_VALUE_REQUIRED", "`episode` wants `value` as the episode's number, counting from 1 — the numbers `player` lists.");
+      if (index === null || !Number.isInteger(index) || index < 1) {
+        throw new PlayerCommandError("PLAYER_VALUE_REQUIRED", `\`${action}\` wants \`value\` as ${INDEX_OF[action]}.`);
+      }
       return { action, value: index };
+    }
+    /*
+      An audio track is named the way a subtitle track is — a label off the
+      snapshot — or numbered, because a container's audio streams often carry
+      no title at all and "2" is then the only way to say which one. Both
+      reach the engine; resolving a label against the file's real tracks is
+      the engine's job, not the parser's.
+    */
+    case "track": {
+      const numbered = finite(typeof raw === "string" && raw.trim() !== "" ? Number(raw) : raw);
+      if (numbered !== null) {
+        if (!Number.isInteger(numbered) || numbered < 1) throw new PlayerCommandError("PLAYER_VALUE_REQUIRED", "`audio_track` wants a track number counting from 1, or a language or title to match.");
+        return { action, value: numbered };
+      }
+      const label = text(String(raw ?? "").trim());
+      if (!label) throw new PlayerCommandError("PLAYER_VALUE_REQUIRED", "`audio_track` wants `value`: a track number counting from 1, or a language or title such as \"Japanese\".");
+      return { action, value: label };
     }
     default:
       return { action };
@@ -139,6 +177,15 @@ export function sanitisePlayerSnapshot(input) {
         })),
     };
   }
+  /*
+    What the window says its engine cannot do with this file. Bounded like
+    everything else here, and filtered to real actions: an unknown name would
+    be a refusal nothing could ever lift.
+  */
+  const unsupported = (Array.isArray(input.unsupported) ? input.unsupported : [])
+    .filter((item) => item && typeof item === "object" && PLAYER_ACTIONS.includes(item.action))
+    .slice(0, PLAYER_ACTIONS.length)
+    .map((item) => ({ action: item.action, reason: text(item.reason, "") }));
   const available = Array.isArray(input.subtitles?.available)
     ? input.subtitles.available.filter((label) => typeof label === "string").slice(0, LIMITS.labels).map((label) => text(label, ""))
     : [];
@@ -157,8 +204,24 @@ export function sanitisePlayerSnapshot(input) {
     rate: finite(input.rate, 1),
     subtitles: { available, active: text(input.subtitles?.active) },
     fullscreen: input.fullscreen === true,
+    unsupported,
     error: text(input.error),
   };
+}
+
+/**
+ * Why an action cannot be carried out on what is showing, or null.
+ *
+ * The list comes from the window — only the engine actually holding the file
+ * knows whether it can step a frame of it — and this is the gateway asking it
+ * before forwarding a command. Refusing here is the whole point: a command the
+ * pane cannot execute otherwise returns "sent to the player" and moves
+ * nothing, which is the failure `tests/player-state.test.mjs` was written to
+ * prevent when the two action lists could drift.
+ */
+export function unsupportedReason(snapshot, action) {
+  const entry = snapshot?.unsupported?.find((item) => item.action === action);
+  return entry ? entry.reason : null;
 }
 
 /**

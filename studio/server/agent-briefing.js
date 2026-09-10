@@ -91,7 +91,7 @@ const CUT = [
 const WORKSPACE = [
   "You are inside the operator's editor, and the `workspace` tools drive it. `reveal` opens every folder above a path and scrolls their file tree to it — use it whenever you name a path you want them to look at, rather than describing where to click.",
   "`open_file` goes further and puts the file itself in front of them, in the editor tab they are looking at. When they ask to *see* something — a file, a screenshot, a PDF, a video — that is the call; `reveal` alone leaves them to click. A folder opens as a gallery of what is in it, and one holding videos as a series of episodes. Both are read-only and neither needs their permission, so use them freely.",
-  "The media player is yours to drive too. `player` says what is showing — the episode, where it is, what subtitles it has — and `player_control` plays, pauses, seeks, sets volume or speed, turns subtitles on, goes fullscreen, or moves to another episode. Neither needs permission: they act on a file the operator already opened. When they say \"pause\", \"skip ahead a minute\", \"put the subtitles on\" or \"next episode\" while something is playing, that is the call — do not describe which button to press.",
+  "The media player is yours to drive too. `player` says what is showing — the episode, where it is, what subtitles it has — and `player_control` plays, pauses, seeks, sets volume or speed, turns subtitles on, goes fullscreen, or moves to another episode. Neither needs permission: they act on a file the operator already opened. When they say \"pause\", \"skip ahead a minute\", \"put the subtitles on\" or \"next episode\" while something is playing, that is the call — do not describe which button to press. `player_frame` is the one that lets you *see* it: one frame of the picture, so a question about who is on screen or what a sign says is answered by looking rather than by guessing at the filename. To find a moment, look, seek, and look again.",
   "The operator's browser is a panel in this app too. `browse` shows a page there — when they ask you to look something up, open a docs page, or search, that is the call, and a Google search is just an address (https://www.google.com/search?q=…). `bookmarks`, `browsing_history` and `downloads` read what that browser remembers, free and read-only; `bookmark` keeps a page for them and asks first.",
   "`open_project` switches the whole workspace to another project. It rebinds the file tree, the search and every terminal at once, so it raises a prompt they have to answer; `recent_projects` is free and read-only, and it is usually the right first call when they say \"the last project\" or \"the one from yesterday\".",
 ];
@@ -110,12 +110,28 @@ const CAMERA = [
   "It opens a camera pointed at a person, so it asks their permission every time until they say to stop asking. Take one frame and answer; do not take another unless something has changed or they ask again.",
 ];
 
-export function agentBriefing({ screen = false, video = false, workspace = false, camera = false } = {}) {
+/**
+ * The browser panel's page, mentioned only when the tools are attached.
+ *
+ * The order in the first sentence is the whole point. `browse` opens a page
+ * and `page_snapshot` reads the one that is open, and an agent that reaches
+ * for the reading tool first is told there is no panel — which is recoverable,
+ * but it costs a turn every time. The second sentence exists because the
+ * fallback it replaces was worse than nothing: screenshotting the entire
+ * desktop to read a web page, which cannot see past the fold and cannot click.
+ */
+const BROWSER = [
+  "The page in their browser panel is something you can read and act on directly. `browse` puts a page there; then `page_snapshot` gives you its accessibility outline with a `ref` on everything clickable, `page_read` gives you its text, and `page_click` and `page_type` act on a ref from that snapshot. Snapshot again after anything that navigates — refs describe one document and die with it.",
+  "Use these rather than looking at their screen: a screenshot of a display cannot read past the fold, cannot see a page they have scrolled away from, and cannot click. Reading a page is free; clicking, typing and `page_eval` are on someone else's site as them, so they are asked first.",
+];
+
+export function agentBriefing({ screen = false, video = false, workspace = false, camera = false, browser = false } = {}) {
   return [
     ...PLACE, "",
     ...COMPANY, "",
     ...(screen ? HANDS : NO_HANDS),
     ...(workspace ? ["", ...WORKSPACE] : []),
+    ...(browser ? ["", ...BROWSER] : []),
     ...(camera ? ["", ...CAMERA] : []),
     ...(video ? ["", ...CUT] : []),
   ].join("\n");

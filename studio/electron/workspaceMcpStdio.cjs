@@ -172,12 +172,29 @@ const TOOLS = [
       properties: {
         action: {
           type: "string",
-          enum: ["play", "pause", "toggle", "restart", "seek", "seek_by", "volume", "mute", "unmute", "rate", "subtitles", "fullscreen", "next", "previous", "episode", "episodes"],
+          enum: [
+            "play", "pause", "toggle", "restart",
+            "seek", "seek_by", "frame_step", "frame_back", "chapter",
+            "volume", "mute", "unmute", "rate",
+            "subtitles", "audio_track", "fullscreen",
+            "next", "previous", "episode", "episodes",
+          ],
         },
-        value: { description: "What the action takes, if anything: seconds, a 0–1 volume, a rate, an episode number, a subtitle label, or a boolean." },
+        value: { description: "What the action takes, if anything: seconds, a 0–1 volume, a rate, an episode or chapter number, an audio or subtitle track, or a boolean." },
       },
       required: ["action"],
     },
+  },
+  {
+    name: "player_frame",
+    description:
+      "Look at the video the operator is playing: one frame of it, as a picture, from wherever it is paused or playing right "
+      + "now. This is how you answer a question about what is *on screen* — who is in the shot, what a caption says, whether "
+      + "this is the scene they mean — instead of guessing from a filename. To find a moment, `player_control` seek and then "
+      + "look again; a few of those is normal. Read-only and free. Nothing but their video is in the picture: for the operator "
+      + "themselves use the camera, for the rest of their desktop use a screenshot. It fails plainly when nothing is playing, "
+      + "or when what is open is audio and has no picture to take.",
+    inputSchema: { type: "object", properties: {} },
   },
   {
     name: "recent_projects",
@@ -232,6 +249,10 @@ async function runTool(name, args) {
       const data = await call("player-control", { action: String(args.action ?? ""), value: args.value });
       return data.result ?? data;
     }
+    case "player_frame": {
+      const data = await call("player-frame", {});
+      return data.result ?? data;
+    }
     case "recent_projects": {
       const data = await call("projects", {});
       return { current: data.current, recent: data.recent };
@@ -246,6 +267,31 @@ async function runTool(name, args) {
     default:
       throw new Error(`"${name}" is not a workspace tool.`);
   }
+}
+
+/**
+ * The tool's result as MCP content.
+ *
+ * Everything here is JSON, which is what it is — except a frame of the
+ * operator's video, which is handed over as a real image block rather than as
+ * a data URI inside a JSON blob. The agent's own eyes are the point of that
+ * tool, and a base64 string in a text field is not a picture to any client.
+ * The same shape browserMcpStdio.cjs and cameraMcpStdio.cjs use.
+ *
+ * The sentence beside the picture is the gateway's, not this shim's: a frame
+ * with no timestamp under it is a frame the model cannot seek from, and this
+ * process decides nothing.
+ */
+function contentFor(name, result) {
+  if (name !== "player_frame") return [{ type: "text", text: JSON.stringify(result, null, 2) }];
+  const source = typeof result?.image === "string" ? result.image : "";
+  const comma = source.indexOf(",");
+  const base64 = comma < 0 ? source : source.slice(comma + 1);
+  if (!base64) throw new Error("The player produced no picture.");
+  return [
+    { type: "image", data: base64, mimeType: "image/jpeg" },
+    { type: "text", text: String(result.summary || "One frame of what the operator is playing.") },
+  ];
 }
 
 async function handle(request) {
@@ -273,7 +319,7 @@ async function handle(request) {
 
       case "tools/call": {
         const result = await runTool(params?.name, params?.arguments ?? {});
-        respond({ id, result: { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] } });
+        respond({ id, result: { content: contentFor(params?.name, result) } });
         return;
       }
 

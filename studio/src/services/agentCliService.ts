@@ -1,5 +1,8 @@
 import { GatewayClient } from "./gatewayClient";
 import { answerCameraRequest } from "./cameraFrame";
+import { answerPlayerFrameRequest } from "./playerFrame";
+import { answerBrowserRequest } from "./browserAgent";
+import type { BrowserCdpOp, BrowserCdpParams } from "./browserView";
 import type { StreamCallbacks } from "./frontierEngine";
 import type { ToolCall } from "../types";
 
@@ -28,6 +31,67 @@ export interface AgentDescriptor {
   version: string | null;
   permissions: string[];
   defaultPermission: string;
+  /**
+   * How hard this CLI can be told to work, weakest first, in its own
+   * vocabulary — the two do not share one. Null default means "say nothing and
+   * let the operator's own CLI config stand". Read from the gateway rather
+   * than hard-coded here so the picker can never offer a level the installed
+   * binary would reject. See server/agent-cli.js `AGENTS`.
+   */
+  efforts: string[];
+  defaultEffort: string | null;
+  /** How much reasoning comes back on the stream. Empty when the CLI has no
+   *  such knob — Claude Code's effort level is its thinking budget. */
+  thinking: string[];
+  defaultThinking: string | null;
+}
+
+/** One thing the agent will or will not have in its hands on the next turn. */
+export interface AgentCapability {
+  id: string;
+  /** The MCP server that carries it, as the CLI will see it named. */
+  server: string;
+  label: string;
+  detail: string;
+  tools: string[];
+  available: boolean;
+  /** Why not, in words that name the thing to change. Null when available. */
+  reason: string | null;
+}
+
+/** An MCP server the CLI carries of its own, read from the CLI, never guessed. */
+export interface AgentMcpServer {
+  name: string;
+  transport: string;
+  /** The CLI's own word for its health, e.g. "Connected". Null when it says nothing. */
+  status: string | null;
+  enabled: boolean;
+}
+
+export interface AgentPlugin {
+  name: string;
+  version: string | null;
+  enabled: boolean;
+  /** How many MCP servers this plugin brings with it. */
+  servers: number;
+}
+
+/**
+ * What an agent brings into a turn.
+ *
+ * `mcp` and `plugins` are null when the CLI could not be read — a missing
+ * binary, a hang, an unrecognised shape. Null and empty mean different things
+ * here and the UI must not collapse them: an empty array is the CLI saying
+ * "none", null is us saying "we do not know".
+ */
+export interface AgentInventory {
+  engine: AgentEngine;
+  label: string;
+  studio: AgentCapability[];
+  mcp: AgentMcpServer[] | null;
+  plugins: AgentPlugin[] | null;
+  /** Surfaces this inventory knowingly does not cover. */
+  unlisted: string[];
 }
 
 export interface AgentTurnOptions {
@@ -35,11 +99,32 @@ export interface AgentTurnOptions {
   prompt: string;
   /** Workspace-relative. Empty means the workspace root. */
   cwd?: string;
+  /**
+   * Attached images, as base64 data URLs.
+   *
+   * Neither CLI can be handed bytes: the prompt is argv. The gateway writes
+   * these to disk inside the agent's own working directory and then either
+   * passes the files to `codex exec --image=` or names their paths to Claude
+   * Code, which reads them with its Read tool. See server/agent-attachments.js.
+   */
+  images?: string[];
   /** Resume the CLI's own session. Null starts a fresh one. */
   sessionId?: string | null;
+  /**
+   * Branch `sessionId` instead of continuing it: the CLI answers from that
+   * thread's history and writes the answer to a new id, leaving the thread it
+   * read alone. Ignored without a `sessionId` — there is nothing to branch.
+   */
+  fork?: boolean;
   model?: string | null;
   permission?: string;
+  /** One of the engine's own `efforts`. Null leaves the CLI's setting alone. */
+  effort?: string | null;
+  /** One of the engine's own `thinking` values, where it has any. */
+  thinking?: string | null;
   signal?: AbortSignal;
+  /** Run through Frontier Max online Gemini tier via Claude Code */
+  frontierMax?: boolean;
 }
 
 /** One selectable model, and how much we actually know about it. */
@@ -118,6 +203,15 @@ type AgentEvent =
      arrives — the operator has already approved the tool call — and a frame is
      a frame whichever surface started the turn. See services/cameraFrame.ts. */
   | { type: "camera"; id: string; frames?: number; spanMs?: number; expiresInMs: number }
+  /* The agent reading or driving the browser panel. Answered here for the same
+     reason the camera is — the decision was made when the tool call was
+     approved, and the panel is a view only this renderer can reach. The op is
+     a name, never a CDP method. See services/browserAgent.ts. */
+  | { type: "browser"; id: string; op: BrowserCdpOp; params?: BrowserCdpParams; expiresInMs: number }
+  /* The agent asking to look at the video the operator is playing. Answered
+     here for the same reason as both of the above, and the picture is the
+     pane's own element — see services/playerFrame.ts. */
+  | { type: "player-frame"; id: string; expiresInMs: number }
   // Recorded by the gateway into the plan store, not consumed here — the pane
   // shows a turn, and plan headroom outlives any one turn. Listed so the switch
   // below is exhaustive over what the stream can actually carry.
@@ -167,6 +261,26 @@ export class AgentCliService {
       const response = await GatewayClient.request("/api/agents/models", { method: "GET", signal });
       if (!response.ok) return null;
       return (await response.json()) as Record<AgentEngine, AgentModelSet>;
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * What this agent brings into a turn: the tools Teminali OS attaches, plus
+   * the MCP servers and plugins the CLI carries of its own.
+   *
+   * Null on any failure, which the caller renders as "could not be read"
+   * rather than as an agent with nothing.
+   */
+  public static async inventory(engine: AgentEngine, signal?: AbortSignal): Promise<AgentInventory | null> {
+    try {
+      const response = await GatewayClient.request(`/api/agents/inventory?engine=${encodeURIComponent(engine)}`, {
+        method: "GET",
+        signal,
+      });
+      if (!response.ok) return null;
+      return (await response.json()) as AgentInventory;
     } catch {
       return null;
     }
@@ -233,9 +347,14 @@ export class AgentCliService {
         engine: options.engine,
         prompt: options.prompt,
         cwd: options.cwd ?? "",
+        images: options.images ?? [],
         sessionId,
+        fork: options.fork ?? false,
         model: options.model ?? null,
         permission: options.permission,
+        effort: options.effort ?? null,
+        thinking: options.thinking ?? null,
+        frontierMax: options.frontierMax ?? false,
       }),
     });
     await GatewayClient.expectOk(response);
@@ -313,6 +432,17 @@ export class AgentCliService {
           // the camera warms up, or the turn's own output stalls behind it.
           void answerCameraRequest(runId, event.id, { frames: event.frames, spanMs: event.spanMs });
           break;
+        case "browser":
+          // Not awaited, for the same reason: a page snapshot is a round trip
+          // through main and back, and the turn's own output would stall
+          // behind it.
+          void answerBrowserRequest(runId, event.id, event.op, event.params ?? {});
+          break;
+        case "player-frame":
+          // Not awaited, for the same reason: encoding a frame and posting it
+          // is a round trip the turn's own output must not queue behind.
+          void answerPlayerFrameRequest(runId, event.id);
+          break;
         case "edit":
           callbacks.onEdit?.(event);
           break;
@@ -360,6 +490,16 @@ export class AgentCliService {
       throw failure;
     }
 
+    const actionMatch = text.match(/<workspace-action\s+action=["']([^"']+)["']\s+path=["']([^"']+)["']\s*\/?>/i);
+    if (actionMatch) {
+      const [, action, targetPath] = actionMatch;
+      callbacks.onWorkspace?.({
+        type: "workspace",
+        action: action as any,
+        path: targetPath,
+      });
+    }
+
     const wallMs = performance.now() - startedAt;
     const usage = totals.usage;
     const outputTokens = usage?.outputTokens ?? 0;
@@ -381,9 +521,9 @@ export class AgentCliService {
       // under a turn means the same thing whichever engine produced it.
       tokensCount: promptTokens + outputTokens,
       durationSec: (durationMs || wallMs) / 1000,
-      engineUsed: options.engine === "claude" ? "Claude Code" : "Codex",
-      mode: "auto",
-      routeReason: reasoning ? "agent_cli_with_reasoning" : "agent_cli",
+      engineUsed: options.frontierMax ? "Frontier Max (Gemini)" : options.engine === "claude" ? "Claude Code" : "Codex",
+      mode: options.frontierMax ? "max" : "auto",
+      routeReason: options.frontierMax ? "frontier_max_gemini" : (reasoning ? "agent_cli_with_reasoning" : "agent_cli"),
       telemetry: {
         requestId: sessionId ?? "agent",
         model: model ?? options.engine,

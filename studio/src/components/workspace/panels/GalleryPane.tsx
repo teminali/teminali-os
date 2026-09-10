@@ -317,6 +317,16 @@ export const GalleryPane: React.FC<{ panel: PanelTab }> = ({ panel }) => {
       muted: false,
       rate: 1,
       subtitles: { available: [], active: null },
+      /*
+        Nothing is playing on the gallery, so the four actions that reach into
+        a file reach into nothing. Said here rather than left to be discovered:
+        the grid's own answer is `episode` with a number, and the refusal names
+        it. See the header of services/playerControl.ts.
+      */
+      unsupported: (["frame_step", "frame_back", "chapter", "audio_track"] as const).map((action) => ({
+        action,
+        reason: "Nothing is playing yet — this is the episode gallery. Start one with `episode` and a number first.",
+      })),
       fullscreen: false,
       error: null,
     }, { immediate: true });

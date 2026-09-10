@@ -81,6 +81,7 @@ export const WORKSPACE_READ_TOOLS = Object.freeze([
   `mcp__${WORKSPACE_SERVER_NAME}__downloads`,
   `mcp__${WORKSPACE_SERVER_NAME}__player`,
   `mcp__${WORKSPACE_SERVER_NAME}__player_control`,
+  `mcp__${WORKSPACE_SERVER_NAME}__player_frame`,
 ]);
 
 /*
@@ -91,6 +92,15 @@ export const WORKSPACE_READ_TOOLS = Object.freeze([
   nothing — the same argument `browse` makes. A prompt before every pause would
   make the tool not worth calling, which is the behaviour it exists to replace:
   an agent asked to pause a video otherwise reaches for the pointer.
+
+  `player_frame` is pre-approved on a narrower argument, and it is worth
+  separating from that one because it takes a picture. It photographs one
+  thing: the film the operator opened and is watching. Not the camera, which
+  looks at *them* and has an approval for it, and not the screen, which has
+  everything else they have open in it. A frame of their own video is no more
+  revealing than the position `player` already reports, and the alternative —
+  a prompt every time the model wants to check what a scene shows — is what
+  makes "find the bit where they arrive" not worth asking for.
 */
 
 /**
