@@ -45,7 +45,13 @@ serving. Those are not covered by the licence above.
 
 The `.gitignore` excludes the 2 GB virtualenv, the vendored wheels, the
 `experiments/` directory, and ~95 MB of rendered voice takes under
-`resources/bella/`. The measurements those takes produced are written down in
+`resources/bella/`. That last rule is written as `**/*.wav`, and it therefore
+also excludes `code/reference_audio.wav` (154 KB) — which is not a take but a
+dependency: `audio_module.py:113` passes it as the Coqui XTTS reference voice.
+A fresh clone can run the Kokoro engine, whose voice is the committed `*.pt`
+embeddings, and cannot run Coqui without that file. Measured 2026-09-10; left
+as it is because the `.gitignore` belongs to another lane's staged work, and
+Kokoro is the engine the pipeline actually serves. The measurements those takes produced are written down in
 code comments and `LOCKED_PIPELINE_SPEC.md`, which is the part worth versioning.
 The Kokoro voice embeddings (`*.pt`) *are* committed: they are small, they are
 the voice itself, and they cannot be regenerated without repeating the tuning.
