@@ -56,12 +56,17 @@ sits over a frame of film — a snowfield in one shot and a night interior in th
 next. Every other token here is measured against a known ground, and a control
 bar tuned for `#181818` disappears over the first bright frame. So that block
 is defined against **black**: a flat scrim (`--player-scrim`), marks as white
-at fixed alphas (`--player-ink`, `--player-track`), and one hue — the brand
-green on the played span of the scrubber, because "this is ours and this is
-live" means there what it means everywhere else. It is still one flat fill, so
-§1's first rule holds on the one surface that most tempts a gradient. Reach for
-these only over picture; a component that used `--player-ink` on a panel would
-be putting pure white on grey, which is not in this system's range.
+at fixed alphas (`--player-ink`, `--player-track`), and one hue —
+`--player-accent`, the brand green, on the played span of the scrubber and on
+whichever pill is currently doing something, because "this is ours and this is
+live" means there what it means everywhere else. `--player-glass` is the
+floating family: the pills in the top corner, the episode drawer on the left
+edge, the menus. One white alpha with a blur behind it covers a bright frame
+and a black one, which is the same argument as the rest of the block. The two
+edge scrims are §1's one sanctioned gradient — see §3 — and nothing else here
+gets one. Reach for these only over picture; a component that used
+`--player-ink` on a panel would be putting pure white on grey, which is not in
+this system's range.
 
 ### Typography
 
@@ -95,7 +100,11 @@ tinted. Internalise these five and the rest follows:
 1. **No gradients.** Not on the window, not on the sidebar, not on a button, not
    as a floor glow or a top light. Every surface is one flat fill. A vertical
    wash across the canvas blurs the one tonal step that matters (the sidebar
-   sitting 3 values above it), which is the whole structure of the shell.
+   sitting 3 values above it), which is the whole structure of the shell. One
+   exception, and it is written down rather than assumed: the media player's
+   two edge scrims (§3). They sit over an arbitrary image, not over a known
+   grey, and a flat plate opaque enough to carry white text there cuts a
+   visible band out of the film.
 2. **No edge lighting.** Depth is a flat 1px border, one step lighter than the
    fill it encloses, identical on all four sides. No brighter crown, no inner
    catch, no fade around the corner, no contact shadow. `--lit-*` still exists
@@ -1237,11 +1246,58 @@ control — the buttons, the keyboard and `player_control` all call it, so
 grey strip under a letterboxed video, and the operator's verdict was the right
 one: *"the player design is not top tier… i need it 4x better, more cinematic
 and clean controls."* The video now fills the pane and the controls float on
-it, on one flat scrim — a fill, never a gradient, so §1's first rule holds on
-the one surface that most tempts one — drawn from the `--player-*` tokens §0
-describes. While a video plays and the pointer is still, the bar, the title and
-the cursor all go; movement, a menu or a pause brings them back. Audio keeps
-its chrome always: there is nothing to get out of the way of.
+it, drawn from the `--player-*` tokens §0 describes. **And it had never once
+left** until 2026-09-10: `time` was in the idle effect's dependency list, so
+every `timeupdate` — four a second — tore down the pending countdown and
+started a new one, and a 2.6s timer restarted every 250ms never expires. The
+bar hid only when playback *stopped*, which is the one moment it should stay.
+It restarts on `awake` now, bumped by pointer activity and throttled to one
+bump per 200ms, because what the countdown is waiting for is the operator
+going still, not the playhead moving. `tests/workspace-gallery.test.mjs` reads
+that dependency list as text: nothing else can catch it, since the broken
+version typechecks, renders, and passes every other test. The two scrims are §1's
+one sanctioned gradient: a flat plate dark enough to carry white text over a
+snowfield is also dark enough to cut a visible band out of the film, and this
+is the only surface in the app whose background is an arbitrary image. While a
+video plays and the pointer is still, the bar, the title and the cursor all go;
+movement, a menu or a pause brings them back. Audio keeps its chrome always:
+there is nothing to get out of the way of.
+
+**Four corners and a rail** (2026-09-10), after a reference design the operator
+handed us. Top-left is the film's name, set large and light. Top-right is the
+close button and, while it is true, the live-transcode badge — and nothing
+else. It carried a resolution pill for a day: the reference stacks *selectable*
+renditions there (2160p/1440p/1080p) and we cannot have one, because nothing
+here streams, so it became a label reading the file's real height off ffprobe.
+The operator's verdict was right and is the general rule — *"we do not need the
+video quality tag"* — a label that never changes and answers no question a
+viewer is asking is just one more thing on top of the film. Bottom-left is transport, bare
+glyphs with no plate behind them, which is why that corner reads as three marks
+on the picture rather than three widgets: back ten, play, forward ten, then the
+clock. The reference's ⏮/⏭ are the two **seeks**, not the two episodes — a seek
+is wanted on every file and an episode only on some. Bottom-right, behind a
+divider, are the settings chosen once and then left: volume, subtitles, speed,
+fullscreen. The rail runs the full width beneath both, unbroken by numbers.
+
+**The clock is scaled to the film, not to the longest film there could be.**
+`00:02:35 / 00:16:08` is nineteen characters, ten of them a zero standing in
+for an hour a sixteen-minute file does not have — and in a narrow pane the
+slashes were break opportunities, so it stacked onto three lines and shoved
+the transport sideways. `formatClock` prints `2:35 / 16:08` under an hour and
+`1:02:35` over it, unpadded at the lead, `whitespace-nowrap`. Screen readers
+still get full `hh:mm:ss` through `aria-valuetext`, where an unambiguous unit
+beats a short one. When a pane is narrower still, the transport and its clock
+hold their size and the **Subtitles pill truncates** — it is the only control
+in the bar whose width is text rather than a glyph, so it is the only one that
+can give up room without giving up a target.
+
+**A series gets a drawer on the left edge**, with a vertical tab where the
+reference puts X-Ray, and its own prev/next in the header. It replaced a pill
+at the bottom centre that opened a modal over the middle of the frame — over
+the very thing you were choosing between — and the two floating chevrons that
+used to sit over the picture are gone with it. Where the reference shows a
+face, an episode row shows its number in the same circle: a folder of episodes
+has no faces, and the number is what identifies one.
 
 The scrubber is a **real `<input type="range">` kept transparent over a track
 this pane draws**. A div with a drag handler would have looked the same and
@@ -1255,11 +1311,15 @@ once.
 is `fixed bottom-2 right-3` at z-40, above anything a panel draws — the video
 editor's timeline has reserved that strip since it shipped, and the player,
 being the second pane to draw content that far down, put the version pill
-straight on top of its fullscreen button. `VERSION_BADGE_STRIP` reserves it the
-same way rather than moving shared chrome for one pane's sake, and only when
-windowed: a fullscreen element is rendered alone, so nothing of the app's is
-over it. A test pins the reservation against the badge's own position, because
-the two are one measurement in two files.
+straight on top of its fullscreen button. It reserved it *horizontally* at
+first, indenting the right end of the controls row. The full-bleed rail ended
+that: the lowest thing in the corner is now the rail, and no right-indent short
+of shortening the rail would clear it. So `VERSION_BADGE_LIFT` raises the whole
+bar off the bottom edge instead — 8px of `bottom-2` plus the badge's 22px plus
+4px of air — which clears the badge for the rail and the controls row alike and
+costs the rail nothing. Only when windowed: a fullscreen element is rendered
+alone, so nothing of the app's is over it. A test pins the reservation against
+the badge's own position, because the two are one measurement in two files.
 
 **The timeline is virtual, and that is not an optimisation.** In `direct` mode
 the element holds the file and seeks by byte range. In a transcode ffmpeg is
@@ -5341,8 +5401,8 @@ at all.
 
 The Teminali OS assistant has no chat surface of its own in the voice stage. It
 reads, edits, searches and runs entirely in the background, and its whole
-visible presence is one line under Temi's orb:
-`AgentActivityTicker.tsx`, fed by `activityPhrase.ts` from
+visible presence is one line in the composer's project tab, after the workspace
+name (§6.44): `AgentActivityTicker.tsx`, fed by `activityPhrase.ts` from
 `assistantActivityStore`.
 
 Small by constraint, not by taste. A panel would become a second chat, which is
@@ -5364,8 +5424,10 @@ Three rules the phrasing follows, each testable and tested
 
 The split into `AgentActivityTicker` (presentational, takes a phrase) and
 `ConnectedAgentActivity` (reads this store) is what makes it portable: the strip
-can be dropped beside any orb, into a status bar or a compact window without
-dragging a store behind it.
+can be dropped into any horizontal strip — a status bar, a compact window —
+without dragging a store behind it. It renders as a fragment into that row, and
+draws its own leading hairline, so the separator disappears with the line rather
+than hanging off the end of the bar.
 
 ### 6.0.2 One switch between the voice and the hands (2026-09-09)
 
@@ -5565,6 +5627,87 @@ same sentence verbatim — at this model size any speakable string in the prompt
 becomes the template for every answer, which `temi_moves.py` documents at
 length. The mechanism is the gate: with state questions delegated, few of these
 questions reach the persona at all.
+
+### 6.0.6 The shell's own directive must not return as a user turn (2026-09-10)
+
+`sendAssistantDirective` is not a user turn. But the pipeline has one way in, so
+`realtime-voice/code/server.py` wraps the line and delivers it through
+`on_final` — **the same callback a spoken turn uses** — and it comes back to the
+shell as `final_user_request`. Type alone cannot tell it from speech.
+
+Unguarded, that closes a loop, and it was observed live: the shell delegates,
+speaks "On it.", the directive returns as a user turn, `performTurn` classifies
+it as work, and it delegates again. The activity queue fills with identical
+tasks and the assistant talks to itself. **The Stop button cannot win** — each
+stop is followed by another delegation, which is why it read as a broken button
+rather than a loop.
+
+Two things were wrong per cycle: the directive was appended to
+`dialogueHistory` **as a user bubble**, captioning the operator with words they
+never said; and it reached the turn switch.
+
+`Realtime8000ProtocolManager.isAssistantDirectiveEcho()` is the guard, matching
+`server.py`'s prefix. It lives on the class that **sends** the directive, so the
+sender and the recogniser cannot drift apart, and `TemiVoiceStage` drops such
+messages on both the `partial_` and `final_user_request` paths before either
+effect happens. It is deliberately narrow: bracketed artefacts like
+`[keyboard clicking]` belong to `transcriptRepair` and must pass through.
+
+Pinned by `tests/voice-directive-echo.test.mjs`, which rebuilds the wrapper from
+`server.py`'s own wording so the test fails if either side drifts.
+
+### 6.0.7 The caption is paced by the speaker, not by the model (`services/voice/captionPacer.ts`, 2026-09-10)
+
+The model finishes a sentence several seconds before the voice does. Rendering
+`partial_assistant_answer` straight to the screen therefore showed the end of a thought
+while the listener was still hearing its beginning — the eye overtakes the ear, and the
+reader stops listening. The two halves of one reply ran at different speeds.
+
+The playback worklet is the only thing that knows how much audio has actually left the
+buffer, so it is now the thing that drives the caption. It reports `ttsProgress` every
+~50ms — finer than a syllable — and `CaptionPacer` maps those seconds onto a prefix of the
+text at a **measured** speaking rate: every completed turn is a direct observation of
+characters per second, so a voice change or a speed change retunes it without anyone
+remembering to.
+
+Three properties, each pinned by `tests/caption-pacer.test.mjs`:
+
+* **Nothing is captioned before the voice has said it.** No lead is added. A caption a
+  little ahead of the voice is the same defect as one seconds ahead, only quieter.
+* **A word is never shown half-written**, and the caption never un-reveals a word — a
+  barge-in resets the worklet's clock, and progress can legitimately drop.
+* **A clipped turn does not poison the rate.** A turn cut off measures the interruption,
+  not the voice, so it is discarded rather than averaged in.
+
+Two boundaries are conversational and cannot be inferred acoustically, which is where the
+first two attempts at this went wrong:
+
+* The worklet's `ttsPlaybackStarted` fires again after **any** 120ms underrun — the
+  ordinary gap between two synthesised sentences — so it cannot reset the caption clock.
+  The turn does, via `resetTTSProgress()`.
+* `ttsPlaybackStopped` fires on that same gap, so it cannot commit the turn either. The
+  commit is debounced, and also fires when the spoken text catches up with the generated
+  text.
+
+`final_assistant_answer` no longer commits the reply. It is **held** until the voice has
+caught up, or the transcript would snap the whole sentence into place the instant
+generation ended — precisely the defect being removed. If a turn is stopped mid-sentence,
+what lands in the transcript is what she **actually said**: a transcript recording words
+the speaker was silenced before reaching is a record of something that did not happen.
+
+### 6.0.8 If she is talking, she can be stopped (`components/voice/TemiVoiceStage.tsx`, 2026-09-10)
+
+`isRunning` was `isTaskRunning || isStreaming`. Temi speaking with no delegated run behind
+it — every plain answer, the ordinary case — was neither, so **Escape was unarmed and the
+composer offered no Stop**. The pipeline runs half-duplex, deliberately ignoring the
+microphone while she speaks so that she does not interrupt herself, so the voice could not
+do it either. There was no way at all to cut her off. Reported as *"I cannot stop this."*
+
+This is the same bug the comment above that line already recorded once, for delegated runs.
+It was fixed there and not here.
+
+`isSpeaking` now counts as running. The rule is the whole of it: **if she is talking, she
+can be stopped.**
 
 ### 6.1 Turn semantics while a run is in flight (2026-09-05)
 
@@ -7508,7 +7651,8 @@ sits under Temi's answers only.
 
 **The activity pane is deleted.** `TemiAssistantPane.tsx` is gone, and with it
 the store's `activeTab`. The Teminali OS assistant's entire standing presence is
-now the one process line under the orb (`AgentActivityTicker`), exactly as
+now the one process line in the composer's project tab (`AgentActivityTicker`,
+§6.44), exactly as
 §6.0.1 said it should be and never quite was. Clicking that line opens
 `TemiActivityDialog` — the full log, paged 20 rows at a time as you reach the
 end, so opening it mid-run costs one screenful rather than the whole feed.
@@ -7851,7 +7995,9 @@ The box, drawn in `TemiComposer`:
 
 - a project tab above its top edge — folder icon and the workspace name, or
   "Choose project" — inset on both sides with square bottom corners, because it
-  is a narrower panel *behind* the box with its top showing, not a floating chip;
+  is a narrower panel *behind* the box with its top showing, not a floating chip.
+  Since §6.44 it is a row of two controls: the project name, then a hairline and
+  the assistant's live process line;
 - a 16px body on `#252525`, borderless, against the stage's black canvas;
 - the placeholder floated to the top-left of a field that starts 52px tall and
   grows to 200px. It is a `textarea`. The control it replaced was an `<input>`,
@@ -8397,3 +8543,131 @@ returning the half-written draft. Geometry was measured off
 **Left open:** `onSend` is still declared by `TemiVoiceStage` and dropped. Wiring
 it would route typed turns through `StudioChat.send` and change the whole lane;
 it is a decision, not an oversight, and it is not this one.
+
+### 6.44 The process line moves into the project tab (`components/voice/AgentActivityTicker.tsx`, `components/voice/TemiComposer.tsx`, `components/voice/TemiVoiceStage.tsx`, `services/voice/activityPhrase.ts`, 2026-09-10)
+
+§6.0.1 gave the Teminali OS assistant one line and put it under Temi's orb, as a
+bordered pill floating between the orb and the box. That placement was wrong for
+three reasons, and only the third is aesthetic.
+
+**It rented a row to say a short sentence.** The pill was its own object with its
+own border, its own `mt-2`, and nothing beside it — roughly 32px of the stage
+occupied by a strip that is empty most of the time and, when it is not, holds
+about four words.
+
+**The bar it belonged in was already drawn and already half empty.** The composer
+has a project tab above it (§6.36) carrying a folder glyph and a workspace name,
+and the rest of that bar was blank. Where the work is happening and what is
+happening to it are the same question asked twice; they now read as one strip:
+
+```
+📁 teminaliCode │ ✳ Reading …/realtimeVoiceStatus.ts
+```
+
+**Three objects stacked over one box is a stack.** Orb, pill, composer read as
+three things to look at. Orb and composer read as a face and a box.
+
+The tab is a `<div>` of two controls now, not one control. It had to be: the
+process line is itself clickable — it opens `TemiActivityDialog` — and a
+`<button>` inside a `<button>` is not markup a browser honours. The project name
+keeps the whole of its own hit area and both controls answer the pointer the
+same way, a colour shift and nothing else, because two controls sharing one
+strip that highlight differently look like two different kinds of thing.
+
+The hairline belongs to the line, not to the bar. `AgentActivityTicker` renders
+a fragment — separator, then the control — so when the assistant goes quiet the
+separator goes with it. A divider owned by the tab would be left pointing at
+nothing every time a run ended.
+
+The orb's dock moved from `bottom-[172px]` to `bottom-[188px]`. 172 was measured
+against a block that also held the pill; with the pill gone, half of the 32px it
+occupied is returned as clearance so the orb does not sit on the box, and the
+other half is the compaction this change was for.
+
+**Three bugs found in the code being moved**, all pinned by
+`tests/activity-phrase.test.mjs` and `tests/temi-composer.test.mjs`:
+
+- **The strip named the wrong step.** `currentActivityPhrase` reversed the item
+  list and took the first match, which is only correct for an oldest-first
+  array — and `assistantActivityStore.logAction` *prepends*. With two steps in
+  flight it named the older one and stayed there while the assistant moved on.
+  It now sorts newest-first rather than trusting the caller's order, the same
+  defence `runProgressFromActivity` already took. (That file's comment claimed
+  the store appends; it does not, and the comment is corrected.)
+- **`truncate` was doing nothing.** The target span is a flex item, and a flex
+  item's `min-width` defaults to `auto`, so it would not shrink below its own
+  text: a long path widened the strip instead of ellipsing. `min-w-0` is what
+  makes the elision `activityPhrase.ts` computes actually visible.
+- **The tooltip showed the elision back.** `title` hung off the shortened
+  target, so hovering `…/realtimeVoiceStatus.ts` answered with
+  `…/realtimeVoiceStatus.ts`. `ActivityPhrase` carries `full` now — the
+  unshortened value, absent when nothing was lost — and the tooltip recovers the
+  path the line had to cut.
+
+Two smaller corrections while in there. The polite live region is now mounted
+whether or not there is anything in it (`sr-only`, and therefore absolutely
+positioned, so it is not a flex item and adds no gap): a live region inserted
+*with* its first message is not reliably announced, and the old strip
+unmounted itself completely whenever a run ended. And `disabled={!onClick}` is
+gone — browsers suppress the tooltip on a disabled element, which is the one
+thing this strip needs; with no click-through it renders as a `<span>` instead.
+
+**Not verified visually.** The measurements above are read off the CSS, not off
+a screenshot; the suite proves the wiring and the phrasing, not the pixels.
+
+### 6.45 The acknowledgement was never the lie; the report was (`services/voice/progressNarration.ts`, `services/voice/teminaliAgentBridge.ts`, `components/voice/TemiVoiceStage.tsx`, 2026-09-10)
+
+`machineAction.ts` classifies "did the tests pass" as `inspect` and Temi says
+**"Checking now."** The module's docstring promises the truthful part "arrives
+afterwards from the activity record", and the standing suspicion was that
+nothing ever followed — that the acknowledgement was a promise of work she
+could not do.
+
+**The wire is whole.** `voiceTurnRouter` → `delegate` → `TeminaliAgentBridge.
+delegateTask` → `onCompleted` → `sendAssistantDirective` → `server.py`'s
+`assistant_directive` → `on_final` → spoken. Both exits of `runTask` call
+`onCompleted`, the success one and the `catch`. Ten of ten realistic state
+questions route to `delegate`/`inspect` and are acknowledged. So the phrases
+are fine and were left alone.
+
+**What arrived was the answer with its answer removed.** `summariseOutcome`
+reads the assistant's own first sentence, and `firstSentence` strips markdown
+so a work narration does not read punctuation aloud. On a question that strip
+deletes the payload. Measured 2026-09-10, eight of eight realistic answers:
+
+| The assistant wrote | The operator heard |
+| --- | --- |
+| ``The port is `8080`.`` | "The port is ." |
+| ``There are `3` errors in the log.`` | "There are errors in the log." |
+| ``You are on branch `master`.`` | "You are on branch ." |
+| ``The tests passed: `2222 passed, 0 failed`.`` | "The tests passed: ." |
+| "The answer is:" then a fence holding only `8080` | "The answer is:" |
+
+The second row is the worst of them: a fluent, complete sentence with the
+number taken out. It does not sound like a failure, so nothing about it invites
+a second question — which is the same failure mode §6.0.4 named, arriving from
+the other end of the turn.
+
+Three changes, all deterministic, no second generation:
+
+- **Code spans are unwrapped, not deleted.** Keep what was inside the
+  backticks, lose only the backticks. A fenced block is still dropped — output
+  read aloud is unbearable — *unless* its whole body is one line of ≤ 40
+  characters, which is a value wearing a fence.
+- **A silent `inspect` run admits it.** With no prose and no edits,
+  `summariseOutcome` returned `"Done."` — the answer to "do this", standing
+  where the answer to "did it pass" belongs. The turn's kind now travels with
+  the prompt (`TaskDelegationOptions.action` → `RunProgress.kind`), and an
+  `inspect` that came back with nothing says so. Work still reports as work.
+- **A refused delegation is spoken.** The queue's "Already queued" and "Queue
+  is full" reached `onProgress` only, which is a toast — on a screen the
+  operator is not looking at, which is why they asked aloud. It reaches
+  `onCompleted` now, like every other exit. **Silence after an acknowledgement
+  is the lie the phrasing was suspected of.**
+
+`tests/inspect-answer.test.mjs` (7) pins all three, the eight measured rows
+included. Suite **2229**, `tsc` and `npm run build` clean.
+
+**Not verified against the ear.** Nothing here was spoken aloud on this
+machine; the tests prove the string that reaches `sendAssistantDirective`, not
+what the synthesiser makes of it.

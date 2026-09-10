@@ -1,6 +1,7 @@
 import React, { useEffect, useRef } from "react";
 import type { UseAssistantResult } from "../../hooks/useAssistant";
 import type { AssistantBridgeCommand } from "../layout/WindowControls";
+import { useStudioStore } from "../../store/studioStore";
 
 /**
  * Keeps the desktop shell and the assistant session in step.
@@ -55,6 +56,29 @@ export const AssistantBridge: React.FC<{ assistant: UseAssistantResult }> = ({ a
     // the failures worth reading.
     window.teminali?.assistant?.setState({ ...settings, phase }).catch(() => {});
   }, [settings, phase]);
+
+  /* The menu bar item the operator chose.
+
+     A preference rather than an assistant setting, and kept apart from the
+     block above for that reason: the others describe how a session behaves and
+     die with it, while this one is a property of the shell that outlives every
+     session. It is pushed from here anyway because this is the module that
+     keeps the tray in step, and a second pusher would be a second owner. */
+  const menuBarIcon = useStudioStore((state) => state.preferences.menuBarIcon);
+  const setPreferences = useStudioStore((state) => state.setPreferences);
+  useEffect(() => {
+    const bridge = window.teminali?.assistant;
+    if (!bridge?.setTrayVisible) return;
+    bridge
+      .setTrayVisible(menuBarIcon)
+      .then((settled) => {
+        // What the menu bar actually has, not what was asked for. A Tray that
+        // will not construct would otherwise leave the row switched on over an
+        // empty menu bar, which is the row lying about its own capability.
+        if (settled !== menuBarIcon) setPreferences({ menuBarIcon: settled });
+      })
+      .catch(() => {});
+  }, [menuBarIcon, setPreferences]);
 
   /* The hotkey the operator chose. */
   useEffect(() => {

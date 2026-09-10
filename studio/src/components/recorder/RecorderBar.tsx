@@ -71,7 +71,16 @@ export const RecorderBar: React.FC = () => {
       className="w-full h-full flex items-center gap-2 px-2 rounded-full select-none"
       /* The whole pill drags the window; the buttons opt back out below.
          Without this the bar is nailed to wherever main first put it,
-         which is guaranteed to be over something you needed to see. */
+         which is guaranteed to be over something you needed to see.
+
+         This is the second draggable window, and the window-chrome work
+         (`layout/WindowChrome.tsx`) deliberately does not reach it: the pill
+         has no minimise, maximise or close, so there is no cluster to place
+         on a platform's preferred edge. Mark, Pause and Stop are transport,
+         not caption buttons, and mirroring transport by host platform would
+         be reproducing a convention that does not apply to it. What the
+         chrome work does require here is what is already true — drag on the
+         pill, no-drag on every control. */
       style={{
         WebkitAppRegion: "drag",
         background: "rgba(14,16,20,0.92)",

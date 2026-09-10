@@ -187,6 +187,15 @@ export interface SpeakOptions {
   prepared?: PreparedSpeech;
 }
 
+/** Real-time speech progress event emitted as audio words are spoken. */
+export interface SpeechProgressEvent {
+  chunk: string;
+  charIndex: number;
+  isChunkEnd: boolean;
+  isAllSpeechDone?: boolean;
+  totalSpokenChars: number;
+}
+
 /**
  * Synthesis begun before it is needed.
  *
@@ -442,7 +451,7 @@ export const DEFAULT_VOICE_SETTINGS: VoiceSettings = {
     for "what the recogniser produces" rather than "how the word is spelt".
   */
   wakeWords: ["temy", "temi", "teminali", "frontier", "studio"],
-  endpointSilenceMs: 900,
+  endpointSilenceMs: 500,
   allowBargeIn: true,
   narrateProgress: true,
   summariseLongReplies: true,

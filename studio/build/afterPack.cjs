@@ -2,7 +2,23 @@ const { execFileSync } = require('node:child_process');
 const fs = require('node:fs');
 const path = require('node:path');
 
-const ENTITLEMENTS = path.join(__dirname, 'entitlements.mac.plist');
+const { composeKeychainAccessGroup, withKeychainAccessGroup } = require('../electron/webauthnGroup.cjs');
+
+/* The checked-in entitlements, and the ones that actually get signed.
+ *
+ * They differ by one key. Touch ID WebAuthn credentials live in a keychain
+ * access group named `<TEAM_ID>.<BUNDLE_ID>.webauthn`, and the team ID exists
+ * only as a CI secret — it is not in this repo and cannot be. `codesign` does
+ * no macro substitution either (measured; see electron/webauthnGroup.cjs), so
+ * the literal has to be composed here, at pack time, from APPLE_TEAM_ID.
+ *
+ * The generated file is what electron-builder.yml points `entitlements` and
+ * `entitlementsInherit` at, and what the ad-hoc path below signs with, so both
+ * signing routes carry the same set. Without APPLE_TEAM_ID it is a byte copy
+ * of the source and nothing changes.
+ */
+const SOURCE_ENTITLEMENTS = path.join(__dirname, 'entitlements.mac.plist');
+const ENTITLEMENTS = path.join(__dirname, 'entitlements.mac.generated.plist');
 
 /* Ad-hoc signs the macOS build, inside out.
  *
@@ -76,11 +92,33 @@ function sign(target, label, entitlements) {
   console.log(`  • signed ${label}${entitlements ? ' (with entitlements)' : ''}`);
 }
 
+/**
+ * Write the entitlements electron-builder is about to sign with.
+ *
+ * Runs before either signing route, including the Developer ID one this hook
+ * otherwise stays out of, because that route reads the generated path straight
+ * out of electron-builder.yml. Answers the group it wrote, or null.
+ */
+function writeEntitlements(appId) {
+  const source = fs.readFileSync(SOURCE_ENTITLEMENTS, 'utf8');
+  const group = composeKeychainAccessGroup(process.env.APPLE_TEAM_ID, appId);
+  fs.writeFileSync(ENTITLEMENTS, group ? withKeychainAccessGroup(source, group) : source);
+  console.log(
+    group
+      ? `  • entitlements: WebAuthn keychain group ${group}`
+      : '  • entitlements: no APPLE_TEAM_ID, so no WebAuthn keychain group (Touch ID stays off)'
+  );
+  return group;
+}
+
 exports.default = async function afterPack(context) {
   if (context.electronPlatformName !== 'darwin') return;
 
+  const keychainGroup = writeEntitlements(context.packager.appInfo.id);
+
   // A real Developer ID is present: electron-builder signs it properly, with the
-  // entitlements from electron-builder.yml. Stay out of the way.
+  // entitlements from electron-builder.yml — which is the file just written.
+  // Stay out of the way.
   if (process.env.CSC_LINK || process.env.CSC_NAME) return;
 
   const appPath = path.join(
@@ -142,6 +180,12 @@ exports.default = async function afterPack(context) {
   });
   if (!carried.includes('com.apple.security.automation.apple-events')) {
     throw new Error('the signature carries no entitlements');
+  }
+  // The keychain group is read back at runtime out of this same signature
+  // (electron/webauthn.cjs), so a group that did not reach it is a Touch ID
+  // that silently never turns on.
+  if (keychainGroup && !carried.includes(keychainGroup)) {
+    throw new Error(`the signature carries no keychain access group (${keychainGroup})`);
   }
   execFileSync('codesign', ['--verify', '--strict', appPath], { stdio: ['ignore', 'ignore', 'pipe'] });
   console.log('  • entitlements verified in signature; bundle verifies');

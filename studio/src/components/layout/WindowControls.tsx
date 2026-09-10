@@ -1,4 +1,12 @@
-import React, { useEffect, useState } from "react";
+/*
+ * The desktop bridge's type surface.
+ *
+ * Despite the name this file draws nothing. It used to hold a second, better
+ * set of window controls that no bar ever rendered; those live in
+ * `WindowChrome.tsx` now, alongside the Windows and Linux dialects. What it is
+ * — and what every importer has always used it for — is the one declaration of
+ * `window.teminali`, plus `isDesktopShell`.
+ */
 
 import type { RecorderBridge } from "../../types/recorder";
 import type { VideoProjectsBridge } from "../../types/videoProjects";
@@ -57,6 +65,8 @@ interface TeminaliBridge {
     setState: (state: Record<string, unknown>) => Promise<boolean>;
     setHotkey: (accelerator: string) => Promise<AssistantHotkeyStatus>;
     hotkeyStatus: () => Promise<AssistantHotkeyStatus>;
+    /** Show or hide the menu bar item; resolves with the settled visibility. */
+    setTrayVisible: (visible: boolean) => Promise<boolean>;
     showOverlay: (state: Record<string, unknown>) => Promise<boolean>;
     hideOverlay: () => Promise<boolean>;
     overlayState: () => Promise<Record<string, unknown>>;
@@ -98,120 +108,3 @@ declare global {
 }
 
 export const isDesktopShell = (): boolean => Boolean(window.teminali?.isElectron);
-
-type LightTone = "close" | "minimize" | "zoom";
-
-const TONES: Record<LightTone, { base: string; top: string; edge: string; glyph: string; glow: string }> = {
-  close:    { base: "#ff5f57", top: "var(--danger)", edge: "var(--danger)", glyph: "#5c0d08", glow: "rgba(255,95,87,.55)" },
-  minimize: { base: "#febc2e", top: "var(--warning)", edge: "var(--warning)", glyph: "#603d02", glow: "rgba(254,188,46,.55)" },
-  zoom:     { base: "#28c840", top: "var(--success)", edge: "var(--success)", glyph: "#0a4715", glow: "rgba(40,200,64,.55)" },
-};
-
-interface LightProps {
-  tone: LightTone;
-  label: string;
-  onClick: () => void;
-  children: React.ReactNode;
-}
-
-const Light: React.FC<LightProps> = ({ tone, label, onClick, children }) => {
-  const colors = TONES[tone];
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      title={label}
-      aria-label={label}
-      className="group/light relative w-3 h-3 rounded-full grid place-items-center transition-transform duration-100 active:scale-90 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white/60"
-      style={{
-        // Depth: a lit top edge over a deeper body, ringed so it reads on any surface.
-        background: `radial-gradient(circle at 50% 28%, ${colors.top} 0%, ${colors.base} 62%, ${colors.edge} 100%)`,
-        boxShadow: `inset 0 .5px 0 rgba(255,255,255,.45), inset 0 0 0 .5px ${colors.edge}, 0 1px 2px rgba(0,0,0,.45)`,
-      }}
-    >
-      {/* Glyphs stay hidden until the cluster is hovered, as on macOS. */}
-      <svg
-        viewBox="0 0 12 12"
-        aria-hidden="true"
-        className="w-full h-full opacity-0 transition-opacity duration-120 group-hover/controls:opacity-100"
-        style={{ color: colors.glyph }}
-      >
-        {children}
-      </svg>
-      <span
-        aria-hidden="true"
-        className="pointer-events-none absolute -inset-1 rounded-full opacity-0 group-hover/light:opacity-100 transition-opacity duration-150"
-        style={{ boxShadow: `0 0 10px 1px ${colors.glow}` }}
-      />
-    </button>
-  );
-};
-
-/**
- * The app's own window controls, drawn because the shell runs frameless.
- * Renders nothing in a browser tab, where the browser supplies its own chrome.
- */
-export const WindowControls: React.FC<{ className?: string }> = ({ className = "" }) => {
-  const bridge = window.teminali;
-  const [isMaximized, setIsMaximized] = useState(false);
-  const [isFocused, setIsFocused] = useState(true);
-
-  useEffect(() => {
-    if (!bridge) return;
-    void bridge.window.isMaximized().then(setIsMaximized).catch(() => {});
-    return bridge.window.onMaximizeChange(setIsMaximized);
-  }, [bridge]);
-
-  // macOS dims the lights when the window loses focus; matching that keeps the
-  // chrome honest about which window is active.
-  useEffect(() => {
-    const focus = () => setIsFocused(true);
-    const blur = () => setIsFocused(false);
-    window.addEventListener("focus", focus);
-    window.addEventListener("blur", blur);
-    return () => {
-      window.removeEventListener("focus", focus);
-      window.removeEventListener("blur", blur);
-    };
-  }, []);
-
-  if (!bridge) return null;
-
-  const stroke = {
-    stroke: "currentColor",
-    strokeWidth: 1.4,
-    strokeLinecap: "round" as const,
-    fill: "none",
-  };
-
-  return (
-    <div
-      className={`group/controls flex items-center gap-2 pl-1 pr-1 transition-opacity duration-200 ${
-        isFocused ? "opacity-100" : "opacity-45"
-      } ${className}`}
-      style={{ WebkitAppRegion: "no-drag" } as React.CSSProperties}
-    >
-      <Light tone="close" label="Close window" onClick={() => void bridge.window.close()}>
-        <path d="M4.2 4.2l3.6 3.6M7.8 4.2l-3.6 3.6" {...stroke} />
-      </Light>
-
-      <Light tone="minimize" label="Minimize window" onClick={() => void bridge.window.minimize()}>
-        <path d="M3.9 6h4.2" {...stroke} />
-      </Light>
-
-      <Light
-        tone="zoom"
-        label={isMaximized ? "Restore window" : "Maximize window"}
-        onClick={() => void bridge.window.toggleMaximize().then(setIsMaximized)}
-      >
-        {isMaximized ? (
-          // Restore: two arrows folding inward.
-          <path d="M7.6 4.4L5.2 6.8M7.6 4.4H5.9M7.6 4.4v1.7M4.4 7.6l2.4-2.4M4.4 7.6h1.7M4.4 7.6V5.9" {...stroke} />
-        ) : (
-          // Zoom: two arrows pushing outward.
-          <path d="M4.3 7.7l3.4-3.4M4.3 7.7V6M4.3 7.7H6M7.7 4.3V6M7.7 4.3H6" {...stroke} />
-        )}
-      </Light>
-    </div>
-  );
-};

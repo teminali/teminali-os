@@ -10,14 +10,23 @@ import { relativeAge as age } from "../../utils/siteMark";
 import { SectionLabel, SidebarRow, IconButton } from "../ui";
 
 /**
- * The chats view: repositories, and the conversations nested under them.
+ * The chats view: past conversations, grouped by the project they belong to.
  *
  * The nav rows that used to sit above this moved up into `Sidebar` when the
  * activity rail was folded away — they belong to every view now, not just this
- * one. What is left is exactly what Cursor shows under its four nav rows: a
- * "Repositories" label with a filter and a new-chat control, one row per
- * repository, and each repository's conversations indented beneath it with
- * their age on the right.
+ * one. What is left is a filter and a new-chat control, one row per repository,
+ * and each repository's conversations indented beneath it with their age on
+ * the right.
+ *
+ * ## It is chat history, not a repository browser
+ *
+ * The label read "Repositories" for as long as this panel existed, which is
+ * what the eye sees first and so what the panel appeared to be — a list of
+ * checkouts that happened to have chats under it. The content was always the
+ * other way round: the chats are the subject and the repository is only how
+ * they are filed. Naming it "Chat history" costs nothing and stops the panel
+ * claiming to be the one thing it is not; the repository rows stay exactly
+ * where they were, because filing chats under their project is the point.
  *
  * Repositories come from the gateway's project list rather than a hardcoded
  * array, so what is shown is what is actually on disk.
@@ -117,7 +126,7 @@ export const StudioSidebar: React.FC<StudioSidebarProps> = () => {
           </>
         }
       >
-        Repositories
+        Chat history
       </SectionLabel>
 
       {filter !== null && (
@@ -129,8 +138,8 @@ export const StudioSidebar: React.FC<StudioSidebarProps> = () => {
             onKeyDown={(event) => {
               if (event.key === "Escape") setFilter(null);
             }}
-            placeholder="Filter repositories and chats"
-            aria-label="Filter repositories and chats"
+            placeholder="Filter chats and projects"
+            aria-label="Filter chats and projects"
             className="w-full h-7 px-2 rounded-md bg-surface-chip border border-edge-popover text-2xs text-ink-high placeholder:text-ink-disabled outline-none focus-visible:border-edge-strong"
           />
         </div>

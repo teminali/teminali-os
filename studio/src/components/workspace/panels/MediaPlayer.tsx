@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
-  AlertTriangle, ChevronLeft, ChevronRight, ChevronUp, FilePlus2, Gauge, Loader2, Maximize, Minimize, Pause, Play,
-  PictureInPicture2, RotateCcw, RotateCw, SkipBack, SkipForward, Subtitles, Volume1, Volume2, VolumeX, X,
+  AlertTriangle, ArrowLeft, ChevronLeft, ChevronRight, FilePlus2, Loader2, Maximize2, Minimize2, Pause, Play,
+  SkipBack, SkipForward, Volume1, Volume2, VolumeX, X,
 } from "lucide-react";
 import { EmptyState } from "../../ui";
 import { WorkspaceService } from "../../../services/workspaceService";
@@ -43,14 +43,36 @@ import { useMpvView } from "./useMpvView";
  *
  * ## The chrome is over the picture, and it leaves
  *
- * The video fills the pane and the controls float on it, on one flat scrim —
- * a fill, not a gradient, so the rule in DESIGN.md §1 holds on the one surface
- * whose background is unknown. Everything is drawn from `--player-*` tokens,
- * which are calibrated against black rather than against the app's greys,
- * because a bar tuned for `#181818` disappears over a snowfield. While a video
- * plays and the pointer is still, the chrome and the cursor both go; any
- * movement, any menu, and a pause bring them back. Audio keeps its chrome
- * always: there is nothing to get out of the way of.
+ * The video fills the pane and the controls float on it. Everything is drawn
+ * from `--player-*` tokens, which are calibrated against black rather than
+ * against the app's greys, because a bar tuned for `#181818` disappears over a
+ * snowfield. The scrims are the one sanctioned exception to the no-gradient
+ * rule in DESIGN.md §1: a flat plate at an alpha dark enough to carry white
+ * text over a snowfield is also dark enough to cut a band out of the film, and
+ * this is the only surface in the app whose background is an arbitrary image.
+ * While a video plays and the pointer is still, the chrome and the cursor both
+ * go; any movement, any menu, and a pause bring them back. Audio keeps its
+ * chrome always: there is nothing to get out of the way of.
+ *
+ * ## Where things are, and why there
+ *
+ * Four corners and a rail, after the reference design the operator handed us.
+ * Top-left is the name, set large and light. Top-right is a column of pills —
+ * the picture's real height, and whether ffmpeg is rewriting it live. The
+ * reference stacks selectable renditions there; nothing here streams, so a
+ * ladder of resolutions you cannot pick would be a lie in the shape of a
+ * control, and the pills state facts instead. Bottom-left is transport, bare
+ * glyphs with no plate: back ten, play, forward ten, then the clock. The
+ * reference's ⏮/⏭ are the two seeks, not the two episodes — a seek is wanted
+ * on every file and an episode only on some. Bottom-right, behind a divider,
+ * are the settings that get chosen once: volume, subtitles, speed, fullscreen.
+ * The rail runs the full width beneath both, unbroken by numbers.
+ *
+ * A series gets a fifth place: a drawer on the left edge, with a vertical tab
+ * where the reference puts X-Ray. It replaced a pill at the bottom centre that
+ * opened a modal over the middle of the frame — over the very thing you were
+ * choosing between. Episode prev/next live in that drawer's header now, so the
+ * two chevrons that used to float over the middle of the picture are gone.
  *
  * ## The two playback modes, and why the timeline is virtual
  *
@@ -145,18 +167,27 @@ const IDLE_MS = 2600;
   (`updates/VersionControl.tsx`: `fixed bottom-2 right-3`, 22px tall) and it is
   above everything a panel draws. The video editor's timeline already reserves
   that strip; this is the second pane to draw content that far down, and it
-  reserves it the same way rather than moving shared chrome for one pane's
-  sake. Only when windowed: a fullscreen element is rendered alone, so nothing
-  of the app's is over it. If that offset changes, change this with it.
+  reserves it too rather than moving shared chrome for one pane's sake.
+
+  It used to reserve it *horizontally*, indenting the right end of the controls
+  row by the badge's width. That stopped working when the rail moved: the
+  reference design puts the rail underneath everything and full-bleed, so the
+  lowest thing in the corner is now the rail itself, and no right-indent short
+  of shortening the rail would clear it. So the whole bar lifts instead —
+  `bottom-2` (8px) plus the badge's 22px, plus 4px of air — which clears the
+  badge for the rail and the controls row alike, and costs the rail nothing.
+
+  Only when windowed: a fullscreen element is rendered alone, so nothing of the
+  app's is over it. If the badge's own offset changes, change this with it.
 */
-const VERSION_BADGE_STRIP = 76;
+const VERSION_BADGE_LIFT = 34;
 
 function volumeGlyph(volume: number, muted: boolean) {
   if (muted || volume === 0) return VolumeX;
   return volume < 0.5 ? Volume1 : Volume2;
 }
 
-/** Format seconds as hh:mm:ss to match the clean cinematic player format. */
+/** Full `hh:mm:ss`. What a screen reader is told, where an unambiguous unit beats a short one. */
 function formatTimestamp(seconds: number): string {
   if (!Number.isFinite(seconds) || seconds < 0) return "00:00:00";
   const whole = Math.max(0, Math.floor(seconds));
@@ -167,15 +198,46 @@ function formatTimestamp(seconds: number): string {
   return `${two(hours)}:${two(minutes)}:${two(rest)}`;
 }
 
-/** A control on the scrim. One shape, so the bar reads as one row of controls. */
-const PlayerButton: React.FC<{
+/**
+ * The clock the bar shows: scaled to *this* film, not to the longest one there
+ * could be.
+ *
+ * `00:02:35 / 00:16:08` is 19 characters, ten of which are a zero standing in
+ * for an hour this file does not have. In a narrow pane that pushed the clock
+ * onto three lines and shoved the transport around; the fix is not to make the
+ * font smaller but to stop printing units the film never reaches. A file under
+ * an hour reads `2:35 / 16:08`, and one over it reads `1:02:35`, with the lead
+ * unit unpadded because a leading zero carries no information either.
+ *
+ * `scale` is the run to size against — the duration, so the two halves of the
+ * readout always agree and the clock never changes width as it crosses an
+ * hour. It falls back to the position when nothing has read a duration yet.
+ */
+function formatClock(seconds: number, scale: number): string {
+  const whole = Number.isFinite(seconds) && seconds > 0 ? Math.floor(seconds) : 0;
+  const span = Number.isFinite(scale) && scale > 0 ? Math.floor(scale) : whole;
+  const minutes = Math.floor((whole % 3600) / 60);
+  const rest = whole % 60;
+  const two = (value: number) => String(value).padStart(2, "0");
+  if (span < 3600) return `${Math.floor(whole / 60)}:${two(rest)}`;
+  return `${Math.floor(whole / 3600)}:${two(minutes)}:${two(rest)}`;
+}
+
+/**
+ * A transport glyph.
+ *
+ * No plate, no ring, no fill — the glyph *is* the button, which is what the
+ * reference does and why its bottom-left corner reads as three marks on the
+ * picture rather than three widgets. The hit area is still 40px square; only
+ * the paint is absent. Everything else on the bar keeps a pill or a circle,
+ * because everything else is a setting and settings want an edge.
+ */
+const TransportButton: React.FC<{
   onClick: () => void;
   title: string;
   disabled?: boolean;
-  active?: boolean;
-  large?: boolean;
   children: React.ReactNode;
-}> = ({ onClick, title, disabled = false, active = false, large = false, children }) => (
+}> = ({ onClick, title, disabled = false, children }) => (
   <button
     type="button"
     onClick={(event) => {
@@ -185,14 +247,13 @@ const PlayerButton: React.FC<{
     disabled={disabled}
     title={title}
     aria-label={title}
-    className={`flex items-center justify-center rounded-full flex-shrink-0 transition-colors duration-ds ease-ds
-      ${large ? "w-10 h-10" : "w-8 h-8"}
-      ${active ? "text-accent" : "text-[var(--player-ink)]"}
-      hover:bg-[var(--player-hover)] disabled:opacity-30 disabled:hover:bg-transparent`}
+    className="w-10 h-10 flex items-center justify-center flex-shrink-0 text-[var(--player-ink)] opacity-90
+      hover:opacity-100 active:scale-90 disabled:opacity-25 transition duration-ds ease-ds"
   >
     {children}
   </button>
 );
+
 
 export const MediaPlayer: React.FC<MediaPlayerProps> = ({
   path, kind, title, sidecars = [], series, onNext, onPrevious, onExit, startAt = 0,
@@ -233,6 +294,16 @@ export const MediaPlayer: React.FC<MediaPlayerProps> = ({
   const [menu, setMenu] = useState<"none" | "subtitles" | "rate">("none");
   const [episodesOpen, setEpisodesOpen] = useState(false);
   const [idle, setIdle] = useState(false);
+  /* Bumped by pointer activity; the idle countdown restarts on it. See the effect below. */
+  const [awake, setAwake] = useState(0);
+  const wokeAt = useRef(0);
+  const wake = useCallback(() => {
+    setIdle(false);
+    const now = Date.now();
+    if (now - wokeAt.current < 200) return;
+    wokeAt.current = now;
+    setAwake(now);
+  }, []);
   const [dragging, setDragging] = useState(false);
   /** Where the pointer is on the scrubber, 0–1, for the time bubble. */
   const [hover, setHover] = useState<number | null>(null);
@@ -906,15 +977,31 @@ export const MediaPlayer: React.FC<MediaPlayerProps> = ({
     return () => window.removeEventListener("keydown", onKey);
   }, [runCommand, volume, muted, activeSubtitle]);
 
-  /* ── Chrome that leaves while the film plays ────────────────────────── */
+  /*
+    ## Chrome that leaves while the film plays
+
+    `time` used to be in this effect's dependencies, and that is why the bar
+    never went away — in fullscreen or windowed. `timeupdate` fires four times
+    a second, each one re-ran the effect, and the cleanup tore down the pending
+    timeout and started a new one. A 2.6s countdown restarted every 250ms never
+    reaches the end. The bar hid only when playback stopped, which is the one
+    moment it is supposed to stay.
+
+    What the timer actually wants to restart on is *the operator*, not the
+    playhead — so it restarts on `awake`, which pointer activity bumps. That
+    also has to survive `mousemove` firing per pixel: `wake` throttles the bump
+    to one every 200ms, which is far below IDLE_MS and so cannot make the timer
+    immortal the way `time` did, while `setIdle(false)` runs on every event so
+    the bar comes back on the first pixel of movement rather than 200ms later.
+  */
   useEffect(() => {
-    if (kind !== "video" || !playing || menu !== "none" || dragging) {
+    if (kind !== "video" || !playing || menu !== "none" || dragging || episodesOpen) {
       setIdle(false);
       return;
     }
     const timer = setTimeout(() => setIdle(true), IDLE_MS);
     return () => clearTimeout(timer);
-  }, [kind, playing, menu, dragging, time]);
+  }, [kind, playing, menu, dragging, episodesOpen, awake]);
 
   useEffect(() => {
     const onChange = () => setFullscreen(Boolean(document.fullscreenElement));
@@ -1007,7 +1094,7 @@ export const MediaPlayer: React.FC<MediaPlayerProps> = ({
     <div
       ref={surfaceRef}
       className={`player-surface flex-1 min-h-0 relative bg-black overflow-hidden ${chromeHidden ? "cursor-none" : ""}`}
-      onMouseMove={() => setIdle(false)}
+      onMouseMove={wake}
       onDoubleClick={() => runCommand({ action: "fullscreen" })}
       onDragOver={onDragOver}
       onDragLeave={(event) => {
@@ -1075,179 +1162,239 @@ export const MediaPlayer: React.FC<MediaPlayerProps> = ({
         )}
       </div>
 
-      {/* Top Bar: Title on left, transcode info & Close 'X' button on far right */}
+      {/*
+        ## The top bar: the name, and the one thing worth interrupting for
+
+        The title is the largest thing on the surface and the lightest — a film
+        announces itself once and then gets out of the way. The right edge is
+        the close button and, while it is true, the live-transcode badge. It
+        held a resolution pill for a day. The reference stacks a *rendition
+        switcher* there and we cannot have one — nothing here streams — so it
+        became a label instead, and a label that never changes and answers no
+        question is just something else on top of the film.
+      */}
       <div
         ref={topChromeRef}
-        className={`absolute top-0 inset-x-0 z-20 flex items-center justify-between gap-4 px-6 pt-4 pb-8 bg-gradient-to-b from-black/85 via-black/40 to-transparent transition-opacity duration-300 ease-out ${
+        className={`absolute top-0 inset-x-0 z-20 flex items-start justify-between gap-6 px-7 pt-6 pb-12 bg-gradient-to-b from-black/80 via-black/35 to-transparent transition-opacity duration-300 ease-out ${
           chromeHidden ? "opacity-0 pointer-events-none" : "opacity-100"
         }`}
         onClick={(e) => e.stopPropagation()}
       >
         <div className="min-w-0 flex-1">
-          <p className="text-sm font-medium text-white/95 truncate tracking-tight">{title}</p>
+          <h2 className="text-3xl font-light text-[var(--player-ink)] truncate tracking-tight leading-none" title={title}>
+            {title}
+          </h2>
           {series && (
-            <p className="text-2xs text-white/60 font-mono mt-0.5">
+            <p className="text-2xs text-[var(--player-ink-dim)] font-mono mt-2">
               {series.title} · Episode {series.index} of {series.count}
             </p>
           )}
         </div>
 
-        <div className="flex items-center gap-3 flex-shrink-0">
-          {transcoding && (
-            <span className="text-3xs font-mono text-white/70 px-2.5 py-0.5 rounded-full border border-white/20 bg-black/40 backdrop-blur-sm">
-              {probe?.plan.mode === "remux" ? "rewrapped" : "converted"} live
-            </span>
-          )}
+        <div className="flex flex-col items-end gap-2 flex-shrink-0">
           {onExit && (
             <button
               type="button"
               onClick={onExit}
               title="Close (esc)"
-              className="w-8 h-8 rounded-full flex items-center justify-center text-white/80 hover:text-white hover:bg-white/15 active:scale-95 transition"
+              aria-label="Close"
+              className="w-8 h-8 rounded-full flex items-center justify-center bg-black/45 backdrop-blur-md border border-[var(--player-glass-edge)] text-[var(--player-ink-dim)] hover:text-[var(--player-ink)] hover:bg-black/70 active:scale-95 transition"
             >
-              <X size={20} />
+              <X size={16} />
             </button>
+          )}
+          {transcoding && (
+            <span className="px-3 py-1 rounded-full text-2xs font-mono text-[var(--player-ink-dim)] bg-black/45 backdrop-blur-md border border-[var(--player-glass-edge)]">
+              {probe?.plan.mode === "remux" ? "rewrapped" : "converted"} live
+            </span>
           )}
         </div>
       </div>
 
-      {/* Side Navigation: Left / Right floating chevrons */}
-      {onPrevious && (
-        <button
-          type="button"
-          onClick={(e) => {
-            e.stopPropagation();
-            onPrevious();
-          }}
-          disabled={!onPrevious}
-          title="Previous episode"
-          aria-label="Previous episode"
-          className={`absolute left-5 top-1/2 -translate-y-1/2 z-20 w-11 h-11 rounded-full bg-black/40 hover:bg-black/75 active:scale-90 backdrop-blur-md border border-white/10 flex items-center justify-center text-white/80 hover:text-white transition shadow-xl duration-300 ease-out ${
-            chromeHidden ? "opacity-0 pointer-events-none" : "opacity-100"
-          }`}
-        >
-          <ChevronLeft size={24} />
-        </button>
-      )}
-
-      {onNext && (
-        <button
-          type="button"
-          onClick={(e) => {
-            e.stopPropagation();
-            onNext();
-          }}
-          disabled={!onNext}
-          title="Next episode"
-          aria-label="Next episode"
-          className={`absolute right-5 top-1/2 -translate-y-1/2 z-20 w-11 h-11 rounded-full bg-black/40 hover:bg-black/75 active:scale-90 backdrop-blur-md border border-white/10 flex items-center justify-center text-white/80 hover:text-white transition shadow-xl duration-300 ease-out ${
-            chromeHidden ? "opacity-0 pointer-events-none" : "opacity-100"
-          }`}
-        >
-          <ChevronRight size={24} />
-        </button>
-      )}
-
       {waiting && !failure && (
         <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-          <Loader2 size={24} className="animate-spin text-white/60" />
+          <Loader2 size={24} className="animate-spin text-[var(--player-ink-dim)]" />
         </div>
       )}
 
-      {/* ── The control bar & scrubber ─────────────────────────────────── */}
+      {/*
+        ## The episode drawer, on the left edge
+
+        It replaced a pill at the bottom centre that opened a modal over the
+        middle of the picture — the worst place to put a list, because the
+        thing you are choosing between is behind it. A panel that slides off
+        the left edge leaves the centre of the frame alone, and it keeps its
+        own handle: the vertical tab is always there, so the list is one click
+        away and never in the way. Only a series has one; a lone file has
+        nothing to list.
+      */}
+      {series && (
+        <div
+          className={`absolute left-0 top-1/2 -translate-y-1/2 z-30 flex items-center transition-opacity duration-300 ease-out ${
+            chromeHidden ? "opacity-0 pointer-events-none" : "opacity-100"
+          }`}
+          onClick={(event) => event.stopPropagation()}
+        >
+          <div
+            className={`overflow-hidden transition-all duration-300 ease-out ${
+              episodesOpen ? "w-[19rem] opacity-100" : "w-0 opacity-0"
+            }`}
+          >
+            <div className="ml-4 rounded-2xl bg-[var(--player-glass)] backdrop-blur-2xl border border-[var(--player-glass-edge)] p-2 shadow-2xl">
+              <div className="flex items-center justify-between gap-2 px-2 pt-1 pb-2">
+                <p className="text-3xs uppercase tracking-[0.14em] text-[var(--player-ink-dim)] truncate">
+                  {series.title}
+                </p>
+                <div className="flex items-center gap-0.5 flex-shrink-0">
+                  <button
+                    type="button"
+                    onClick={() => onPrevious?.()}
+                    disabled={!onPrevious}
+                    title="Previous episode"
+                    aria-label="Previous episode"
+                    className="w-6 h-6 rounded-full flex items-center justify-center text-[var(--player-ink-dim)] hover:text-[var(--player-ink)] hover:bg-[var(--player-hover)] disabled:opacity-25 disabled:hover:bg-transparent transition"
+                  >
+                    <ChevronLeft size={15} />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => onNext?.()}
+                    disabled={!onNext}
+                    title="Next episode"
+                    aria-label="Next episode"
+                    className="w-6 h-6 rounded-full flex items-center justify-center text-[var(--player-ink-dim)] hover:text-[var(--player-ink)] hover:bg-[var(--player-hover)] disabled:opacity-25 disabled:hover:bg-transparent transition"
+                  >
+                    <ChevronRight size={15} />
+                  </button>
+                </div>
+              </div>
+              <div className="max-h-[19rem] overflow-y-auto pr-0.5 flex flex-col gap-0.5">
+                {series.episodes.map((ep) => {
+                  const isCurrent = ep.index === series.index;
+                  return (
+                    <button
+                      key={ep.path}
+                      type="button"
+                      onClick={() => dispatchPlayerCommand({ action: "episode", value: ep.index })}
+                      aria-current={isCurrent || undefined}
+                      className={`w-full text-left flex items-center gap-3 p-1.5 rounded-xl transition ${
+                        isCurrent ? "bg-[var(--player-hover)]" : "hover:bg-[var(--player-hover)]"
+                      }`}
+                    >
+                      {/* The design puts a face here. A folder of episodes has
+                          no faces, and the number is what actually identifies
+                          one — so the number wears the circle. */}
+                      <span
+                        className={`w-10 h-10 rounded-full flex items-center justify-center text-xs font-semibold tabular-nums flex-shrink-0 ${
+                          isCurrent
+                            ? "bg-[var(--player-accent)] text-[var(--player-accent-ink)]"
+                            : "bg-black/45 text-[var(--player-ink-dim)] border border-[var(--player-glass-edge)]"
+                        }`}
+                      >
+                        {ep.index}
+                      </span>
+                      <span className="min-w-0 flex-1">
+                        <span
+                          className={`block text-xs truncate ${isCurrent ? "text-[var(--player-ink)] font-medium" : "text-[var(--player-ink)]"}`}
+                          title={ep.title}
+                        >
+                          {ep.title}
+                        </span>
+                        <span className="block text-3xs font-mono text-[var(--player-ink-dim)] mt-0.5">
+                          {ep.duration ? formatDuration(ep.duration) : "—"}
+                        </span>
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          </div>
+
+          {/* The handle. Vertical, like the design's X-Ray tab, and the arrow
+              points the way the panel will go. */}
+          <button
+            type="button"
+            onClick={() => setEpisodesOpen((prev) => !prev)}
+            title={episodesOpen ? "Hide episodes" : "Show episodes"}
+            aria-expanded={episodesOpen}
+            className="ml-1 py-3 px-1.5 flex flex-col items-center gap-2 text-[var(--player-ink-dim)] hover:text-[var(--player-ink)] transition"
+          >
+            <span className="text-3xs uppercase tracking-[0.22em] [writing-mode:vertical-rl] rotate-180 select-none">
+              Episodes
+            </span>
+            <ArrowLeft size={14} className={`transition-transform duration-300 ${episodesOpen ? "" : "rotate-180"}`} />
+          </button>
+        </div>
+      )}
+
+      {/*
+        ## The bottom bar: transport left, everything else right, rail beneath
+
+        The order is the design's and it is the right one. Transport is the
+        only thing reached in a hurry, so it sits alone on the left at a size
+        you can hit without looking. Volume, subtitles, speed and fullscreen
+        are settled once and then left, so they go right, behind a divider.
+        The rail runs the full width underneath both, unbroken by the numbers
+        — the elapsed time reads next to the transport instead, where the eye
+        already is.
+      */}
       <div
         ref={bottomChromeRef}
-        className={`absolute bottom-0 inset-x-0 z-20 bg-gradient-to-t from-black/95 via-black/60 to-transparent pt-10 pb-3 px-6 transition-opacity duration-300 ease-out ${
+        className={`absolute bottom-0 inset-x-0 z-20 bg-gradient-to-t from-black/90 via-black/50 to-transparent pt-16 px-7 transition-opacity duration-300 ease-out ${
           chromeHidden ? "opacity-0 pointer-events-none" : "opacity-100"
         }`}
+        style={{ paddingBottom: fullscreen ? 16 : VERSION_BADGE_LIFT }}
         onClick={(event) => event.stopPropagation()}
         onMouseLeave={() => setHover(null)}
       >
-        {/* Timeline Scrubber Row */}
-        <div className="flex items-center gap-3 w-full mb-1">
-          <span className="text-xs font-mono tabular-nums text-white/90 font-medium w-16 text-left flex-shrink-0">
-            {formatTimestamp(time)}
-          </span>
-
-          <div
-            className="relative flex-1 h-6 flex items-center cursor-pointer group/scrub"
-            onMouseMove={(event) => {
-              const box = event.currentTarget.getBoundingClientRect();
-              setHover(Math.min(1, Math.max(0, (event.clientX - box.left) / box.width)));
-            }}
-          >
-            <input
-              type="range"
-              className="player-range absolute inset-0 w-full h-full z-20 opacity-0 cursor-pointer"
-              min={0}
-              max={duration && duration > 0 ? duration : 100}
-              step={0.1}
-              value={time}
-              disabled={!duration}
-              aria-label="Position"
-              aria-valuetext={`${formatTimestamp(time)} of ${formatTimestamp(duration ?? 0)}`}
-              onChange={(event) => runCommand({ action: "seek", value: Number(event.target.value) })}
-            />
-            {/* Background rail */}
-            <div className="absolute inset-x-0 h-1 rounded-full bg-white/20 overflow-hidden">
-              <div
-                className="absolute inset-y-0 left-0 bg-white/30 rounded-full"
-                style={{ width: `${bufferedFraction * 100}%` }}
-              />
-              {/* Sky blue progress rail */}
-              <div
-                className="absolute inset-y-0 left-0 bg-sky-400 rounded-full"
-                style={{ width: `${position * 100}%` }}
-              />
-            </div>
-            {/* Scrubber thumb: crisp white vertical rounded pill */}
-            <div
-              className="absolute top-1/2 -translate-y-1/2 w-1.5 h-3.5 bg-white rounded-full shadow pointer-events-none -ml-[3px]"
-              style={{ left: `${position * 100}%` }}
-            />
-            {/* Hover timestamp */}
-            {hover !== null && duration ? (
-              <span
-                className="absolute bottom-full mb-2 px-1.5 py-0.5 -translate-x-1/2 rounded bg-black/85 text-white text-3xs font-mono tabular-nums border border-white/10 opacity-0 group-hover/scrub:opacity-100 pointer-events-none"
-                style={{ left: `${hover * 100}%` }}
-              >
-                {formatTimestamp(hover * duration)}
-              </span>
-            ) : null}
-          </div>
-
-          <span className="text-xs font-mono tabular-nums text-white/70 font-medium w-16 text-right flex-shrink-0">
-            {duration ? formatTimestamp(duration) : "00:00:00"}
-          </span>
-        </div>
-
-        {/* Controls Row */}
-        <div
-          className="h-10 flex items-center justify-between"
-          style={{ paddingRight: fullscreen ? undefined : VERSION_BADGE_STRIP }}
-        >
-          {/* Left: Play/Pause, Volume */}
-          <div className="flex items-center gap-3">
-            <button
-              type="button"
+        <div className="flex items-end justify-between gap-3 mb-3">
+          {/* Transport. Flat, no plate behind it, the three glyphs the design
+              uses: back ten, play, forward ten. */}
+          <div className="flex items-center gap-1 flex-shrink-0">
+            <TransportButton
+              onClick={() => runCommand({ action: "seek_by", value: -PLAYER_LIMITS.seekStep })}
+              title={`Back ${PLAYER_LIMITS.seekStep}s (←)`}
+            >
+              <SkipBack size={22} fill="currentColor" strokeWidth={1.75} />
+            </TransportButton>
+            <TransportButton
               onClick={() => runCommand({ action: "toggle" })}
               title={playing ? "Pause (space)" : "Play (space)"}
-              className="text-white/90 hover:text-white transition active:scale-95 flex items-center justify-center w-8 h-8 rounded-full hover:bg-white/10"
             >
-              {playing ? <Pause size={20} fill="currentColor" /> : <Play size={20} fill="currentColor" />}
-            </button>
+              {playing ? <Pause size={30} fill="currentColor" strokeWidth={1} /> : <Play size={30} fill="currentColor" strokeWidth={1} />}
+            </TransportButton>
+            <TransportButton
+              onClick={() => runCommand({ action: "seek_by", value: PLAYER_LIMITS.seekStep })}
+              title={`Forward ${PLAYER_LIMITS.seekStep}s (→)`}
+            >
+              <SkipForward size={22} fill="currentColor" strokeWidth={1.75} />
+            </TransportButton>
 
-            {/* Volume */}
-            <div className="flex items-center gap-1.5">
+            {/* One line, always. `whitespace-nowrap` is the half of this that
+                a narrow pane actually needed: without it the slashes are break
+                opportunities and the clock stacks. */}
+            <span className="ml-2 text-2xs font-mono tabular-nums whitespace-nowrap text-[var(--player-ink-dim)] select-none">
+              <span className="text-[var(--player-ink)]">{formatClock(time, duration ?? 0)}</span>
+              <span className="mx-1 opacity-50">/</span>
+              {formatClock(duration ?? 0, duration ?? 0)}
+            </span>
+          </div>
+
+          <div className="flex items-center gap-2 min-w-0">
+            {/* Volume. The rail only unrolls under the pointer, so the row
+                reads as glyphs at rest the way the design's does. */}
+            <div className="flex items-center gap-1.5 group/vol">
               <button
                 type="button"
                 onClick={() => runCommand({ action: muted ? "unmute" : "mute" })}
                 title={muted ? "Unmute (m)" : "Mute (m)"}
-                className="text-white/80 hover:text-white transition w-7 h-7 flex items-center justify-center rounded-full hover:bg-white/10"
+                aria-label={muted ? "Unmute" : "Mute"}
+                className="w-8 h-8 flex items-center justify-center rounded-full text-[var(--player-ink-dim)] hover:text-[var(--player-ink)] hover:bg-[var(--player-hover)] transition"
               >
                 <VolumeGlyph size={18} />
               </button>
-              <div className="relative w-20 h-5 flex items-center">
+              <div className="relative h-5 flex items-center w-0 opacity-0 group-hover/vol:w-20 group-hover/vol:opacity-100 focus-within:w-20 focus-within:opacity-100 transition-all duration-200 ease-out overflow-hidden">
                 <input
                   type="range"
                   className="player-range absolute inset-0 w-full h-full opacity-0 z-10 cursor-pointer"
@@ -1258,55 +1405,55 @@ export const MediaPlayer: React.FC<MediaPlayerProps> = ({
                   aria-label="Volume"
                   onChange={(event) => runCommand({ action: "volume", value: Number(event.target.value) })}
                 />
-                <div className="w-full h-1 rounded-full bg-white/25 overflow-hidden">
+                <div className="w-full h-[3px] rounded-full bg-[var(--player-track)] overflow-hidden">
                   <div
-                    className="h-full bg-white rounded-full"
+                    className="h-full bg-[var(--player-ink)] rounded-full"
                     style={{ width: `${(muted ? 0 : volume) * 100}%` }}
                   />
                 </div>
               </div>
             </div>
-          </div>
 
-          {/* Right: Subtitle Track, Playback Speed, Fullscreen */}
-          <div className="flex items-center gap-2">
-            {/* Subtitles: "Original" pill */}
+            {/* Subtitles */}
             <div className="relative">
               <button
                 type="button"
                 onClick={() => setMenu(menu === "subtitles" ? "none" : "subtitles")}
-                className={`text-xs px-2.5 py-1 rounded transition hover:bg-white/10 flex items-center gap-1 ${
-                  activeSubtitle ? "text-sky-400 font-medium bg-white/10" : "text-white/70"
-                }`}
                 title="Subtitles (c)"
+                aria-expanded={menu === "subtitles"}
+                className={`text-2xs px-3 py-1 rounded-full border transition min-w-0 max-w-[9rem] truncate ${
+                  activeSubtitle
+                    ? "bg-[var(--player-accent)] text-[var(--player-accent-ink)] border-transparent font-semibold"
+                    : "bg-black/45 backdrop-blur-md text-[var(--player-ink-dim)] border-[var(--player-glass-edge)] hover:text-[var(--player-ink)]"
+                }`}
               >
-                <span>{activeSubtitle ?? "Original"}</span>
+                {activeSubtitle ?? "Subtitles"}
               </button>
               {menu === "subtitles" && (
-                <div className="absolute bottom-10 right-0 z-30 min-w-52 py-1 rounded-xl bg-black/90 backdrop-blur-2xl border border-white/15 shadow-2xl text-white">
-                  <p className="px-3 py-1 text-3xs text-white/50 uppercase tracking-wider">Subtitles</p>
+                <div className="absolute bottom-10 right-0 z-30 min-w-52 py-1 rounded-2xl bg-black/85 backdrop-blur-2xl border border-[var(--player-glass-edge)] shadow-2xl">
+                  <p className="px-3 py-1 text-3xs text-[var(--player-ink-dim)] uppercase tracking-[0.14em]">Subtitles</p>
                   <button
                     type="button"
-                    className={`w-full text-left px-3 py-1.5 text-xs hover:bg-white/10 transition ${activeSubtitle === null ? "text-sky-400 font-medium" : "text-white/90"}`}
+                    className={`w-full text-left px-3 py-1.5 text-xs hover:bg-[var(--player-hover)] transition ${activeSubtitle === null ? "text-accent font-medium" : "text-[var(--player-ink)]"}`}
                     onClick={() => { runCommand({ action: "subtitles", value: "off" }); setMenu("none"); }}
                   >
-                    Original (Off)
+                    Off
                   </button>
                   {subtitleRows.map((row) => (
                     <button
                       key={row.key}
                       type="button"
-                      className={`w-full text-left px-3 py-1.5 text-xs hover:bg-white/10 transition flex items-center gap-2 ${activeSubtitle === row.label ? "text-sky-400 font-medium" : "text-white/90"}`}
+                      className={`w-full text-left px-3 py-1.5 text-xs hover:bg-[var(--player-hover)] transition flex items-center gap-2 ${activeSubtitle === row.label ? "text-accent font-medium" : "text-[var(--player-ink)]"}`}
                       onClick={() => { runCommand({ action: "subtitles", value: row.label }); setMenu("none"); }}
                     >
                       <span className="flex-1 truncate">{row.label}</span>
-                      <span className="text-3xs text-white/40">{row.source}</span>
+                      <span className="text-3xs text-[var(--player-ink-dim)]">{row.source}</span>
                     </button>
                   ))}
-                  <div className="h-px bg-white/10 my-1" />
+                  <div className="h-px bg-[var(--player-glass-edge)] my-1" />
                   <button
                     type="button"
-                    className="w-full text-left px-3 py-1.5 text-xs text-white/90 hover:bg-white/10 flex items-center gap-2"
+                    className="w-full text-left px-3 py-1.5 text-xs text-[var(--player-ink)] hover:bg-[var(--player-hover)] flex items-center gap-2 transition"
                     onClick={() => { pickerRef.current?.click(); setMenu("none"); }}
                   >
                     <FilePlus2 size={13} className="flex-shrink-0" />
@@ -1316,117 +1463,97 @@ export const MediaPlayer: React.FC<MediaPlayerProps> = ({
               )}
             </div>
 
-            {/* Speed: "1.0X" pill */}
+            {/* Speed */}
             <div className="relative">
               <button
                 type="button"
                 onClick={() => setMenu(menu === "rate" ? "none" : "rate")}
-                className="text-xs font-semibold text-white/80 hover:text-white px-2.5 py-1 rounded hover:bg-white/10 transition tabular-nums"
                 title="Playback speed"
+                aria-expanded={menu === "rate"}
+                className={`text-2xs px-3 py-1 rounded-full border transition tabular-nums ${
+                  rate === 1
+                    ? "bg-black/45 backdrop-blur-md text-[var(--player-ink-dim)] border-[var(--player-glass-edge)] hover:text-[var(--player-ink)]"
+                    : "bg-[var(--player-accent)] text-[var(--player-accent-ink)] border-transparent font-semibold"
+                }`}
               >
-                {rate === 1 ? "1.0X" : `${rate.toFixed(1)}X`}
+                {rate.toFixed(2).replace(/0$/, "")}×
               </button>
               {menu === "rate" && (
-                <div className="absolute bottom-10 right-0 z-30 min-w-24 py-1 rounded-xl bg-black/90 backdrop-blur-2xl border border-white/15 shadow-2xl text-white">
+                <div className="absolute bottom-10 right-0 z-30 min-w-24 py-1 rounded-2xl bg-black/85 backdrop-blur-2xl border border-[var(--player-glass-edge)] shadow-2xl">
                   {RATES.map((value) => (
                     <button
                       key={value}
                       type="button"
-                      className={`w-full text-left px-3 py-1.5 text-xs hover:bg-white/10 transition ${rate === value ? "text-sky-400 font-semibold" : "text-white/85"}`}
+                      className={`w-full text-left px-3 py-1.5 text-xs hover:bg-[var(--player-hover)] transition tabular-nums ${rate === value ? "text-accent font-semibold" : "text-[var(--player-ink)]"}`}
                       onClick={() => { runCommand({ action: "rate", value }); setMenu("none"); }}
                     >
-                      {value.toFixed(1)}X
+                      {value.toFixed(2).replace(/0$/, "")}×
                     </button>
                   ))}
                 </div>
               )}
             </div>
 
-            {/* Fullscreen */}
+            <span className="w-px h-5 bg-[var(--player-glass-edge)] mx-1" aria-hidden="true" />
+
             <button
               type="button"
               onClick={() => runCommand({ action: "fullscreen" })}
               title="Fullscreen (f)"
-              className="text-white/80 hover:text-white transition w-8 h-8 flex items-center justify-center rounded-full hover:bg-white/10"
+              aria-label={fullscreen ? "Leave fullscreen" : "Fullscreen"}
+              className="w-8 h-8 flex items-center justify-center rounded-full text-[var(--player-ink-dim)] hover:text-[var(--player-ink)] hover:bg-[var(--player-hover)] transition"
             >
-              {fullscreen ? <Minimize size={18} /> : <Maximize size={18} />}
+              {fullscreen ? <Minimize2 size={18} /> : <Maximize2 size={18} />}
             </button>
           </div>
         </div>
-      </div>
 
-      {/* ── Bottom Center Episode Pill Drawer Affordance ─────────────────────── */}
-      <div
-        className={`absolute bottom-1.5 left-1/2 -translate-x-1/2 z-30 transition-opacity duration-300 ease-out ${
-          chromeHidden ? "opacity-0 pointer-events-none" : "opacity-100"
-        }`}
-      >
-        <button
-          type="button"
-          onClick={() => setEpisodesOpen((prev) => !prev)}
-          className="flex items-center gap-1.5 px-3 py-0.5 rounded-full bg-black/60 hover:bg-black/85 active:scale-95 backdrop-blur-md border border-white/15 text-xs font-mono text-white/90 hover:text-white transition shadow-xl"
-          title="Toggle episodes"
-        >
-          <span>{series ? `${series.index} / ${series.count}` : "1 / 1"}</span>
-          <ChevronUp size={13} className={`transition-transform duration-200 ${episodesOpen ? "rotate-180" : ""}`} />
-        </button>
-      </div>
-
-      {/* Episode Drawer Modal */}
-      {episodesOpen && series && (
+        {/* The rail. Full width, edge to edge under everything, as the design
+            draws it: a hairline that thickens under the pointer. */}
         <div
-          className="absolute bottom-12 inset-x-4 max-w-2xl mx-auto z-40 rounded-2xl bg-black/90 backdrop-blur-2xl border border-white/15 p-4 shadow-2xl transition-all"
-          onClick={(e) => e.stopPropagation()}
+          className="relative h-4 flex items-center cursor-pointer group/scrub"
+          onMouseMove={(event) => {
+            const box = event.currentTarget.getBoundingClientRect();
+            setHover(Math.min(1, Math.max(0, (event.clientX - box.left) / box.width)));
+          }}
         >
-          <div className="flex items-center justify-between mb-3">
-            <h4 className="text-xs font-medium text-white/90 tracking-wide uppercase">
-              {series.title} · Episodes ({series.count})
-            </h4>
-            <button
-              type="button"
-              onClick={() => setEpisodesOpen(false)}
-              className="text-white/60 hover:text-white text-xs p-1 rounded hover:bg-white/10 transition"
+          <input
+            type="range"
+            className="player-range absolute inset-0 w-full h-full z-20 opacity-0 cursor-pointer"
+            min={0}
+            max={duration && duration > 0 ? duration : 100}
+            step={0.1}
+            value={time}
+            disabled={!duration}
+            aria-label="Position"
+            aria-valuetext={`${formatTimestamp(time)} of ${formatTimestamp(duration ?? 0)}`}
+            onChange={(event) => runCommand({ action: "seek", value: Number(event.target.value) })}
+          />
+          <div className="absolute inset-x-0 h-[3px] group-hover/scrub:h-[5px] rounded-full bg-[var(--player-track)] overflow-hidden transition-all duration-150">
+            <div
+              className="absolute inset-y-0 left-0 bg-[var(--player-buffered)] rounded-full"
+              style={{ width: `${bufferedFraction * 100}%` }}
+            />
+            <div
+              className="absolute inset-y-0 left-0 bg-[var(--player-ink)] rounded-full"
+              style={{ width: `${position * 100}%` }}
+            />
+          </div>
+          {/* The design's handle is a round dot riding the filled span. */}
+          <div
+            className="absolute top-1/2 -translate-y-1/2 -translate-x-1/2 w-3 h-3 rounded-full bg-[var(--player-ink)] shadow-md pointer-events-none transition-transform duration-150 group-hover/scrub:scale-125"
+            style={{ left: `${position * 100}%` }}
+          />
+          {hover !== null && duration ? (
+            <span
+              className="absolute bottom-full mb-2 px-1.5 py-0.5 -translate-x-1/2 rounded bg-black/85 text-[var(--player-ink)] text-3xs font-mono tabular-nums border border-[var(--player-glass-edge)] opacity-0 group-hover/scrub:opacity-100 pointer-events-none"
+              style={{ left: `${hover * 100}%` }}
             >
-              <X size={16} />
-            </button>
-          </div>
-          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-2 max-h-56 overflow-y-auto pr-1">
-            {series.episodes.map((ep) => {
-              const isCurrent = ep.index === series.index;
-              return (
-                <button
-                  key={ep.path}
-                  type="button"
-                  onClick={() => {
-                    dispatchPlayerCommand({ action: "episode", value: ep.index });
-                    setEpisodesOpen(false);
-                  }}
-                  className={`text-left p-2.5 rounded-xl border transition flex flex-col justify-between gap-1.5 ${
-                    isCurrent
-                      ? "bg-sky-500/20 border-sky-400/80 text-white shadow-[0_0_12px_rgba(56,189,248,0.25)]"
-                      : "bg-white/5 border-white/10 text-white/80 hover:bg-white/10 hover:border-white/25 hover:text-white"
-                  }`}
-                >
-                  <div className="flex items-center justify-between w-full">
-                    <span className={`text-2xs font-mono font-semibold px-1.5 py-0.5 rounded ${isCurrent ? "bg-sky-400/20 text-sky-300" : "bg-white/10"}`}>
-                      Ep {ep.index}
-                    </span>
-                    {ep.duration && (
-                      <span className="text-3xs font-mono text-white/50">
-                        {formatDuration(ep.duration)}
-                      </span>
-                    )}
-                  </div>
-                  <p className="text-xs font-medium truncate w-full" title={ep.title}>
-                    {ep.title}
-                  </p>
-                </button>
-              );
-            })}
-          </div>
+              {formatClock(hover * duration, duration)}
+            </span>
+          ) : null}
         </div>
-      )}
-
+      </div>
       {/* The picker the menu row opens. Either engine takes a file from
           anywhere on the disk, and neither needs an argument about the
           workspace boundary: the element reads the `File`'s bytes, and mpv is

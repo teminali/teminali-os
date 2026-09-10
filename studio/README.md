@@ -772,7 +772,8 @@ utterance passes a repair pass the operator sees before it sends.
 
 In the voice stage, one assistant speaks and another works. Temi holds the
 conversation; the Teminali OS assistant does the engineering with no chat
-surface of its own, showing only a single process line under the orb. Every
+surface of its own, showing only a single process line in the composer's project
+tab — the workspace name, a hairline, then what the assistant is doing. Every
 transcript passes through one switch first, so while a run is in flight
 "what's going on?" is answered from that run instead of starting a second
 conversation, "stop" lands on the run, "stop talking" stops only the voice, and
@@ -1215,7 +1216,7 @@ ollama serve              # local models on 127.0.0.1:11434
 
 ```bash
 npm run typecheck   # tsc --noEmit
-npm test            # 2202 tests, 0 failures
+npm test            # 2229 tests, 0 failures
 npm run eval:local  # the local lane against the real model — a score, not a pass/fail; needs Ollama
 npm run eval:voice  # the voice co-agent's spoken answers, same discipline; needs Ollama
 npm run eval:conversation  # Temi over a whole conversation: routing, fabrication, recall; needs Ollama
