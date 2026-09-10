@@ -311,10 +311,13 @@ export function requestPlayerFrame({ runId, token }) {
  * The frame, arriving on its own request because the run's stream only goes
  * one way.
  *
- * **`image`, singular, and the same word at both ends.** The camera's path
- * says `image` here and `images` in the window, which is why `look_at_me`
- * fails every time; `tests/player-frame.test.mjs` pins this one so the same
- * typo cannot be made twice.
+ * **`image`, singular, and the same word at both ends.** The camera's is
+ * `images`, plural, at both ends of its own path — a different word for a
+ * different thing, since a camera capture is a sequence and this is one frame.
+ * The gateway's camera hop was once written with *this* file's spelling and
+ * forwarded `image` into a reader expecting `images`, so `look_at_me` failed
+ * every time it was called. Both pairs are pinned now, here by
+ * `tests/player-frame.test.mjs` and there by `tests/camera-frame.test.mjs`.
  */
 export function resolvePlayerFrame({ runId, id, image, error, time = null, duration = null, title = null }) {
   const run = runs.get(runId);

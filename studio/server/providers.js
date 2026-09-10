@@ -55,13 +55,13 @@ export const PROVIDERS = Object.freeze({
     id: "google",
     label: "Google",
     envVar: "GEMINI_API_KEY",
-    keyPrefix: "AI",
+    keyPrefixes: ["AI", "AQ"],
     docsUrl: "https://aistudio.google.com/apikey",
     lanes: {
       light: { model: "gemini-2.5-flash", label: "Gemini 2.5 Flash", note: "Fast and inexpensive; the default for everyday turns." },
       heavy: { model: "gemini-2.5-pro", label: "Gemini 2.5 Pro", note: "Used automatically when a task looks hard." },
     },
-    flagship: { model: "gemini-2.5-ultra", label: "Gemini 2.5 Ultra", note: "Available, but never selected automatically." },
+    flagship: { model: "gemini-3.8-flash", label: "Gemini 3.8 Flash", note: "Google flagship model for autonomous agentic coding." },
   },
 });
 
@@ -118,6 +118,9 @@ export function describeProviders(store, environment = process.env) {
     // shell-launched gateway is expected to be set up.
     const fromEnv = Boolean(environment[provider.envVar]);
     const key = saved.key ?? (fromEnv ? environment[provider.envVar] : null);
+    const backupEnvVar = `${provider.envVar}_BACKUP`;
+    const fromBackupEnv = Boolean(environment[backupEnvVar]);
+    const backupKey = saved.backupKey ?? (fromBackupEnv ? environment[backupEnvVar] : null);
 
     return {
       id,
@@ -127,6 +130,8 @@ export function describeProviders(store, environment = process.env) {
       configured: Boolean(key),
       source: saved.key ? "stored" : fromEnv ? "environment" : null,
       hint: key ? maskKey(key) : null,
+      backupConfigured: Boolean(backupKey),
+      backupHint: backupKey ? maskKey(backupKey) : null,
       enabled: saved.enabled !== false && Boolean(key),
       lanes: {
         light: { ...provider.lanes.light, model: saved.lightModel ?? provider.lanes.light.model },
@@ -146,17 +151,20 @@ export function validateKey(providerId, key) {
   if (!value) return { ok: false, message: "A key is required." };
   if (value.length < 20) return { ok: false, message: "That key is too short to be valid." };
   if (/\s/.test(value)) return { ok: false, message: "A key cannot contain whitespace." };
-  if (provider.keyPrefix && !value.startsWith(provider.keyPrefix)) {
-    return { ok: false, message: `${provider.label} keys start with “${provider.keyPrefix}”.` };
+  const prefixes = provider.keyPrefixes || (provider.keyPrefix ? [provider.keyPrefix] : null);
+  if (prefixes && !prefixes.some((p) => value.startsWith(p))) {
+    return { ok: false, message: `${provider.label} keys start with “${prefixes.join("” or “")}”.` };
   }
   return { ok: true, value };
 }
 
-export function setProviderKey(store, providerId, key) {
+export function setProviderKey(store, providerId, key, backupKey = undefined) {
   const next = { ...store, providers: { ...store.providers } };
+  const existing = next.providers[providerId] ?? {};
   next.providers[providerId] = {
-    ...(next.providers[providerId] ?? {}),
+    ...existing,
     key,
+    ...(backupKey !== undefined ? { backupKey: backupKey ? String(backupKey).trim() : null } : {}),
     enabled: true,
     updatedAt: new Date().toISOString(),
   };
@@ -167,6 +175,7 @@ export function clearProviderKey(store, providerId) {
   const next = { ...store, providers: { ...store.providers } };
   const existing = { ...(next.providers[providerId] ?? {}) };
   delete existing.key;
+  delete existing.backupKey;
   existing.enabled = false;
   existing.updatedAt = new Date().toISOString();
   next.providers[providerId] = existing;
@@ -190,6 +199,14 @@ export function resolveKey(store, providerId, environment = process.env) {
   const provider = PROVIDERS[providerId];
   if (!provider) return null;
   return store.providers?.[providerId]?.key ?? environment[provider.envVar] ?? null;
+}
+
+/** The backup key a request should fall back to on rate limits, or null. */
+export function resolveBackupKey(store, providerId, environment = process.env) {
+  const provider = PROVIDERS[providerId];
+  if (!provider) return null;
+  const backupEnvVar = `${provider.envVar}_BACKUP`;
+  return store.providers?.[providerId]?.backupKey ?? environment[backupEnvVar] ?? null;
 }
 
 /**

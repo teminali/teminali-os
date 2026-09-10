@@ -312,8 +312,12 @@ test("the agent CLI builder attaches the panel without disturbing the rest", asy
   // gateway starts, and a stale token would fail every call.
   assert.match(source, /const mcp = videoMcpArgs\(engine\);/);
   // Codex's prompt is positional and `exec resume <id> <prompt>` is
-  // order-sensitive, so the override has to lead.
-  assert.match(source, /const args = \[\.\.\.mcp, "exec", "--json"/);
+  // order-sensitive, so the override has to lead — and it still leads now that
+  // the reasoning overrides sit beside it, because they are `-c` too and every
+  // `-c` must precede the subcommand. Both spreads before `"exec"`, in that
+  // order, is the whole contract; `tests/agent-cli.test.mjs` asserts the same
+  // thing against the argv a real spawn produces.
+  assert.match(source, /const args = \[\.\.\.mcp, \.\.\.overrides, "exec", "--json"/);
 });
 
 /* ── The curated surface ──────────────────────────────────────────────────── */

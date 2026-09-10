@@ -68,6 +68,10 @@ asarUnpack:
   # webcam. tests/asar-unpack.test.mjs now fails if a shim rewrite has no
   # matching entry here.
   - electron/cameraMcpStdio.cjs
+  # And the browser panel's page tools: `browserShimPath()` rewrites the same
+  # way, so this line is what keeps `page_snapshot` from being the next
+  # "failed to connect" in a packaged build.
+  - electron/browserMcpStdio.cjs
 
 # server/gateway.js imports "../../gateway/frontier-runner.js" — the one module
 # under server/ that reaches outside this package. From inside the archive that
