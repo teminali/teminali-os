@@ -350,6 +350,10 @@ function packBitmap(raw) {
  * `tests/mpv-ipc.test.mjs` asserts every action in it is answered here, so a
  * new action cannot be added to the contract and silently do nothing in mpv.
  *
+ * The table is a superset of that contract by exactly one case, and the gap is
+ * deliberate: `subtitle_file` is the pane's, never the assistant's. See it
+ * below for why a path may not be an askable verb.
+ *
  * Returning an **array** of commands, not one, is deliberate: `restart` is a
  * seek and an unpause, and doing it as two calls at the call site would put a
  * decision back where the point of this table is to take it away.
@@ -447,6 +451,33 @@ function mpvCommand(command, context = {}) {
       }
       const chosen = trackFor(wanted, subtitles);
       return chosen ? [["set_property", "sid", chosen.id]] : null;
+    }
+    /*
+      The one case here that is **not** in the contract, and staying out of it
+      is the point rather than an oversight.
+
+      Every other action is a verb an assistant may ask for. This one carries an
+      absolute path, and a path is not askable: it exists only because a human
+      dropped a file on the picture and `webUtils.getPathForFile` turned that
+      gesture into a path — which is the media gate's whole foundation, that
+      consent to a file is a gesture and not a string. In `PLAYER_ACTIONS` this
+      would hand a model `sub-add` against any file on the disk, so
+      `tests/mpv-ipc.test.mjs` pins it *out* of the contract, and
+      `playerToolCalls.ts` refuses the name long before it could arrive here.
+
+      `select` because the drop *is* the request to see it. `title` because
+      `trackLabel` would otherwise name the track after the file with its
+      extension still on, while the pane's own WebVTT path takes it off — the
+      same file remembered under two names depending on which engine drew it,
+      which is precisely the disagreement `subtitleToRestore` then cannot
+      settle. The pane sends the label it is about to remember, so there is one
+      name rather than two rules that agree until someone edits one.
+    */
+    case "subtitle_file": {
+      const path = String(value?.path ?? "").trim();
+      if (!path) return null;
+      const title = String(value?.title ?? "").trim();
+      return [title ? ["sub-add", path, "select", title] : ["sub-add", path, "select"]];
     }
     /*
       A number is mpv's `aid` as it stands — the contract counts audio tracks

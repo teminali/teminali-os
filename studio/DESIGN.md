@@ -1617,10 +1617,35 @@ answer to the command is a new `sid` arriving back as the next
 `engineSubtitleId` — comparing against what is on is what makes the exchange
 settle rather than repeat.
 
-One thing this deliberately still does not do. A subtitle file **dropped on the
-pane** is bytes, not a path — the renderer is never told where a dropped file
-is on disk — so while embedded it is refused with the sentence that says what
-would work instead.
+**A subtitle file dropped on the pane now reaches mpv too (2026-09-10).** What
+arrives with a drop is bytes, and mpv opens files by path, so while embedded
+this used to be refused with a sentence saying to put the file beside the video
+instead. The path was already reachable: `webUtils.getPathForFile` is on the
+bridge as `media.getPathForFile`, put there because the media gate needs a human
+gesture to produce an absolute path before anything may consent to one — and a
+file dropped on the picture is exactly that gesture. `subtitleFileToLoad`
+(`services/mpvView.ts`) asks it and returns either the command or the sentence;
+`mpvCommand` turns the command into `sub-add <path> select <title>`.
+
+The title is sent rather than left to mpv because `trackLabel` would otherwise
+name the track after the file with its extension still on, while the pane's own
+WebVTT path takes it off — the same file remembered under two names depending on
+which engine drew it, which is the one disagreement `subtitleToRestore` cannot
+settle. The pane sends the label it is about to remember, so there is one name.
+
+`subtitle_file` is the only case in `mpvCommand` that is **not** in
+`PLAYER_ACTIONS`, and that is the design rather than an omission: every other
+action is a verb an assistant may ask for, while this one carries an absolute
+path. In the contract it would hand a model `sub-add` against any file on the
+disk. `tests/mpv-ipc.test.mjs` pins it *out* of the list, so completing the
+contract by adding it fails the suite, and `playerToolCalls.ts` refuses the name
+before it could arrive. The format check moved ahead of the engine fork in the
+same edit: mpv accepts `sub-add` on anything and then shows an empty track, so
+an `.ass` is now refused in the same words whichever engine has the picture.
+
+**Not run.** `canEmbedSpawned` is false on darwin, so the branch that calls
+`subtitleFileToLoad` has never executed. What is tested here is the rule and the
+command table; the drop itself is Windows/Linux behaviour.
 
 ### One action list, two engines (`services/playerControl.ts`, `server/player-state.js`, 2026-09-10)
 

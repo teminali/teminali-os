@@ -25,7 +25,7 @@ import {
 import { registerPlayerFrameSource } from "../../../services/playerFrame";
 import { usePlayerStore } from "../../../store/playerStore";
 import { useStudioStore } from "../../../store/studioStore";
-import { subtitleToRestore, type MpvTrackList, type MpvViewState } from "../../../services/mpvView";
+import { subtitleFileToLoad, subtitleToRestore, type MpvTrackList, type MpvViewState } from "../../../services/mpvView";
 import { useMpvView } from "./useMpvView";
 
 /**
@@ -490,20 +490,38 @@ export const MediaPlayer: React.FC<MediaPlayerProps> = ({
    * one conspicuously did not. A format we cannot convert is named rather than
    * silently ignored.
    *
-   * The one place it does not work is where mpv holds the picture. What
-   * arrives with the gesture is bytes, and mpv opens files by path — the
-   * renderer is never told where a dropped file is on disk, and nothing here
-   * may go looking. So the operator is told what would work instead, rather
-   * than being given a menu row that turns nothing on.
+   * Where mpv holds the picture the same gesture takes a different road. What
+   * arrives with the drop is bytes, and mpv opens files by path — so the path
+   * is asked for by `subtitleFileToLoad`, through the media gate's
+   * `getPathForFile`, and mpv is handed a `sub-add`. Nothing here goes looking
+   * on the disk: the only path this pane can learn is the one the operator's
+   * own gesture produced.
    */
   const addSubtitleFile = useCallback(async (file: File) => {
     setNote(null);
-    if (embed.embedded) {
-      setNote("The engine drawing this picture reads subtitle files from the folder. Put this one beside the video, named after it, and reopen it.");
-      return;
-    }
+    // Ahead of the engine fork rather than inside each arm. mpv will accept
+    // `sub-add` on anything and then show an empty track, so a format we cannot
+    // name is refused once, in the same words, whichever engine has the picture.
     if (!isSubtitleFileName(file.name)) {
       setNote(subtitleFileRefusal(file.name));
+      return;
+    }
+    if (embed.embedded) {
+      const media = (window.teminali as unknown as {
+        media?: { getPathForFile?: (file: File) => string | null };
+      } | undefined)?.media;
+      const outcome = subtitleFileToLoad(file, media?.getPathForFile);
+      if ("refusal" in outcome) {
+        setNote(outcome.refusal);
+        return;
+      }
+      embed.command(outcome.command);
+      // No `setActiveTrack`: while mpv draws, the selected track is whatever
+      // mpv says its `sid` is, and it reports one back for having been given
+      // `select`. Remembering the label is still ours — it is what
+      // `subtitleToRestore` will ask for on the next file.
+      setPreferredSubtitle(outcome.label);
+      setNote(`Subtitles added from ${file.name}.`);
       return;
     }
     try {
@@ -522,7 +540,7 @@ export const MediaPlayer: React.FC<MediaPlayerProps> = ({
     } catch {
       setNote(`${file.name} could not be read.`);
     }
-  }, [setPreferredSubtitle, embed.embedded]);
+  }, [setPreferredSubtitle, embed.embedded, embed.command]);
 
   /* ── Showing the chosen track ───────────────────────────────────────── */
   useEffect(() => {
@@ -1409,9 +1427,10 @@ export const MediaPlayer: React.FC<MediaPlayerProps> = ({
         </div>
       )}
 
-      {/* The picker the menu row opens. Reading the File directly is what keeps
-          a subtitle from anywhere on the disk working without a path, an IPC
-          bridge, or an argument about the workspace boundary. */}
+      {/* The picker the menu row opens. Either engine takes a file from
+          anywhere on the disk, and neither needs an argument about the
+          workspace boundary: the element reads the `File`'s bytes, and mpv is
+          given the path the same gesture produced. */}
       <input
         ref={pickerRef}
         type="file"

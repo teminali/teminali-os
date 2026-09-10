@@ -193,6 +193,56 @@ export function subtitleToRestore(
   return wanted;
 }
 
+/**
+ * The `sub-add` a dropped subtitle file becomes, or the sentence to show instead.
+ *
+ * This is the gap B4 left open. The pane's own subtitle path reads the bytes
+ * that arrive with the gesture and builds a WebVTT blob, which works because a
+ * `<video>` element will take a blob URL. mpv will not: it opens files by path,
+ * and a renderer is never told where a dropped file is — `File.path` was
+ * removed in Electron 44 and a blob URL is not a path. So while mpv held the
+ * picture the operator was told to go and put the file beside the video, which
+ * is a true sentence and a bad player.
+ *
+ * `webUtils.getPathForFile` is the way in, and it is already on the bridge as
+ * `media.getPathForFile` — it exists because the media gate needs a human
+ * gesture to produce an absolute path before anything may consent to one. A
+ * subtitle dropped on the picture is exactly such a gesture, so this asks the
+ * same question the file pane asks and gets the same kind of answer.
+ *
+ * A rule rather than a branch inside the pane because, like `subtitleToRestore`
+ * above, it is the only part of this that a test on this machine can reach:
+ * `canEmbedSpawned` is false on darwin, so the branch that calls it never runs
+ * here. The refusals are values for the same reason — each is a sentence an
+ * operator reads, and a sentence is worth a test.
+ *
+ * The label it returns is the one the pane remembers *and* the title mpv is
+ * given, deliberately the same string: see `mpvCommand`'s `subtitle_file`.
+ */
+export function subtitleFileToLoad<TFile extends { name: string }>(
+  file: TFile,
+  getPathForFile?: ((file: TFile) => string | null) | null,
+): { command: MpvPlayerCommand; label: string } | { refusal: string } {
+  // No bridge at all: a browser build, or an Electron too old to have it. The
+  // old sentence is still the honest answer, because the folder really is the
+  // only way in from here.
+  if (!getPathForFile) {
+    return {
+      refusal:
+        "The engine drawing this picture reads subtitle files from the folder. Put this one beside the video, named after it, and reopen it.",
+    };
+  }
+  // A bridge that answers null: the drop carried no real file — a browser's
+  // synthetic `File`, or one already gone. Naming the file separates this from
+  // the case above, where nothing was ever going to work.
+  const path = getPathForFile(file)?.trim() ?? "";
+  if (!path) {
+    return { refusal: `${file.name} could not be found on disk, so the engine cannot open it.` };
+  }
+  const label = file.name.replace(/\.[^.]+$/, "");
+  return { command: { action: "subtitle_file", value: { path, title: label } }, label };
+}
+
 /** The bridge, or null in a browser build — where there is no main process to ask. */
 export function mpvViewBridge(): MpvViewBridge | null {
   if (typeof window === "undefined") return null;

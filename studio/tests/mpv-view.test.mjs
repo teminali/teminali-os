@@ -13,7 +13,7 @@ import {
   trackId,
 } from "../electron/mpvView.cjs";
 import { OBSERVED_PROPERTIES, mpvArgs } from "../electron/mpvProcess.cjs";
-import { embeddedPictureBounds, subtitleToRestore } from "../src/services/mpvView.ts";
+import { embeddedPictureBounds, subtitleFileToLoad, subtitleToRestore } from "../src/services/mpvView.ts";
 
 /**
  * Embedding, at the four places it fails without saying so.
@@ -329,4 +329,50 @@ test("the remembered language is re-asked for, once, and never over a deliberate
   assert.equal(subtitleToRestore("Swahili", [], null), null);
   // Nothing selected at all is still a reason to ask, not a reason to wait.
   assert.equal(subtitleToRestore("English", tracks, null).id, 1);
+});
+
+test("a dropped subtitle reaches mpv by the path the gesture produced", () => {
+  /*
+    The pane's own path reads the `File`'s bytes into a WebVTT blob, which mpv
+    cannot take: it opens files by path, and the renderer is told a dropped
+    file's path by exactly one thing — `webUtils.getPathForFile`, the same
+    bridge the media gate is built on. So the drop is a gesture that produces a
+    path, and this is where the two meet.
+  */
+  const outcome = subtitleFileToLoad({ name: "Arrival.2016.srt" }, () => "/Users/t/Films/Arrival.2016.srt");
+  assert.deepEqual(outcome.command, {
+    action: "subtitle_file",
+    value: { path: "/Users/t/Films/Arrival.2016.srt", title: "Arrival.2016" },
+  });
+  // The label the pane remembers and the title mpv is given are one string, not
+  // two rules that agree until somebody edits one of them: `subtitleToRestore`
+  // above compares exactly these on the next file.
+  assert.equal(outcome.label, "Arrival.2016");
+  assert.equal(outcome.label, outcome.command.value.title);
+});
+
+test("a subtitle that cannot be located says which of the two things went wrong", () => {
+  // No bridge — a browser build, or an Electron without `webUtils`. Nothing was
+  // ever going to work, so the sentence names the one thing that would: mpv
+  // loads sidecars itself, by `--sub-auto=exact`.
+  const noBridge = subtitleFileToLoad({ name: "Arrival.srt" }, null);
+  assert.ok(noBridge.refusal.includes("beside the video"), noBridge.refusal);
+  assert.ok(!("command" in noBridge));
+
+  // A bridge that answers nothing — the drop carried no file on this disk. A
+  // different failure, so a different sentence: this one names the file, which
+  // is how an operator tells the two apart without reading the log.
+  for (const answer of [null, "", "   "]) {
+    const lost = subtitleFileToLoad({ name: "Arrival.srt" }, () => answer);
+    assert.ok(lost.refusal.includes("Arrival.srt"), lost.refusal);
+    assert.ok(!("command" in lost));
+  }
+});
+
+test("a subtitle file with no extension keeps the whole of its name", () => {
+  // The label rule strips one extension; a name with none is not a name with an
+  // empty one. `"subs"` must not become `""`, which mpv would take as no title
+  // at all and `subtitleToRestore` could never match again.
+  const outcome = subtitleFileToLoad({ name: "subs" }, () => "/tmp/subs");
+  assert.equal(outcome.label, "subs");
 });
