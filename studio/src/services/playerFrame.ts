@@ -30,11 +30,13 @@ import { GatewayClient } from "./gatewayClient";
 /**
  * What the agent gets, or why it did not.
  *
- * `image` is base64 JPEG with no data-URI prefix, the same shape
- * `cameraFrame.ts` sends — and the word is `image`, singular, at every step
- * from here to `resolvePlayerFrame`. The camera's path says `images` at one
- * end and `image` at the other, which is why `look_at_me` fails; this one is
- * pinned by `tests/player-frame.test.mjs`.
+ * `image` is base64 JPEG with no data-URI prefix, the same encoding
+ * `cameraFrame.ts` uses — but the word here is `image`, singular, at every
+ * step from here to `resolvePlayerFrame`, because this is one frame and a
+ * camera capture is a sequence. The camera's own path said `images` at both
+ * ends and `image` in the gateway between them, which is why `look_at_me`
+ * failed for four releases; both pairs are pinned now, this one by
+ * `tests/player-frame.test.mjs`.
  */
 export interface PlayerFrameCapture {
   image?: string;
