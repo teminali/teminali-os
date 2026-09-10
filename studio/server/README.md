@@ -247,6 +247,18 @@ through `/api/entitlement/refresh`, where it is verified before it is stored.
 | `POST` | `/api/updates/download` | bearer | Downloads a release, abortable by client disconnect. |
 | `POST` | `/api/updates/publish` | admin | Publishes a release to `TEMINALI_RELEASE_REPO`. |
 
+### About and licences
+
+| | Path | Auth | |
+| --- | --- | --- | --- |
+| `GET` | `/api/about` | bearer | This build's name, version, platform and runtime, plus the media stack it ships: every component with its version and licence, the source offer, and the licence texts that came with it. Read from the `manifest.json` the build script wrote beside the binaries, so it cannot describe a different ffmpeg from the one the app spawns. A build made without that script answers `bundled: false` with no components — the truth for every release up to and including v0.0.6. |
+| `GET` | `/api/about/licence?bundle=&file=` | bearer | One shipped licence text, verbatim. `bundle` and `file` are matched against the real directory listing rather than sanitised, so they can only ever name a file the bundle has; anything else is `404 LICENCE_NOT_FOUND`. Truncated at 512 kB. |
+
+This is a licence surface, not an ornament. The installers carry an LGPL-2.1
+FFmpeg built by `scripts/build-media-stack.sh`, and §6 of that licence is met
+only when the shipped components are named with their versions and the
+corresponding source is offered. See [`../docs/MEDIA_LICENSING.md`](../docs/MEDIA_LICENSING.md).
+
 ### Upstream proxies
 
 | | Path | Auth | |

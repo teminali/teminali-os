@@ -1591,18 +1591,31 @@ and the plan's acceptance case — HEVC video, DTS audio, embedded ASS — is
 unaffected. What an LGPL build drops is GPL-only optional code the player does
 not use.
 
-**Encoding is where it costs, and the bill is real.** `libx264` and `libx265`
-are GPL-only, and they are the software fallback in five places today
-(`server/media-probe.js:256`, `electron/exportFilters.cjs:51`,
-`electron/liveStreamer.cjs:89,176`, `electron/screenRecorder.cjs:438`,
-`electron/mediaAccess.cjs:192`). Against an LGPL ffmpeg those names are
-`Unknown encoder`. Hardware covers most of it — `hardwareEncoder.cjs` already
-prefers VideoToolbox on macOS and NVENC/QSV/AMF on Windows — but a machine with
-no hardware encoder currently has no fallback at all, and Linux has no entry in
-that table. The replacements are **libopenh264** (BSD, links LGPL-clean) for
-software H.264 and **kvazaar** or **SVT-HEVC** for software HEVC. This is the
-export path's problem, not playback's, and it must be settled in the same turn
-that first bundles an ffmpeg — not after.
+**Encoding is where it cost, and the bill was paid on 2026-09-11.** `libx264`
+and `libx265` are GPL-only, and they were the software fallback in five places.
+Against an LGPL ffmpeg those names are `Unknown encoder`.
+
+The fix was not to write `libopenh264` in five places instead — that is the
+same mistake facing the other way, since a developer's Homebrew ffmpeg does not
+have it. **No call site names an encoder.** Each states what it wants — a
+quality, a speed, whether latency matters — and `electron/hardwareEncoder.cjs`
+(pure, the only table) decides against what `electron/encoderProbe.cjs` found
+in the binary that will run: hardware if the caller allows it, then `libx264`,
+then `libopenh264`; `libx265` then `libkvazaar` for HEVC.
+
+Two things that were not obvious until it was done. **The encoder name is not
+the hard part — the flags are:** `-preset`, `-crf` and `-tune` are x264/x265
+private options, openh264 has no constant-quality mode at all, and ffmpeg fails
+a run on an unrecognised private option rather than ignoring it, so quality is
+translated per encoder family and a CRF becomes a bitrate scaled by frame
+height. And **deciding by capability dissolves the ordering rule** this
+paragraph used to end with: bundling and swapping no longer have to happen in
+the same turn, because each half is correct on its own.
+
+Hardware still covers most of it — VideoToolbox on macOS, NVENC/QSV/AMF on
+Windows — and Linux still has no entry in that table, so a Linux machine
+without a hardware encoder now gets openh264 rather than nothing. An HEVC
+request nothing can satisfy degrades to H.264 and drops the `hvc1` tag with it.
 
 The build flags, what each excludes, and what has to ship beside the binaries
 are in `docs/MEDIA_LICENSING.md`.
@@ -4625,6 +4638,34 @@ screens to eight. All four are built out of the `ui/Setting.tsx` row family, all
 four declare their rows for the rail search, and each is a `.tsx` pane in
 `settings/` with its state in a `.ts` service — the split `AppearancePane`
 established, for the reason the tests need it.
+
+**About is the tenth pane, and the only one whose absence was a licence
+breach** (`settings/AboutPane.tsx`, `services/aboutService.ts`,
+`server/about.js`, 2026-09-11). The installers now carry an FFmpeg we built
+ourselves under LGPL-2.1, and §6 of that licence is met only when the shipped
+components are named with their versions and the corresponding source is
+offered — `docs/MEDIA_LICENSING.md` calls this surface the shipping blocker for
+exactly that reason. It is not one of the screens
+`docs/SETTINGS_AND_CHROME_PLAN.md` §5 queues up; it arrived from the licence,
+not from the settings plan, which is why it is last in the rail rather than in
+that document's order.
+
+Nothing in it is compiled in. `GET /api/about` reads the `manifest.json` that
+`scripts/build-media-stack.sh` wrote *beside the binaries it produced*, so the
+pane cannot name a different ffmpeg from the one the app will spawn; a version
+bumped in the script and not in a hard-coded list would otherwise make the
+interface state a falsehood about a file two directories away. The licence
+texts are listed from `licences/` rather than enumerated, so a component the
+build drops disappears from the pane by itself, and `GET /api/about/licence`
+matches `bundle` and `file` against that listing instead of sanitising them —
+a name that is not in the bundle is a 404, and `../` has no path to take.
+
+The pane's honest empty state is the load-bearing half. A build made without
+the media-stack script ships no bundle — every release up to and including
+v0.0.6 did — and it says so in words: the app is using an ffmpeg it found on
+the machine, which we did not build and whose licence we cannot state on its
+behalf. Claiming LGPL compliance over somebody else's Homebrew binary would be
+worse than saying nothing.
 
 Two new services carry them. `services/preferences.ts` is the sibling of
 `services/appearance.ts` and is deliberately not the same shape: appearance

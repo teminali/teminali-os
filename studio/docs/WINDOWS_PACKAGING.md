@@ -188,12 +188,19 @@ this on 2026-09-10 alongside the same question for mpv: both are built LGPL
 rather than taken prebuilt. The recipe, the obligations and the one real cost
 are in [`MEDIA_LICENSING.md`](MEDIA_LICENSING.md).
 
-That cost, before anyone drops a binary in: an LGPL FFmpeg has no `libx264` and
-no `libx265`, and those are the software encode fallback in five places
-(`server/media-probe.js:256` and four others). Hardware encoders cover most
-machines, not all, and not Linux. **The turn that bundles ffmpeg replaces those
-five call sites in the same turn** — otherwise the bundle breaks export on
-exactly the clean machines it was meant to fix.
+That cost was paid on 2026-09-11, before any binary was dropped in. An LGPL
+FFmpeg has no `libx264` and no `libx265`, and those were the software encode
+fallback in five places. No call site names an encoder now: each states a
+quality and a speed, and `electron/encoderProbe.cjs` asks the ffmpeg that will
+actually run which encoders it has. So the bundle can arrive on any platform,
+in any order, without breaking export on the clean machines it was meant to
+fix — and until it arrives this code keeps using the x264 in whatever ffmpeg
+the operator already installed.
+
+The Windows *installer* still carries no media stack:
+`scripts/build-media-stack.sh` has a macOS and a Linux recipe and exits 0 with
+a warning on Windows. Bundling here means msys2/mingw-w64, and it is the same
+question as the speech sidecar above — pack it, or fetch it in the wizard.
 
 The fix is the same shape as the sidecar one, and cheaper: a Windows ffmpeg
 static build is roughly 80-120 MB against the sidecar's 573 MB, so bundling it

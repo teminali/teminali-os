@@ -62,6 +62,7 @@ route requires it. Roughly sixty routes across:
 | Usage, files, device | `/api/usage` · `/api/plan` · `/api/files/{capabilities,ingest}` · `/api/system/device` |
 | GitHub, admin | `/api/github/{status,repos,token,clone}` · `/api/me` · `/api/admin/*` |
 | Updates & releases | `/api/updates/{check,releases,download,publish}` |
+| About & licences | `/api/about` · `/api/about/licence` |
 | Upstream proxies | `/api/ollama/*` · `/api/anthropic/v1/messages` · `/api/mcp` |
 
 Audit records are metadata only — route, status, duration, byte counts — with
@@ -1230,6 +1231,30 @@ How the downloaded asset becomes the running app differs by platform, and
 | Windows | `.exe` (NSIS) | Opened, then the app quits 1.5 s later so the installer never has to kill it. The installer's finish page reopens the new build. |
 | Linux, AppImage | `.AppImage` | `chmod 755`, then written over the running image at `$APPIMAGE` (a mounted image keeps its inode until exit). "Close and Reopen" relaunches that path. An unpacked Linux build is opened instead. |
 
+### About, and the source offer
+
+**Settings › About** (`src/components/settings/AboutPane.tsx`) is the one
+settings screen whose absence was a licence breach rather than a missing
+feature. The installers carry an FFmpeg built here under LGPL-2.1, and §6 of
+that licence is met only when the shipped components are **named with their
+versions** and the corresponding source is **offered**. The pane does both: a
+row per component with its version and SPDX identifier, the written offer with
+a link to the release carrying the pinned tarballs and the build script, and
+each shipped licence text readable in place.
+
+None of it is compiled in. `GET /api/about` reads the `manifest.json` that
+`scripts/build-media-stack.sh` wrote beside the binaries it produced, so the
+pane cannot name a different ffmpeg from the one the app spawns; the licence
+texts are listed out of `licences/` rather than enumerated, so a component the
+build drops leaves the pane by itself. `GET /api/about/licence` matches its
+`bundle` and `file` against that listing instead of sanitising them.
+
+A build made without the media-stack script says so in words — the app is using
+an ffmpeg found on the machine, which we did not build and whose licence we
+cannot state on its behalf. That is the state every release up to and including
+v0.0.6 shipped in. Details and the §6 obligations:
+[`docs/MEDIA_LICENSING.md`](docs/MEDIA_LICENSING.md).
+
 ---
 
 ## Verification runtimes
@@ -1274,6 +1299,7 @@ Optional local capabilities:
 
 ```bash
 npm run build:pointer     # compile the Swift accessibility/input helper (macOS)
+npm run build:media-stack # build the LGPL ffmpeg and mpv the installer bundles
 npm run assistant:doctor  # report the whole screen-assistant path, honestly
 brew install whisper-cpp  # local transcription; place a ggml model in ~/.cache/whisper
 ollama serve              # local models on 127.0.0.1:11434
@@ -1283,7 +1309,7 @@ ollama serve              # local models on 127.0.0.1:11434
 
 ```bash
 npm run typecheck   # tsc --noEmit
-npm test            # 2278 tests, 0 failures
+npm test            # 2321 tests
 npm run eval:local  # the local lane against the real model — a score, not a pass/fail; needs Ollama
 npm run eval:voice  # the voice co-agent's spoken answers, same discipline; needs Ollama
 npm run eval:conversation  # Temi over a whole conversation: routing, fabrication, recall; needs Ollama
@@ -1543,8 +1569,42 @@ differs by platform: the pointer helper and the sidecar's dependencies.
 to start the gateway. `electron/main.cjs` now starts it in-process — the gateway
 is ESM inside an asar, which Node can import but cannot execute as a script.
 
-Two top-level directories ship as `extraResources` because `server/` imports
-them from outside this package: `gateway/` (the runner) and `licence/` (the
+**The media stack ships as `extraResources` too, and it is the exception to the
+rule those entries otherwise follow.** `media-stack/ffmpeg` is copied to
+`<Resources>/ffmpeg` and `media-stack/mpv` to `<Resources>/mpv` — a `to:` that
+deliberately does not match its `from:`, because nothing *imports* an ffmpeg:
+it is spawned, at an absolute path `findFfmpeg` and `findMpv` build at runtime,
+and both probe those two names ahead of anything installed on the machine.
+`tests/packaging-resources.test.mjs` asserts that agreement rather than the
+naming rule, since an installer carrying a good ffmpeg under a name nothing
+probes is a download that changes nothing and looks identical to a working one.
+
+Both directories are committed empty — each holds a `README.md` and nothing
+else, because git does not track an empty directory and an entry whose `from:`
+does not resolve fails the build. `npm run build:media-stack` fills them (the
+release workflow runs it before packaging, and is allowed to fail), so a build
+made without it ships no bundle and falls back to a system ffmpeg exactly as
+every release up to v0.0.6 did.
+
+Run on macOS arm64 it produces a 22 MB `media-stack/ffmpeg` — `ffmpeg`,
+`ffprobe`, nine dylibs, the licence texts and `manifest.json` — that starts
+with the build tree deleted and encodes through both `libopenh264` and
+`h264_videotoolbox`. **`media-stack/mpv` stays empty**: the script refuses to
+stage a binary linking libraries it did not build from a pinned source, and mpv
+hard-requires two of those. The script proves the bundle self-contained before
+staging it and clears the directory if it cannot, since that release step is
+allowed to fail and a half-staged ffmpeg inside an installer is worse than
+none. What gets built, why it is LGPL and what that costs:
+[`docs/MEDIA_LICENSING.md`](docs/MEDIA_LICENSING.md).
+
+`manifest.json` is written *inside* each staged directory as well as at the top
+of `media-stack/`, so `<Resources>/ffmpeg/manifest.json` exists whenever a
+bundle does. That is what **Settings › About** reads to name the components and
+offer their source — the §6 half of the obligation, without which the bundle
+must not ship at all.
+
+Two other top-level directories ship as `extraResources` because `server/`
+imports them from outside this package: `gateway/` (the runner) and `licence/` (the
 licence format and the plan registry). `licence/` holds only the verifying
 half — `billing/`, which signs licences and talks to the payment rails, is a
 separately deployed service and is never packaged, so no build of this app
