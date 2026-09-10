@@ -23,6 +23,7 @@ import { useEffect, useRef } from 'react';
 import { useTimelineStore } from '../store/timelineStore';
 import { useProjectStore } from '../store/projectStore';
 import { renderTimelineFrame, getMediaGeneration } from '../engine/compositor';
+import type { RenderQuality } from '../engine/compositor';
 import { audioEngine } from '../engine/audioEngine';
 import { syncVideo } from '../engine/videoEngine';
 import { useRafLoop } from './useRafLoop';
@@ -39,11 +40,17 @@ interface Options {
   project: ProjectSettings;
   /** Exactly one caller may be active. */
   active: boolean;
+  /**
+   * How much work a preview frame is worth. Defaults to `draft`, which
+   * is what a working surface should be — see `RenderQuality`. Nothing
+   * that writes a file goes through this hook.
+   */
+  quality?: RenderQuality;
   /** Called only when a level actually moved, so it cannot thrash React. */
   onMeters?: (next: Meters | ((prev: Meters) => Meters)) => void;
 }
 
-export function useProgramLoop({ canvasRef, project, active, onMeters }: Options): void {
+export function useProgramLoop({ canvasRef, project, active, quality = 'draft', onMeters }: Options): void {
   const lastRenderKey = useRef('');
 
   /*
@@ -125,10 +132,29 @@ export function useProgramLoop({ canvasRef, project, active, onMeters }: Options
     const canvas = canvasRef.current;
     if (!canvas) return;
 
+    /*
+      Drawn at the size of the ELEMENT, not at the size of the sequence.
+
+      These used to be `project.width` and `project.height`, which meant a
+      screen recording from a 3024x1964 laptop composited 4.25 million
+      pixels a frame into a canvas the operator was looking at inside a
+      960px box. The compositor has always scaled a canvas that is not the
+      project's size — export relies on it to render a 1080p sequence at
+      4K — so this direction costs nothing but the arithmetic.
+
+      `PreviewPlayer` owns what that size is, because it is the one that
+      knows how big the canvas is on screen and at what zoom.
+    */
+    const surfaceW = canvas.width;
+    const surfaceH = canvas.height;
+    if (surfaceW === 0 || surfaceH === 0) return;
+
     // Skip the repaint when nothing that affects the image has moved.
     const key = [
       Math.round(state.playheadMs),
       `${project.width}x${project.height}`,
+      `${surfaceW}x${surfaceH}`,
+      quality,
       state.historyIndex,
       state.txDepth,
       storeRevision.current,
@@ -141,6 +167,6 @@ export function useProgramLoop({ canvasRef, project, active, onMeters }: Options
 
     const ctx = canvas.getContext('2d', { alpha: false });
     if (!ctx) return;
-    renderTimelineFrame(ctx, state.tracks, project, state.playheadMs, project.width, project.height);
+    renderTimelineFrame(ctx, state.tracks, project, state.playheadMs, surfaceW, surfaceH, quality);
   }, active);
 }

@@ -15,6 +15,7 @@
 
 import React, { useCallback, useState } from "react";
 import { Check, Copy, MoreHorizontal, ThumbsUp } from "lucide-react";
+import { CursorMarkdownRenderer } from "../chat/CursorMarkdownRenderer";
 
 export interface DialogueTurn {
   id: string;
@@ -153,10 +154,27 @@ export const TemiTranscript: React.FC<TemiTranscriptProps> = ({
         </div>
       ) : (
         <div key={turn.id} className="group flex flex-col items-start">
-          <p className="max-w-full whitespace-pre-wrap break-words text-[16px] leading-[1.75] text-[#f3f3f3]">
-            {turn.content}
-            {turn.pending && <LiveCaret tone="assistant" />}
-          </p>
+          {/*
+            Temi's side is markdown, the operator's is not.
+
+            An answer arrives as an answer — headings, a list of steps, a table,
+            a fenced command — and rendering it as one string of source put
+            literal `**` on the screen. It goes through the same renderer the
+            panel chats use rather than a second one written for this surface;
+            `scale="stage"` is what makes that renderer 16px prose in this
+            screen's own palette instead of 13px on the token ramp. The caret
+            is handed to it rather than placed after it, so a half-spoken
+            sentence still ends in a caret rather than dropping one onto the
+            line below.
+          */}
+          <div className="max-w-full break-words text-[16px] leading-[1.75] text-[#f3f3f3]">
+            <CursorMarkdownRenderer
+              content={turn.content}
+              scale="stage"
+              isStreaming={turn.pending}
+              trailing={turn.pending ? <LiveCaret tone="assistant" /> : undefined}
+            />
+          </div>
           {/* No actions on a half-spoken answer — there is nothing settled to
               copy yet, and the row would jump as the text grows. */}
           {!turn.pending && turn.content.trim() && (

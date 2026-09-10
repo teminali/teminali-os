@@ -36,10 +36,38 @@ const TYPE_ICONS: Record<string, React.ElementType> = {
 
 const MIN_CLIP_MS = 100;
 
-export const ClipBlock: React.FC<ClipBlockProps> = ({
+/**
+ * A clip that did not change does not re-render.
+ *
+ * `Timeline` subscribes to `tracks`, so any store write during a drag
+ * re-rendered every block on the timeline — and a drag is a store write
+ * per frame. Immer's structural sharing means an untouched clip keeps
+ * its identity across that write, which is exactly what makes this
+ * memo work: only the clips that actually moved come back.
+ *
+ * `track` is compared field by field rather than by identity, because a
+ * track object is rebuilt whenever ANY clip on it changes — comparing it
+ * by reference would re-render every sibling of the clip being dragged
+ * and give most of the win back.
+ *
+ * The three callbacks are stable at the call site (`useCallback` with
+ * `[]` and `[pxPerMs]`, plus a `useState` setter), so they are compared
+ * by identity and that is meaningful.
+ */
+const ClipBlockImpl: React.FC<ClipBlockProps> = ({
   clip, track, pxPerMs, trackHeightPx, collectSnapPoints, snapTime, onSnapLine,
 }) => {
-  const selectedClipIds = useTimelineStore((s) => s.selectedClipIds);
+  /*
+    A boolean, not the array.
+
+    `selectedClipIds` is a new array on every selection change, so
+    subscribing to it re-rendered EVERY clip on the timeline whenever any
+    one of them was clicked. What this component needs from it is one bit.
+    The drag handler reads the full list imperatively from `getState()`,
+    which is where a list belongs — it is needed at pointer-down, not at
+    render.
+  */
+  const isSelected = useTimelineStore((s) => s.selectedClipIds.includes(clip.id));
   const selectClip = useTimelineStore((s) => s.selectClip);
   const trimClip = useTimelineStore((s) => s.trimClip);
   const moveClips = useTimelineStore((s) => s.moveClips);
@@ -52,7 +80,6 @@ export const ClipBlock: React.FC<ClipBlockProps> = ({
   const [interaction, setInteraction] = useState<'move' | 'trim-l' | 'trim-r' | 'fade-in' | 'fade-out' | null>(null);
   const suppressClick = useRef(false);
 
-  const isSelected = selectedClipIds.includes(clip.id);
   const leftPx = clip.startTimeMs * pxPerMs;
   const widthPx = Math.max(8, clip.durationMs * pxPerMs);
   const Icon = TYPE_ICONS[clip.type] ?? Film;
@@ -122,7 +149,38 @@ export const ClipBlock: React.FC<ClipBlockProps> = ({
       beginTransaction();
       setInteraction('move');
 
+      /*
+        Coalesced to one store write per FRAME.
+
+        `pointermove` was wired straight to `moveClips`, and every one of
+        those is a zustand `set` through immer: a new `tracks` array, so
+        `Timeline` re-renders, so every `ClipBlock` under it re-renders,
+        and `useProgramLoop`'s revision counter bumps and forces a canvas
+        repaint. On a high-poll pointer that is several of those per
+        frame, and on a long timeline each one is hundreds of React
+        reconciliations for a drag that will be drawn once.
+
+        The pointer event now only records where the pointer IS; a rAF
+        pass turns the latest position into one update. Coalescing rather
+        than throttling, so the frame that lands always uses the newest
+        position and the clip never trails the cursor.
+      */
+      let pending: PointerEvent | null = null;
+      let frame = 0;
+
+      const flush = () => {
+        frame = 0;
+        const ev = pending;
+        pending = null;
+        if (ev) apply(ev);
+      };
+
       const move = (ev: PointerEvent) => {
+        pending = ev;
+        if (frame === 0) frame = requestAnimationFrame(flush);
+      };
+
+      const apply = (ev: PointerEvent) => {
         const dx = ev.clientX - startX;
         const dy = ev.clientY - startY;
         if (!moved && Math.hypot(dx, dy) < 3) return;
@@ -175,6 +233,11 @@ export const ClipBlock: React.FC<ClipBlockProps> = ({
         window.removeEventListener('pointermove', move);
         window.removeEventListener('pointerup', up);
         window.removeEventListener('keydown', onKey);
+        /* The last pointer position must land before the transaction
+           closes, or a drag released between two frames commits the
+           position from one frame ago. */
+        if (frame !== 0) cancelAnimationFrame(frame);
+        if (pending && !cancelled) { apply(pending); pending = null; }
         onSnapLine(null);
         setInteraction(null);
         if (cancelled || !moved) cancelTransaction();
@@ -213,7 +276,25 @@ export const ClipBlock: React.FC<ClipBlockProps> = ({
       beginTransaction();
       setInteraction(side === 'left' ? 'trim-l' : 'trim-r');
 
+      /* Coalesced exactly as the move drag is, and for the same reason:
+         `trimClip` is a store write, and a store write is a re-render of
+         every clip on the timeline plus a canvas repaint. */
+      let pending: PointerEvent | null = null;
+      let frame = 0;
+
+      const flush = () => {
+        frame = 0;
+        const ev = pending;
+        pending = null;
+        if (ev) apply(ev);
+      };
+
       const move = (ev: PointerEvent) => {
+        pending = ev;
+        if (frame === 0) frame = requestAnimationFrame(flush);
+      };
+
+      const apply = (ev: PointerEvent) => {
         const deltaMs = (ev.clientX - startX) / pxPerMs;
         if (!moved && Math.abs(ev.clientX - startX) < 2) return;
         moved = true;
@@ -236,6 +317,11 @@ export const ClipBlock: React.FC<ClipBlockProps> = ({
         window.removeEventListener('pointermove', move);
         window.removeEventListener('pointerup', up);
         window.removeEventListener('keydown', onKey);
+        /* The last pointer position must land before the transaction
+           closes, or a drag released between two frames commits the
+           position from one frame ago. */
+        if (frame !== 0) cancelAnimationFrame(frame);
+        if (pending && !cancelled) { apply(pending); pending = null; }
         onSnapLine(null);
         setInteraction(null);
         if (cancelled || !moved) cancelTransaction();
@@ -268,16 +354,35 @@ export const ClipBlock: React.FC<ClipBlockProps> = ({
       beginTransaction();
       setInteraction(side === 'in' ? 'fade-in' : 'fade-out');
 
-      const move = (ev: PointerEvent) => {
+      /* Coalesced like the other two drags: `updateClipAudio` is a store
+         write, and a store write is a timeline re-render. */
+      let pending: PointerEvent | null = null;
+      let frame = 0;
+
+      const apply = (ev: PointerEvent) => {
         suppressClick.current = true;
         const deltaMs = ((ev.clientX - startX) / pxPerMs) * (side === 'in' ? 1 : -1);
         const next = Math.max(0, Math.min(maxFade, origin + deltaMs));
         updateClipAudio(clip.id, side === 'in' ? { fadeInMs: Math.round(next) } : { fadeOutMs: Math.round(next) });
       };
 
+      const flush = () => {
+        frame = 0;
+        const ev = pending;
+        pending = null;
+        if (ev) apply(ev);
+      };
+
+      const move = (ev: PointerEvent) => {
+        pending = ev;
+        if (frame === 0) frame = requestAnimationFrame(flush);
+      };
+
       const up = () => {
         window.removeEventListener('pointermove', move);
         window.removeEventListener('pointerup', up);
+        if (frame !== 0) cancelAnimationFrame(frame);
+        if (pending) { apply(pending); pending = null; }
         setInteraction(null);
         commitTransaction(`Set fade ${side}`);
         window.setTimeout(() => { suppressClick.current = false; }, 0);
@@ -525,3 +630,20 @@ export const ClipBlock: React.FC<ClipBlockProps> = ({
     </div>
   );
 };
+
+export const ClipBlock = React.memo(ClipBlockImpl, (a, b) => (
+  a.clip === b.clip
+  && a.pxPerMs === b.pxPerMs
+  && a.trackHeightPx === b.trackHeightPx
+  && a.collectSnapPoints === b.collectSnapPoints
+  && a.snapTime === b.snapTime
+  && a.onSnapLine === b.onSnapLine
+  /* Only the fields this component actually reads off the track. */
+  && a.track.id === b.track.id
+  && a.track.index === b.track.index
+  && a.track.type === b.track.type
+  && a.track.locked === b.track.locked
+  && a.track.muted === b.track.muted
+  && a.track.solo === b.track.solo
+  && a.track.heightPx === b.track.heightPx
+));

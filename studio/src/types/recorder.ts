@@ -31,6 +31,15 @@ export interface RecorderSource {
   /** A data URL, or null when the thumbnail came back empty. */
   thumbnail: string | null;
   icon: string | null;
+  /**
+   * This source IS Teminali OS's own window.
+   *
+   * Only main can tell: `getMediaSourceId()` is a BrowserWindow method,
+   * and matching on the title would break the first time it carried a
+   * file name. It matters because `hideWindow` would otherwise hide the
+   * subject of the capture, and a hidden window delivers no frames.
+   */
+  isSelf?: boolean;
 }
 
 export interface RecorderSourcesResult {
@@ -221,6 +230,11 @@ export interface RecorderBridge {
     streams: ("screen" | "camera")[];
     displayId: number | null;
     hideWindow: boolean;
+    /**
+     * What is being captured, so main can tell whether it is being asked
+     * to hide the subject. See `hideWindow` in `electron/screenRecorder.cjs`.
+     */
+    sourceId: string;
     live?: LiveStreamConfig;
   }) => Promise<BeginResult>;
   chunk: (

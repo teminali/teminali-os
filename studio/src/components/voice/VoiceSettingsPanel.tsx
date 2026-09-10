@@ -2,6 +2,7 @@ import React, { useEffect, useState } from "react";
 import { Cpu, Globe, Languages, Zap } from "lucide-react";
 import { VOICE_LANGUAGES, type ProviderCapabilities, type VoiceSettings, type VoiceTier } from "../../services/voice";
 import { VoiceEnrolment } from "./VoiceEnrolment";
+import { SettingGroup, SettingList, SettingRow, SettingSelect, SettingSlider, SettingToggle } from "../ui";
 
 /**
  * Every voice control in one place, grouped by the question it answers:
@@ -20,44 +21,6 @@ export interface VoiceSettingsPanelProps {
   onProbe: () => void;
 }
 
-const Row: React.FC<{ label: string; hint?: string; children: React.ReactNode }> = ({ label, hint, children }) => (
-  <div className="flex items-start justify-between gap-4 py-2.5">
-    <div className="min-w-0">
-      <div className="text-xs text-ink-prose">{label}</div>
-      {hint && <div className="text-2xs text-ink-faint mt-0.5 leading-relaxed">{hint}</div>}
-    </div>
-    <div className="flex-shrink-0">{children}</div>
-  </div>
-);
-
-const Toggle: React.FC<{ checked: boolean; onChange: (value: boolean) => void; disabled?: boolean }> = ({
-  checked,
-  onChange,
-  disabled = false,
-}) => (
-  <button
-    type="button"
-    role="switch"
-    aria-checked={checked}
-    disabled={disabled}
-    onClick={() => onChange(!checked)}
-    className={`w-9 h-5 rounded-full relative transition-colors duration-ds ease-ds disabled:opacity-35 ${
-      checked ? "bg-accent" : "bg-surface-hover"
-    }`}
-  >
-    <span
-      className="absolute top-0.5 w-4 h-4 rounded-full bg-ink-high transition-[left] duration-ds ease-ds"
-      style={{ left: checked ? 18 : 2 }}
-    />
-  </button>
-);
-
-const Select: React.FC<React.SelectHTMLAttributes<HTMLSelectElement>> = ({ className = "", ...props }) => (
-  <select
-    className={`lit lit-inner h-7 bg-surface-raised rounded-md px-2 text-xs text-ink-body outline-none max-w-[190px] ${className}`}
-    {...props}
-  />
-);
 
 export const VoiceSettingsPanel: React.FC<VoiceSettingsPanelProps> = ({
   settings,
@@ -120,12 +83,12 @@ export const VoiceSettingsPanel: React.FC<VoiceSettingsPanelProps> = ({
   const strongMatching = Boolean(vibe?.speakerEmbedding && vibe.asr && activeAsrTier === "vibevoice");
 
   return (
-    <div className="flex flex-col divide-y divide-edge-subtle">
+    <div className="space-y-5">
       {/* ── Engine ─────────────────────────────────────────────────────── */}
-      <section className="pb-1">
-        <Row
+      <SettingGroup label="Engine">
+        <SettingRow
           label="Speech engine"
-          hint={
+          description={
             activeAsrTier === "vibevoice"
               ? `${vibe?.label ?? "The local engine"} is running on this machine. Audio never leaves it.`
               : activeAsrTier === "builtin"
@@ -133,16 +96,16 @@ export const VoiceSettingsPanel: React.FC<VoiceSettingsPanelProps> = ({
                 : (vibe?.detail ?? capabilities?.builtin.detail ?? "No speech engine is available.")
           }
         >
-          <Select value={settings.tier} onChange={(event) => update({ tier: event.target.value as VoiceTier | "auto" })}>
+          <SettingSelect value={settings.tier} onChange={(event) => update({ tier: event.target.value as VoiceTier | "auto" })}>
             <option value="auto">Auto (best available)</option>
             <option value="vibevoice">{vibe?.label ?? "Local engine"}</option>
             <option value="builtin">
               {capabilities?.builtin.asr ? "Built-in (browser)" : "Built-in (unavailable here)"}
             </option>
-          </Select>
-        </Row>
+          </SettingSelect>
+        </SettingRow>
 
-        <div className="flex items-center gap-2 pb-2.5">
+        <div className="flex items-center gap-2 px-3.5 py-2.5">
           <span
             className={`inline-flex items-center gap-1.5 text-3xs font-mono rounded px-1.5 py-0.5 ${
               activeAsrTier === "vibevoice"
@@ -163,19 +126,19 @@ export const VoiceSettingsPanel: React.FC<VoiceSettingsPanelProps> = ({
             Re-check
           </button>
         </div>
-      </section>
+      </SettingGroup>
 
       {/* ── Language ───────────────────────────────────────────────────── */}
-      <section>
-        <Row
+      <SettingGroup label="Language">
+        <SettingRow
           label="Language"
-          hint={
+          description={
             activeAsrTier === "vibevoice"
               ? "The local engine detects the spoken language per utterance, Kiswahili included."
               : "The browser engine cannot detect language — it uses your system language. Pick one explicitly."
           }
         >
-          <Select value={settings.language} onChange={(event) => update({ language: event.target.value })}>
+          <SettingSelect value={settings.language} onChange={(event) => update({ language: event.target.value })}>
             <option value="auto">Detect automatically</option>
             {VOICE_LANGUAGES.map((language) => (
               <option key={language.tag} value={language.tag}>
@@ -183,15 +146,15 @@ export const VoiceSettingsPanel: React.FC<VoiceSettingsPanelProps> = ({
                 {!language.webSpeech && activeAsrTier === "builtin" ? " — needs VibeVoice" : ""}
               </option>
             ))}
-          </Select>
-        </Row>
-      </section>
+          </SettingSelect>
+        </SettingRow>
+      </SettingGroup>
 
       {/* ── Who may speak ──────────────────────────────────────────────── */}
-      <section>
-        <Row
+      <SettingGroup label="Who may speak">
+        <SettingRow
           label="Only respond to my voice"
-          hint={
+          description={
             hasProfile
               ? "Speech that does not match your enrolled profile is ignored."
               // On by default, but the gate also tests `hasProfile`, so it does
@@ -200,21 +163,41 @@ export const VoiceSettingsPanel: React.FC<VoiceSettingsPanelProps> = ({
               : "Waiting on a voice profile — record one below and this starts working."
           }
         >
-          <Toggle
+          <SettingToggle
             checked={settings.requireSpeakerMatch}
             disabled={!hasProfile}
             onChange={(value) => update({ requireSpeakerMatch: value })}
           />
-        </Row>
+        </SettingRow>
 
-        <Row
+        <SettingRow
           label="Require my name"
-          hint={`Only act on speech that starts with ${settings.wakeWords.map((word) => `“${word}”`).join(", ")}. Strictest setting; use it in a busy room.`}
+          description="Only act on speech that starts with one of the words below. Strictest setting; use it in a busy room."
         >
-          <Toggle checked={settings.requireWakeWord} onChange={(value) => update({ requireWakeWord: value })} />
-        </Row>
+          <SettingToggle checked={settings.requireWakeWord} onChange={(value) => update({ requireWakeWord: value })} />
+        </SettingRow>
 
-        <div className="pb-3 pt-1">
+        {/* The words themselves were printed into the row above and could not be
+            changed, which made them read like a property of the build rather
+            than a choice. They are neither secret nor fixed: `addressing.ts`
+            matches the front of an utterance against this list, and a name the
+            recogniser mishears is worth being able to add a spelling for. */}
+        <SettingRow
+          label="Names it answers to"
+          description="What the assistant listens for at the start of a sentence, when the setting above is on. Add the spellings speech recognition actually produces for your name — “temmy” is heard as often as “temy”."
+        />
+        <SettingList
+          entries={settings.wakeWords}
+          onChange={(wakeWords) => update({ wakeWords })}
+          placeholder="temy"
+          label="Add a name the assistant answers to"
+          emptyNote="No names left. With none of them, “Require my name” can never match and the assistant will not answer."
+          validate={(entry) =>
+            /\s/.test(entry) ? "One word per entry \u2014 it is matched against the start of a sentence." : null
+          }
+        />
+
+        <div className="px-3.5 py-3">
           <VoiceEnrolment
             hasProfile={hasProfile}
             strongMatching={strongMatching}
@@ -223,52 +206,55 @@ export const VoiceSettingsPanel: React.FC<VoiceSettingsPanelProps> = ({
             clear={clearEnrolment}
           />
         </div>
-      </section>
+      </SettingGroup>
 
       {/* ── Conversation ───────────────────────────────────────────────── */}
-      <section>
-        <Row label="Read replies aloud" hint="Applies to hands-free conversation mode only.">
-          <Toggle checked={settings.speakReplies} onChange={(value) => update({ speakReplies: value })} />
-        </Row>
+      <SettingGroup label="Conversation">
+        <SettingRow label="Read replies aloud" description="Applies to hands-free conversation mode only.">
+          <SettingToggle checked={settings.speakReplies} onChange={(value) => update({ speakReplies: value })} />
+        </SettingRow>
 
-        <Row label="Greet me when it starts" hint="A short line when hands-free mode opens, so you know the microphone is live. You can talk over it.">
+        <SettingRow label="Greet me when it starts" description="A short line when hands-free mode opens, so you know the microphone is live. You can talk over it.">
           <div className="flex items-center gap-2">
             <input
               value={settings.greeting}
               onChange={(event) => update({ greeting: event.target.value })}
               disabled={!settings.speakGreeting}
               maxLength={60}
-              className="lit lit-inner h-7 w-36 px-2 bg-surface-raised rounded-md text-xs text-ink-body outline-none disabled:opacity-40"
+              /* Wide enough to read the default greeting without scrolling it:
+                 w-36 showed 144px of a 205px value, so the shipped default was
+                 cut off in its own field. */
+              className="lit lit-inner h-7 w-64 px-2 bg-surface-raised rounded-md text-xs text-ink-body outline-none disabled:opacity-40"
             />
-            <Toggle checked={settings.speakGreeting} onChange={(value) => update({ speakGreeting: value })} />
+            <SettingToggle checked={settings.speakGreeting} onChange={(value) => update({ speakGreeting: value })} />
           </div>
-        </Row>
+        </SettingRow>
 
-        <Row label="Narrate progress" hint="While an agent run is working, say a short line when it starts something notable — “running the tests”. Never more than one every few seconds, and only when nothing else is being said.">
-          <Toggle checked={settings.narrateProgress} onChange={(value) => update({ narrateProgress: value })} />
-        </Row>
+        <SettingRow label="Narrate progress" description="While an agent run is working, say a short line when it starts something notable — “running the tests”. Never more than one every few seconds, and only when nothing else is being said.">
+          <SettingToggle checked={settings.narrateProgress} onChange={(value) => update({ narrateProgress: value })} />
+        </SettingRow>
 
-        <Row label="Summarise long replies" hint="Read the first few sentences as they arrive, then a two-sentence spoken summary of the rest instead of the whole answer. The full text is always in the chat.">
-          <Toggle checked={settings.summariseLongReplies} onChange={(value) => update({ summariseLongReplies: value })} />
-        </Row>
+        <SettingRow label="Summarise long replies" description="Read the first few sentences as they arrive, then a two-sentence spoken summary of the rest instead of the whole answer. The full text is always in the chat.">
+          <SettingToggle checked={settings.summariseLongReplies} onChange={(value) => update({ summariseLongReplies: value })} />
+        </SettingRow>
 
-        <Row label="Remember what it overhears" hint="Speech that was not addressed to the assistant is kept for ten minutes, so you can ask “what did she just say?” — and, where the local sidecar can name sounds, “did you hear that car?”. The words are transcribed either way; naming a sound is an extra pass this switch turns on. Nothing is sent anywhere, and it is cleared whenever hands-free conversation stops.">
-          <Toggle checked={settings.ambientMemory} onChange={(value) => update({ ambientMemory: value })} />
-        </Row>
+        <SettingRow label="Remember what it overhears" description="Speech that was not addressed to the assistant is kept for ten minutes, so you can ask “what did she just say?” — and, where the local sidecar can name sounds, “did you hear that car?”. The words are transcribed either way; naming a sound is an extra pass this switch turns on. Nothing is sent anywhere, and it is cleared whenever hands-free conversation stops.">
+          <SettingToggle checked={settings.ambientMemory} onChange={(value) => update({ ambientMemory: value })} />
+        </SettingRow>
 
-        <Row label="Let me interrupt" hint="Talking over a spoken reply stops it immediately and starts your turn. Praise, “keep going” and “how's it going?” do not cancel a run; a new instruction or “stop” does.">
-          <Toggle checked={settings.allowBargeIn} onChange={(value) => update({ allowBargeIn: value })} />
-        </Row>
+        <SettingRow label="Let me interrupt" description="Talking over a spoken reply stops it immediately and starts your turn. Praise, “keep going” and “how's it going?” do not cancel a run; a new instruction or “stop” does.">
+          <SettingToggle checked={settings.allowBargeIn} onChange={(value) => update({ allowBargeIn: value })} />
+        </SettingRow>
 
-        <Row label="Confirm before sending" hint="Show the cleaned-up text and wait for approval. Turning this off sends as soon as it is understood.">
-          <Toggle checked={settings.confirmBeforeSend} onChange={(value) => update({ confirmBeforeSend: value })} />
-        </Row>
+        <SettingRow label="Confirm before sending" description="Show the cleaned-up text and wait for approval. Turning this off sends as soon as it is understood.">
+          <SettingToggle checked={settings.confirmBeforeSend} onChange={(value) => update({ confirmBeforeSend: value })} />
+        </SettingRow>
 
-        <Row
+        <SettingRow
           label="Auto-send after"
-          hint="In conversation mode, how long the cleaned-up text waits before sending itself. Any interaction cancels it."
+          description="In conversation mode, how long the cleaned-up text waits before sending itself. Any interaction cancels it."
         >
-          <Select
+          <SettingSelect
             value={String(settings.autoSendAfterMs)}
             onChange={(event) => update({ autoSendAfterMs: Number(event.target.value) })}
           >
@@ -276,22 +262,22 @@ export const VoiceSettingsPanel: React.FC<VoiceSettingsPanelProps> = ({
             <option value="1500">1.5 seconds</option>
             <option value="2500">2.5 seconds</option>
             <option value="4000">4 seconds</option>
-          </Select>
-        </Row>
+          </SettingSelect>
+        </SettingRow>
 
-        <Row label="Pause before I'm finished" hint="How long a silence has to last before your turn ends. Shorter feels snappier; longer forgives thinking.">
-          <Select
+        <SettingRow label="Pause before I'm finished" description="How long a silence has to last before your turn ends. Shorter feels snappier; longer forgives thinking.">
+          <SettingSelect
             value={String(settings.endpointSilenceMs)}
             onChange={(event) => update({ endpointSilenceMs: Number(event.target.value) })}
           >
             <option value="600">Snappy — 0.6s</option>
             <option value="900">Balanced — 0.9s</option>
             <option value="1400">Patient — 1.4s</option>
-          </Select>
-        </Row>
+          </SettingSelect>
+        </SettingRow>
 
-        <Row label="Voice" hint={voiceHint}>
-          <Select
+        <SettingRow label="Voice" description={voiceHint}>
+          <SettingSelect
             value={settings.ttsVoice ?? "auto"}
             onChange={(event) => update({ ttsVoice: event.target.value === "auto" ? null : event.target.value })}
           >
@@ -301,25 +287,22 @@ export const VoiceSettingsPanel: React.FC<VoiceSettingsPanelProps> = ({
                 {v.name} ({v.lang})
               </option>
             ))}
-          </Select>
-        </Row>
+          </SettingSelect>
+        </SettingRow>
 
-        <Row label="Speaking rate">
-          <div className="flex items-center gap-2">
-            <Zap size={11} className="text-ink-faint" />
-            <input
-              type="range"
-              min={0.7}
-              max={1.6}
-              step={0.02}
-              value={settings.ttsRate}
-              onChange={(event) => update({ ttsRate: Number(event.target.value) })}
-              className="w-24 accent-[var(--accent)]"
-            />
-            <span className="font-mono text-3xs text-ink-faint w-8">{settings.ttsRate.toFixed(2)}×</span>
-          </div>
-        </Row>
-      </section>
+        <SettingRow label="Speaking rate">
+          <Zap size={11} className="text-ink-faint" />
+          <SettingSlider
+            label="Speaking rate"
+            min={0.7}
+            max={1.6}
+            step={0.02}
+            value={settings.ttsRate}
+            onChange={(ttsRate) => update({ ttsRate })}
+            format={(rate) => `${rate.toFixed(2)}×`}
+          />
+        </SettingRow>
+      </SettingGroup>
 
       <section className="pt-2.5">
         <div className="flex items-start gap-2 text-3xs text-ink-disabled">

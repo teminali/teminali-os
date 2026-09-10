@@ -42,7 +42,84 @@ interface Voice {
   sig: string;
   /** Which bus `gain` feeds — the ducked one, or the key one. */
   ducked: boolean;
+  /**
+   * The gain this voice was last ramped towards.
+   *
+   * `setTargetAtTime` schedules an automation event every time it is
+   * called, and `sync` runs every frame — so a voice sitting at a
+   * constant level was scheduling sixty events a second to hold still,
+   * and every voice NOT under the playhead was scheduling sixty more to
+   * stay at zero. Ramp only when the destination actually moved.
+   */
+  lastGain: number;
+  /**
+   * The position this module last ASKED the element for, while paused.
+   * See `shouldParkSeek` — this is the audio twin of the video engine's
+   * seek storm, and the same guard.
+   */
+  requestedTime: number | null;
+  /** `performance.now()` of the last frame this voice was under the playhead. */
+  lastUsedAt: number;
 }
+
+/**
+ * A gain change too small to hear, so not worth an automation event.
+ *
+ * A 60fps loop scheduling events for a change of 1e-4 is spending the
+ * audio thread's budget to hold a level it is already at.
+ */
+const GAIN_EPSILON = 0.001;
+
+/**
+ * How many voices may sit in the graph before idle ones are torn down.
+ *
+ * A voice is an `<audio>` element, a `MediaElementAudioSourceNode` and a
+ * whole per-clip filter chain. `sync` used to pause the ones that had
+ * fallen out from under the playhead and leave every one of them
+ * resident for the life of the page — so scrubbing across a hundred-clip
+ * timeline left a hundred decoders alive, a hundred filter chains
+ * connected, and a hundred no-op ramps scheduled per frame. The video
+ * engine had exactly this bug and this is the same bound.
+ */
+const VOICE_SOFT_LIMIT = 8;
+
+/** How long a voice may sit unused before it is worth its teardown. */
+const VOICE_IDLE_EVICT_MS = 20_000;
+
+/**
+ * Whether a PAUSED element is worth seeking.
+ *
+ * The audio twin of `shouldScrubSeek` in `videoEngine.ts`, and it exists
+ * for the same reason: a tolerance alone cannot fix this. A compressed
+ * stream seeks to a packet boundary, so an element told to go to 4.100
+ * may answer 4.180 and be "wrong" for ever — re-seeked on every one of
+ * the next sixty frames, permanently `seeking`, and audible as a clip
+ * that will not scrub. Asking twice for a position the decoder has
+ * already answered cannot produce a different answer, so it is not
+ * asked.
+ */
+export function shouldParkSeek(state: {
+  currentTime: number;
+  requestedTime: number | null;
+  target: number;
+  seeking: boolean;
+}): boolean {
+  if (state.seeking) return false;
+  if (!Number.isFinite(state.target)) return false;
+  if (Math.abs(state.currentTime - state.target) <= PARK_TOLERANCE_S) return false;
+  if (state.requestedTime !== null
+      && Math.abs(state.requestedTime - state.target) < PARK_TOLERANCE_S) return false;
+  return true;
+}
+
+/**
+ * How close a parked element has to be before it is left alone.
+ *
+ * One video frame at 60fps, matching the picture side, and comfortably
+ * wider than an AAC packet (23ms at 44.1kHz) so an ordinary seek lands
+ * inside it first time.
+ */
+const PARK_TOLERANCE_S = 1 / 60;
 
 /** Beyond this drift we re-seek rather than let the element free-run. */
 const RESYNC_TOLERANCE_S = 0.28;
@@ -223,6 +300,7 @@ class AudioPlaybackEngine {
     const voice: Voice = {
       el, source, chain, gain, clipId: clip.id,
       sig: chainSignature(clip.audio), ducked,
+      lastGain: 0, requestedTime: null, lastUsedAt: performance.now(),
     };
     this.voices.set(clip.id, voice);
     return voice;
@@ -323,6 +401,7 @@ class AudioPlaybackEngine {
 
     const anySolo = tracks.some((t) => t.type === 'audio' && t.solo);
     const live = new Set<string>();
+    const now = performance.now();
     let duckedLive = 0;
     let keyLive = 0;
     let sounding = 0;
@@ -342,12 +421,19 @@ class AudioPlaybackEngine {
         const voice = this.acquire(clip);
         if (!voice) continue;
         this.repatch(voice, clip);
+        voice.lastUsedAt = now;
 
         if (clip.audio.ducking) duckedLive++; else keyLive++;
 
         const gain = this.gainFor(clip, track, offsetMs, anySolo);
-        // A short ramp instead of a jump: stepping gain per frame clicks.
-        voice.gain.gain.setTargetAtTime(gain, ctx.currentTime, 0.02);
+        // A short ramp instead of a jump: stepping gain per frame clicks —
+        // and only when the destination moved, because scheduling an
+        // automation event to hold a level is sixty events a second of
+        // nothing. See `GAIN_EPSILON`.
+        if (Math.abs(gain - voice.lastGain) > GAIN_EPSILON) {
+          voice.gain.gain.setTargetAtTime(gain, ctx.currentTime, 0.02);
+          voice.lastGain = gain;
+        }
         // A clip under the playhead on a muted or unsoloed track is silent,
         // and silence is not something the microphone has to be careful of.
         if (isPlaying && gain > 0) sounding++;
@@ -358,12 +444,24 @@ class AudioPlaybackEngine {
 
         if (!isPlaying) {
           if (!voice.el.paused) voice.el.pause();
-          // Keep the element parked so unpausing is instant and correct.
-          if (Math.abs(voice.el.currentTime - sourceSeconds) > 0.05 && !voice.el.seeking && Number.isFinite(sourceSeconds)) {
+          // Keep the element parked so unpausing is instant and correct —
+          // asking once per position, not once per frame. See
+          // `shouldParkSeek`.
+          if (shouldParkSeek({
+            currentTime: voice.el.currentTime,
+            requestedTime: voice.requestedTime,
+            target: sourceSeconds,
+            seeking: voice.el.seeking,
+          })) {
+            voice.requestedTime = sourceSeconds;
             try { voice.el.currentTime = sourceSeconds; } catch { /* not seekable yet */ }
           }
           continue;
         }
+
+        /* Playing: the element owns its own position, so the last parked
+           target must not veto the next seek. */
+        voice.requestedTime = null;
 
         const targetRate = Math.max(0.25, Math.min(4, rate * (clip.speed?.multiplier ?? 1)));
         const signedDrift = sourceSeconds - voice.el.currentTime;
@@ -391,11 +489,29 @@ class AudioPlaybackEngine {
       }
     }
 
-    // Anything no longer under the playhead stops immediately.
+    /*
+      Anything no longer under the playhead stops immediately — and after
+      a while is torn down rather than left resident.
+
+      Both halves were wrong. The ramp to zero was unconditional, so a
+      silent voice scheduled an automation event every frame to stay
+      silent; and nothing ever released these, so every clip the playhead
+      had ever crossed kept an `<audio>` element, a decoder and a filter
+      chain alive for the life of the page. Scrub across a long timeline
+      and that is what the memory and the audio thread go to.
+    */
     for (const [clipId, voice] of this.voices) {
       if (live.has(clipId)) continue;
       if (!voice.el.paused) voice.el.pause();
-      voice.gain.gain.setTargetAtTime(0, ctx.currentTime, 0.01);
+      if (voice.lastGain > GAIN_EPSILON) {
+        voice.gain.gain.setTargetAtTime(0, ctx.currentTime, 0.01);
+        voice.lastGain = 0;
+      }
+      /* Kept long enough that scrubbing back and forth across a cut
+         re-uses the voice rather than rebuilding its whole chain. */
+      if (this.voices.size > VOICE_SOFT_LIMIT && now - voice.lastUsedAt > VOICE_IDLE_EVICT_MS) {
+        this.release(clipId);
+      }
     }
 
     this.applyDucking(ctx, duckedLive > 0 && keyLive > 0, isPlaying);

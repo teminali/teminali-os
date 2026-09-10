@@ -28,6 +28,40 @@ import { Track, Clip, ClipType } from '../types/edl';
 /** Beyond this drift we re-seek rather than let the element free-run. */
 const RESYNC_TOLERANCE_S = 0.25;
 
+/**
+ * The longest edge the held-frame canvas is allowed to be.
+ *
+ * That canvas exists for exactly one job: cover the black flash while an
+ * element seeks. It is drawn onto the program canvas, which is itself
+ * capped well below this, so holding it at the SOURCE's resolution buys
+ * nothing and costs a great deal. Measured on an M4 Pro, one
+ * `drawImage` of a 2560x1662 frame into a canvas of the same size is
+ * **4.21 ms** — and it was being done on `timeupdate`, four times a
+ * second, per element. Two elements on a screen recording is 34 ms of
+ * main-thread readback per second of wall clock, for a picture nobody
+ * was going to look at.
+ */
+const HELD_FRAME_MAX_EDGE = 640;
+
+/**
+ * How far a paused element may sit from the playhead before it is
+ * seeked again.
+ *
+ * It was 20 ms, which is SHORTER THAN A FRAME at any rate this editor
+ * supports, and that is a seek storm rather than a tolerance. A long-GOP
+ * screen recording seeks to the nearest decodable frame; if that lands
+ * 30 ms away the element is instantly "wrong" again, so the next tick
+ * re-seeks, and the one after that. The element is then permanently
+ * `seeking`, `getVideoFrame` permanently returns the held frame, every
+ * seek fires `onseeked` -> a full-resolution readback + a `generation`
+ * bump that forces the compositor to repaint — and the picture never
+ * moves. That is the "the footage gets stuck, the webcam goes black"
+ * report, and it needs no slow machine to reproduce.
+ *
+ * One frame at 60fps is the floor; a 30fps project gets 33 ms.
+ */
+const SCRUB_TOLERANCE_S = 1 / 60;
+
 /** A seek that never lands must not wedge an export. */
 const SEEK_TIMEOUT_MS = 4000;
 
@@ -51,13 +85,38 @@ interface VideoEntry {
    */
   live: boolean;
   /**
-   * Last decoded frame cached onto an offscreen canvas.
+   * Last decoded frame cached onto an offscreen canvas, at reduced size.
    * Prevents black screen / placeholder flashes during seeks and buffer stalls.
    */
   lastFrameCanvas?: HTMLCanvasElement;
+  /**
+   * The last position this module ASKED the element for.
+   *
+   * Not the same question as `currentTime`, and the difference is the
+   * whole seek-storm fix: an element that has been told to go to 4.100
+   * and has landed on the nearest decodable frame at 4.133 must not be
+   * told again, however far from the playhead it looks. Only a NEW
+   * target is worth a seek.
+   */
+  requestedTime: number | null;
+  /** `performance.now()` of the last frame this entry was under the playhead. */
+  lastUsedAt: number;
 }
 
 const videos = new Map<string, VideoEntry>();
+
+/**
+ * How many elements may sit in the cache before idle ones are dropped.
+ *
+ * A recording lands as five video tracks — backdrop, screen, cursor,
+ * camera, grade — of which at most three point at real files, so a
+ * single take never trips this. It is the SECOND and third take in one
+ * session that does.
+ */
+const CACHE_SOFT_LIMIT = 6;
+
+/** How long an element may sit unused before it is worth its teardown. */
+const IDLE_EVICT_MS = 30_000;
 
 /**
  * Capture the current frame into the entry's canvas so it can be held
@@ -69,16 +128,22 @@ function updateLastFrame(entry: VideoEntry): void {
     if (!entry.lastFrameCanvas) {
       entry.lastFrameCanvas = document.createElement('canvas');
     }
-    if (
-      entry.lastFrameCanvas.width !== entry.el.videoWidth ||
-      entry.lastFrameCanvas.height !== entry.el.videoHeight
-    ) {
-      entry.lastFrameCanvas.width = entry.el.videoWidth;
-      entry.lastFrameCanvas.height = entry.el.videoHeight;
+    /* Scaled down on the way in. See `HELD_FRAME_MAX_EDGE`: this is a
+       stand-in shown for a few frames during a seek, and paying the
+       source's full resolution for it is what made scrubbing a screen
+       recording feel like treacle. */
+    const longEdge = Math.max(entry.el.videoWidth, entry.el.videoHeight);
+    const scale = longEdge > HELD_FRAME_MAX_EDGE ? HELD_FRAME_MAX_EDGE / longEdge : 1;
+    const w = Math.max(2, Math.round(entry.el.videoWidth * scale));
+    const h = Math.max(2, Math.round(entry.el.videoHeight * scale));
+
+    if (entry.lastFrameCanvas.width !== w || entry.lastFrameCanvas.height !== h) {
+      entry.lastFrameCanvas.width = w;
+      entry.lastFrameCanvas.height = h;
     }
     const ctx = entry.lastFrameCanvas.getContext('2d');
     if (ctx) {
-      ctx.drawImage(entry.el, 0, 0);
+      ctx.drawImage(entry.el, 0, 0, w, h);
     }
   } catch {
     /* ignore draw errors if element is momentarily detached */
@@ -138,7 +203,10 @@ function acquire(url: string): VideoEntry {
   // a decode-ahead buffer for playback it will never do.
   el.disableRemotePlayback = true;
 
-  const entry: VideoEntry = { el, loaded: false, failed: false, seekWaiters: [], live: false };
+  const entry: VideoEntry = {
+    el, loaded: false, failed: false, seekWaiters: [], live: false,
+    requestedTime: null, lastUsedAt: performance.now(),
+  };
 
   el.onloadeddata = () => {
     entry.loaded = true;
@@ -156,9 +224,14 @@ function acquire(url: string): VideoEntry {
     generation++;
     entry.seekWaiters.splice(0).forEach((fn) => fn());
   };
-  el.ontimeupdate = () => {
-    updateLastFrame(entry);
-  };
+  /*
+    There is deliberately no `ontimeupdate` handler.
+
+    It used to call `updateLastFrame`, which fires about four times a
+    second per element during playback — and the held frame is only ever
+    READ while the element is seeking, which `onseeked` already covers.
+    It was pure cost: see `HELD_FRAME_MAX_EDGE` for the measurement.
+  */
 
   el.src = url;
   videos.set(url, entry);
@@ -191,7 +264,10 @@ export function registerLiveSource(url: string, stream: MediaStream): HTMLVideoE
   el.disableRemotePlayback = true;
   el.srcObject = stream;
 
-  const entry: VideoEntry = { el, loaded: false, failed: false, seekWaiters: [], live: true };
+  const entry: VideoEntry = {
+    el, loaded: false, failed: false, seekWaiters: [], live: true,
+    requestedTime: null, lastUsedAt: performance.now(),
+  };
   el.onloadeddata = () => { entry.loaded = true; generation++; };
   el.onerror = () => { entry.failed = true; generation++; };
 
@@ -272,6 +348,39 @@ export function getVideoNaturalSize(url: string): { width: number; height: numbe
 
 /* ── Timeline reconciliation ────────────────────────────────────── */
 
+/**
+ * Whether a paused element is worth seeking.
+ *
+ * Its own function because it is the whole of a bug that had no visible
+ * cause: an element permanently `seeking`, a picture that never moves,
+ * a full-resolution readback and a forced repaint on every one of those
+ * seeks. Two independent guards, and the second is the one that matters.
+ *
+ * `SCRUB_TOLERANCE_S` stops a tolerance narrower than a frame from
+ * declaring every landed seek wrong — it was 20 ms, and a frame is 33.
+ *
+ * `requestedTime` stops the case a tolerance cannot: a long-GOP source
+ * whose nearest decodable frame is further away than any tolerance you
+ * would be willing to accept. Asking for the same position twice can
+ * only produce the answer it already gave, so it is not asked. That is
+ * what makes this safe at ANY tolerance, including a wrong one.
+ */
+export function shouldScrubSeek(state: {
+  currentTime: number;
+  requestedTime: number | null;
+  target: number;
+  seeking: boolean;
+}): boolean {
+  if (state.seeking) return false;
+  if (!Number.isFinite(state.target)) return false;
+  // Already where it was asked to be.
+  if (Math.abs(state.currentTime - state.target) <= SCRUB_TOLERANCE_S) return false;
+  // Already asked for this, and the element answered as well as it can.
+  if (state.requestedTime !== null
+      && Math.abs(state.requestedTime - state.target) < SCRUB_TOLERANCE_S) return false;
+  return true;
+}
+
 /** Where in the SOURCE a given timeline position lands, in seconds. */
 export function sourceSecondsFor(clip: Clip, offsetMs: number): number {
   const mult = clip.speed?.multiplier ?? 1;
@@ -317,12 +426,14 @@ function visibleVideoClips(tracks: Track[], playheadMs: number): Array<{ clip: C
  */
 export function syncVideo(tracks: Track[], playheadMs: number, isPlaying: boolean, rate: number): void {
   const live = new Set<string>();
+  const now = performance.now();
 
   for (const { clip, offsetMs } of visibleVideoClips(tracks, playheadMs)) {
     const url = clip.mediaUrl!;
     const entry = acquire(url);
     if (entry.failed) continue;
     live.add(url);
+    entry.lastUsedAt = now;
 
     /* A live capture has one position and it is now. Seeking it throws,
        pausing it loses frames for good. Leave it running. */
@@ -337,11 +448,21 @@ export function syncVideo(tracks: Track[], playheadMs: number, isPlaying: boolea
 
     if (scrub) {
       if (!entry.el.paused) entry.el.pause();
-      if (Math.abs(entry.el.currentTime - sourceSeconds) > 0.02 && !entry.el.seeking) {
+      if (shouldScrubSeek({
+        currentTime: entry.el.currentTime,
+        requestedTime: entry.requestedTime,
+        target: sourceSeconds,
+        seeking: entry.el.seeking,
+      })) {
+        entry.requestedTime = sourceSeconds;
         try { entry.el.currentTime = sourceSeconds; } catch { /* not seekable yet */ }
       }
       continue;
     }
+
+    /* Playing again: the element owns its own position from here, so the
+       last scrub target must not veto the next seek. */
+    entry.requestedTime = null;
 
     const targetRate = Math.max(0.0625, Math.min(16, rate * (clip.speed?.multiplier ?? 1)));
     const signedDrift = sourceSeconds - entry.el.currentTime;
@@ -372,7 +493,42 @@ export function syncVideo(tracks: Track[], playheadMs: number, isPlaying: boolea
        sense and cannot be resumed from where it was paused. */
     if (entry.live) continue;
     if (!entry.el.paused) entry.el.pause();
+
+    /*
+      And after a while, released outright.
+
+      A paused <video> is not free: it holds a decoder, its buffered
+      ranges, and a held-frame canvas, and this map had no upper bound —
+      every clip ever passed under the playhead stayed resident for the
+      life of the page. On a session where several takes are reviewed one
+      after another that is several 4K decoders alive at once, which is
+      the shape of "it got slower the longer I used it". Kept long enough
+      that scrubbing back and forth across a cut re-uses the element
+      rather than rebuilding it.
+    */
+    if (videos.size > CACHE_SOFT_LIMIT && now - entry.lastUsedAt > IDLE_EVICT_MS) {
+      releaseVideo(url);
+    }
   }
+}
+
+/** Tear one element down without disturbing the rest of the cache. */
+function releaseVideo(url: string): void {
+  const entry = videos.get(url);
+  if (!entry) return;
+  try {
+    entry.el.pause();
+    entry.el.removeAttribute('src');
+    entry.el.load();
+    if (entry.lastFrameCanvas) {
+      entry.lastFrameCanvas.width = 0;
+      entry.lastFrameCanvas.height = 0;
+      entry.lastFrameCanvas = undefined;
+    }
+  } catch { /* already torn down */ }
+  entry.seekWaiters.splice(0).forEach((fn) => fn());
+  videos.delete(url);
+  generation++;
 }
 
 /* ── Deterministic seeking, for export ──────────────────────────── */

@@ -1,17 +1,19 @@
 import React, { useCallback, useEffect, useState } from "react";
-import { MacCloseButton } from "./components/ui";
+import { DialogCloseButton } from "./components/ui";
 import { StudioTitleBar } from "./components/layout/StudioTitleBar";
 import { SidebarDock } from "./components/sidebar/SidebarDock";
 import { ACTIVITY_BAR_WIDTH } from "./components/sidebar/ActivityBar";
 import type { SidebarTabId } from "./components/sidebar/ActivityBar";
 import { StudioChat } from "./components/chat/StudioChat";
 import { WorkspacePanel } from "./components/workspace/WorkspacePanel";
-import { CursorSettingsModal } from "./components/modals/CursorSettingsModal";
+import { SettingsPage } from "./components/settings/SettingsPage";
 import { CommandPaletteModal } from "./components/modals/CommandPaletteModal";
 import { SkillsModal } from "./components/modals/SkillsModal";
+import { GeminiKeyModal } from "./components/modals/GeminiKeyModal";
 import { MediaConsentModal } from "./components/modals/MediaConsentModal";
 import { RecorderModal } from "./components/modals/RecorderModal";
 import { useRecorderDialogStore } from "./store/recorderDialogStore";
+import { useRecorderStore } from "./video/store/recorderStore";
 import { DiffInspectorModal } from "./components/diff/DiffInspectorModal";
 import { BenchmarkGapAnalyzer } from "./components/benchmark/BenchmarkGapAnalyzer";
 import { CopilotLiveEditController } from "./components/editor/CopilotLiveEditController";
@@ -53,7 +55,6 @@ const DEFAULT_SIDEBAR_WIDTH = 212;
 
 export default function App() {
   const [activeView, setActiveView] = useState("agent");
-  const [isSettingsOpen, setSettingsOpen] = useState(false);
   const [isCommandPaletteOpen, setCommandPaletteOpen] = useState(false);
   const [isGitHubOpen, setGitHubOpen] = useState(false);
   const [isUpdateOpen, setUpdateOpen] = useState(false);
@@ -70,6 +71,9 @@ export default function App() {
   );
 
   const {
+    settingsView,
+    openSettings,
+    closeSettings,
     isBenchmarkModalOpen,
     setBenchmarkModalOpen,
     clearEngineSession,
@@ -230,7 +234,8 @@ export default function App() {
           break;
         case ",":
           event.preventDefault();
-          setSettingsOpen((previous) => !previous);
+          if (settingsView.open) closeSettings();
+          else openSettings();
           break;
         case "\\":
           event.preventDefault();
@@ -263,6 +268,41 @@ export default function App() {
     const bridge = window.teminali;
     if (!bridge) return;
     return bridge.menu.on("menu:record-screen", () => openRecorder());
+  }, [openRecorder]);
+
+  /*
+    A finished take always gets a surface.
+
+    Dismissing the recorder dialog mid-take is a supported thing to do —
+    the floating bar is the control while the main window is hidden — and
+    stopping from that bar left the recorder in `review` (or `error`)
+    with no mounted component rendering either. The files were on disk
+    the whole time; there was simply nowhere to see them, no way to reach
+    "Open on the timeline", and from outside that is indistinguishable
+    from the recording having been thrown away. It was reported exactly
+    that way, for a capture of Teminali OS's own window.
+
+    `recorderStore` used to try to fix this itself with an `isOpen` flag,
+    which stopped meaning anything the day the recorder became a dialog.
+    It lives here instead because everything under `src/video/` is
+    workspace-agnostic, and the dialog's own store is app-side.
+
+    Subscribed rather than rendered off a selector: `App` must not
+    re-render on every phase change of a recording, and the only thing
+    wanted is the EDGE into a phase that has something to show.
+  */
+  useEffect(() => {
+    let previous = useRecorderStore.getState().phase;
+    return useRecorderStore.subscribe((state) => {
+      const phase = state.phase;
+      if (phase === previous) return;
+      previous = phase;
+      /* `processing` as well as the two that follow it, so a slow remux
+         shows its progress bar rather than appearing at the end. */
+      if (phase === "processing" || phase === "review" || phase === "error") {
+        if (!useRecorderDialogStore.getState().isOpen) openRecorder();
+      }
+    });
   }, [openRecorder]);
 
   // "Open Video Project…" (⌥⌘O) and "Save Video Project…" (⌥⌘S).
@@ -395,6 +435,12 @@ export default function App() {
           onOpenIde={() => focusOrOpen({ kind: "file" })}
         />
 
+        {/* Settings is a page, so it takes the workspace rather than floating
+            over it: the title bar and its window controls stay put, and Back
+            or Escape returns the workspace exactly as it was. */}
+        {settingsView.open ? (
+          <SettingsPage />
+        ) : (
         <div className="flex-1 min-h-0 flex">
           <SidebarDock
             tab={sidebarTab}
@@ -412,8 +458,8 @@ export default function App() {
               setActiveView("agent");
               setSidebarTab("chats");
             }}
-            onOpenCustomize={() => setSettingsOpen(true)}
-            onOpenSettings={() => setSettingsOpen(true)}
+            onOpenCustomize={() => openSettings()}
+            onOpenSettings={() => openSettings()}
             onConnectGitHub={() => setGitHubOpen(true)}
             updates={updates}
             onOpenUpdate={() => setUpdateOpen(true)}
@@ -428,6 +474,7 @@ export default function App() {
 
           <WorkspacePanel />
         </div>
+        )}
       </div>
 
       {/* ── Version, updates and rollback ───────────────────────────────
@@ -439,15 +486,15 @@ export default function App() {
 
       {/* ── Modal layer ─────────────────────────────────────────────────── */}
 
-      <CursorSettingsModal isOpen={isSettingsOpen} onClose={() => setSettingsOpen(false)} />
       <CommandPaletteModal
         isOpen={isCommandPaletteOpen}
         onClose={() => setCommandPaletteOpen(false)}
-        onOpenSettings={() => setSettingsOpen(true)}
+        onOpenSettings={() => openSettings()}
       />
       <GitHubModal isOpen={isGitHubOpen} onClose={() => setGitHubOpen(false)} />
       <UpdateModal updates={updates} isOpen={isUpdateOpen} onClose={() => setUpdateOpen(false)} />
       <SkillsModal />
+      <GeminiKeyModal />
       <DiffInspectorModal />
       {/* App-level, not panel-level: the video tool bridge is registered at
           module load and serves agent CLIs whether or not a video panel is
@@ -462,7 +509,7 @@ export default function App() {
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4">
           <div className="relative w-full max-w-4xl max-h-[85vh] bg-surface-sunken border border-edge rounded-xl shadow-modal overflow-y-auto">
             <div className="absolute top-3 right-3 z-10">
-              <MacCloseButton onClose={() => setBenchmarkModalOpen(false)} size={14} />
+              <DialogCloseButton onClose={() => setBenchmarkModalOpen(false)} size={14} />
             </div>
             <BenchmarkGapAnalyzer />
           </div>

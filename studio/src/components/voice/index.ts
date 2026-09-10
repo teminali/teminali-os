@@ -7,3 +7,8 @@ export * from "./VoiceSettingsPanel";
 export * from "./VoiceEnrolment";
 export * from "./EnrolVoiceModal";
 export * from "./AstraVoiceOrb";
+export * from "./TemiCanvasOrb";
+export * from "./TemiTranscript";
+export * from "./TemiActivityDialog";
+export * from "./TemiStagePanels";
+export * from "./TemiVoiceStage";

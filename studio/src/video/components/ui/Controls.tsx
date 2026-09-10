@@ -395,13 +395,31 @@ export const ToggleRow: React.FC<{
   checked: boolean;
   onChange: (v: boolean) => void;
   hint?: string;
-}> = ({ label, checked, onChange, hint }) => (
-  <label className="flex items-center justify-between gap-3 cursor-pointer group/toggle min-h-[var(--h-sm)]">
+  /**
+   * The switch cannot apply here, and the row says so.
+   *
+   * A control that silently does nothing is worse than a missing one:
+   * the operator sets it, believes it, and finds out from the result.
+   * A disabled row still shows its label and hint, so the hint is where
+   * the reason goes.
+   */
+  disabled?: boolean;
+}> = ({ label, checked, onChange, hint, disabled = false }) => (
+  <label
+    className={`flex items-center justify-between gap-3 group/toggle min-h-[var(--h-sm)] ${
+      disabled ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'
+    }`}
+  >
     <span className="flex flex-col min-w-0 gap-0.5">
       <span className="prop-label group-hover/toggle:text-spectrum-text transition-colors">{label}</span>
       {hint && <span className="text-micro text-spectrum-textFaint truncate leading-tight">{hint}</span>}
     </span>
-    <input type="checkbox" checked={checked} onChange={(e) => onChange(e.target.checked)} />
+    <input
+      type="checkbox"
+      checked={checked}
+      disabled={disabled}
+      onChange={(e) => onChange(e.target.checked)}
+    />
   </label>
 );
 

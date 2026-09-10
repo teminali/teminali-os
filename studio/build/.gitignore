@@ -1,0 +1,4 @@
+# Written by afterPack.cjs at pack time from entitlements.mac.plist plus the
+# WebAuthn keychain access group. Generated because the group carries an Apple
+# team ID, which lives in CI as a secret rather than in this repo.
+entitlements.mac.generated.plist

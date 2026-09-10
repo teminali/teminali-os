@@ -413,6 +413,25 @@ interface CompositorOptions {
   corner?: 'top-left' | 'top-right' | 'bottom-left' | 'bottom-right';
   sizePct?: number;
   mirror?: boolean;
+  /** The height being broadcast, from the operator's bitrate choice. */
+  broadcastHeight?: number;
+}
+
+/**
+ * The height the operator asked to broadcast, read back off the bitrate.
+ *
+ * The rail offers three pairs — 720p at 2.5M, 1080p at 4.5M, 1440p at 8M —
+ * so the bitrate IS the resolution choice; there is no second control to
+ * consult and inventing one would be a third place for the answer to
+ * disagree with itself. An unrecognised rate falls to 1080p rather than
+ * to the display's own size, because the failure that matters is
+ * streaming 5K down a 4.5 Mbps pipe.
+ */
+function broadcastHeightFor(bitrateKbps: number | undefined): number {
+  if (!bitrateKbps) return 1080;
+  if (bitrateKbps <= 3000) return 720;
+  if (bitrateKbps >= 7000) return 1440;
+  return 1080;
 }
 
 function createLiveCompositor(
@@ -425,8 +444,24 @@ function createLiveCompositor(
     const canvas = document.createElement('canvas');
     if (!canvas.captureStream) return null;
     const screenSettings = screenTrack.getSettings?.() || {};
-    canvas.width = screenSettings.width || 1920;
-    canvas.height = screenSettings.height || 1080;
+    /*
+      Sized to the BROADCAST, not to the display.
+
+      This took the screen track's own dimensions, so a 3024x1964 laptop
+      composited 5.9 million pixels a frame and handed them to an encoder
+      the operator had set to 4.5 Mbps for 1080p. Every one of those extra
+      pixels costs fill rate, encoder time and upstream bandwidth, and
+      then the service scales them back down anyway. `broadcastHeight`
+      comes from the bitrate the operator picked, which is the only place
+      that decision is actually expressed.
+    */
+    const sourceW = screenSettings.width || 1920;
+    const sourceH = screenSettings.height || 1080;
+    const targetH = options.broadcastHeight || 1080;
+    const fit = sourceH > targetH ? targetH / sourceH : 1;
+    const even = (n: number) => Math.max(2, Math.round(n / 2) * 2);
+    canvas.width = even(sourceW * fit);
+    canvas.height = even(sourceH * fit);
     const ctx = canvas.getContext('2d');
     if (!ctx) return null;
 
@@ -453,9 +488,16 @@ function createLiveCompositor(
       if (!active) return;
       lastRenderTime = performance.now();
       try {
-        if (screenEl.videoWidth > 0 && canvas.width !== screenEl.videoWidth) {
-          canvas.width = screenEl.videoWidth;
-          canvas.height = screenEl.videoHeight;
+        /* The display can change resolution mid-take. Follow its SHAPE,
+           still inside the broadcast's height. */
+        if (screenEl.videoWidth > 0 && screenEl.videoHeight > 0) {
+          const s = screenEl.videoHeight > targetH ? targetH / screenEl.videoHeight : 1;
+          const w = even(screenEl.videoWidth * s);
+          const h = even(screenEl.videoHeight * s);
+          if (canvas.width !== w || canvas.height !== h) {
+            canvas.width = w;
+            canvas.height = h;
+          }
         }
         ctx.drawImage(screenEl, 0, 0, canvas.width, canvas.height);
 
@@ -518,10 +560,21 @@ function createLiveCompositor(
 
     /* Hybrid loop: requestAnimationFrame handles vsync rendering when visible;
        an interval timer acts as a watchdog to ensure frames keep rendering at full
-       framerate even if Chromium throttles rAF when the main window is hidden. */
+       framerate even if Chromium throttles rAF when the main window is hidden.
+
+       The rAF half is RATE-LIMITED, and it was not. `render()` ran once
+       per vsync — 120 times a second on a ProMotion display, 144 on a
+       gaming laptop — to feed a `captureStream(30)` that samples thirty.
+       Three quarters of every composite was encoded by nobody and thrown
+       away, while a live take is precisely the moment the machine has an
+       encoder, a screen capture and a camera to serve as well. The
+       watchdog keeps its own schedule; it exists for when rAF stops. */
     const loop = () => {
       if (!active) return;
-      render();
+      /* A frame early by less than a tenth of the interval is a frame due:
+         vsync rarely divides evenly into the target rate, and demanding
+         the full interval every time drops every other frame. */
+      if (performance.now() - lastRenderTime >= intervalMs * 0.9) render();
       animId = requestAnimationFrame(loop);
     };
     animId = requestAnimationFrame(loop);
@@ -1036,6 +1089,7 @@ export async function startCapture(
         streams,
         displayId: settings.sourceKind === 'screen' ? settings.displayId : null,
         hideWindow: settings.hideWindow,
+        sourceId: settings.sourceId,
         live: settings.live,
       });
       if (!begun.ok) {
@@ -1147,6 +1201,7 @@ export async function startCapture(
           corner: settings.cameraCorner,
           sizePct: settings.cameraSizePct,
           mirror: settings.mirrorCamera,
+          broadcastHeight: broadcastHeightFor(settings.live?.bitrateKbps),
         });
         if (comp) {
           liveVideoTrack = comp.track;

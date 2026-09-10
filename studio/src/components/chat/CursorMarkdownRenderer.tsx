@@ -2,12 +2,29 @@ import React, { useState } from "react";
 import { ChevronDown, ChevronUp, Maximize2, Minimize2 } from "lucide-react";
 import { CodeSnippet } from "../ui/CodeSnippet";
 import { tokenizeInline } from "../../services/markdown";
+import { openLink } from "../../services/linkOpen";
 
 export interface CursorMarkdownRendererProps {
   content: string;
   isStreaming?: boolean;
   /** Denser type for user bubbles, roomier for assistant answers. */
   compact?: boolean;
+  /**
+   * Which surface this is drawn on.
+   *
+   * `panel` is the chat column and the update notes: 13px on the token ink
+   * ramp, where a `strong` earns `--text-bright` against dimmer body text.
+   * `stage` is the voice screen, which is 16px prose in its own palette on
+   * black — there the colour is the caller's and emphasis is carried by weight
+   * alone, because brightening text that is already #f3f3f3 does nothing.
+   */
+  scale?: "panel" | "stage";
+  /**
+   * Rendered inside the final paragraph rather than after it — the live caret,
+   * which has to sit at the end of the sentence being spoken rather than
+   * orphaned on the line below it.
+   */
+  trailing?: React.ReactNode;
 }
 
 type Block =
@@ -153,7 +170,7 @@ function parseBlocks(raw: string): Block[] {
   return blocks;
 }
 
-const Inline: React.FC<{ text: string }> = ({ text }) => (
+const Inline: React.FC<{ text: string; stage?: boolean }> = ({ text, stage = false }) => (
   <>
     {tokenizeInline(text).map((token, index) => {
       switch (token.type) {
@@ -164,11 +181,11 @@ const Inline: React.FC<{ text: string }> = ({ text }) => (
             </code>
           );
         case "bold":
-          return <strong key={index} className="font-semibold text-ink-bright">{token.value}</strong>;
+          return <strong key={index} className={`font-semibold ${stage ? "" : "text-ink-bright"}`}>{token.value}</strong>;
         case "italic":
-          return <em key={index} className="italic text-ink-high">{token.value}</em>;
+          return <em key={index} className={`italic ${stage ? "" : "text-ink-high"}`}>{token.value}</em>;
         case "boldItalic":
-          return <strong key={index} className="font-semibold italic text-ink-bright">{token.value}</strong>;
+          return <strong key={index} className={`font-semibold italic ${stage ? "" : "text-ink-bright"}`}>{token.value}</strong>;
         case "strike":
           return <span key={index} className="line-through text-ink-placeholder">{token.value}</span>;
         case "link":
@@ -178,6 +195,15 @@ const Inline: React.FC<{ text: string }> = ({ text }) => (
               href={token.href}
               target="_blank"
               rel="noreferrer noopener"
+              /* Every link in the app goes through `openLink`, which honours the
+                 Links preference — in-app panel or system browser. The href and
+                 target stay so the context menu, middle-click and "copy link
+                 address" keep working; this only intercepts the plain click. */
+              onClick={(event) => {
+                if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+                event.preventDefault();
+                openLink(token.href);
+              }}
               className="text-reason underline decoration-reason/40 underline-offset-2 hover:decoration-reason transition-colors"
             >
               {token.value}
@@ -221,7 +247,10 @@ export const CursorMarkdownRenderer: React.FC<CursorMarkdownRendererProps> = ({
   content,
   isStreaming = false,
   compact = false,
+  scale = "panel",
+  trailing,
 }) => {
+  const stage = scale === "stage";
   const [expandedDiagram, setExpandedDiagram] = useState(false);
   // Keyed by block index: block order is stable across a streaming render, so a
   // block the reader opened stays open as later blocks arrive.
@@ -231,9 +260,38 @@ export const CursorMarkdownRenderer: React.FC<CursorMarkdownRendererProps> = ({
   const blocks = parseBlocks(content);
   const lastCodeIndex = blocks.reduce((last, block, index) => (block.kind === "code" ? index : last), -1);
   const body = compact ? "text-xs" : "text-[13px]";
+  // The stage's own prose metrics, and `text-current` so the voice screen's
+  // palette governs rather than the token ramp — see `scale` on the props.
+  const shell = stage
+    ? "markdown-body font-sans text-[16px] text-current leading-[1.75] space-y-4"
+    : `markdown-body font-sans ${body} text-ink-prose leading-[1.7] space-y-2.5`;
+  // The last paragraph takes the caret. Anything else (a list, a table, a code
+  // block) has no sentence to end, so it falls through to a trailing sibling.
+  const inlineTrailingAt =
+    trailing && blocks[blocks.length - 1]?.kind === "paragraph" ? blocks.length - 1 : -1;
 
   const headingClass = (level: number) =>
-    level <= 1
+    /*
+      Calmed by weight and spacing, not by shrinking.
+
+      A turn here is usually one or two spoken sentences, so a heading at
+      document weight — 22px over 16px prose — turned a two-line answer into a
+      report. The first correction took the sizes down to 18/17/16, which
+      overshot: an h1 a hair off body text reads as small rather than as calm.
+      What does the work is the weight and the space around a heading; the size
+      only has to say "this is a heading", and 20/18/17 says it. The deepest
+      level stops being a heading at all and becomes a label — the one thing
+      here set below prose, because case and tracking already mark it as chrome.
+    */
+    stage
+      ? level <= 1
+        ? "text-[20px] font-semibold tracking-tight mt-5 mb-1.5"
+        : level === 2
+        ? "text-[18px] font-semibold tracking-tight mt-4 mb-1"
+        : level === 3
+        ? "text-[17px] font-semibold mt-3.5 mb-1"
+        : "text-[14px] font-semibold uppercase tracking-wider opacity-70 mt-3.5 mb-1"
+      : level <= 1
       ? "text-[15px] font-bold text-ink-bright tracking-tight mt-5 mb-2 pb-1.5 border-b border-edge"
       : level === 2
       ? "text-[14px] font-semibold text-ink-bright tracking-tight mt-4 mb-1.5"
@@ -242,7 +300,7 @@ export const CursorMarkdownRenderer: React.FC<CursorMarkdownRendererProps> = ({
       : "text-xs font-semibold text-ink-prose uppercase tracking-wider mt-3 mb-1";
 
   return (
-    <div className={`markdown-body font-sans ${body} text-ink-prose leading-[1.7] space-y-2.5`}>
+    <div className={shell}>
       {blocks.map((block, index) => {
         switch (block.kind) {
           case "code": {
@@ -283,8 +341,14 @@ export const CursorMarkdownRenderer: React.FC<CursorMarkdownRendererProps> = ({
                  fill here is what made this read as a widget dropped into the
                  reply instead of as part of it. */
               <div key={index} className="my-3">
+              {/* The stage's table inherits prose size rather than setting its
+                  own. It was dropped to 14px to stop a three-row table being
+                  louder than the sentence around it, which made the densest
+                  block on the screen also the smallest — the one thing nobody
+                  can read. Nothing on this surface is smaller than the sentence
+                  it sits in; the calm comes from the heading scale instead. */}
               <div className="lit rounded-xl overflow-x-auto">
-                <table className="w-full text-left border-collapse text-md">
+                <table className={`w-full text-left border-collapse ${stage ? "" : "text-md"}`}>
                   <thead>
                     <tr className="border-b border-edge">
                       {block.headers.map((header, headerIndex) => (
@@ -294,7 +358,7 @@ export const CursorMarkdownRenderer: React.FC<CursorMarkdownRendererProps> = ({
                           className="px-3.5 py-2.5 font-semibold text-ink-bright whitespace-nowrap"
                           style={{ textAlign: block.align[headerIndex] || "left" }}
                         >
-                          <Inline text={header} />
+                          <Inline text={header} stage={stage} />
                         </th>
                       ))}
                     </tr>
@@ -311,7 +375,7 @@ export const CursorMarkdownRenderer: React.FC<CursorMarkdownRendererProps> = ({
                             className="px-3.5 py-2.5 text-ink-prose align-top"
                             style={{ textAlign: block.align[cellIndex] || "left" }}
                           >
-                            <Inline text={cell} />
+                            <Inline text={cell} stage={stage} />
                           </td>
                         ))}
                       </tr>
@@ -335,17 +399,17 @@ export const CursorMarkdownRenderer: React.FC<CursorMarkdownRendererProps> = ({
             return React.createElement(
               `h${Math.min(6, block.level)}`,
               { key: index, className: headingClass(block.level) },
-              <Inline text={block.text} />,
+              <Inline text={block.text} stage={stage} />,
             );
 
           case "quote":
             return (
               <blockquote
                 key={index}
-                className="my-2.5 pl-3.5 py-1 border-l-2 border-edge-strong text-ink-prose italic"
+                className={`my-2.5 pl-3.5 py-1 border-l-2 border-edge-strong italic ${stage ? "" : "text-ink-prose"}`}
               >
                 {block.lines.map((line, lineIndex) => (
-                  <p key={lineIndex} className="my-0.5"><Inline text={line} /></p>
+                  <p key={lineIndex} className="my-0.5"><Inline text={line} stage={stage} /></p>
                 ))}
               </blockquote>
             );
@@ -374,7 +438,7 @@ export const CursorMarkdownRenderer: React.FC<CursorMarkdownRendererProps> = ({
                 {listItems.map((item, itemIndex) => (
                   <li
                     key={itemIndex}
-                    className="flex gap-2 text-ink-prose"
+                    className={`flex gap-2 ${stage ? "" : "text-ink-prose"}`}
                     style={{ marginLeft: `${item.depth * 16}px` }}
                   >
                     {item.checked === undefined ? (
@@ -395,7 +459,7 @@ export const CursorMarkdownRenderer: React.FC<CursorMarkdownRendererProps> = ({
                       </span>
                     )}
                     <span className={item.checked ? "line-through text-ink-placeholder" : ""}>
-                      <Inline text={item.text} />
+                      <Inline text={item.text} stage={stage} />
                     </span>
                   </li>
                 ))}
@@ -414,12 +478,14 @@ export const CursorMarkdownRenderer: React.FC<CursorMarkdownRendererProps> = ({
 
           default:
             return (
-              <p key={index} className="leading-[1.7] text-ink-prose">
-                <Inline text={block.text} />
+              <p key={index} className={stage ? "leading-[1.75]" : "leading-[1.7] text-ink-prose"}>
+                <Inline text={block.text} stage={stage} />
+                {index === inlineTrailingAt && trailing}
               </p>
             );
         }
       })}
+      {trailing && inlineTrailingAt === -1 ? trailing : null}
     </div>
   );
 };

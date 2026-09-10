@@ -1,6 +1,6 @@
 import React from "react";
 import { Github } from "lucide-react";
-import { MacCloseButton } from "../ui";
+import { DialogCloseButton } from "../ui";
 import { GitHubConnect } from "./GitHubConnect";
 
 /**
@@ -35,7 +35,7 @@ export const GitHubModal: React.FC<{ isOpen: boolean; onClose: () => void }> = (
           <Github size={15} className="text-ink-prose" />
           <span className="text-sm text-ink-bright">Connect GitHub</span>
           <div className="flex-1" />
-          <MacCloseButton onClose={onClose} />
+          <DialogCloseButton onClose={onClose} />
         </div>
         <div className="flex-1 min-h-0 overflow-y-auto p-4">
           <GitHubConnect onCloned={onClose} />

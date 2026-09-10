@@ -4,6 +4,7 @@
 import type { ToolCall } from "../types";
 import { normalizeWorkspacePath } from "./liveEditProtocol.ts";
 import { htmlToText, looksLikeHtml } from "./readablePage.ts";
+import type { RunMode } from "./preferences.ts";
 
 export type CommandRisk = "auto" | "confirm" | "blocked";
 
@@ -132,6 +133,45 @@ const BLOCKED_PATTERNS: Array<{ pattern: RegExp; reason: string }> = [
   { pattern: /\bhistory\b|\bcrontab\b/, reason: "shell history or scheduler access" },
   { pattern: />\s*\/dev\/(sd|disk|nvme)/, reason: "raw device write" },
 ];
+
+/**
+ * Commands that destroy something rather than change it.
+ *
+ * The distinction this draws is recoverability, not danger. An agent that
+ * writes a bad file in `auto` leaves the old contents in the change dock and in
+ * git; an agent that deletes the file leaves nothing, and `git checkout` cannot
+ * restore what was never committed. So these keep asking even when the operator
+ * has said everything else may run — that exception is the whole reason an auto
+ * mode can be offered at all.
+ *
+ * Deliberately matched on the line rather than per segment: `x && rm y` deletes
+ * whichever half of it the classifier looks at. Anything here that is also in
+ * BLOCKED_PATTERNS never reaches this function — blocked is refused first.
+ */
+const DESTRUCTIVE_PATTERNS: RegExp[] = [
+  /(^|[|;&]\s*)(rm|rmdir|unlink|shred|srm)\b/,
+  /(^|[|;&]\s*)trash\b/,
+  /\bgit\b[^|;&]*\b(clean|reset\s+--hard)\b/,
+  /\bfind\b[^|;&]*\s-delete\b/,
+  /\bfind\b[^|;&]*\s-(?:exec|execdir|ok|okdir)\s+(?:.*\/)?(?:rm|rmdir|unlink|shred)\b/,
+  /\btruncate\b[^|;&]*\s-s\s*0\b/,
+  /\bmkfs|\bdd\b[^|;&]*\bof=/,
+  /\b(npm|pnpm|yarn)\b[^|;&]*\b(uninstall|remove|rm)\b/,
+  /\bdocker\b[^|;&]*\b(rm|rmi|prune)\b/,
+];
+
+/**
+ * Would running this line delete something?
+ *
+ * Answers on the raw line, so a redirection that empties a file (`> keep.txt`)
+ * counts too — an emptied file is a deleted file with the name left behind.
+ */
+export function isDestructiveCommand(command: string): boolean {
+  const normalized = String(command ?? "").trim();
+  if (!normalized) return false;
+  if (/(?<![-=>|])>(?!=|>)\s*\S/.test(normalized) && !/>>/.test(normalized)) return true;
+  return DESTRUCTIVE_PATTERNS.some((pattern) => pattern.test(normalized));
+}
 
 /** Splits a command line into the segments a shell would run separately. */
 function segments(command: string): string[] {
@@ -402,8 +442,14 @@ export interface RunAgentCommandsOptions {
   onToolCall?: (toolCall: ToolCall) => void;
   /** Resolves true when a human approves a state-changing command. */
   approve?: (request: AgentCommandRequest) => Promise<boolean>;
-  /** When true, runs all non-blocked commands seamlessly without manual confirmation. */
-  autoApproveAll?: boolean;
+  /**
+   * How much may run unattended. Omitted means `review`, which is what the
+   * runner did before the mode existed: auto-risk commands run, confirm-risk
+   * commands ask.
+   */
+  runMode?: RunMode;
+  /** Keeps a delete-shaped command asking even under `auto`. Default true. */
+  protectDeletions?: boolean;
   maxCommands?: number;
   maxOutputChars?: number;
 }
@@ -425,9 +471,9 @@ const HTML_CEILING_CHARS = 512_000;
 
 /**
  * Executes the commands a model explicitly requested and returns what actually
- * happened. A blocked command never runs; a state-changing command runs only
- * when `approve` says so or when autoApproveAll is enabled. Nothing here reports
- * success for a command that did not execute.
+ * happened. A blocked command never runs; what else needs a human first is
+ * `runMode`'s decision. Nothing here reports success for a command that did not
+ * execute.
  */
 export async function runAgentCommands(
   text: string,
@@ -458,14 +504,33 @@ export async function runAgentCommands(
       continue;
     }
 
-    if (request.risk === "confirm") {
-      const approved = options.autoApproveAll
-        ? true
-        : options.approve
-          ? await options.approve(request)
-          : false;
+    /*
+      Three modes, one question: does a human see this before it runs?
+
+      `ask` promotes an auto-risk command to a prompt — the operator has said
+      they want to see everything, and a read-only command is still a command
+      run on their machine. `auto` demotes a confirm-risk command to a run,
+      except a destructive one, which `protectDeletions` keeps asking about.
+      `review` is neither and is what the runner always did.
+
+      A blocked command is refused above and reaches none of this.
+    */
+    const runMode = options.runMode ?? "review";
+    const protectDeletions = options.protectDeletions ?? true;
+    const destructive = isDestructiveCommand(request.command);
+    const needsHuman =
+      runMode === "ask" ||
+      (request.risk === "confirm" && (runMode !== "auto" || (protectDeletions && destructive)));
+
+    if (needsHuman) {
+      const approved = options.approve ? await options.approve(request) : false;
       if (!approved) {
-        const note = `Skipped pending approval: ${request.reason}.`;
+        // The model reads this note and learns why nothing ran, so it names the
+        // reason the command was put to a human — which under `ask` is the mode
+        // itself, not the classifier's verdict about the command.
+        const why =
+          request.risk === "auto" ? "every command is set to ask first" : request.reason;
+        const note = `Skipped pending approval: ${why}.`;
         emit("error", note);
         executions.push({ command: request.command, risk: request.risk, executed: false, code: null, output: "", truncated: false, note });
         continue;
@@ -684,13 +749,40 @@ export interface ApprovalGate {
   /** Denies the outstanding request — for cancellation and teardown. */
   cancel: () => void;
   pending: () => AgentCommandRequest | null;
+  /**
+   * Adopt the operator's saved allowlist wholesale.
+   *
+   * The stored list is the truth, not a seed: an entry removed in settings has
+   * to stop allowing things in the run that is already open, or the row the
+   * operator just deleted goes on working until they quit the app.
+   */
+  replaceAllowlist: (entries: readonly string[]) => void;
 }
 
-export function createApprovalGate(onPendingChange?: (pending: AgentCommandRequest | null) => void): ApprovalGate {
+export interface ApprovalGateOptions {
+  /**
+   * Executables answered "always" in an earlier session, from the operator's
+   * saved allowlist. The gate treats these exactly as it treats one remembered
+   * a minute ago — the point of saving them was that the answer outlives the
+   * window.
+   */
+  allowlist?: readonly string[];
+  /**
+   * A new "always" was just granted. The caller persists it; the gate does not
+   * know where preferences live and should not. Fires only for an entry the
+   * gate did not already hold, so a re-grant does not churn storage.
+   */
+  onRemember?: (scope: string) => void;
+}
+
+export function createApprovalGate(
+  onPendingChange?: (pending: AgentCommandRequest | null) => void,
+  options: ApprovalGateOptions = {},
+): ApprovalGate {
   let resolver: ((approved: boolean) => void) | null = null;
   let current: AgentCommandRequest | null = null;
-  /** Executables the operator has already said yes to for this session. */
-  const remembered = new Set<string>();
+  /** Executables the operator has said yes to — this session, or an earlier one. */
+  const remembered = new Set<string>(options.allowlist ?? []);
 
   const set = (next: AgentCommandRequest | null) => {
     current = next;
@@ -702,7 +794,13 @@ export function createApprovalGate(onPendingChange?: (pending: AgentCommandReque
     const asked = current;
     resolver = null;
     set(null);
-    if (approved && remember && asked) remembered.add(commandHead(asked.command));
+    if (approved && remember && asked) {
+      const scope = commandHead(asked.command);
+      if (scope && !remembered.has(scope)) {
+        remembered.add(scope);
+        options.onRemember?.(scope);
+      }
+    }
     resolve?.(approved);
   };
 
@@ -724,5 +822,9 @@ export function createApprovalGate(onPendingChange?: (pending: AgentCommandReque
       if (resolver) settle(false);
     },
     pending: () => current,
+    replaceAllowlist(entries) {
+      remembered.clear();
+      for (const entry of entries) remembered.add(entry);
+    },
   };
 }

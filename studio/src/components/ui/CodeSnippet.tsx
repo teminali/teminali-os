@@ -12,6 +12,12 @@ import { useStudioStore } from "../../store/studioStore";
 import { highlightCode } from "../../utils/syntaxHighlight";
 import { useStickyScroll } from "../../hooks/useStickyScroll";
 
+/**
+ * A fenced block at or under this many lines opens rather than collapsing —
+ * a command, an import, a two-line patch. Above it, the card wins.
+ */
+const SHORT_SNIPPET_LINES = 6;
+
 export interface CodeSnippetProps {
   content: string;
   lang?: string;
@@ -55,10 +61,24 @@ export const CodeSnippet: React.FC<CodeSnippetProps> = ({
     }
   }
 
-  // When streaming, stay expanded. Once streaming finishes, minimize to compact card.
+  /*
+    A short snippet is its own summary.
+
+    Collapsing on settle is right for a file the model rewrote — thirty lines
+    of it would bury the sentence after it. It was wrong for the far more
+    common case: a one-line command, which collapsed into a card reading
+    "bash · 1 line · Expand" and hid the only thing the reader wanted. Anything
+    at or under `SHORT_SNIPPET_LINES` cannot flood a transcript, so it opens and
+    stays open; longer blocks keep the card. A manual toggle still wins over
+    both.
+  */
+  const shortEnough = content.split("\n").length <= SHORT_SNIPPET_LINES;
+
+  // When streaming, stay expanded. Once streaming finishes, minimize to compact
+  // card — unless it is short enough to simply show.
   const [isExpanded, setIsExpanded] = useState<boolean>(() => {
     if (defaultExpanded !== undefined) return defaultExpanded;
-    return isStreaming;
+    return isStreaming || shortEnough;
   });
 
   const [hasManuallyToggled, setHasManuallyToggled] = useState(false);
@@ -73,11 +93,11 @@ export const CodeSnippet: React.FC<CodeSnippetProps> = ({
 
   useEffect(() => {
     if (!isStreaming && !hasManuallyToggled) {
-      setIsExpanded(false);
+      setIsExpanded(shortEnough);
     } else if (isStreaming && !hasManuallyToggled) {
       setIsExpanded(true);
     }
-  }, [isStreaming, hasManuallyToggled]);
+  }, [isStreaming, hasManuallyToggled, shortEnough]);
 
   const handleToggle = () => {
     setHasManuallyToggled(true);

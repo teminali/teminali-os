@@ -57,10 +57,12 @@ import {
   type VoiceProvider,
   type VoiceSettings,
   type VoiceState,
+  type SpeechProgressEvent,
 } from "./types";
 import { readyToWarmNext } from "./speechStream";
 
-/** What the engine needs from the application around it. */
+export type { SpeechProgressEvent };
+
 export interface VoiceHost {
   /**
    * Hand an approved utterance to the chat.
@@ -76,6 +78,8 @@ export interface VoiceHost {
   isBusy: () => boolean;
   /** Cancel any active in-flight assistant generation or task. */
   interrupt?: () => void;
+  /** Real-time speech playback progress for synchronizing visual chat text. */
+  onSpeechProgress?: (event: SpeechProgressEvent) => void;
   /**
    * Run a short local completion. Used for the addressing tiebreak and the
    * transcript polish. Optional: without it both fall back to the rule layer.
@@ -129,7 +133,7 @@ export interface VoiceSnapshot {
 type Listener = (snapshot: VoiceSnapshot) => void;
 
 /** Sustained speech needed to count as a barge-in rather than a cough or speaker bleed. */
-const BARGE_IN_FRAMES = 18;
+const BARGE_IN_FRAMES = 10;
 /**
  * How little it takes to talk over the greeting: three frames, 60 ms.
  *
@@ -196,6 +200,7 @@ export class VoiceEngine {
   private isStreamDone = false;
   private suspendedSpeech: string[] | null = null;
   private currentlySpeakingText: string | null = null;
+  private totalSpokenCharsInTurn = 0;
   /*
     Which reply the audio in flight belongs to.
 
@@ -434,7 +439,7 @@ export class VoiceEngine {
    */
   private applyEndpointerWindow(): void {
     this.endpointer.configure({
-      minSilenceMs: Math.max(400, Math.round(this.settings.endpointSilenceMs * 0.7)),
+      minSilenceMs: Math.max(220, Math.round(this.settings.endpointSilenceMs * 0.5)),
       maxSilenceMs: Math.max(DEFAULT_ENDPOINTER.minUtteranceMs * 2, Math.round(this.settings.endpointSilenceMs * 2)),
     });
   }
@@ -806,7 +811,17 @@ export class VoiceEngine {
       return;
     }
 
-    if (isFinal) this.finalTranscript = this.finalTranscript ? `${this.finalTranscript} ${cleanPart}`.trim() : cleanPart;
+    if (isFinal) {
+      const trimmedFinal = this.finalTranscript.trim().toLowerCase();
+      const trimmedPart = cleanPart.trim().toLowerCase();
+      if (!trimmedFinal) {
+        this.finalTranscript = cleanPart;
+      } else if (trimmedFinal === trimmedPart || trimmedFinal.endsWith(trimmedPart)) {
+        // Skip duplicate final result delivered repeatedly by browser recogniser
+      } else {
+        this.finalTranscript = `${this.finalTranscript} ${cleanPart}`.trim();
+      }
+    }
     this.transcript = isFinal ? this.finalTranscript : `${this.finalTranscript} ${cleanPart}`.trim();
     if (this.state === "listening" && this.transcript) this.setState("hearing");
     this.emit();
@@ -1033,6 +1048,7 @@ export class VoiceEngine {
   }
 
   private async commitTurn(): Promise<void> {
+    this.totalSpokenCharsInTurn = 0;
     this.clearFinalFallback();
     this.awaitingFinal = false;
     const raw = cleanTranscript(this.transcript);
@@ -1042,8 +1058,6 @@ export class VoiceEngine {
     // by the time the gate saw it, and the foreign-language rule — the whole
     // point of carrying the language this far — could never fire.
     const language = this.turnLanguage;
-    this.transcript = "";
-    this.finalTranscript = "";
     this.turnLanguage = "";
     this.turnConfidence = -1;
     this.endpointer.reset();
@@ -1055,6 +1069,8 @@ export class VoiceEngine {
     const heard = echo.echoed ? echo.text : raw;
 
     if (!heard || isNonSpeechOrBlank(heard)) {
+      this.transcript = "";
+      this.finalTranscript = "";
       // Non-speech, blank audio, or our own voice. Resume where we left off.
       this.resumeSuspendedSpeech();
       return;
@@ -1304,6 +1320,8 @@ export class VoiceEngine {
     // A real instruction: it replaces whatever was being said or done.
     this.dropSpeech();
     this.interrupted = true;
+    this.suspendedSpeech = null;
+    this.speechQueue = [];
     if (hostBusy || wasSpeaking) this.callInterrupt();
 
     this.setState("repairing");
@@ -1470,6 +1488,11 @@ export class VoiceEngine {
   private async send(text: string): Promise<void> {
     const value = text.trim();
     this.pending = null;
+    this.transcript = "";
+    this.finalTranscript = "";
+    this.suspendedSpeech = null;
+    this.speechQueue = [];
+    this.totalSpokenCharsInTurn = 0;
     this.hasSpokenInSession = true;
     this.clearAutoSend();
     if (!value) {
@@ -1627,6 +1650,7 @@ export class VoiceEngine {
     this.clearSpeechWatchdog();
     this.graph.setDucked(false);
     this.level = 0;
+    this.totalSpokenCharsInTurn = 0;
     this.assistantTurnEndedAt = Date.now();
     if (this.state === "speaking" || this.state === "thinking") {
       this.setState(this.mode === "conversation" ? "listening" : "idle");
@@ -1634,6 +1658,13 @@ export class VoiceEngine {
     if (!this.streamingAsr && this.mode === "conversation" && this.state === "listening" && !this.session?.active) {
       void this.reopen();
     }
+    this.host.onSpeechProgress?.({
+      chunk: "",
+      charIndex: 0,
+      isChunkEnd: true,
+      isAllSpeechDone: true,
+      totalSpokenChars: 0,
+    });
     this.emit();
   }
 
@@ -1780,8 +1811,25 @@ export class VoiceEngine {
       const handle = await tts.speak({
         text,
         ...(prepared ? { prepared } : {}),
-        onStart: () => this.beginAudibleSpeech(epoch),
-        onBoundary: (charIndex) => this.warmNextBlock(tts, text, charIndex),
+        onStart: () => {
+          if (this.beginAudibleSpeech(epoch)) {
+            this.host.onSpeechProgress?.({
+              chunk: text,
+              charIndex: 0,
+              isChunkEnd: false,
+              totalSpokenChars: this.totalSpokenCharsInTurn,
+            });
+          }
+        },
+        onBoundary: (charIndex) => {
+          this.warmNextBlock(tts, text, charIndex);
+          this.host.onSpeechProgress?.({
+            chunk: text,
+            charIndex,
+            isChunkEnd: false,
+            totalSpokenChars: this.totalSpokenCharsInTurn + charIndex,
+          });
+        },
         language: this.settings.language === "auto" ? navigator.language : this.settings.language,
         voice: this.settings.ttsVoice ?? undefined,
         rate: paceFor(this.settings.ttsRate, text),
@@ -1796,6 +1844,13 @@ export class VoiceEngine {
           this.level = 0;
           this.currentlySpeakingText = null;
           this.synthesis = null;
+          this.totalSpokenCharsInTurn += text.length;
+          this.host.onSpeechProgress?.({
+            chunk: text,
+            charIndex: text.length,
+            isChunkEnd: true,
+            totalSpokenChars: this.totalSpokenCharsInTurn,
+          });
           this.echo.markEnded();
           void this.processSpeechQueue();
         },
@@ -1819,7 +1874,24 @@ export class VoiceEngine {
         try {
           const fallbackHandle = await fallback.speak({
             text,
-            onStart: () => this.beginAudibleSpeech(epoch),
+            onStart: () => {
+              if (this.beginAudibleSpeech(epoch)) {
+                this.host.onSpeechProgress?.({
+                  chunk: text,
+                  charIndex: 0,
+                  isChunkEnd: false,
+                  totalSpokenChars: this.totalSpokenCharsInTurn,
+                });
+              }
+            },
+            onBoundary: (charIndex) => {
+              this.host.onSpeechProgress?.({
+                chunk: text,
+                charIndex,
+                isChunkEnd: false,
+                totalSpokenChars: this.totalSpokenCharsInTurn + charIndex,
+              });
+            },
             language: this.settings.language === "auto" ? navigator.language : this.settings.language,
             voice: undefined,
             rate: paceFor(this.settings.ttsRate, text),
@@ -1834,6 +1906,13 @@ export class VoiceEngine {
               this.level = 0;
               this.currentlySpeakingText = null;
               this.synthesis = null;
+              this.totalSpokenCharsInTurn += text.length;
+              this.host.onSpeechProgress?.({
+                chunk: text,
+                charIndex: text.length,
+                isChunkEnd: true,
+                totalSpokenChars: this.totalSpokenCharsInTurn,
+              });
               this.echo.markEnded();
               void this.processSpeechQueue();
             },

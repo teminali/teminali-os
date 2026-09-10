@@ -3,7 +3,6 @@ import {
   ArrowLeft,
   ArrowRight,
   ExternalLink,
-  Loader2,
   Maximize2,
   Minimize2,
   MonitorSmartphone,
@@ -14,19 +13,27 @@ import {
   X,
 } from "lucide-react";
 import { isDesktopShell } from "./WindowControls";
-import { TrafficLights, IconButton, Menu, type MenuItem } from "../ui";
+import { WindowChrome } from "./WindowChrome";
+import { IconButton, Menu, type MenuItem } from "../ui";
 import { PANEL_DEFAULTS, usePanelStore, type PanelKind } from "../../store/panelStore";
 import { PanelGlyph } from "../workspace/PanelGlyph";
 import { useStudioStore } from "../../store/studioStore";
 import { PlatformService } from "../../services/platformService";
+import { CHROME_CLUSTER_WIDTH, CHROME_SIDE, resolveChromeStyle } from "../../services/appearance";
 import { ACTIVITY_BAR_WIDTH } from "../sidebar/ActivityBar";
-import { useProjectStore } from "../../video/store/projectStore";
+import { SETTINGS_RAIL_WIDTH } from "../settings/SettingsPage";
 
 /**
  * The window chrome, in three regions that line up with the three panes below:
  * sidebar controls on the left, the conversation title in the middle, and the
  * panel tab strip on the right. Keeping the strip up here — rather than inside
  * the panel — is what lets the panel itself be nothing but content.
+ *
+ * The window's own control cluster is a fourth region, and which end of the bar
+ * it takes is not a constant: macOS puts it left, where it shares the sidebar
+ * region with the toggle; Windows and Linux put it hard right, past the tab
+ * strip. So both ends are reserved from the resolved chrome style rather than
+ * from the layout — see `WindowChrome` and `services/appearance`.
  */
 
 export interface StudioTitleBarProps {
@@ -61,6 +68,8 @@ export const StudioTitleBar: React.FC<StudioTitleBarProps> = ({
   } = usePanelStore();
 
   const { sessionHistory, sessionHistoryIndex, goBackSession, goForwardSession } = useStudioStore();
+  const chromeStyle = useStudioStore((state) => state.appearance.chromeStyle);
+  const settingsOpen = useStudioStore((state) => state.settingsView.open);
   const [isAdmin, setIsAdmin] = useState(false);
   /*
     The overflow button's own copy of the panel menu.
@@ -83,6 +92,10 @@ export const StudioTitleBar: React.FC<StudioTitleBarProps> = ({
   const canGoForward = sessionHistoryIndex >= 0 && sessionHistoryIndex < sessionHistory.length - 1;
 
   const desktop = isDesktopShell();
+  // Resolved every render rather than memoised: it is two comparisons, and the
+  // operator can change it from Appearance while looking at this bar.
+  const chrome = resolveChromeStyle(chromeStyle);
+  const chromeSide = CHROME_SIDE[chrome];
   // The left region spans both halves of the dock — the activity bar and the
   // panel — so this border lands on the same pixel as the panel's own. When the
   // panel is collapsed the region shrinks to just enough room for the traffic
@@ -110,6 +123,42 @@ export const StudioTitleBar: React.FC<StudioTitleBarProps> = ({
       kind === "terminal" || kind === "side" || kind === "browser" ? open({ kind }) : focusOrOpen({ kind }),
   }));
 
+  /*
+    Settings took the workspace, so the bar gives up what the workspace owned.
+
+    Every control below — the sidebar toggle, the session arrows, the title,
+    Editor, IDE, the panel menu and the tab strip — acts on panes that are not
+    on screen while this page is up: pressing "Editor" opened a video panel
+    behind Settings, and ⌘B jogged the divider over a sidebar nobody could see.
+    What stays is the window's own business: the lights, the drag region and
+    double-click to zoom. The left region takes the rail's width so the two
+    borders are one line, and Back or Escape brings the whole bar back.
+  */
+  if (settingsOpen) {
+    return (
+      <header
+        className="flex items-stretch flex-shrink-0 select-none"
+        style={{ height: "var(--titlebar-h)", WebkitAppRegion: "drag" } as React.CSSProperties}
+        onDoubleClick={() => void window.teminali?.window.toggleMaximize()}
+      >
+        <div
+          className="flex items-center pl-[11px] pr-2 flex-shrink-0 border-r border-edge-chrome"
+          style={{ width: SETTINGS_RAIL_WIDTH }}
+        >
+          {desktop && chromeSide === "left" ? <WindowChrome style={chrome} /> : null}
+        </div>
+
+        <div className="flex-1 min-w-0" />
+
+        {desktop && chromeSide === "right" ? (
+          <div className="flex items-stretch flex-shrink-0" style={{ width: CHROME_CLUSTER_WIDTH[chrome] }}>
+            <WindowChrome style={chrome} />
+          </div>
+        ) : null}
+      </header>
+    );
+  }
+
   return (
     <header
       className="flex items-stretch flex-shrink-0 select-none"
@@ -126,13 +175,7 @@ export const StudioTitleBar: React.FC<StudioTitleBarProps> = ({
         }`}
         style={{ width: railWidth, WebkitAppRegion: "no-drag" } as React.CSSProperties}
       >
-        {desktop ? (
-          <TrafficLights
-            onClose={() => void window.teminali?.window.close()}
-            onMinimize={() => void window.teminali?.window.minimize()}
-            onMaximize={() => void window.teminali?.window.toggleMaximize()}
-          />
-        ) : null}
+        {desktop && chromeSide === "left" ? <WindowChrome style={chrome} /> : null}
 
         <IconButton onClick={onToggleSidebar} active={!sidebarCollapsed} title="Toggle sidebar (⌘B)">
           <PanelLeft size={15} />
@@ -327,6 +370,21 @@ export const StudioTitleBar: React.FC<StudioTitleBarProps> = ({
           </IconButton>
         </div>
       )}
+
+      {/* ── Window controls, right-hand dialects ───────────────────────── */}
+      {/* Last in the DOM so it owns the corner: on Windows the caption buttons
+          run to the very edge, and anything after them would sit outside a
+          target the operator expects to be the last pixel of the window.
+          `ml-auto` only bites when neither the conversation region nor an
+          expanded tab strip is present to absorb the slack. */}
+      {desktop && chromeSide === "right" ? (
+        <div
+          className="ml-auto flex items-stretch flex-shrink-0"
+          style={{ width: CHROME_CLUSTER_WIDTH[chrome] }}
+        >
+          <WindowChrome style={chrome} />
+        </div>
+      ) : null}
     </header>
   );
 };
