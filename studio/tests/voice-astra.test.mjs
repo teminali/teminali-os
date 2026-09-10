@@ -61,6 +61,42 @@ test("a bare stop cancels; a stop with an object is an instruction", () => {
   assert.equal(classifyTurnIntent("stop", idle).intent, "stop");
 });
 
+test("a request for quiet survives the qualifier people attach to it", () => {
+  // §6.30 finding 3. "quiet" was a hush and "quiet for a second" was a new
+  // task, because a phrase set has to consume the whole utterance and nobody
+  // says the bare word. The tail is stripped, so the wording stops mattering.
+  for (const line of [
+    "quiet for a second", "be quiet for a second", "quiet for a sec",
+    "quiet for a minute", "shut up for a moment", "stop talking for a bit",
+    "nyamaza kidogo",
+  ]) {
+    assert.equal(classifyTurnIntent(line, talking).intent, "hush", line);
+  }
+});
+
+test("calling a run off is a stop however the abandonment is worded", () => {
+  // §6.30 finding 4. "never mind" was in the set and "drop it" was not, so the
+  // compound was consumed halfway, failed, and reached the agent as fresh work
+  // — the operator asking for the run to end got another one.
+  for (const line of [
+    "never mind, drop it", "drop it", "forget about it", "skip it",
+    "let it go", "don't bother", "cancel that for now",
+    "wait a second", "hold on a sec", "subiri kidogo",
+  ]) {
+    assert.equal(classifyTurnIntent(line, busy).intent, "stop", line);
+  }
+});
+
+test("a qualifier tail is never a verdict on its own", () => {
+  // Stripping must not empty the utterance, and must not reach past a verb's
+  // object: "skip it" abandons the run, "skip the slow tests" is work.
+  assert.equal(classifyTurnIntent("for a second", busy).intent, "instruction");
+  assert.equal(classifyTurnIntent("a minute", busy).intent, "instruction");
+  assert.equal(classifyTurnIntent("drop the users table", busy).intent, "instruction");
+  assert.equal(classifyTurnIntent("skip the slow tests for now", busy).intent, "instruction");
+  assert.equal(classifyTurnIntent("keep going for a bit", busy).intent, "acknowledge");
+});
+
 test("a new instruction during a run is still an instruction", () => {
   assert.equal(classifyTurnIntent("also rename the component to VoicePanel", busy).intent, "instruction");
   assert.equal(classifyTurnIntent("make the orb bigger", talking).intent, "instruction");

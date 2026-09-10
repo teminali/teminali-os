@@ -180,9 +180,12 @@ the track's own number. Which one is on is mpv's answer, not the pane's. The
 language you last chose still comes back on the next episode: mpv opens the
 file in its own choice and reports its tracks afterwards, so the pane compares
 the two and asks again — once, and never over subtitles you deliberately turned
-off. One gap remains, and it is deliberate: a subtitle file **dropped** on the
-pane is bytes rather than a path, so while embedded it is refused with a
-sentence saying to put it beside the video instead.
+off. A subtitle file **dropped** on the pane reaches mpv as well: a drop carries
+bytes and mpv opens files by path, so the pane asks the same bridge the file
+tree asks — `getPathForFile`, which turns your gesture into a path — and hands
+mpv `sub-add`. A file it cannot place is refused with a sentence that names it.
+None of this has run: `canEmbedSpawned` is false on macOS, so it is
+Windows/Linux behaviour covered by unit tests only.
 
 **Subtitles, on the element path.** A sidecar `.srt` or `.vtt` beside the
 video is picked up by name — `Episode 1.srt`, or `Episode 1.en.srt`, whose tag becomes the language's
@@ -1212,7 +1215,7 @@ ollama serve              # local models on 127.0.0.1:11434
 
 ```bash
 npm run typecheck   # tsc --noEmit
-npm test            # 2192 tests, 0 failures
+npm test            # 2202 tests, 0 failures
 npm run eval:local  # the local lane against the real model — a score, not a pass/fail; needs Ollama
 npm run eval:voice  # the voice co-agent's spoken answers, same discipline; needs Ollama
 npm run eval:conversation  # Temi over a whole conversation: routing, fabrication, recall; needs Ollama

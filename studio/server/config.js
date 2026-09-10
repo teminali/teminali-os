@@ -42,12 +42,35 @@ export function createConfig(environment = process.env, overrides = {}) {
     voiceUrl: loopbackUrl(environment.TEMINALI_VOICE_URL, "http://127.0.0.1:8321", "TEMINALI_VOICE_URL"),
     voiceTimeoutMs: positiveInteger(environment.TEMINALI_VOICE_TIMEOUT_MS, 30_000),
     voiceMaxAudioBytes: positiveInteger(environment.TEMINALI_VOICE_MAX_AUDIO_BYTES, 25 * 1024 * 1024),
+    // The realtime voice assistant — the full-duplex Python pipeline in
+    // `studio/realtime-voice/`, which owns recognition, the conversation loop and
+    // synthesis in one process and speaks to the renderer over a WebSocket.
+    // The studio supervises it rather than asking the operator to run a
+    // terminal: `realtimeVoiceRoot` is the checkout, `realtimeVoicePython` the
+    // interpreter that has its 2 GB of wheels. Absent either, voice falls back
+    // to the VibeVoice sidecar above and then to the browser engine — three
+    // tiers, none of which is a hard dependency of the others.
+    realtimeVoiceUrl: loopbackUrl(environment.TEMINALI_REALTIME_VOICE_URL, "http://127.0.0.1:8000", "TEMINALI_REALTIME_VOICE_URL"),
+    realtimeVoiceRoot: resolve(environment.TEMINALI_REALTIME_VOICE_ROOT || resolve(DEFAULT_WORKSPACE_ROOT, "studio", "realtime-voice")),
+    realtimeVoicePython: environment.TEMINALI_REALTIME_VOICE_PYTHON || "",
+    // Autostart is the default because a voice assistant that needs a terminal
+    // is not shipped. Set to "0" when running the pipeline by hand, though the
+    // supervisor adopts an already-listening server rather than duplicating it.
+    realtimeVoiceAutostart: environment.TEMINALI_REALTIME_VOICE_AUTOSTART !== "0",
+    // Weights load before the socket answers; on a cold cache that is minutes,
+    // not seconds, and killing it early would mean it never starts at all.
+    realtimeVoiceStartupTimeoutMs: positiveInteger(environment.TEMINALI_REALTIME_VOICE_STARTUP_TIMEOUT_MS, 300_000),
     anthropicUrl: new URL("https://api.anthropic.com"),
     anthropicApiKey: environment.ANTHROPIC_API_KEY || "",
     requestTimeoutMs: positiveInteger(environment.FRONTIER_REQUEST_TIMEOUT_MS, 600_000),
     healthTimeoutMs: positiveInteger(environment.FRONTIER_HEALTH_TIMEOUT_MS, 1_500),
     maxJsonBytes: positiveInteger(environment.FRONTIER_MAX_JSON_BYTES, 1024 * 1024),
     maxOllamaJsonBytes: positiveInteger(environment.FRONTIER_MAX_OLLAMA_JSON_BYTES, 8 * 1024 * 1024),
+    // An agent turn may carry attached images, and base64 is a third larger
+    // than the bytes it encodes. The attachment policy allows 5 MB of image;
+    // the 1 MB general cap would refuse that as a malformed request long
+    // before anything could say why. See server/agent-attachments.js.
+    maxAgentJsonBytes: positiveInteger(environment.FRONTIER_MAX_AGENT_JSON_BYTES, 12 * 1024 * 1024),
     maxStreamBytes: positiveInteger(environment.FRONTIER_MAX_STREAM_BYTES, 64 * 1024 * 1024),
     workspaceRoot: resolve(environment.FRONTIER_WORKSPACE_ROOT || DEFAULT_WORKSPACE_ROOT),
     workspaceMaxFileBytes: positiveInteger(environment.FRONTIER_WORKSPACE_MAX_FILE_BYTES, 8 * 1024 * 1024),

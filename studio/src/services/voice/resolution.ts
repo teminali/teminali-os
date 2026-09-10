@@ -26,10 +26,15 @@ export function resolveProviders(
   capabilities: Record<VoiceTier, ProviderCapabilities>,
   preferred: VoiceTier | "auto",
 ): ResolvedProviders {
-  const order: VoiceTier[] =
+  // For ASR on auto mode, prioritize built-in real-time streaming recognition (0ms latency, no silence hallucinations).
+  // For TTS, prioritize VibeVoice / high-fidelity natural speech.
+  const asrOrder: VoiceTier[] =
+    preferred === "vibevoice" ? ["vibevoice", "builtin"] : ["builtin", "vibevoice"];
+  const ttsOrder: VoiceTier[] =
     preferred === "builtin" ? ["builtin", "vibevoice"] : ["vibevoice", "builtin"];
 
   const pick = (job: "asr" | "tts"): { provider: VoiceProvider | null; tier: VoiceTier | null } => {
+    const order = job === "asr" ? asrOrder : ttsOrder;
     for (const tier of order) {
       if (capabilities[tier]?.[job]) return { provider: roster[tier] as VoiceProvider, tier };
     }

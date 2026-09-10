@@ -90,6 +90,47 @@ test("restart is a seek and an unpause, in that order", () => {
   ]);
 });
 
+/* ── The one action that is not in the contract ───────────────────────────── */
+
+/**
+ * `subtitle_file` carries a path, and the whole of its design is that no model
+ * can name one. The test above walks the contract and finds every action
+ * answered; this one walks the other way, and would fail the moment somebody
+ * "completed" the contract by adding this to it — which is the only way the
+ * pane's private door could become the assistant's.
+ */
+test("the action that carries a path is not an action the contract can ask for", () => {
+  assert.ok(
+    !PLAYER_ACTIONS.includes("subtitle_file"),
+    "subtitle_file in PLAYER_ACTIONS would hand a model sub-add against any file on the disk",
+  );
+});
+
+test("a dropped subtitle becomes a sub-add that selects it and names it", () => {
+  assert.deepEqual(
+    mpvCommand({ action: "subtitle_file", value: { path: "/Users/t/Films/Arrival.srt", title: "Arrival" } }),
+    [["sub-add", "/Users/t/Films/Arrival.srt", "select", "Arrival"]],
+  );
+});
+
+test("a subtitle file with no title is still added, and mpv names it", () => {
+  // `trackLabel`'s own fallback takes over. Worse than the pane's label, but a
+  // track that is there and badly named beats no track at all.
+  assert.deepEqual(
+    mpvCommand({ action: "subtitle_file", value: { path: "/tmp/x.srt" } }),
+    [["sub-add", "/tmp/x.srt", "select"]],
+  );
+});
+
+test("a subtitle file with no path is refused rather than sent as an empty sub-add", () => {
+  // Every one of these is a shape the renderer could send if `getPathForFile`
+  // came back empty. `sub-add ""` is a command mpv accepts and does nothing
+  // with, which is exactly the silent no-op this table exists to prevent.
+  for (const value of [undefined, null, "", "   ", 7, { path: "" }, { path: "  ", title: "x" }]) {
+    assert.equal(mpvCommand({ action: "subtitle_file", value }), null, `${JSON.stringify(value) ?? "undefined"} should be refused`);
+  }
+});
+
 test("seek is absolute and seek_by is relative", () => {
   assert.deepEqual(mpvCommand({ action: "seek", value: 90 }), [["seek", 90, "absolute+exact"]]);
   assert.deepEqual(mpvCommand({ action: "seek_by", value: -15 }), [["seek", -15, "relative+exact"]]);

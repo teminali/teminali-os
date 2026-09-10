@@ -58,6 +58,16 @@
   --surface-control: #313131;       /* the +/mic discs inside a composer — measured */
   --surface-hover: #242424;         /* hover on a sidebar row — measured */
   --surface-active: #252525;        /* selected nav row — measured */
+  /*
+    The one surface not sampled from the reference. A switch that is off has to
+    show its slot, and WCAG 1.4.11 asks 3:1 of a control's boundary; every other
+    surface and border here tops out at 1.42:1 against --surface, so none of them
+    can carry it. #6b6b6b is 3.02:1 on #212121 — the darkest value that clears the
+    bar, and already in the palette as --text-placeholder, so it adds a role rather
+    than a new grey. #6a6a6a was tried first and measured 2.98:1 — under by a hair.
+    Switch tracks only. It is not a hover, a fill or a border.
+  */
+  --surface-track: #6b6b6b;         /* off switch track — the placeholder grey */
   --surface-tab-active: #262626;    /* active panel tab, menu row hover */
   --surface-skeleton: #262626;      /* canvas placeholder, strong */
   --surface-skeleton-dim: #1e1e1e;  /* canvas placeholder, weak */
@@ -188,6 +198,26 @@
   --tl-max: #65c466;
 
   /* ---------------------------------------------------------------------
+     WINDOW CHROME — the two non-macOS control clusters.
+
+     The shell runs frameless on every platform, so these are ours to draw.
+     They are deliberately NOT expressed in brand tokens: an operator on
+     Windows recognises the Fluent close-red the way a macOS operator
+     recognises #ec6765, and re-tinting either to the accent would make the
+     cluster look like an app widget rather than the window's own controls.
+     --------------------------------------------------------------------- */
+
+  /* Windows 11 caption buttons: a near-invisible wash on hover, except close,
+     which takes the Fluent destructive red with a white glyph. */
+  --chrome-win-hover: rgba(255, 255, 255, 0.06);
+  --chrome-win-close: #c42b1c;
+
+  /* GNOME/Adwaita: circular buttons that carry their glyph at rest, so the
+     fill only has to separate the circle from the header bar behind it. */
+  --chrome-gnome-btn: rgba(255, 255, 255, 0.10);
+  --chrome-gnome-btn-hover: rgba(255, 255, 255, 0.15);
+
+  /* ---------------------------------------------------------------------
      PLAYER — chrome that sits over picture, not over the app's greys.
 
      The one surface in this interface whose background is unknown: a frame of
@@ -239,6 +269,13 @@
   --text-sm: 13px;    /* sidebar rows, chrome — measured */
   --text-md: 14px;    /* chat body and headings — measured */
   --text-lg: 16px;
+
+  /* Code sets its own size, independent of the UI ramp above: an operator who
+     grows the chrome has not asked for larger snippets, and vice versa. Every
+     code surface reads this one token — see the Appearance pane's Code Font
+     Size row, and `services/appearance.ts`. Note --text-code above is the code
+     text *colour*; this is its size. */
+  --code-font-size: 12px;
 
   /* ---------------------------------------------------------------------
      RADII — measured off the reference.
