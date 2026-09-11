@@ -15,6 +15,9 @@ import { watchBrowserHistory } from "./services/browserHistory";
 import { watchBrowserDownloads } from "./services/browserDownloads";
 import { selfAudio, watchBrowserAudio, watchMediaElements, watchTimelineAudio } from "./services/voice/selfAudio";
 import { audioEngine } from "./video/engine/audioEngine";
+import { runExport } from "./video/engine/exportPipeline";
+import { useProjectStore } from "./video/store/projectStore";
+import { useTimelineStore } from "./video/store/timelineStore";
 import { usePanelStore } from "./store/panelStore";
 
 /**
@@ -47,6 +50,26 @@ if (/Electron/i.test(navigator.userAgent)) {
 
 if (typeof window !== "undefined") {
   (window as unknown as { __studioStore: typeof useStudioStore }).__studioStore = useStudioStore;
+  /*
+    The video editor's own stores and its export entry point, beside
+    `__studioStore` and on the same terms: not dev-gated, because the build
+    worth driving from outside is the PRODUCTION one.
+
+    This exists because an export cannot otherwise be exercised or timed end
+    to end. It finishes at a native save dialog that CDP cannot reach, so
+    without a handle the only way to time a real render is by hand with a
+    stopwatch — which is how "the export feels slow" stayed an impression
+    rather than a number for as long as it did. `runExport` takes an explicit
+    `outputPath` and does not open that dialog.
+
+    A handle, not an API: nothing in the app reads it, and it exposes no
+    capability the main frame's own modules do not already have.
+  */
+  (window as unknown as { __videoExport: unknown }).__videoExport = {
+    runExport,
+    useProjectStore,
+    useTimelineStore,
+  };
 }
 
 /*

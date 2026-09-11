@@ -4024,7 +4024,10 @@ Same real 1080p30 source, 600 frames, cold Electron process:
 | tier 1 only: sequential decode + JPEG | 125.1 | 4.8s |
 | **tiers 1+2: decode + WebCodecs encode** | **187** | **3.2s** |
 
-**49.3s to 3.2s end to end — 15.4x on real footage.** The encode stage itself
+**49.3s to 3.2s in the harness — 15.4x.** Against the app's real exporter this
+is an overstatement; see "End to end, through the app's own exporter" below,
+where the same change measures **6.1x** because the shipped seek path is
+faster than the strict baseline used here. The encode stage itself
 went 4.2s to 2.6s; the rest of tier 2's value is not on this clock at all,
 because it also deletes ffmpeg's JPEG decode and re-encode in the other
 process, and a generation of lossy recompression.
@@ -4082,6 +4085,57 @@ rather than as a number every user gets. A timeline with GPU transitions is
 also a different case: `gpuStage` uploads the canvas and reads it back, which
 `shaders.ts` already records as expensive enough to make one effect slower
 than its 2D equivalent.
+
+#### End to end, through the app's own exporter — measured 2026-09-11
+
+Everything above is per-stage in a harness. This is `runExport` in the
+production build, driven over CDP on a scratch profile, writing a real file:
+the demo project's timeline with its video clip pointed at local 1080p30
+footage, 600 frames, `superSpeed` and `hardware` on, the two paths one
+`localStorage['teminali.export.legacy']` apart.
+
+| timeline | legacy | tiers 1+2 | |
+| --- | --- | --- | --- |
+| 2 text + overlay + video | 24.4s | **4.01s** | **6.1x** |
+| video only | 24.4s | 3.73s | 6.5x |
+
+**6x is the number to quote, not the 15.4x this section reported from the
+harness.** The harness overstated it by measuring a baseline the product does
+not ship: it waited on `seeked` ALONE, where `videoEngine.seekTo` races
+`seeked` against `requestVideoFrameCallback`. That race is about twice as fast
+— 24.4s against the harness's 49.3s for identical work — so the real pipeline
+was never as slow as the strict measurement implied. Both files came out
+correct: 600 frames, 20.000s exactly.
+
+Compositing again proved cheap: the text and overlay tracks cost 283ms across
+600 frames (4.01s against 3.73s), which agrees with the 0.1ms-per-frame floor
+measured separately.
+
+**Quality is better, and the old path was not delivering wrong frames.**
+Against the same source through the same timeline, range-normalised: tiers 1+2
+score **SSIM 0.9649**, legacy **0.9426**.
+
+**The trap that nearly produced a false alarm.** Compared WITHOUT normalising
+range, legacy scored Y 0.5736 while its chroma stayed at 0.988 — which reads
+exactly like an exporter emitting stale frames, and was written up as one for
+several minutes. It is not: the legacy path writes `yuvj420p`/full range and
+tiers 1+2 write `yuv420p`/limited, and ffmpeg's `ssim` compares raw planes
+without converting, so a range difference lands almost entirely on luma. **A
+luma-only SSIM collapse with healthy chroma is a range mismatch until proven
+otherwise.** Normalise both sides before believing any of it.
+
+**That range difference is a real behaviour change**, not only a measurement
+artifact: an export that used to be full-range is now limited-range. Both are
+correctly tagged and both display the same — the mean level moved 0.23 of 255
+across 300 frames — but anything downstream that assumed `yuvj420p` will see
+`yuv420p` now.
+
+**How this was driven**, since it is the only way to time a real export:
+`main.tsx` exposes `window.__videoExport` — `runExport` plus the two video
+stores — beside the existing `__studioStore`, on the same not-dev-gated terms,
+because the build worth measuring is the production one. The export otherwise
+ends at a native save dialog CDP cannot reach; `runExport` takes an explicit
+`outputPath` and skips it.
 
 #### Landmines, measured
 
