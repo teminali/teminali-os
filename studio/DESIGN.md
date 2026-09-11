@@ -3846,6 +3846,156 @@ per drag, at pointer-down, not per move. `Timeline` reads the playhead
 imperatively inside a subscription, and `Playhead` is an isolated
 component re-rendering one `translateX`.
 
+### Export throughput: the seek is the render (`engine/exportPipeline.ts`, `engine/videoEngine.ts`, 2026-09-11)
+
+**None of this section is implemented yet.** It is the measured case for a
+rewrite and the shape that rewrite must take. What ships today is the Turbo
+loop and the hardware encoder described at the end; everything under "The four
+tiers" is a decision recorded, not a capability. Treat any claim here as false
+about the current build until this line is deleted.
+
+**What ships today.** The export dialog has two speed switches, both defaulting
+on: `superSpeed` (`ExportDialog.tsx:470`) batches 8 frames per IPC write, runs 8
+writes in flight, ping-pongs two canvases, drops JPEG quality to 0.82 and hands
+ffmpeg `-probesize 32 -analyzeduration 0 -threads 0`; `hardware`
+(`ExportDialog.tsx:526`) lets `hardwareEncoder.cjs` pick `h264_videotoolbox` on
+macOS, NVENC/QSV/AMF on Windows. Both are real. Both tune the wrong stage.
+
+**The pipeline they tune.** Per output frame the exporter pays: a random-access
+`currentTime` seek on an `<video>` element (`videoEngine.ts:575`) → `drawImage`
+→ `canvas.toBlob('image/jpeg')` (`exportPipeline.ts:170`) → an `arrayBuffer`
+copy → an IPC hop → ffmpeg **decoding that JPEG again** → H.264 encode. Three
+codec round-trips where one is needed, and a generation of JPEG loss the user
+never asked for.
+
+**Measured**, Electron 44 / Chromium, this machine, a 1920×1080 H.264 clip at 30fps
+with GOP 250, 600 frames (20s) — the harness drives the real `seekTo` logic:
+
+| stage | fps | wall clock | share of export |
+| --- | --- | --- | --- |
+| **current: seek + drawImage + JPEG(0.82)** | **17.8** | **33.7s** | 100% |
+| — seek + drawImage alone | 22.4 | 26.8s | **80%** |
+| — JPEG(0.82) encode alone | 104 | 5.8s | 17% |
+
+**Twenty seconds of video takes 33.7 seconds to export — 1.7× slower than
+realtime — and 80% of that is the seek.** The encoder both switches fight over
+is 17%. Turbo's ping-pong canvases and 8-deep write queue are optimising a
+sixth of the problem while the other four fifths sits in `seekTo`.
+
+**Why the seek costs that.** A delta frame is only decodable from the preceding
+keyframe, so setting `currentTime` to frame N decodes from N's keyframe forward
+and throws away everything before N. At GOP 250 the decoder does up to 250
+frames of work to deliver one. The literature calls this decode amplification
+and puts it at 30–300× for sporadic access; measured here against the same file
+it is **87×** — sequential decode does 1953 fps where the seek path does 22.4.
+The exporter already walks frames in strict order, so it is paying random-access
+cost for a purely sequential access pattern.
+
+**The replacement, measured end to end** on the same file and machine, decoding
+through `VideoSampleSink.samplesAtTimestamps()` (WebCodecs `VideoDecoder`, each
+packet decoded at most once for monotonic timestamps) and encoding through
+WebCodecs `VideoEncoder`:
+
+| stage | fps | wall clock |
+| --- | --- | --- |
+| sequential decode + draw to canvas | 1953 | 0.31s |
+| WebCodecs `VideoEncoder` h264, hardware | 197 | 3.0s |
+| **full: decode + draw + hw encode** | **230** | **2.6s** |
+| full, plus muxing a playable MP4 | 224 | 2.7s |
+
+**33.7s becomes 2.7s — 12.6×** — and the output is a valid 600-frame, exactly
+20.000s, 11.1 Mbps H.264 High MP4. For reference, ffmpeg on the same file and
+machine decodes all 600 frames in 0.283s and does decode+`h264_videotoolbox`
+in 2.75s: the replacement is at the machine's ffmpeg-class ceiling, in-process,
+with no JPEG and no IPC.
+
+#### The four tiers, in payoff order
+
+1. **Sequential decode instead of per-frame seek.** Replace
+   `seekVideosForFrame` with one sink per source clip pulled in presentation
+   order. This is 80% of the win and the only tier that changes the
+   architecture rather than the plumbing. The export loop's existing in-order
+   walk is what makes it possible; the preview keeps the `<video>` pool and the
+   seek path, which is the right tool for scrubbing.
+2. **WebCodecs encode instead of JPEG → IPC → ffmpeg.** Deletes the JPEG
+   encode, the IPC copy, ffmpeg's JPEG decode and the 0.82 generation loss in
+   one move. ffmpeg keeps the muxing and the audio, fed H.264 it can `-c:v
+   copy`.
+3. **Smart rendering.** A stretch of timeline with no effect, no transform and
+   a codec/resolution/frame-rate match against the source is a stream copy, not
+   a re-encode — Premiere ships this under that name and it is lossless as well
+   as near-instant. For the common case this editor actually serves, trimming a
+   screen recording, it makes export close to free.
+4. **Segmented parallel encode.** Split at keyframe boundaries, render N
+   segments in N workers, concat. Scales with cores and is how cloud renderers
+   get their numbers — but it multiplies a per-frame cost that tiers 1–3 have
+   already removed, so it is last, not first.
+
+#### The decoder is a dependency, and it has a licence
+
+The tiers above name `VideoSampleSink.samplesAtTimestamps()` without naming what
+provides it. That is **mediabunny** (1.56.1, **MPL-2.0**) — a pure TypeScript
+demuxer/muxer over WebCodecs: no WASM blob, no native module, and no runtime
+dependencies, its only two being `@types/*` for the WebCodecs DOM definitions.
+The browser bundle is 673 KB minified. The sequential-decode row above was
+measured through it, not through a hand-rolled `VideoDecoder` loop, and the
+figure is partly its pipelining — it decodes ahead and reuses one packet across
+every output frame that maps to it. A port that swaps it for mp4box.js or a
+bare decoder has to re-measure rather than inherit the number.
+
+**It is not installed, and nothing MPL ships today.** The obligation attaches to
+what is distributed, not to what a design document names — the same reasoning
+`docs/MEDIA_LICENSING.md` already applies to the GPL encoders living inside a
+user's own ffmpeg. MPL-2.0 is file-level copyleft: it asks that the library's
+own files stay MPL and that modifications *to those files* be published, and it
+does not reach this product's source, which is what makes it a safe shape to
+depend on beside an LGPL ffmpeg. When tier 1 lands it becomes a shipped
+component like any other: named on the About surface off the manifest, with its
+licence text copied into `licences/` and checked rather than attempted.
+
+#### Landmines, measured
+
+**Colour management is not free, and getting it wrong is invisible until
+someone looks.** The first working WebCodecs build scored materially *worse*
+than the JPEG pipeline it replaced:
+
+| output vs source | SSIM (all) | PSNR avg |
+| --- | --- | --- |
+| current pipeline (JPEG 0.82 → H.264) | 0.9930 | 41.9 dB |
+| WebCodecs path, as first built | 0.9700 | 24.8 dB |
+| the same file, compared after correcting range | 0.9853 | — |
+
+PSNR varying only between 24.69 and 25.64 across the whole clip is a constant
+offset, not compression noise, and the V channel was the worst of the three at
+0.947 — the signature of a range/matrix conversion, not a weak encoder. The
+source was untagged, the canvas round-trip re-emitted it as `tv`/bt709, and the
+levels were squashed. **Pin range and matrix explicitly on the way out.** A
+naive port of this ships a washed-out export that no test catches.
+
+**`CanvasSource` silently fell back to software OpenH264** rather than
+VideoToolbox in the muxing run — visible only as a stray `[OpenH264]` line on
+stderr. Ask for `hardwareAcceleration: 'prefer-hardware'` and assert what came
+back; a silent software fallback is a 2× regression that looks like nothing.
+
+**The fallback path stays.** WebCodecs decodes what WebCodecs decodes; live
+capture has nothing to seek, image sequences have no packets, and an exotic
+source will fail `canDecode()`. Every tier above must degrade to the current
+seek-and-JPEG path per source, not per export.
+
+**The rAF paint budget becomes more important, not less.** The export yields to
+`requestAnimationFrame` every `PAINT_BUDGET_MS` so the panel does not freeze the
+IDE around it (`exportPipeline.ts:23-33`) — a deliberate trade of throughput for
+an app that stays usable. At 230 fps that yield is a proportionally larger share
+of the budget, which is the argument for moving the whole loop onto a worker
+with an `OffscreenCanvas` so the UI thread stops being the render thread.
+
+**Caveats on the numbers above.** The source is synthetic (`testsrc2`), which
+compresses unlike camera footage; the JPEG-only and encoder-only rows re-encode
+one canvas repeatedly, so their throughput is real but their bitrates are not
+representative; and the "current pipeline" quality row is an ffmpeg emulation of
+the JPEG path at `-q:v 6`, not a Studio export. Re-measure against real footage
+before quoting any of it as a product claim.
+
 ### Screen recorder (`modals/RecorderModal.tsx`, `src/video/components/recorder/**`)
 
 **Not a panel kind — a dialog**, and the change is the design. A workspace
