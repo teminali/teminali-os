@@ -1309,7 +1309,7 @@ ollama serve              # local models on 127.0.0.1:11434
 
 ```bash
 npm run typecheck   # tsc --noEmit
-npm test            # 2329 tests
+npm test            # 2332 tests
 npm run eval:local  # the local lane against the real model — a score, not a pass/fail; needs Ollama
 npm run eval:voice  # the voice co-agent's spoken answers, same discipline; needs Ollama
 npm run eval:conversation  # Temi over a whole conversation: routing, fabrication, recall; needs Ollama
@@ -1756,11 +1756,24 @@ So the workflow now installs `nasm` on `macos-latest` — and nowhere else. **A
 tagged release ships the bundle on macOS**; Linux and Windows stop at the
 script's tool gate and fall back to a system ffmpeg exactly as v0.0.7 did. It
 turned out to be one tool rather than three: `meson` and `ninja` only ever built
-mpv, which a universal macOS build no longer builds. Linux (`--linux --x64` on
-an x64 runner) has no architecture mismatch and is untouched by this change, but
-that half of the recipe has never been run anywhere — giving it the same line
-would trade an honest "no bundle" for an untested one, so it stays unproven
-rather than known-good until somebody runs it.
+mpv, which a universal macOS build no longer builds.
+
+Linux (`--linux --x64` on an x64 runner) has no architecture mismatch, and that
+half of the recipe has now been run — on aarch64 Ubuntu 24.04, where it failed
+in three ways that were all invisible from macOS. Every staging function tested
+for Mach-O, so on ELF the dependency walk and `patchelf` skipped every binary
+and reported success; `verify_bundle` returned 0 on anything but macOS, passing
+by declining to look; and mpv's build runs the binary it just built, which on
+ELF cannot find the prefix. The staged result was two executables, no
+libraries, and an ffmpeg that did not start — while the manifest claimed a
+working mpv. All four faults (including an unconditional `nasm` gate that
+refused a build needing no assembler) are fixed, and the re-run stages nine
+libraries with an `$ORIGIN` rpath, zero unresolved sonames, and runs relocated.
+See [`docs/MEDIA_LICENSING.md`](docs/MEDIA_LICENSING.md) for the measurements.
+
+The runner is still not given the toolchain, for two honest reasons: the proof
+is aarch64 and the runner is x64, and Linux still builds mpv only to discard
+it, so it would want `meson` and `ninja` as well as `nasm`.
 
 The step keeps `continue-on-error: true`, which reports it as `success` even
 when it failed, so a **Report what the media stack produced** step follows it:

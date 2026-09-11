@@ -126,8 +126,16 @@ need curl; need tar; need make; need pkg-config
 # between a CI runner that needs three extra tools and one that needs nasm.
 if [ "$BUILD_MPV" = yes ]; then need meson; need ninja; fi
 if [ "$PLATFORM" = macos ]; then need lipo; need otool; need install_name_tool; else need patchelf; fi
-command -v nasm >/dev/null 2>&1 || command -v yasm >/dev/null 2>&1 \
-  || die "missing build tool: nasm (or yasm) — ffmpeg's assembly needs one"
+# Only x86 needs one. nasm assembles ffmpeg's x86 SIMD and nothing else — the
+# arm64 and aarch64 paths go through the C compiler's own assembler for NEON —
+# so demanding it unconditionally refuses a build it is no part of. Measured on
+# aarch64 Ubuntu 24.04, 2026-09-11: the gate stopped a Linux build that then
+# completed without nasm ever being installed.
+case " $ARCHS " in
+  *" x86_64 "*|*" amd64 "*|*" i386 "*|*" i686 "*)
+    command -v nasm >/dev/null 2>&1 || command -v yasm >/dev/null 2>&1 \
+      || die "missing build tool: nasm (or yasm) — ffmpeg's x86 assembly needs one" ;;
+esac
 
 mkdir -p "$WORK"
 # Saved because the ffmpeg closure is built hermetically against its own prefix
@@ -264,6 +272,15 @@ if [ "$BUILD_MPV" = yes ]; then
     # The one build here that is allowed to see the machine: libplacebo and
     # libass are not ours and have to come from somewhere.
     export PKG_CONFIG_PATH="$WORK/prefix-$PRIMARY_ARCH/lib/pkgconfig${HOST_PKG_CONFIG_PATH:+:$HOST_PKG_CONFIG_PATH}"
+    # mpv's build RUNS the mpv it just built — TOOLS/gen-mpv-desktop.py asks it
+    # for its protocol list — and on ELF that binary resolves libopenh264.so.7
+    # through the runtime linker, not by the absolute path Mach-O records. The
+    # prefix is on no system path, so without this the build dies at the
+    # desktop-file step with "cannot open shared object file", having compiled
+    # every object successfully first. Measured on aarch64 Ubuntu 24.04,
+    # 2026-09-11; macOS never needed it and still does not.
+    [ "$PLATFORM" = macos ] \
+      || export LD_LIBRARY_PATH="$WORK/prefix-$PRIMARY_ARCH/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
     # -Dlibmpv=true builds the shared library as well as the player: Windows and
     # Linux spawn the executable, macOS links the library, and both come out of
     # one build.
@@ -301,7 +318,18 @@ fi
 # machine can see, and one the first version of this section did not prevent
 # despite saying so. `verify_bundle` is the part that cannot quietly do nothing.
 
-is_macho() { file -b "$1" 2>/dev/null | grep -q "Mach-O"; }
+# A file this script relocates and checks. This used to test for Mach-O only,
+# which is false for every ELF file — so on Linux the dependency walk, the
+# relocation and the whole of staging skipped every binary they were given and
+# reported success. Measured on aarch64 Ubuntu 24.04, 2026-09-11: the staged
+# `media-stack/ffmpeg` held the two executables, no libraries at all, no rpath,
+# seven unresolved sonames, and did not start. Platform goes in the test.
+is_binary() {
+  case "$PLATFORM" in
+    macos) file -b "$1" 2>/dev/null | grep -q "Mach-O" ;;
+    *)     file -b "$1" 2>/dev/null | grep -q "^ELF" ;;
+  esac
+}
 
 # What a Mach-O file records that it will load at run time. The first entry for
 # a dylib is its own install name, which is why relocation sets that too.
@@ -312,6 +340,23 @@ macho_deps() { # file [arch]
   else otool -arch "$2" -L "$1" 2>/dev/null | tail -n +2 | awk '{print $1}'; fi
 }
 
+# ELF records a SONAME, not a path — the runtime linker finds it wherever it
+# can. That difference is the whole reason Linux needs its own staging rules
+# rather than the macOS ones with `patchelf` swapped in for `install_name_tool`.
+elf_needed() { patchelf --print-needed "$1" 2>/dev/null; }
+
+# Libraries a glibc Linux is guaranteed to have, so bundling them would be
+# wrong rather than merely redundant — a private libc is how you get a binary
+# that runs on the build machine and nowhere else.
+#
+# Everything NOT on this list and not inside the bundle means we are relying on
+# a library the user may not have and whose licence we cannot state. That is
+# exactly mpv's libplacebo and libass, and it is why mpv does not ship: the
+# same verdict macOS reaches, by a different route.
+LINUX_BASE_LIBS="libc.so.6 libm.so.6 libpthread.so.0 libdl.so.2 librt.so.1
+libgcc_s.so.1 libstdc++.so.6 libz.so.1 libbz2.so.1.0 libatomic.so.1
+ld-linux-aarch64.so.1 ld-linux-x86-64.so.2 ld-linux-armhf.so.3 linux-vdso.so.1"
+
 # A path the customer's Mac will resolve without our help, or one already made
 # relative to the bundle. Anything else is a path off this machine.
 is_self_contained() {
@@ -319,6 +364,14 @@ is_self_contained() {
     /usr/lib/*|/System/*|@rpath/*|@loader_path/*|@executable_path/*) return 0 ;;
     *) return 1 ;;
   esac
+}
+
+# The ELF equivalent: a soname that is either beside the binary or part of the
+# base system. `$ORIGIN` makes the first one resolve on the user's machine.
+is_base_or_bundled() { # soname destdir
+  [ -e "$2/$1" ] && return 0
+  case " $(echo $LINUX_BASE_LIBS) " in *" $1 "*) return 0 ;; esac
+  return 1
 }
 
 stage_closure() { # prefix destdir binary...
@@ -333,10 +386,19 @@ stage_closure() { # prefix destdir binary...
   while [ "$added" = 1 ]; do
     added=0
     for f in "$dest"/*; do
-      if [ ! -f "$f" ] || ! is_macho "$f"; then continue; fi
-      for dep in $(macho_deps "$f"); do
-        if is_self_contained "$dep"; then continue; fi
-        base="$(basename "$dep")"
+      if [ ! -f "$f" ] || ! is_binary "$f"; then continue; fi
+      # The rule is identical on both platforms — copy only what this script
+      # built — but what a binary *records* is not, so resolving a dependency
+      # to a file differs. Mach-O names an absolute path and the walk follows
+      # it; ELF names a soname and the walk has to look for it in the prefix.
+      for dep in $(if [ "$PLATFORM" = macos ]; then macho_deps "$f"; else elf_needed "$f"; fi); do
+        if [ "$PLATFORM" = macos ]; then
+          if is_self_contained "$dep"; then continue; fi
+          base="$(basename "$dep")"
+        else
+          base="$dep"
+          dep="$prefix/lib/$base"
+        fi
         if [ -e "$dest/$base" ] || [ ! -e "$dep" ]; then continue; fi
         # Only libraries this script built, from a pinned and checksummed
         # source. Left to itself this walk is happy to pull /opt/homebrew into
@@ -356,7 +418,7 @@ stage_closure() { # prefix destdir binary...
 relocate() { # destdir
   local dest="$1" f dep base
   for f in "$dest"/*; do
-    if [ ! -f "$f" ] || ! is_macho "$f"; then continue; fi
+    if [ ! -f "$f" ] || ! is_binary "$f"; then continue; fi
     if [ "$PLATFORM" = macos ]; then
       # -id first: a library has to announce itself by basename before any
       # sibling pointing at it can be rewritten to @rpath.
@@ -371,6 +433,9 @@ relocate() { # destdir
         install_name_tool -change "$dep" "@rpath/$base" "$f" 2>/dev/null || true
       done
     else
+      # $ORIGIN is the directory the binary is in, resolved by the runtime
+      # linker — the ELF answer to @loader_path. A soname is not rewritten the
+      # way a Mach-O path is: the name stays, only the search path changes.
       patchelf --set-rpath '$ORIGIN' "$f" 2>/dev/null || true
     fi
   done
@@ -389,7 +454,7 @@ fuse() { # destdir stagedir... — one universal bundle out of the per-arch ones
   done
   for f in "$first"/*; do
     base="$(basename "$f")"
-    if [ "$#" -gt 1 ] && is_macho "$f"; then
+    if [ "$#" -gt 1 ] && is_binary "$f"; then
       inputs=""
       for other in "$@"; do inputs="$inputs $other/$base"; done
       lipo -create $inputs -output "$dest/$base"
@@ -402,11 +467,32 @@ fuse() { # destdir stagedir... — one universal bundle out of the per-arch ones
 verify_bundle() { # destdir — 0 if it carries every architecture and nothing in
                   # it points off this machine, in any slice
   local dest="$1" f dep arch have bad=0
-  # macOS only: measured here. The ELF equivalent is a NEEDED/RPATH walk and
-  # has never been run, so it is not claimed.
-  [ "$PLATFORM" = macos ] || return 0
+  # This used to `return 0` on anything but macOS — a check that passed by
+  # declining to look, which is the one failure mode the whole function exists
+  # to prevent. It let Linux stage an ffmpeg with seven unresolved sonames and
+  # call it verified, and let the manifest claim an mpv that could not start.
+  if [ "$PLATFORM" != macos ]; then
+    for f in "$dest"/*; do
+      if [ ! -f "$f" ] || ! is_binary "$f"; then continue; fi
+      # Read the recorded SONAMEs rather than asking `ldd` what resolves today.
+      # `ldd` answers for THIS machine: on a build box that happens to carry
+      # libplacebo, an mpv depending on it resolves cleanly and ships broken to
+      # everyone else. That is the same "absorbs the build machine" trap the
+      # ffmpeg configure flags exist to close, one layer down.
+      for dep in $(elf_needed "$f"); do
+        if is_base_or_bundled "$dep" "$dest"; then continue; fi
+        printf '    %s → %s (not bundled, not base system)\n' "$(basename "$f")" "$dep" >&2
+        bad=1
+      done
+      case "$(patchelf --print-rpath "$f" 2>/dev/null)" in
+        *'$ORIGIN'*) ;;
+        *) printf '    %s: no $ORIGIN rpath — it would not find its siblings\n' "$(basename "$f")" >&2; bad=1 ;;
+      esac
+    done
+    return "$bad"
+  fi
   for f in "$dest"/*; do
-    if [ ! -f "$f" ] || ! is_macho "$f"; then continue; fi
+    if [ ! -f "$f" ] || ! is_binary "$f"; then continue; fi
     have="$(lipo -archs "$f" 2>/dev/null || true)"
     for arch in $ARCHS; do
       case " $have " in

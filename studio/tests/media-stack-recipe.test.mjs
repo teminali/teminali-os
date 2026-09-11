@@ -190,3 +190,53 @@ test("the source offer names a real place", () => {
     "LGPL-2.1 §6 wants an offer at a URL that outlives the release",
   );
 });
+
+/* ── The Linux path ───────────────────────────────────────────────────────
+   Run for the first time on 2026-09-11, on aarch64 Ubuntu 24.04, and it did
+   not work. The staged `media-stack/ffmpeg` held two executables, no libraries
+   at all, no rpath, seven unresolved sonames, and did not start — while
+   `manifest.json` claimed a working mpv beside it. Nothing reported any of it.
+   These are the three faults, each asserted where it lived.
+   ──────────────────────────────────────────────────────────────────────── */
+
+test("the staging walk recognises ELF, not only Mach-O", () => {
+  // `file -b | grep Mach-O` is false for every ELF file, so stage_closure's
+  // dependency walk and relocate's patchelf branch skipped every binary they
+  // were handed — and said nothing, because skipping is silent.
+  assert.ok(
+    !/\bis_macho\b/.test(CODE),
+    "is_macho is back: on Linux it is false for every file, and the walk it guards does nothing",
+  );
+  assert.ok(/\bis_binary\b/.test(CODE), "nothing decides what counts as a binary");
+  assert.ok(/grep -q "\^ELF"/.test(CODE), "the ELF case is not recognised");
+});
+
+test("the bundle check never passes by declining to look", () => {
+  // It used to `return 0` for anything but macOS. A check that reports success
+  // without reading the thing it checks is the one failure mode this whole
+  // function exists to prevent, and it shipped a broken bundle behind it.
+  const verify = CODE.match(/verify_bundle\(\) \{[\s\S]*?\n\}/)?.[0];
+  assert.ok(verify, "verify_bundle is gone");
+  assert.ok(
+    !/\[ "\$PLATFORM" = macos \] \|\| return 0/.test(verify),
+    "verify_bundle still returns success on non-macOS without checking anything",
+  );
+  assert.ok(/elf_needed/.test(verify), "the ELF side never reads what a binary records");
+  assert.ok(
+    /ORIGIN/.test(verify),
+    "nothing requires the $ORIGIN rpath, without which a staged binary cannot find its siblings",
+  );
+  // Deliberately NOT ldd: it answers for the build machine, so an mpv linking
+  // the box's libplacebo resolves cleanly there and ships broken to everyone
+  // else. Reading the headers is what makes the check about the artifact.
+  assert.ok(!/\bldd\b/.test(verify), "verify_bundle asks ldd, which answers for the build machine");
+});
+
+test("the assembler is demanded only where it assembles something", () => {
+  // nasm builds ffmpeg's x86 SIMD and nothing else; arm64 and aarch64 go
+  // through the C compiler. An unconditional gate refused an aarch64 build
+  // that then completed without nasm ever being installed.
+  const gate = CODE.match(/case " \$ARCHS " in[\s\S]{0,400}?nasm[\s\S]{0,200}?esac/)?.[0];
+  assert.ok(gate, "the nasm gate is not conditioned on the target architecture");
+  assert.match(gate, /x86_64/);
+});

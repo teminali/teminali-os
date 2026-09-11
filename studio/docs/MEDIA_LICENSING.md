@@ -93,10 +93,14 @@ Not done:
   §6 obligations, which are met, and then on the universal-binary defect, which
   is fixed and measured below. It also turned out to be one tool rather than
   three — `meson` and `ninja` only ever built mpv, which a universal macOS
-  build no longer builds. Giving Linux the same line would not be the same
-  decision: **that half of the recipe has never been run anywhere**, and
-  installing the assembler there would turn an honest "no bundle" into an
-  untested one. Run it locally first — see the last bullet under Status.
+  build no longer builds. Giving Linux the same line is now a smaller decision
+  than it was — **that half of the recipe has been run, found broken in three
+  ways, fixed, and re-run green on aarch64** (see the last bullet under Status)
+  — but not the same one: the runner is `--linux --x64` and the proof is
+  aarch64, so the x86 assembler gate is the one thing an x64 run would exercise
+  that the aarch64 one could not. Linux also still *builds* mpv and then
+  discards it, so it would want `meson` and `ninja` as well as `nasm` — three
+  tools for an artifact measured to be refused at staging.
 
   `continue-on-error: true` stays on that step, so a macOS release whose bundle
   failed to build still publishes and falls back to a system ffmpeg. Because
@@ -172,11 +176,46 @@ Not done:
   encodes through `libopenh264` and `h264_videotoolbox`, under both
   architectures.
 
-  **Linux (`--linux --x64`, built on an x64 runner) has no such mismatch and is
-  untouched by this change** — it builds its native architecture only, as it
-  always did. That recipe has still never been run anywhere, so it is unproven
-  rather than known-good, and `verify_bundle`'s path walk is a macOS
-  measurement that the ELF equivalent has not had.
+  **Linux has now been run, and it did not work — measured on aarch64 Ubuntu
+  24.04, 2026-09-11.** It had never been run anywhere, and "unproven rather
+  than known-good" turned out to be generous. The staged `media-stack/ffmpeg`
+  held the two executables, **no libraries at all**, no rpath, seven unresolved
+  sonames, and did not start; `manifest.json` meanwhile claimed a working mpv.
+  Three separate faults, each invisible on macOS:
+
+  1. **Every staging function tested for Mach-O**, which is false for every ELF
+     file — so `stage_closure`'s dependency walk and `relocate`'s `patchelf`
+     branch skipped every binary they were handed and reported success. The
+     test is now `is_binary`, and the platform is in it.
+  2. **`verify_bundle` returned 0 on anything but macOS** — a check that passed
+     by declining to look, which is the one failure it exists to prevent. It
+     now walks recorded `SONAME`s and requires an `$ORIGIN` rpath. It reads the
+     headers rather than asking `ldd`, deliberately: `ldd` answers for the
+     build machine, so an mpv linking the box's libplacebo would resolve
+     cleanly there and ship broken to everyone else — the same "absorbs the
+     build machine" trap the configure flags close, one layer down.
+  3. **mpv's build runs the mpv it just built** (`TOOLS/gen-mpv-desktop.py`
+     asks it for its protocol list) and ELF resolves `libopenh264.so.7` through
+     the runtime linker, not by the absolute path Mach-O records. The build
+     died at the desktop-file step after compiling every object. `LD_LIBRARY_PATH`
+     now points at the prefix for that step on non-macOS.
+
+  A fourth, shared with macOS: the `nasm` gate was unconditional, and nasm
+  assembles x86 SIMD only. It refused an aarch64 build that then completed
+  without nasm ever being installed. The gate is now taken only when a target
+  architecture is x86.
+
+  **After those four, Linux is proven on aarch64**: nine libraries staged,
+  `$ORIGIN` rpath, zero unresolved sonames, and a copy moved out of the build
+  tree runs and encodes through `libopenh264` with `LD_LIBRARY_PATH` unset.
+  mpv is refused there exactly as on macOS, naming `libass.so.9` and
+  `libplacebo.so.338`, and no longer appears in the manifest.
+
+  **What is still unproven is x86_64 Linux specifically.** The run above was
+  aarch64, because that is what a VM on an Apple Silicon Mac gives you; the CI
+  runner is `--linux --x64`. The ELF path is the same code, and the nasm gate
+  now takes effect there where it did not on aarch64, so that is the one
+  difference an x64 run would exercise that this one could not.
 
 ## What to build
 
