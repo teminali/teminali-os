@@ -6760,6 +6760,64 @@ the four filter lines that decide whether the thing can start) and
 `tests/realtime-voice.test.mjs` (the interpreter order, both platform layouts,
 and that the message carries a runnable install).
 
+### 6.0.13 She was still talking when the microphone opened (`realtime-voice/code/server.py`, 2026-09-11)
+
+With the pipeline finally shipping (6.0.12) and the gate finally releasing
+(6.0.11), the operator's first real session on the installed app reported two
+things: *"it looks like the AI hears itself"*, and replies that were repetitive
+and not very smart. They are two different defects and only one of them is
+audio.
+
+**The tail.** The gate was reopened by `reset_turn_state`, which runs when the
+last TTS chunk is handed to the client. The client is still playing at that
+moment, and keeps playing for seconds: measured in that session, the gate opened
+at 28:09.63 and the next user turn ended at 28:11.98. Everything in that window
+is her own voice arriving back through the microphone. The gate now stays shut
+until the client says `tts_stop`, which is the message that means the turn is
+over *in the room* rather than in this process. Barge-in is unaffected: it is
+client-initiated (`user_barge_in`), and the gate was already shut for the rest
+of the assistant's turn.
+
+That hands the release to a flag, so the watchdog was hardened in the same
+change. It now measures from the close and never restarts its timer on a busy
+tick, because a timer restarted every tick is a timer that never fires, and the
+flag most likely to be wrong is exactly the one that would keep restarting it:
+`tts_client_playing` latched true for an entire session once already (6.0.9).
+Past `TEMI_MIC_HARD_TIMEOUT` (60s) it stops believing the flag. A reply is
+capped at `OLLAMA_NUM_PREDICT` tokens, which is nowhere near a minute of speech.
+
+**The repetition is not an audio problem at all, and the fix for it is not
+where the code assumes.** From that session's log, no user turn repeats an
+assistant line, so nothing was transcribed twice. What the model does is copy
+its own previous answer out of the history, verbatim. It reproduces on demand:
+given the turn that preceded the loop, `temi:r2` returns "Nothing I cannot do is
+wrong. Nothing I do is wrong. Nothing is wrong." word for word.
+
+Measured against the live model on 2026-09-11, and the reason this is written
+down before it is fixed:
+
+| option | 0 | as shipped | extreme |
+| --- | --- | --- | --- |
+| `frequency_penalty` (0.7 shipped) | identical | identical | identical at 2.0 |
+| `presence_penalty` (0.5 shipped) | identical | identical | — |
+| `repeat_penalty` | identical at 1.0 | — | identical at 2.0 |
+| `temperature` | 0.1 and 1.8 give plainly different replies | | |
+
+So the anti-repetition options `llm_module.py` sets, with a comment explaining
+the choice of each, **do nothing on this Ollama build**, while temperature
+proves the options channel itself works. `temi:r2` also ships
+`repeat_penalty 1`, which is the penalty switched off, and the code cannot
+override it: `repeat_penalty` is not in `valid_options`, and adding it would
+change nothing anyway, as the table shows. The lever is elsewhere — the
+repetition filter, which already owns cross-turn memory, or the Modelfile. Not
+yet fixed, and not guessed at: the voice lane has an eval
+(`npm run eval:conversation`) and this is exactly the kind of change that has
+to be scored rather than reasoned about.
+
+Pinned by `realtime-voice/code/test_mic_gate.py`, now 15 tests: the gate stays
+shut while the client is playing, opens when it is not, and the hard ceiling
+fires even while a latched flag claims playback is still running.
+
 ### 6.1 Turn semantics while a run is in flight (2026-09-05)
 
 A directed utterance is not automatically an instruction. `turnIntent.ts`

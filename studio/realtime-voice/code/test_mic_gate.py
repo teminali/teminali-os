@@ -109,6 +109,27 @@ class TurnEndsWithoutAGeneration(unittest.TestCase):
         self.assertIsNotNone(app.state.SpeechPipelineManager.running_generation)
 
 
+class TheRoomNotThePipeline(unittest.TestCase):
+    """The turn is over when the client stops playing, not when we stop sending."""
+
+    def test_reset_leaves_the_gate_shut_while_the_client_is_playing(self):
+        # The last TTS chunk leaves this process seconds before the speaker
+        # falls silent. A gate opened at the earlier moment feeds the tail of
+        # her own reply back into the recogniser.
+        cb, app = make_callbacks()
+        cb.set_mic_gate(True, "assistant turn")
+        cb.tts_client_playing = True
+        cb.reset_turn_state()
+        self.assertTrue(app.state.AudioInputProcessor.interrupted)
+
+    def test_reset_opens_it_when_nothing_is_playing(self):
+        cb, app = make_callbacks()
+        cb.set_mic_gate(True, "assistant turn")
+        cb.tts_client_playing = False
+        cb.reset_turn_state()
+        self.assertFalse(app.state.AudioInputProcessor.interrupted)
+
+
 class Watchdog(unittest.TestCase):
     """The backstop for whatever closes the gate that we have not thought of."""
 
@@ -134,6 +155,27 @@ class Watchdog(unittest.TestCase):
         cb._mic_closed_since = time.time() - (server.MIC_STUCK_TIMEOUT + 1)
         cb.reopen_mic_if_stuck()
         self.assertTrue(app.state.AudioInputProcessor.interrupted)
+
+    def test_a_latched_playing_flag_cannot_hold_the_gate_for_ever(self):
+        # `tts_client_playing` stuck true for a whole session is not
+        # hypothetical: it is DESIGN 6.0.9. Past the hard ceiling the
+        # watchdog stops believing it.
+        cb, app = make_callbacks()
+        cb.set_mic_gate(True, "assistant turn")
+        cb.tts_client_playing = True
+        cb._mic_closed_since = time.time() - (server.MIC_HARD_TIMEOUT + 1)
+        cb.reopen_mic_if_stuck()
+        self.assertFalse(app.state.AudioInputProcessor.interrupted)
+
+    def test_the_timer_is_not_restarted_by_a_busy_tick(self):
+        # A timer reset on every tick is a timer that never fires.
+        cb, app = make_callbacks()
+        cb.set_mic_gate(True, "assistant turn")
+        cb.tts_client_playing = True
+        closed_at = time.time() - (server.MIC_STUCK_TIMEOUT + 1)
+        cb._mic_closed_since = closed_at
+        cb.reopen_mic_if_stuck()
+        self.assertEqual(cb._mic_closed_since, closed_at)
 
     def test_does_not_fire_before_the_timeout(self):
         cb, app = make_callbacks()

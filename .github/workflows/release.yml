@@ -268,6 +268,20 @@ jobs:
           # wider token.
           GH_TOKEN: ${{ secrets.RELEASES_TOKEN || secrets.GITHUB_TOKEN }}
           GITHUB_TOKEN: ${{ secrets.RELEASES_TOKEN || secrets.GITHUB_TOKEN }}
+          # The same failure as above, from a different direction: a build that
+          # goes green and publishes nothing. electron-builder refuses to add
+          # assets to a release that was published more than two hours ago, and
+          # says so only in the debug log —
+          #   "GitHub release not created  reason=existing release published
+          #    more than 2 hours ago tag=v0.0.10"
+          #   "skipped publishing  file=Teminali-OS-Setup-0.0.10-Windows-x64.exe"
+          # That is the normal case for a re-run: v0.0.10 was published by hand
+          # at 16:58 when Actions was blocked on billing, and the re-run at
+          # 19:30 built Windows, macOS and Linux, reported success on all
+          # three, and uploaded not one file. A re-run on a tag is exactly when
+          # the guard is wrong, because the release it is protecting is the one
+          # this build is for.
+          EP_GH_IGNORE_TIME: "true"
           # Pending, and inert while it is — but inert by being UNSET, not by
           # being empty. An absent secret interpolates to an empty string, and
           # electron-builder reads CSC_LINK with `v1 == null ? v2 : v1`, so ""

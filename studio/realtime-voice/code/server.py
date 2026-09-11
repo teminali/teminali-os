@@ -76,6 +76,12 @@ from colors import Colors
 # magnitude of headroom over the longest legitimate close.
 MIC_STUCK_TIMEOUT = float(os.getenv("TEMI_MIC_STUCK_TIMEOUT", "15.0"))
 
+# The ceiling the watchdog applies even when something claims to be in flight.
+# A reply is capped at OLLAMA_NUM_PREDICT tokens, which is well under a minute
+# of speech, so a gate held shut this long is held by a flag that has latched,
+# not by an assistant who is still talking.
+MIC_HARD_TIMEOUT = float(os.getenv("TEMI_MIC_HARD_TIMEOUT", "60.0"))
+
 LANGUAGE = "en"
 # TTS_FINAL_TIMEOUT = 0.5 # unsure if 1.0 is needed for stability
 TTS_FINAL_TIMEOUT = 1.0 # unsure if 1.0 is needed for stability
@@ -418,6 +424,11 @@ async def process_incoming_data(ws: WebSocket, app: FastAPI, incoming_chunks: as
                 elif msg_type == "tts_stop":
                     logger.info("🖥️ℹ️ Received tts_stop from client (audio playback completed).")
                     callbacks.tts_client_playing = False
+                    # The turn is over in the room, not just in this process.
+                    # Nothing else will reopen the gate: reset_turn_state has
+                    # already run and deliberately left it shut.
+                    if app.state.SpeechPipelineManager.running_generation is None and not callbacks.tts_chunk_sent:
+                        callbacks.set_mic_gate(False, "client finished playing")
                 elif msg_type == "user_barge_in":
                     logger.info("🖥️⚡ Received user_barge_in from client.")
                     callbacks.trigger_user_interruption(reason="client user_barge_in")
@@ -704,8 +715,16 @@ class TranscriptionCallbacks:
         self.final_assistant_answer_sent = False
         self.partial_transcription = ""
 
-        # Re-enable microphone only once assistant turn has completely finished
-        self.set_mic_gate(False, "turn state reset")
+        # Re-enable the microphone only once the assistant's turn has finished
+        # being HEARD, not merely finished being generated. The last TTS chunk
+        # leaves this process seconds before the client stops playing it, and a
+        # gate opened at the earlier moment puts the tail of her own reply into
+        # the recogniser. `tts_stop` is what reopens it in that case; the
+        # watchdog is what reopens it if that message never comes.
+        if self.tts_client_playing:
+            logger.info("🖥️🎙️ Turn state reset while the client is still playing; mic stays shut until tts_stop.")
+        else:
+            self.set_mic_gate(False, "turn state reset")
 
     def set_mic_gate(self, closed: bool, reason: str, clear_audio: bool = True) -> None:
         """
@@ -754,24 +773,34 @@ class TranscriptionCallbacks:
         no audio playing is broken, whatever closed it.
         """
         since = self._mic_closed_since
-        if not since or (time.time() - since) < MIC_STUCK_TIMEOUT:
+        if not since:
+            return
+        elapsed = time.time() - since
+        if elapsed < MIC_STUCK_TIMEOUT:
             return
         aip = getattr(self.app.state, "AudioInputProcessor", None)
         if aip is None or not aip.interrupted:
             self._mic_closed_since = 0.0
             return
-        if self.tts_client_playing or self.tts_chunk_sent:
-            self._mic_closed_since = time.time()  # legitimately closed; keep waiting
-            return
-        if self.app.state.SpeechPipelineManager.running_generation is not None:
-            self._mic_closed_since = time.time()
+
+        busy = (
+            self.tts_client_playing
+            or self.tts_chunk_sent
+            or self.app.state.SpeechPipelineManager.running_generation is not None
+        )
+        # Elapsed is measured from the close and never reset while busy. A
+        # timer restarted on every tick is a timer that never fires, and the
+        # flag most likely to be wrong here is exactly the one that would keep
+        # restarting it: `tts_client_playing` latched true for a whole session
+        # once already (DESIGN 6.0.9).
+        if busy and elapsed < MIC_HARD_TIMEOUT:
             return
         logger.warning(
-            f"🖥️🎙️ {Colors.YELLOW}Microphone was closed for "
-            f"{time.time() - since:.1f}s with no generation and no playback. "
-            f"Reopening.{Colors.RESET}"
+            f"🖥️🎙️ {Colors.YELLOW}Microphone was closed for {elapsed:.1f}s"
+            f"{' with something still claiming to be in flight' if busy else ' with no generation and no playback'}."
+            f" Reopening.{Colors.RESET}"
         )
-        self.set_mic_gate(False, "watchdog: closed with nothing in flight")
+        self.set_mic_gate(False, "watchdog: closed too long")
 
     def reset_state(self):
         """Resets state flags and triggers audio abort (e.g. on clear_history)."""
