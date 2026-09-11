@@ -280,3 +280,46 @@ test("widening the state patterns did not widen them into small talk", () => {
     assert.equal(classifyMachineAction(line), null, `"${line}" was delegated`);
   }
 });
+
+test("a pronoun is an object only when it sits behind the verb", () => {
+  /*
+    `it`, `this` and `that` have always been documented as counting only
+    "behind a verb", because they are the loosest match in the file. That was
+    never implemented: the object test ran over the whole sentence, so a
+    pronoun anywhere satisfied a verb anywhere, in either order, and `make`,
+    `change` and `move` are ordinary English.
+
+    The first line below is verbatim what was spoken to the voice on
+    2026-09-11. It classified `edit`, was delegated to a background agent, and
+    came back "On it." then "Done." with no answer to the question.
+  */
+  for (const line of [
+    "Interesting. Say something that will make me surely see that you have improved especially in your personality.",
+    "that will make me see",
+    "that will make me happy",
+    "it will make me laugh",
+    "that will show me",
+    "this makes me think",
+    "that would change everything",
+  ]) {
+    assert.equal(classifyMachineAction(line), null, `"${line}" was delegated`);
+  }
+
+  // The spoken forms the pronoun exists for are untouched: the object follows
+  // the verb, with at most one word in between.
+  for (const [line, kind] of [
+    ["play it", "media"],
+    ["open that", "open"],
+    ["delete that", "edit"],
+    ["show me that", "open"],
+    ["rename that file", "edit"],
+  ]) {
+    assert.equal(classifyMachineAction(line)?.kind, kind, `"${line}" stopped being work`);
+  }
+
+  // A look is cheap and changes nothing, so it keeps the loose pronoun test:
+  // "is it still running" has no verb for the pronoun to sit behind.
+  for (const line of ["is it still running", "did that change land"]) {
+    assert.equal(classifyMachineAction(line)?.kind, "inspect", `"${line}" stopped being a look`);
+  }
+});

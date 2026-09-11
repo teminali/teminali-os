@@ -287,6 +287,21 @@ export function summariseProgress(run: RunProgress, now = Date.now()): string {
  */
 export const NO_ANSWER = "I looked, but nothing came back that I can read out.";
 
+/**
+ * What any turn says when its run finished having done nothing whatsoever.
+ *
+ * Measured 2026-09-11: a delegated turn came back with no tool calls, no edits
+ * and no prose, in under a millisecond, because the stream resolved empty
+ * instead of throwing. The operator heard "On it." and then "Done." and was
+ * never told that nothing had happened. "Done." is a claim about work, and the
+ * one thing known here is that there was none.
+ *
+ * The `inspect` branch below already refused to do this. The rule was never
+ * about the kind of turn: it is that a report may only describe what was
+ * observed, and an empty run was observed to do nothing.
+ */
+export const NOTHING_RAN = "That did not run, so there is nothing to report.";
+
 /** What to say once a run finishes and nothing else was read out. */
 export function summariseOutcome(run: RunProgress): string {
   const edits = new Set<string>();
@@ -296,7 +311,14 @@ export function summariseOutcome(run: RunProgress): string {
     if (path && /(edit|write|patch|replace|create|apply|multiedit|str_replace)/.test(name)) edits.add(basename(path));
   }
   const note = firstSentence(run.lastText, 140);
-  if (edits.size === 0) return note || (run.kind === "inspect" ? NO_ANSWER : "Done.");
+  if (edits.size === 0) {
+    if (note) return note;
+    if (run.kind === "inspect") return NO_ANSWER;
+    // Nothing changed and nothing was said. Whether "Done." is true at all
+    // turns on whether anything ran: a run that made calls and changed no file
+    // did work, and one with no calls at all did not.
+    return run.toolCalls.length === 0 ? NOTHING_RAN : "Done.";
+  }
   const named = [...edits].slice(0, 3).map(speakablePath).join(", ");
   return `Done. I changed ${edits.size <= 3 ? named : `${plural(edits.size, "file")}, including ${named}`}.${note ? ` ${note}` : ""}`;
 }

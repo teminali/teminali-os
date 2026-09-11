@@ -3,97 +3,45 @@
  * Full-duplex Web Audio pipeline + Binary WebSocket Protocol
  */
 
-const PCM_WORKLET_CODE = `
-class PCMWorkletProcessor extends AudioWorkletProcessor {
-  process(inputs) {
-    const in32 = inputs[0][0];
-    if (in32) {
-      const int16 = new Int16Array(in32.length);
-      for (let i = 0; i < in32.length; i++) {
-        let s = in32[i];
-        s = s < -1 ? -1 : s > 1 ? 1 : s;
-        int16[i] = s < 0 ? s * 0x8000 : s * 0x7FFF;
-      }
-      this.port.postMessage(int16.buffer, [int16.buffer]);
-    }
-    return true;
+/*
+  The two worklets have exactly one copy each, in `./worklets`, and they reach
+  the AudioContext as a blob built from those bytes.
+
+  They used to be served as files from `public/` and loaded by URL, with an
+  inline transcription as the fallback. Both halves of that were wrong. The URL
+  was root-absolute, so in a packaged build, where the page is loaded from
+  `file:///.../app.asar/dist/index.html`, it resolved to the root of the
+  operator's filesystem and always failed -- invisible in dev, which serves from
+  `/`. That threw every packaged session onto the fallback, and the fallback had
+  drifted: `ttsPlaybackProcessor.js` learned a `resetProgress` message and the
+  transcription never did, so the control object landed on the PCM queue,
+  `samplesRemaining` went NaN, and the first spoken turn wedged the lane for the
+  rest of the session. A blob from a `?raw` import has no origin to resolve
+  against and no second copy to drift from.
+
+  The import is deferred to the one place that needs it. `?raw` is a bundler
+  specifier that bare Node cannot resolve, and `tests/voice-directive-echo.test.mjs`
+  imports this module directly to pin a pure predicate; a static import would
+  fail that test at load. A session needs a real AudioContext, so no Node test
+  can reach these lines.
+*/
+
+
+
+/**
+ * Register one worklet from its own source file. The object URL is revoked once
+ * the module is parsed: `addModule` resolves after the worklet global scope has
+ * the processor, so nothing reads the blob again.
+ */
+async function addWorklet(context: AudioContext, load: () => Promise<{ default: string }>): Promise<void> {
+  const { default: code } = await load();
+  const url = URL.createObjectURL(new Blob([code], { type: "application/javascript" }));
+  try {
+    await context.audioWorklet.addModule(url);
+  } finally {
+    URL.revokeObjectURL(url);
   }
 }
-registerProcessor('pcm-worklet-processor', PCMWorkletProcessor);
-`;
-
-const TTS_WORKLET_CODE = `
-class TTSPlaybackProcessor extends AudioWorkletProcessor {
-  constructor() {
-    super();
-    this.bufferQueue = [];
-    this.readOffset = 0;
-    this.samplesRemaining = 0;
-    this.isPlaying = false;
-    this.silenceSamples = 0;
-    this.debounceSampleThreshold = 5760;
-
-    this.port.onmessage = (event) => {
-      if (event.data && typeof event.data === "object" && event.data.type === "clear") {
-        this.bufferQueue = [];
-        this.readOffset = 0;
-        this.samplesRemaining = 0;
-        this.silenceSamples = 0;
-        if (this.isPlaying) {
-          this.isPlaying = false;
-          this.port.postMessage({ type: 'ttsPlaybackStopped' });
-        }
-        return;
-      }
-      this.bufferQueue.push(event.data);
-      this.samplesRemaining += event.data.length;
-      this.silenceSamples = 0;
-    };
-  }
-
-  process(inputs, outputs) {
-    const outputChannel = outputs[0][0];
-    if (this.samplesRemaining === 0) {
-      outputChannel.fill(0);
-      if (this.isPlaying) {
-        this.silenceSamples += outputChannel.length;
-        if (this.silenceSamples >= this.debounceSampleThreshold) {
-          this.isPlaying = false;
-          this.silenceSamples = 0;
-          this.port.postMessage({ type: 'ttsPlaybackStopped' });
-        }
-      }
-      return true;
-    }
-
-    this.silenceSamples = 0;
-    if (!this.isPlaying) {
-      this.isPlaying = true;
-      this.port.postMessage({ type: 'ttsPlaybackStarted' });
-    }
-
-    let outIdx = 0;
-    while (outIdx < outputChannel.length && this.bufferQueue.length > 0) {
-      const currentBuffer = this.bufferQueue[0];
-      const sampleValue = currentBuffer[this.readOffset] / 32768;
-      outputChannel[outIdx++] = sampleValue;
-      this.readOffset++;
-      this.samplesRemaining--;
-
-      if (this.readOffset >= currentBuffer.length) {
-        this.bufferQueue.shift();
-        this.readOffset = 0;
-      }
-    }
-
-    while (outIdx < outputChannel.length) {
-      outputChannel[outIdx++] = 0;
-    }
-    return true;
-  }
-}
-registerProcessor('tts-playback-processor', TTSPlaybackProcessor);
-`;
 
 export class Realtime8000AudioEngine {
   audioContext: AudioContext | null = null;
@@ -180,12 +128,7 @@ export class Realtime8000AudioEngine {
     this.userAnalyser.fftSize = 128;
     this.userAnalyser.smoothingTimeConstant = 0.8;
 
-    try {
-      await this.audioContext.audioWorklet.addModule("/pcmWorkletProcessor.js");
-    } catch {
-      const blob = new Blob([PCM_WORKLET_CODE], { type: "application/javascript" });
-      await this.audioContext.audioWorklet.addModule(URL.createObjectURL(blob));
-    }
+    await addWorklet(this.audioContext, () => import("./worklets/pcmWorkletProcessor.js?raw"));
     this.micWorklet = new AudioWorkletNode(this.audioContext, "pcm-worklet-processor");
 
     this.micWorklet.port.onmessage = ({ data }) => {
@@ -214,12 +157,7 @@ export class Realtime8000AudioEngine {
     this.micWorklet.connect(zeroGain);
     zeroGain.connect(this.audioContext.destination);
 
-    try {
-      await this.audioContext.audioWorklet.addModule("/ttsPlaybackProcessor.js");
-    } catch {
-      const blob = new Blob([TTS_WORKLET_CODE], { type: "application/javascript" });
-      await this.audioContext.audioWorklet.addModule(URL.createObjectURL(blob));
-    }
+    await addWorklet(this.audioContext, () => import("./worklets/ttsPlaybackProcessor.js?raw"));
     this.ttsWorklet = new AudioWorkletNode(this.audioContext, "tts-playback-processor");
 
     this.assistantAnalyser = this.audioContext.createAnalyser();

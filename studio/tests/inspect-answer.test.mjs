@@ -19,7 +19,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 
-import { summariseOutcome, NO_ANSWER } from "../src/services/voice/progressNarration.ts";
+import { summariseOutcome, NO_ANSWER, NOTHING_RAN } from "../src/services/voice/progressNarration.ts";
 import { routeVoiceTurn } from "../src/services/voice/voiceTurnRouter.ts";
 
 const readSource = (path) => readFile(new URL(path, import.meta.url), "utf8");
@@ -79,6 +79,29 @@ test("work still reports as work", () => {
   assert.equal(edited, "Done. I changed echoGuard dot ts. All green.");
 });
 
+test("a run that did nothing does not say it is done", () => {
+  /*
+    Observed on 2026-09-11: a conversational turn was delegated, the stream
+    resolved empty in under a millisecond without throwing, and the operator
+    heard "On it." then "Done." Nothing had run. "Done." is a claim about work
+    and there was none, so the one thing the report may not do is imply there
+    was. Only `inspect` refused this before, which had the rule backwards: it
+    is not about the kind of turn, it is about what was observed.
+  */
+  const nothing = (extra = {}) =>
+    summariseOutcome({ startedAt: NOW, finishedAt: NOW + 1, engine: "frontier", toolCalls: [], lastText: "", ...extra });
+
+  assert.equal(nothing(), NOTHING_RAN);
+  assert.equal(nothing({ kind: "edit" }), NOTHING_RAN);
+  assert.equal(nothing({ kind: "inspect" }), NO_ANSWER);
+
+  // A run that made calls and changed no file did work. That one may say so.
+  assert.equal(nothing({ toolCalls: ran }), "Done.");
+
+  // And whatever it actually said still wins over both.
+  assert.equal(nothing({ lastText: "The port is 8080." }), "The port is 8080.");
+});
+
 /* ── The wire the answer travels on ───────────────────────────────────────── */
 
 test("a state question is delegated and acknowledged, so something must follow it", () => {
@@ -113,5 +136,26 @@ test("a refused delegation is spoken, not only shown in a toast", async () => {
     bridge,
     /const refusal = describeRejection\(result\.reason\);[\s\S]{0,700}?options\.onCompleted\?\.\(refusal\)/,
     "the refusal must reach onCompleted, which is what speaks",
+  );
+});
+
+test("a delegated run that failed says so instead of reporting success", async () => {
+  /*
+    `AIService.streamMessage` catches everything and hands it to `onError`,
+    then resolves — it never throws. The voice bridge was the one caller that
+    passed no `onError`, so a 401 (or any other failure) arrived as a stream
+    that produced nothing at all, the bridge's `catch` never ran, and the turn
+    reported success. Observed 2026-09-11: "On it." and "Done." one
+    millisecond apart, with no answer in between.
+  */
+  const bridge = await readSource("../src/services/voice/teminaliAgentBridge.ts");
+  assert.match(bridge, /onError:\s*\(error\)\s*=>\s*\{\s*streamError = error;/);
+  assert.match(bridge, /if \(streamError\) throw streamError;/);
+
+  // And the throw must land before the success report is built, or it reports
+  // success on the way past.
+  assert.ok(
+    bridge.indexOf("if (streamError) throw streamError;") < bridge.indexOf("const completionSummary = summariseOutcome("),
+    "the raise must precede the outcome summary",
   );
 });

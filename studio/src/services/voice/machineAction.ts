@@ -81,15 +81,50 @@ const OPINION_FRAMES = [
  * written, and "8080" came back instead. A noun the voice is willing to invent
  * a value for belongs on both lists or on neither.
  */
-const MACHINE_OBJECTS =
-  /\b(file|files|folder|folders|directory|dir|project|projects|workspace|workspaces|repo|repository|video|clip|movie|track|audio|song|music|playback|player|terminal|command|shell|script|build|tests?|suite|server|app|code|function|component|readme|config|package|branch|commit|log|logs|screen|window|tab|pane|editor|timeline|path|document|note|notes|bug|bugs|error|errors|warning|warnings|issue|issues|crash|regression|feature|dependency|dependencies|import|imports|type|types|deploy|deployment|release|install|migration|pipeline|job|task|port|ports|version|versions|model|models|it|this|that|these|those)\b/i;
+const MACHINE_NOUNS =
+  /\b(file|files|folder|folders|directory|dir|project|projects|workspace|workspaces|repo|repository|video|clip|movie|track|audio|song|music|playback|player|terminal|command|shell|script|build|tests?|suite|server|app|code|function|component|readme|config|package|branch|commit|log|logs|screen|window|tab|pane|editor|timeline|path|document|note|notes|bug|bugs|error|errors|warning|warnings|issue|issues|crash|regression|feature|dependency|dependencies|import|imports|type|types|deploy|deployment|release|install|migration|pipeline|job|task|port|ports|version|versions|model|models)\b/i;
 
 /**
- * `it`, `this` and `that` are in `MACHINE_OBJECTS` on purpose — "play it",
- * "open that", "close this" are the commonest spoken forms and there is no
- * other object to find. They are also the loosest match in the file, so they
- * only count behind a verb that is unambiguously operational.
+ * `it`, `this` and `that` are objects only when they are the thing the verb is
+ * being done to -- "play it", "open that", "close this", "rename that file".
+ * They are the commonest spoken forms and there is no other object to find.
+ *
+ * They are also by far the loosest match in the file, which is why the rule has
+ * always been that they "only count behind a verb". That was written down and
+ * not implemented: `hasObject` tested the whole sentence, so a pronoun anywhere
+ * satisfied a verb anywhere, in either order. `make` and `change` are ordinary
+ * English, so every sentence built from "that" and "make" became a coding task.
+ *
+ * Measured 2026-09-11, spoken to the voice: "Interesting. Say something that
+ * will make me surely see that you have improved especially in your
+ * personality." classified `edit`, was delegated to a background agent, and the
+ * operator got "On it." followed by "Done." instead of an answer.
+ *
+ * So the pronoun must now actually sit behind the verb, with at most one word
+ * between them -- "show me that" is a command, "make me see it" is not.
  */
+const PRONOUN_OBJECT = /^\W*(?:\w+\W+)?(it|this|that|these|those)\b/i;
+
+/**
+ * The same pronouns, anywhere in the sentence.
+ *
+ * A state question may point with one and have no verb for it to sit behind:
+ * "is it still running", "did that change land". Those are looks, and a look is
+ * cheap and changes nothing, so the loose test is the right one there. The
+ * strict rule above exists because the verb groups end in a delegated agent
+ * run, which is neither cheap nor free of consequences.
+ */
+const PRONOUN_ANYWHERE = /\b(it|this|that|these|those)\b/i;
+
+/**
+ * Is there an object for this verb? A named thing may sit anywhere in the
+ * sentence; a bare pronoun must follow the verb it belongs to.
+ */
+function hasObjectFor(text: string, verbMatch: RegExpExecArray): boolean {
+  if (MACHINE_NOUNS.test(text)) return true;
+  return PRONOUN_OBJECT.test(text.slice(verbMatch.index + verbMatch[0].length));
+}
+
 const VERB_GROUPS: { kind: MachineActionKind; verbs: RegExp; reason: string }[] = [
   {
     kind: "media",
@@ -196,11 +231,10 @@ export function classifyMachineAction(text: string): MachineAction | null {
   const stripped = raw.replace(POLITE_PREFIX, "").trim();
   if (!stripped) return null;
 
-  const hasObject = MACHINE_OBJECTS.test(stripped);
-
   // Asked before the verb groups: a state question is a look, whatever verb it
-  // happens to contain.
-  if (hasObject) {
+  // happens to contain. Its object may be a bare pronoun with nothing to sit
+  // behind — see `PRONOUN_ANYWHERE`.
+  if (MACHINE_NOUNS.test(stripped) || PRONOUN_ANYWHERE.test(stripped)) {
     const state = STATE_QUESTIONS.find((pattern) => pattern.test(stripped));
     if (state) {
       return { kind: "inspect", reason: `a question about machine state — ${state.exec(stripped)?.[0]}` };
@@ -216,7 +250,7 @@ export function classifyMachineAction(text: string): MachineAction | null {
       return { kind: group.kind, reason: `${group.reason} — "${match[0]}"` };
     }
 
-    if (!hasObject) continue;
+    if (!hasObjectFor(stripped, match)) continue;
 
     return { kind: group.kind, reason: `${group.reason} — "${match[0]}" with an object in range` };
   }

@@ -164,6 +164,15 @@ export class TeminaliAgentBridge {
     options.onProgress?.(initialStatus);
 
     let accumulatedProse = "";
+    /*
+      `AIService.streamMessage` never throws: it catches everything and hands it
+      to `onError`, then resolves. This was the one caller that passed no
+      `onError`, so every failure -- a 401, a dead provider, a refused tool --
+      arrived as a stream that simply produced nothing, the `catch` below never
+      ran, and the turn reported success for work that had not happened.
+      Measured 2026-09-11: "On it." and "Done." in the same millisecond.
+    */
+    let streamError: Error | null = null;
     // What the run was *observed* to do. Everything spoken at the end is built
     // from this list, so nothing can be reported that did not happen.
     const observed: NarratableToolCall[] = [];
@@ -239,6 +248,9 @@ export class TeminaliAgentBridge {
           onComplete: (data) => {
             if (data.fullText) accumulatedProse = data.fullText;
           },
+          onError: (error) => {
+            streamError = error;
+          },
         },
         [],
         {
@@ -297,6 +309,10 @@ export class TeminaliAgentBridge {
           },
         },
       );
+
+      // Raised here rather than reported as an outcome, so the failure lands in
+      // the `catch` below and is spoken with every other kind of failure.
+      if (streamError) throw streamError;
 
       // 2. Final completion log — what was counted, not what would sound good.
       // It used to read "Success · 0 errors" whether or not a tool had failed,

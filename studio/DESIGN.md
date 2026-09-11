@@ -6593,6 +6593,80 @@ It was fixed there and not here.
 `isSpeaking` now counts as running. The rule is the whole of it: **if she is talking, she
 can be stopped.**
 
+### 6.0.9 The worklets have one copy, and it is not a file (`services/voice/worklets/`, 2026-09-11)
+
+The realtime engine's two AudioWorklets are the mic's PCM converter and the TTS
+playback buffer. They now live in `services/voice/worklets/`, are imported with
+`?raw`, and reach the AudioContext as a blob. There is no second copy and no URL
+to resolve.
+
+Both of those were previously wrong, and together they meant **the installed app
+never once ran the worklet described in 6.0.7**, while dev always did.
+
+* The worklet was fetched with `addModule("/ttsPlaybackProcessor.js")`. A leading
+  slash means the server root, and a packaged build has no server: the page loads
+  from `file:///.../app.asar/dist/index.html`, so the path resolved to the root of
+  the operator's disk and always failed. Dev serves from `/`, so dev never saw it.
+* Every packaged session therefore fell through to an inline transcription of the
+  worklet kept in the engine file, and that transcription had drifted. When the
+  real worklet learned `resetProgress` (6.0.7, the day before), the copy did not.
+
+The failure that produced is worth keeping, because none of it looks like audio.
+The copy had no branch for a control message, so `{type:"resetProgress"}` was
+pushed onto the PCM queue and `samplesRemaining += event.data.length` made it
+`NaN`. `NaN === 0` is false, so the buffer never drained, `ttsPlaybackStopped`
+never fired, and `isTTSPlaying` latched true. Every microphone frame carries that
+flag, and the server is half-duplex: it read every subsequent frame as the
+assistant hearing itself and discarded all of it. **The first spoken reply
+deafened the app for the rest of the session** — text answers kept arriving, no
+audio ever played, and then nothing answered at all.
+
+A fallback that is a transcription rather than the same bytes is not a fallback.
+It is a second implementation that only runs where nobody is looking.
+
+### 6.0.10 "On it." then "Done.", with no answer in between (2026-09-11)
+
+Spoken to the voice: *"Interesting. Say something that will make me surely see
+that you have improved especially in your personality."* The operator heard
+"On it.", then "Done.", and never got an answer. Three defects, stacked, none of
+them in the audio path.
+
+**The turn was classified as work.** `MACHINE_OBJECTS` carried `it`, `this`,
+`that`, `these`, `those`, and the comment beside them said they "only count
+behind a verb that is unambiguously operational". That was written down and not
+implemented: `hasObject` tested the whole sentence, so a pronoun anywhere
+satisfied a verb anywhere, in either order. `make`, `change` and `move` are
+ordinary English, so any sentence built from "that" and "make" was a coding
+task. `machineAction.ts` now splits `MACHINE_NOUNS` from `PRONOUN_OBJECT`: a
+named thing may sit anywhere, a bare pronoun must follow its verb with at most
+one word between them. "show me that" is a command; "make me see it" is not.
+State questions keep the loose test via `PRONOUN_ANYWHERE` — "is it still
+running" has no verb for the pronoun to sit behind, and a look is cheap.
+
+**The delegated run failed silently.** `AIService.streamMessage` never throws:
+it catches everything and hands it to `onError`, then resolves.
+`teminaliAgentBridge.ts` was the only caller in the codebase that passed no
+`onError`, so a 401 — or a dead provider, or a refused tool — arrived as a
+stream that produced nothing, and the bridge's `catch` never ran. It now
+captures the error and raises it before the outcome is summarised, so a failed
+delegation is spoken with every other kind of failure.
+
+**And then it claimed success.** `summariseOutcome` answered `"Done."` for a run
+with no edits, no tools and no prose, unless its kind was `inspect`. The rule
+was never about the kind of turn: a report may only describe what was observed,
+and an empty run was observed to do nothing. `NOTHING_RAN` now covers every kind
+whose run did nothing at all, while a run that made calls and changed no file
+still says "Done.", because work did happen.
+
+The through-line is the one §6.0.7 and `machineAction.ts` already state: **the
+voice may only say what was observed.** Each of these three broke it in a
+different place, and together they produced a confident report of work that
+never started.
+
+Pinned by `tests/machine-action.test.mjs` (the verbatim sentence, the spoken
+pronoun forms, and the two state questions) and `tests/inspect-answer.test.mjs`
+(the empty-run wording, and that the raise precedes the summary).
+
 ### 6.1 Turn semantics while a run is in flight (2026-09-05)
 
 A directed utterance is not automatically an instruction. `turnIntent.ts`
