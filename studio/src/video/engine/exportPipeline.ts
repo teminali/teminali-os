@@ -345,6 +345,29 @@ export async function runExport(request: ExportRequest): Promise<ExportOutcome> 
       ctxB = canvasB.getContext('2d', { alpha: false });
     }
 
+    /*
+      The way back to the pipeline that shipped through 0.0.8.
+
+      Tiers 1 and 2 changed how every frame is read and written, and both lean
+      on what the machine's decoder and encoder will accept — a codec the UA
+      takes on this Mac may be refused on someone's Windows box, and the
+      failure mode of a wrong guess is a bad file rather than an error. So
+      there is a switch, set from the console with
+      `localStorage['teminali.export.legacy'] = '1'`, that puts an export back
+      on the seek-and-JPEG path in one move without a downgrade.
+
+      It is also the only honest way to A/B the two on a real project: the same
+      timeline, the same machine, one flag apart.
+    */
+    const legacyExport = (() => {
+      try {
+        return localStorage.getItem('teminali.export.legacy') === '1';
+      } catch {
+        return false;
+      }
+    })();
+    if (legacyExport) console.info('[export] legacy path forced: seek + JPEG');
+
     /* ── Tier 2 ──
        Encode here and hand ffmpeg an elementary stream it can copy, rather
        than a JPEG it has to decode and re-encode. Null means this export
@@ -354,7 +377,7 @@ export async function runExport(request: ExportRequest): Promise<ExportOutcome> 
        The bitrate is the same number `exportFilters.cjs:64` hands a hardware
        encoder — 40 Mbps above 1080p, 12 below — so switching paths does not
        quietly change the quality of the file. Keep the two in step. */
-    frameEncoder = await createFrameEncoder(
+    frameEncoder = legacyExport ? null : await createFrameEncoder(
       request.codec,
       width,
       height,
@@ -392,7 +415,7 @@ export async function runExport(request: ExportRequest): Promise<ExportOutcome> 
        throughput: the seek is the render"). Sources whose demands run
        forward are pulled in order instead; anything reversed, doubled or
        non-monotonic is planned back onto the seek path, per source. */
-    const plans = planSequentialDecode(
+    const plans = legacyExport ? [] : planSequentialDecode(
       (timestampMs) => visibleVideoClips(tracks, timestampMs)
         .filter(({ clip }) => Boolean(clip.mediaUrl))
         .map(({ clip, offsetMs }) => ({

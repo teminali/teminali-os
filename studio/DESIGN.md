@@ -3857,11 +3857,8 @@ describe the pipeline these replaced, not the one that ships; see "Tier 1, on
 real footage" and "Tier 2, measured" for what it is now. Tiers 3-4 remain a
 decision recorded, not a capability.
 
-**Two cautions on every number in this section.** None of them has a
-compositor in the loop — the harness decodes one clip and draws it, where a
-real timeline runs `renderTimelineFrame` over layers, transforms and
-transitions, a cost the seek used to hide and which is now the floor. And a
-seek harness is easy to get wrong: `requestVideoFrameCallback` will resolve
+**One caution on every number in this section.** A seek harness is easy to get
+wrong: `requestVideoFrameCallback` will resolve
 against the frame already on screen rather than the seek, which reports
 11,000 fps and is how an early version of this measurement got a 9x-optimistic
 figure for the old path. The real-footage table below waits on `seeked` alone
@@ -3979,6 +3976,13 @@ next thing to build: removing the JPEG round-trip should take 4.8s toward the
    build and any codec the UA refuses keep the JPEG path — the encoder is
    built before the session starts and `frameFormat` tells the main process
    which contract this export is using.
+
+   **There is a way back.** `localStorage['teminali.export.legacy'] = '1'`
+   forces an export onto the seek-and-JPEG path. Both tiers depend on what a
+   machine's decoder and encoder accept, and a wrong guess produces a bad file
+   rather than an error, so the switch exists for a user whose hardware
+   disagrees with this one — and it is what makes an honest A/B possible on a
+   real project: same timeline, same machine, one flag apart.
 3. **Smart rendering.** A stretch of timeline with no effect, no transform and
    a codec/resolution/frame-rate match against the source is a stream copy, not
    a re-encode — Premiere ships this under that name and it is lossless as well
@@ -4047,6 +4051,37 @@ both silent:**
    range tag. This is the same class of failure as the colour landmine below,
    caught the second time by `ffprobe` rather than by a metric. **Verify colour
    with `ffprobe`; a quality score is not evidence.**
+
+#### The compositor is not the new floor — measured 2026-09-11
+
+Removing the seek was expected to promote compositing to the bottleneck, and
+this section said so for most of a day. It does not. Measured in Electron on
+this machine, drawing into a 1920x1080 context:
+
+| frame content | fps | per frame |
+| --- | --- | --- |
+| one full-frame layer | 25,263 | 0.04ms |
+| three layers + rotate/scale, alpha, a filled bar and 64px text | 9,717 | 0.10ms |
+
+A busy composited frame costs **~0.1ms against the encoder's 4.3ms** — about
+62ms across a 600-frame render, which is why the end-to-end 3.2s matches the
+sum of its stages. Compositing would have to get ~40x slower to become the
+bottleneck again.
+
+**Two ways to mismeasure this, both of which happened here first.**
+`requestAnimationFrame` is vsync-locked: a sustained-frames loop reported
+120.9 and 120.1 fps for the one-layer and four-element frames, which is the
+display's refresh rate and not a property of either. And `performance.now()`
+around `drawImage` measures command SUBMISSION, not execution. The table above
+runs the draws back to back with a single `getImageData` after the batch, so
+the GPU has to finish what was queued before the clock stops.
+
+**This machine is bandwidth-rich.** An Intel iGPU will pay materially more for
+fill rate, so read 0.1ms as a lower bound on what compositing costs elsewhere
+rather than as a number every user gets. A timeline with GPU transitions is
+also a different case: `gpuStage` uploads the canvas and reads it back, which
+`shaders.ts` already records as expensive enough to make one effect slower
+than its 2D equivalent.
 
 #### Landmines, measured
 
