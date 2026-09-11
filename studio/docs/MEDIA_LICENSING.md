@@ -107,11 +107,44 @@ Not done:
   that also reports the step as `success`, the workflow has a **Report what the
   media stack produced** step after it: that line, not the step's conclusion,
   is what says whether a bundle shipped and which architectures it carries.
-- **Windows has no recipe.** The script exits 0 on Windows with a warning
-  rather than failing the job: a Windows release with no media stack is
-  v0.0.6's behaviour, and failing would trade away the first Windows build this
-  project ever shipped for a bundle it has never had. The route is
-  msys2/mingw-w64.
+- **Windows has no recipe, and writing one blind is the thing Linux just
+  disproved.** The script exits 0 on Windows with a warning rather than failing
+  the job: a Windows release with no media stack is v0.0.6's behaviour, and
+  failing would trade away the first Windows build this project ever shipped
+  for a bundle it has never had. The route is msys2/mingw-w64.
+
+  The Linux account further down this section — under "The macOS bundle is
+  universal", which is where that measurement lives — is the argument against
+  writing this one from reading. Three of that platform's four faults were
+  **silent skips, not errors**: a guard
+  that quietly excluded every file, a check that returned success without
+  looking, a build that ran its own output. Reading the script predicted one of
+  the three. A Windows recipe written without a Windows machine would be wrong
+  in the same shape, and `continue-on-error: true` would report it green.
+
+  What can be established from here, and is worth having written down before
+  somebody starts:
+
+  - **Windows can carry the bundle already.** The two `media-stack`
+    `extraResources` entries in `electron-builder.yml` are global, not inside
+    a platform block, so the packaging half needs no change — only the recipe.
+  - **There is no relocation step.** The Windows loader searches the
+    executable's own directory before anything else, so the DLLs simply sit
+    beside `ffmpeg.exe`. There is no `@rpath`, no `$ORIGIN`, and no
+    `install_name_tool`/`patchelf` equivalent to run — `relocate` should be a
+    no-op there rather than a third branch.
+  - **`verify_bundle` still needs a third implementation.** PE records an
+    import table, read with `objdump -p` under mingw; the check is that every
+    imported DLL is either beside the binary or a genuine system DLL
+    (`KERNEL32`, `msvcrt`, …). Without it Windows would be in exactly the
+    position Linux was: staging whatever it likes and reporting success.
+  - **`is_binary` needs a PE case**, or it excludes every Windows file the same
+    way it excluded every ELF one.
+
+  **Prove it on the CI Windows runner before trusting it**, the way Linux was
+  proven in a VM. A `workflow_dispatch` run exercises the media-stack step
+  without publishing a release, which is the cheapest honest test available for
+  a platform nobody here has.
 - **The About surface exists** (2026-09-11). **Settings › About** —
   `src/components/settings/AboutPane.tsx` over `GET /api/about`
   (`server/about.js`) — names every bundled component with its version and
