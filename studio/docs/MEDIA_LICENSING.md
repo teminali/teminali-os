@@ -411,9 +411,18 @@ build. Three things satisfy it, and all three are release-time work:
    records that URL, the About pane shows it, and `MEDIA_STACK_SOURCE_OFFER`
    overrides it. **Created 2026-09-11** with the four tarballs, FFmpeg's
    upstream signature and signing key, and the build script — the last of the
-   three obligations to be met. Re-cut it whenever a pin in the script changes:
-   the offer names versions, so a bumped pin without a new release is an offer
-   for source we no longer ship.
+   three obligations to be met.
+
+   **Re-cut it whenever a pin *or the script itself* changes.** The first
+   version of this rule said "whenever a pin changes", which is too narrow and
+   was wrong within a day: §6 asks for the scripts used to control compilation,
+   so a script that has changed materially makes the offer stale even when
+   every version it names is identical. Measured 2026-09-11 — the published
+   asset was the 381-line pre-universal script against 647 lines in the tree,
+   different sha256, same four tarballs. Re-uploading `build-media-stack.sh` to
+   the existing tag is enough when no pin moved; a bumped pin needs a new tag,
+   because the offer names versions and an old tag would offer source we no
+   longer ship.
 
 ## Where the files land
 
