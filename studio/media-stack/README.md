@@ -13,12 +13,15 @@ detail; the player falls back to a system mpv exactly as it always has.
 Nothing here is committed but the three READMEs, which exist so their
 directories do — git does not track an empty directory, and an `extraResources`
 entry whose `from:` does not resolve fails the build. `media-stack/ffmpeg`
-measures 22 MB built (macOS arm64), it is platform-specific, and it is
-reproducible from `scripts/build-media-stack.sh` — which is also what the LGPL
-source offer points at.
+measures 48 MB built (macOS, universal — an `arm64` and an `x86_64` slice in
+every Mach-O), it is platform-specific, and it is reproducible from
+`scripts/build-media-stack.sh` — which is also what the LGPL source offer
+points at.
 
 A build made without running the script ships no bundle and warns about
-nothing. That is what every release up to and including v0.0.6 did: the app
+nothing. That is what every release up to and including v0.0.7 did: the app
 falls back to whatever ffmpeg is installed, and says so when there is none.
+From the next tagged release it is what Linux and Windows still do — the
+workflow installs the assembler on macOS only.
 
 Why LGPL and what it costs: `docs/MEDIA_LICENSING.md`.

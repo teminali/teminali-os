@@ -196,26 +196,59 @@ jobs:
         run: npm run build:pointer
         working-directory: studio
 
+      # ffmpeg's SIMD needs an assembler, and it is installed on macOS ONLY.
+      # That `if:` is the whole shipping decision. The macOS half of
+      # `build-media-stack.sh` has been run end to end and produces a universal
+      # bundle; the Linux half has never been run anywhere, and Windows has no
+      # recipe at all. Installing nasm on those two would turn an honest "no
+      # bundle" into an untested one — they stop at the script's tool gate and
+      # ship without a stack, exactly as v0.0.7 did.
+      #
+      # `brew list` first because `brew install` on a formula that is already
+      # present can decide to upgrade it, which costs runner time and pins a
+      # version nobody asked for.
+      - name: Install the media stack's assembler
+        if: matrix.os == 'macos-latest'
+        run: brew list nasm >/dev/null 2>&1 || brew install nasm
+
       # LGPL ffmpeg and mpv, built here — see studio/docs/MEDIA_LICENSING.md.
-      # `continue-on-error` because a build without the stack is v0.0.6's
-      # behaviour, not a broken release: the app falls back to a system ffmpeg.
+      # `continue-on-error` because a build without the stack is v0.0.6's and
+      # v0.0.7's behaviour, not a broken release: the app falls back to a
+      # system ffmpeg.
       # A failure here must not take down the Windows job that only just
       # started finishing at all.
       #
-      # No runner installs meson/ninja/nasm, so this stops at the script's tool
-      # gate and every platform ships without a bundle. That is deliberate and
-      # it is NOT a one-line fix. This job builds macOS as `--mac --arm64
-      # --x64` on a single arm64 runner, and extraResources copies the same
-      # media-stack/ffmpeg into both app bundles — so installing the toolchain
-      # here would put an arm64 ffmpeg inside the Intel build. `findFfmpeg`
-      # prefers the bundled copy over PATH, so an x64 Mac would select a binary
-      # it cannot exec and lose export and transcode, which work today. The
-      # bundle needs to be universal (build per arch, `lipo -create`) before
-      # this step is allowed to succeed on macOS.
+      # This step was gated on a correctness defect until 2026-09-11, and the
+      # defect is worth knowing: the job builds macOS as `--mac --arm64 --x64`
+      # on a single arm64 runner and extraResources copies the same
+      # media-stack/ffmpeg into both app bundles, so a single-arch build put an
+      # arm64 ffmpeg inside the Intel app — and `findFfmpeg` prefers the bundled
+      # copy over PATH, so an x64 Mac would have selected a binary it cannot
+      # exec and lost export and transcode, which work today via a system
+      # ffmpeg. The script now builds per arch and `lipo -create`s the result,
+      # with verify_bundle asserting every slice, so macOS is allowed to
+      # succeed here. Every §6 obligation is met.
       - name: Build the media stack
         working-directory: studio
         continue-on-error: true
         run: npm run build:media-stack
+
+      # `continue-on-error` above reports that step as `success` even when it
+      # failed, so THIS is the line to read in the log: it says what actually
+      # reached extraResources, and on macOS which architectures it carries. A
+      # macOS release whose bundle silently went missing looks identical to one
+      # that never built it, and only this line tells the two apart.
+      - name: Report what the media stack produced
+        working-directory: studio
+        shell: bash
+        run: |
+          if [ -e media-stack/ffmpeg/ffmpeg ]; then
+            echo "bundled ffmpeg: $(lipo -archs media-stack/ffmpeg/ffmpeg 2>/dev/null || echo 'no lipo on this platform')"
+          elif [ "${{ matrix.os }}" = "macos-latest" ]; then
+            echo "::warning::macOS built no media stack; this release falls back to a system ffmpeg. Read the step above."
+          else
+            echo "no media stack bundled (expected here); the app falls back to a system ffmpeg"
+          fi
 
       - name: Build web assets
         run: npm run build

@@ -4662,7 +4662,8 @@ a name that is not in the bundle is a 404, and `../` has no path to take.
 
 The pane's honest empty state is the load-bearing half. A build made without
 the media-stack script ships no bundle — every release up to and including
-v0.0.6 did — and it says so in words: the app is using an ffmpeg it found on
+v0.0.7 did, and Linux and Windows still do — and it says so in words: the app
+is using an ffmpeg it found on
 the machine, which we did not build and whose licence we cannot state on its
 behalf. Claiming LGPL compliance over somebody else's Homebrew binary would be
 worse than saying nothing.

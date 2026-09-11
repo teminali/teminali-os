@@ -13,11 +13,14 @@ only shape that does not have to be chosen twice.
 
 ## Status
 
-**Updated 2026-09-11. The recipe has been run end to end on macOS (arm64), and
-both §6 obligations that were outstanding are now met — the About surface names
-what ships, and the source offer resolves. The bundle may ship. The ffmpeg half
-is built, measured and self-contained; mpv is deliberately not staged, for a
-reason worth reading before anyone "fixes" it.**
+**Updated 2026-09-11. The recipe has been run end to end on macOS and now
+produces a universal bundle — `arm64` and `x86_64`, built separately and fused
+with `lipo`. Both §6 obligations that were outstanding are met: the About
+surface names what ships, and the source offer resolves. The ffmpeg half is
+built, measured, self-contained and executable on both architectures; mpv is
+deliberately not staged, for a reason worth reading before anyone "fixes" it.
+Nothing in the licence or the build stands between this bundle and a release,
+and the macOS runner now installs `nasm`: the next tagged release ships it.**
 
 Done, and verified by the suite:
 
@@ -48,11 +51,12 @@ Done, and measured by a real build rather than argued from the spec:
   measured from the canonical host; two of them are GitHub *archive* tarballs,
   which GitHub has regenerated before, so a mismatch there means re-verify
   rather than assume the worst.
-- **The ffmpeg bundle is 22 MB** — `ffmpeg`, `ffprobe`, nine `.dylib`s and the
-  licence texts — and it starts and encodes with the build tree deleted. Both
-  encoders were exercised: `libopenh264` (software) and `h264_videotoolbox`
-  (hardware) each wrote a real file. `License: LGPL version 2.1 or later`, read
-  off the configure summary.
+- **The ffmpeg bundle is 48 MB** — `ffmpeg`, `ffprobe`, nine `.dylib`s and the
+  licence texts, each carrying both architectures — and it starts and encodes
+  from a copy made outside the build tree. Both encoders were exercised on
+  **both slices**: `libopenh264` (software) and `h264_videotoolbox` (hardware)
+  each wrote a real file natively and under Rosetta. `License: LGPL version 2.1
+  or later`, read off the configure summary.
 - **The component set it drops is recorded below**, read off the build rather
   than guessed, along with the check that the app asks for none of it.
 
@@ -66,18 +70,39 @@ Not done:
   source offer has to name a version. So `stage_closure` refuses to copy any
   library this script did not build, `verify_bundle` then sees mpv pointing off
   the machine, and `media-stack/mpv` is left empty — which is exactly what
-  every release up to v0.0.6 shipped. **Finishing mpv means pinning and
-  building libplacebo, libass and libass's own closure (freetype, fribidi,
-  harfbuzz) here.** Until then the player falls back to a system mpv as before.
-- **No release builds the bundle yet, and that is currently the right state.**
-  `.github/workflows/release.yml` runs `npm run build:media-stack` with
-  `continue-on-error: true`, but the runner installs no `meson`, `ninja` or
-  `nasm` — so the script stops at its tool gate and the job ships no bundle,
-  exactly as v0.0.6 did. Adding those three to the workflow is one line, and it
-  is the step that turns "we build an LGPL ffmpeg" into "we distribute one" —
-  which is why it was gated on every §6 obligation below being met. As of
-  2026-09-11 they are, so the gate is clear and the line is a decision about
-  what the next release should carry, not a licence question.
+  every release up to v0.0.7 shipped.
+
+  Since the bundle went universal it is not built on macOS **at all**. Those
+  same machine-supplied libraries exist for the native architecture only, so
+  there is no second half to fuse against, and a universal bundle cannot carry
+  a thin binary — building it would spend minutes on something staging must
+  then discard. `MEDIA_STACK_ARCHS=arm64` restores the old behaviour for anyone
+  working on it. A consequence worth knowing: mpv is the only thing that needed
+  `meson` and `ninja`, so the default macOS build no longer asks for either.
+
+  **Finishing mpv means pinning and building libplacebo, libass and libass's
+  own closure (freetype, fribidi, harfbuzz) here**, per architecture. Until
+  then the player falls back to a system mpv as before.
+- **Only macOS releases carry the bundle; Linux and Windows still ship without
+  one.** `.github/workflows/release.yml` installs `nasm` on `macos-latest` and
+  nowhere else, so the script runs to completion there and stops at its tool
+  gate on the other two, which ship exactly as v0.0.7 did.
+
+  That `if:` is the whole decision, and it is deliberately not a matrix-wide
+  one. What it cost had changed twice before it was taken: it was gated on the
+  §6 obligations, which are met, and then on the universal-binary defect, which
+  is fixed and measured below. It also turned out to be one tool rather than
+  three — `meson` and `ninja` only ever built mpv, which a universal macOS
+  build no longer builds. Giving Linux the same line would not be the same
+  decision: **that half of the recipe has never been run anywhere**, and
+  installing the assembler there would turn an honest "no bundle" into an
+  untested one. Run it locally first — see the last bullet under Status.
+
+  `continue-on-error: true` stays on that step, so a macOS release whose bundle
+  failed to build still publishes and falls back to a system ffmpeg. Because
+  that also reports the step as `success`, the workflow has a **Report what the
+  media stack produced** step after it: that line, not the step's conclusion,
+  is what says whether a bundle shipped and which architectures it carries.
 - **Windows has no recipe.** The script exits 0 on Windows with a warning
   rather than failing the job: a Windows release with no media stack is
   v0.0.6's behaviour, and failing would trade away the first Windows build this
@@ -108,25 +133,50 @@ Not done:
 - **All three §6 obligations are now met**, so the licence no longer stands in
   the way of shipping the bundle. **A build problem now does**, and it is not
   the one-line change earlier notes promised.
-- **CI cannot ship this bundle to macOS until it is universal — measured
-  2026-09-11.** `release.yml` builds macOS as `--mac --arm64 --x64`: one arm64
-  runner producing *both* app bundles. `extraResources` copies the same
-  `media-stack/ffmpeg` into each, and what this script builds is **arm64 only**
-  (`lipo -archs media-stack/ffmpeg/ffmpeg` → `arm64`). So an Intel Mac would
-  receive an arm64 ffmpeg, and `findFfmpeg` prefers the bundled copy over
-  `PATH` — the file exists, so it is selected, and then cannot exec. Export and
-  transcode would break for every x64 user **where they work today** via a
-  system ffmpeg. Adding `meson`/`ninja`/`nasm` to the runner without fixing
-  this ships that regression.
+- **The macOS bundle is universal — fixed and measured 2026-09-11.**
+  `release.yml` builds macOS as `--mac --arm64 --x64`: one arm64 runner
+  producing *both* app bundles, with `extraResources` copying the same
+  `media-stack/ffmpeg` into each. Until this was fixed the script built
+  **arm64 only**, so an Intel Mac would have received an arm64 ffmpeg — and
+  `findFfmpeg` prefers the bundled copy over `PATH`, deciding by
+  `statSync().isFile()`, so the wrong-architecture binary would exist, win, and
+  then fail to exec, taking export and transcode down **where they work today**
+  via a system ffmpeg. A bundle like that is worse than no bundle.
 
-  The fix is a universal binary: build the closure twice, once per arch, and
-  `lipo -create` each Mach-O before staging — `verify_bundle` should then also
-  assert both architectures are present. Until that exists the workflow's
-  media-stack step stays as it is: it runs, stops at the tool gate, and ships
-  no bundle, exactly as v0.0.6 did. **Do not add the toolchain to the macOS
-  runner as a one-line change.** Linux (`--linux --x64`, built on an x64
-  runner) has no such mismatch, but that recipe has never been run anywhere, so
-  it is unproven rather than known-good.
+  The script now builds the whole closure once per architecture into its own
+  prefix, from its own pristine source tree, and `lipo -create`s every Mach-O
+  before staging. Three details are load-bearing:
+
+  - **The architecture rides in `CC`, not in `ARCH` and not in `CFLAGS`.**
+    openh264's `build/platform-darwin.mk` adds `-arch arm64` for arm64 and
+    nothing at all for x86_64, so `make ARCH=x86_64` on an arm64 Mac compiles
+    native C and assembles foreign asm. And all three build systems here do
+    `CFLAGS +=`; a command-line `CFLAGS=` replaces what they append rather than
+    extending it, taking `-fPIC` with it. `CC="clang -arch <arch>"` is the one
+    channel all three honour. No cross toolchain is needed — the macOS SDK
+    already carries both slices.
+  - **Each architecture gets its own extraction**, not a `make clean` between
+    passes. openh264 and ffmpeg build in-tree, and a leftover object file from
+    the other architecture does not announce itself.
+  - **`verify_bundle` asserts every slice, and walks paths per slice.** A fat
+    binary missing one fails the build exactly like a thin one; and `otool -L`
+    without `-arch` only ever shows the architecture you are standing on, so a
+    dependency pointing into the build tree in the *other* slice would ship
+    silently. Beyond the headers, the script executes what it built: natively,
+    and through Rosetta when it is installed, which is a real test of the
+    cross-built half rather than a reading of it.
+
+  Measured on this build: `lipo -archs media-stack/ffmpeg/ffmpeg` → `x86_64
+  arm64`; all eleven Mach-O files carry both slices; no path in either slice
+  points off the machine; and a copy of the directory moved elsewhere runs, and
+  encodes through `libopenh264` and `h264_videotoolbox`, under both
+  architectures.
+
+  **Linux (`--linux --x64`, built on an x64 runner) has no such mismatch and is
+  untouched by this change** — it builds its native architecture only, as it
+  always did. That recipe has still never been run anywhere, so it is unproven
+  rather than known-good, and `verify_bundle`'s path walk is a macOS
+  measurement that the ELF equivalent has not had.
 
 ## What to build
 
@@ -217,8 +267,11 @@ rather than failing.
 
 ## What the LGPL build actually contains — measured 2026-09-11
 
-Read off `ffmpeg-configure.log` from the real build, not from the spec. macOS
-arm64, ffmpeg 7.1.1, `License: LGPL version 2.1 or later`.
+Read off `ffmpeg-configure-arm64.log` from the real build, not from the spec.
+macOS, ffmpeg 7.1.1, both architectures. The two configures were compared in
+`config.h` rather than assumed equal: `GPL 0`, `NONFREE 0`, `LIBOPENH264 1`,
+`LIBKVAZAAR 1` and `VIDEOTOOLBOX 1` on each, and both binaries report the GNU
+Lesser General Public License when asked with `ffmpeg -L`.
 
 External libraries, and this is the whole list: `avfoundation`, `coreimage`,
 `iconv`, `zlib`, `bzlib`, `libopenh264`, `libkvazaar`.
@@ -304,9 +357,11 @@ own copy of the shared-library closure rather than sharing one: they both need
 `libav*`, and the duplication is cheaper than a resolution order that breaks
 the first time one of the two moves.
 
-Measured on macOS arm64: **`media-stack/ffmpeg` is 22 MB** — `ffmpeg`,
-`ffprobe`, nine `.dylib`s, `licences/` and `manifest.json`. `media-stack/mpv`
-is empty, for the reason in Status above.
+Measured on macOS, universal: **`media-stack/ffmpeg` is 48 MB** — `ffmpeg`,
+`ffprobe`, nine `.dylib`s, `licences/` and `manifest.json`. It was 22 MB while
+it was arm64 only; two slices of eleven Mach-O files is where the rest went,
+and it buys an Intel Mac an ffmpeg that runs. `media-stack/mpv` is empty, for
+the reason in Status above.
 
 **`manifest.json` is written into each staged directory as well as at the top
 of `media-stack/`.** The two `extraResources` entries copy directories, so a

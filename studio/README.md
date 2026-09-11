@@ -1309,7 +1309,7 @@ ollama serve              # local models on 127.0.0.1:11434
 
 ```bash
 npm run typecheck   # tsc --noEmit
-npm test            # 2321 tests
+npm test            # 2323 tests
 npm run eval:local  # the local lane against the real model — a score, not a pass/fail; needs Ollama
 npm run eval:voice  # the voice co-agent's spoken answers, same discipline; needs Ollama
 npm run eval:conversation  # Temi over a whole conversation: routing, fabrication, recall; needs Ollama
@@ -1586,12 +1586,18 @@ release workflow runs it before packaging, and is allowed to fail), so a build
 made without it ships no bundle and falls back to a system ffmpeg exactly as
 every release up to v0.0.6 did.
 
-Run on macOS arm64 it produces a 22 MB `media-stack/ffmpeg` — `ffmpeg`,
-`ffprobe`, nine dylibs, the licence texts and `manifest.json` — that starts
-with the build tree deleted and encodes through both `libopenh264` and
-`h264_videotoolbox`. **`media-stack/mpv` stays empty**: the script refuses to
-stage a binary linking libraries it did not build from a pinned source, and mpv
-hard-requires two of those. The script proves the bundle self-contained before
+Run on macOS it produces a 48 MB `media-stack/ffmpeg` — `ffmpeg`, `ffprobe`,
+nine dylibs, the licence texts and `manifest.json` — that starts with the build
+tree deleted and encodes through both `libopenh264` and `h264_videotoolbox`.
+**It is universal**: the whole closure is built once per architecture and
+`lipo -create`d, so all eleven Mach-O files carry an `arm64` and an `x86_64`
+slice, and both were run. `MEDIA_STACK_ARCHS=arm64` halves the build for local
+iteration; `manifest.json` records what was actually built, so a bundle made
+that way cannot pass itself off as the universal one. **`media-stack/mpv` stays
+empty**: the script refuses to stage a binary linking libraries it did not build
+from a pinned source, mpv hard-requires two of those, and on a universal build
+it is not built at all — there is no second architecture of those libraries to
+fuse against. The script proves the bundle self-contained before
 staging it and clears the directory if it cannot, since that release step is
 allowed to fail and a half-staged ffmpeg inside an installer is worse than
 none. What gets built, why it is LGPL and what that costs:
@@ -1727,25 +1733,39 @@ need that install to be told the target (`--cpu x64 --os darwin`) or its
 sidecar fails the same way. The Windows and Linux entries are written but have
 not been built here.
 
-**The media stack has the same shape and a worse ending, which is why CI does
-not build it.** One arm64 runner produces both `--arm64` and `--x64` app
-bundles, and the two `extraResources` entries copy the same
-`media-stack/ffmpeg` into each. What `build-media-stack.sh` produces is
-single-arch — `lipo -archs media-stack/ffmpeg/ffmpeg` answers `arm64` — so an
-Intel Mac would receive an arm64 ffmpeg. `sharp` fails softly there; this does
-not. `findFfmpeg` prefers the bundled copy over `PATH`, and it decides by
-`statSync().isFile()`, so the wrong-architecture binary *exists*, wins, and
-then cannot exec — and the PATH fallback that works on that machine today never
-gets a turn. A bundle like that is worse than no bundle.
+**The media stack had the same shape and a worse ending, and that is what the
+universal build fixes.** One arm64 runner produces both `--arm64` and `--x64`
+app bundles, and the two `extraResources` entries copy the same
+`media-stack/ffmpeg` into each. While `build-media-stack.sh` produced a
+single-arch bundle, an Intel Mac would have received an arm64 ffmpeg — and
+`sharp` fails softly there, this does not. `findFfmpeg` prefers the bundled copy
+over `PATH`, and it decides by `statSync().isFile()`, so the wrong-architecture
+binary *exists*, wins, and then cannot exec, while the PATH fallback that works
+on that machine today never gets a turn. A bundle like that is worse than no
+bundle.
 
-So the workflow's media-stack step is left to stop at its tool gate: no runner
-installs `meson`, `ninja` or `nasm`, every platform ships without a bundle, and
-the app falls back exactly as v0.0.6 did. **Installing that toolchain is not
-the one-line change it looks like.** macOS needs the closure built once per
-architecture and `lipo -create`d before staging, with `verify_bundle` asserting
-both slices are present. Linux (`--linux --x64` on an x64 runner) has no
-mismatch, but that half of the recipe has never been run anywhere and is
-unproven rather than known-good. See
+The script now builds the closure once per architecture and `lipo -create`s
+every Mach-O before staging, and `verify_bundle` asserts every slice — a fat
+binary missing one fails the build exactly like a thin one. It also walks the
+recorded paths *per slice*, because `otool -L` without `-arch` only shows the
+architecture you are standing on, and then executes what it built: natively, and
+through Rosetta when it is installed. Measured: `lipo -archs` answers `x86_64
+arm64`, and a relocated copy encodes under both.
+
+So the workflow now installs `nasm` on `macos-latest` — and nowhere else. **A
+tagged release ships the bundle on macOS**; Linux and Windows stop at the
+script's tool gate and fall back to a system ffmpeg exactly as v0.0.7 did. It
+turned out to be one tool rather than three: `meson` and `ninja` only ever built
+mpv, which a universal macOS build no longer builds. Linux (`--linux --x64` on
+an x64 runner) has no architecture mismatch and is untouched by this change, but
+that half of the recipe has never been run anywhere — giving it the same line
+would trade an honest "no bundle" for an untested one, so it stays unproven
+rather than known-good until somebody runs it.
+
+The step keeps `continue-on-error: true`, which reports it as `success` even
+when it failed, so a **Report what the media stack produced** step follows it:
+that line is what says whether a bundle actually shipped and which
+architectures it carries. See
 [`docs/MEDIA_LICENSING.md`](docs/MEDIA_LICENSING.md).
 
 ## Configuration

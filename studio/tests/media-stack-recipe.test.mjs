@@ -17,6 +17,11 @@
       which were merely useless rather than fatal.
     • Its checksums were `SET_ME` placeholders. A source offer that cannot
       name the bytes it built is not an offer.
+    • It built one architecture and the release copied it into two. Measured
+      2026-09-11: `lipo -archs media-stack/ffmpeg/ffmpeg` answered `arm64`,
+      while release.yml packages `--mac --arm64 --x64` from a single arm64
+      runner. That bundle is not a licence problem; it is an ffmpeg an Intel
+      Mac selects, over a working system one, and then cannot exec.
 
   Nothing here builds anything. It reads the recipe the way a reviewer would,
   which is the only reading available before a release is already out.
@@ -44,7 +49,7 @@ const CODE = RECIPE.split("\n")
  * so a whole-file search finds the guard and calls it the offence.
  */
 const FFMPEG_CONFIGURE = CODE.match(
-  /\.\/configure \\[\s\S]*?ffmpeg-configure\.log/,
+  /\.\/configure \\[\s\S]*?ffmpeg-configure-\$arch\.log/,
 )?.[0];
 
 test("the ffmpeg it builds is never GPL, and never nonfree", () => {
@@ -103,7 +108,9 @@ test("every optional mpv dependency is stated, not left to the machine", () => {
 });
 
 test("every source is pinned to a checksum that was measured", () => {
-  const fetches = [...CODE.matchAll(/^fetch "([^"]+)" \\\n\s+"([^"]+)"/gm)];
+  const fetches = [
+    ...CODE.matchAll(/^[A-Z0-9_]+_TARBALL="\$\(tarball "([^"]+)" \\\n\s+"([^"]+)"\)"/gm),
+  ];
   assert.equal(fetches.length, 4, "expected four pinned sources");
 
   for (const [, url, sha] of fetches) {
@@ -132,6 +139,45 @@ test("the bundle is proved self-contained before it is allowed to ship", () => {
     /verify_bundle "\$OUT\/ffmpeg"[\s\S]{0,300}?\bdie\b/.test(CODE),
     "verify_bundle's verdict on ffmpeg does not reach die — a failed check that "
       + "only warns is the no-op this test exists to prevent",
+  );
+});
+
+test("the macOS bundle is built for every architecture it ships to", () => {
+  // release.yml builds `--mac --arm64 --x64` from one arm64 runner and copies
+  // the same media-stack/ffmpeg into both app bundles, and `findFfmpeg` prefers
+  // the bundled copy over PATH. Build one architecture here and the Intel app
+  // gets a binary it cannot exec while the working system ffmpeg never gets a
+  // turn — so the default is both, and they are fused rather than picked.
+  assert.ok(
+    CODE.includes('DEFAULT_ARCHS="arm64 x86_64"'),
+    "macOS no longer defaults to building both architectures",
+  );
+  assert.ok(
+    CODE.includes("lipo -create"),
+    "the per-architecture closures are never fused into a universal binary",
+  );
+});
+
+test("a bundle missing an architecture fails here, not on a customer's Mac", () => {
+  // The point of asserting the slices is that a fat binary short one fails the
+  // build exactly like a thin one. Both fail identically on the machine you do
+  // not have, and only one of the two is visible from the machine you do.
+  const verify = CODE.match(/verify_bundle\(\) \{[\s\S]*?\n\}/)?.[0];
+  assert.ok(verify, "verify_bundle is gone");
+  assert.ok(
+    /lipo -archs/.test(verify),
+    "verify_bundle never reads which architectures a staged file carries",
+  );
+  assert.ok(
+    /for arch in \$ARCHS/.test(verify),
+    "verify_bundle checks a fixed architecture rather than the ones being built",
+  );
+  // And the path walk reads each slice. A fat binary can be clean in the
+  // architecture you are standing on and point into the build tree in the one
+  // you are not; `otool -L` without -arch only ever shows you the first.
+  assert.ok(
+    /otool -arch "\$2" -L/.test(CODE),
+    "the dependency walk reads only one slice, so a bad path in the other ships",
   );
 });
 
