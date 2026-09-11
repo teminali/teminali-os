@@ -3851,13 +3851,19 @@ component re-rendering one `translateX`.
 **Tier 1 is implemented (2026-09-11); tiers 2-4 are not.** The export now
 decodes sequentially where it can — `sequentialPlan.ts`, `sequentialDecode.ts`
 and the frame override in `videoEngine.ts` — and still encodes through JPEG to
-ffmpeg, so the 17.8 fps and 33.7s figures below describe the pipeline tier 1
-replaced, not the one that ships. **The end-to-end gain on a real project has
-not been measured yet**: every number in this section comes from a harness
-decoding one synthetic clip with no compositor in the loop, and removing the
-seek promotes compositing to the new floor. Quote none of it as a product
-claim. Everything under tiers 2-4 remains a decision recorded, not a
-capability.
+ffmpeg. The figures below under "Measured" describe the pipeline tier 1
+replaced, not the one that ships; see "Tier 1, on real footage" for what it is
+now. Tiers 2-4 remain a decision recorded, not a capability.
+
+**Two cautions on every number in this section.** None of them has a
+compositor in the loop — the harness decodes one clip and draws it, where a
+real timeline runs `renderTimelineFrame` over layers, transforms and
+transitions, a cost the seek used to hide and which is now the floor. And a
+seek harness is easy to get wrong: `requestVideoFrameCallback` will resolve
+against the frame already on screen rather than the seek, which reports
+11,000 fps and is how an early version of this measurement got a 9x-optimistic
+figure for the old path. The real-footage table below waits on `seeked` alone
+and asserts both that `currentTime` landed and that the pixels changed.
 
 **What ships today.** The export dialog has two speed switches, both defaulting
 on: `superSpeed` (`ExportDialog.tsx:470`) batches 8 frames per IPC write, runs 8
@@ -3913,6 +3919,31 @@ WebCodecs `VideoEncoder`:
 machine decodes all 600 frames in 0.283s and does decode+`h264_videotoolbox`
 in 2.75s: the replacement is at the machine's ffmpeg-class ceiling, in-process,
 with no JPEG and no IPC.
+
+#### Tier 1, on real footage — measured 2026-09-11
+
+The numbers above use `testsrc2`, which is synthetic and decodes unlike
+anything a user owns. Repeated against real 1080p30 H.264 (84.9s, GOP ~128,
+64 MB), 600 frames, each mode in its own cold Electron process so no run warms
+the next:
+
+| path | fps | 600 frames |
+| --- | --- | --- |
+| **old: seek + JPEG** | **12.2** | **49.3s** |
+| old: strict seek alone, no encode | 11.9 | 50.6s |
+| **tier 1: sequential decode + JPEG** | **125.1** | **4.8s** |
+| tier 1: sequential decode alone | 1046 | 0.57s |
+
+**10.3x on real footage, from tier 1 alone** — better than the synthetic clip
+predicted, because the seek dominates real footage even harder than it
+dominates `testsrc2`. Note the second row: the encode is nearly free beside the
+seek, which is why the two old rows are within 3% of each other.
+
+**This inverts what is expensive.** Decode is now 0.57s of a 4.8s render and
+JPEG is the other 4.2s — the stage that was 17% of the problem is now ~88% of
+it. Tier 2 is therefore worth more after tier 1 than it was before, and is the
+next thing to build: removing the JPEG round-trip should take 4.8s toward the
+~1.5s the WebCodecs measurements suggest.
 
 #### The four tiers, in payoff order
 
