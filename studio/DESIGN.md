@@ -3848,11 +3848,16 @@ component re-rendering one `translateX`.
 
 ### Export throughput: the seek is the render (`engine/exportPipeline.ts`, `engine/videoEngine.ts`, 2026-09-11)
 
-**None of this section is implemented yet.** It is the measured case for a
-rewrite and the shape that rewrite must take. What ships today is the Turbo
-loop and the hardware encoder described at the end; everything under "The four
-tiers" is a decision recorded, not a capability. Treat any claim here as false
-about the current build until this line is deleted.
+**Tier 1 is implemented (2026-09-11); tiers 2-4 are not.** The export now
+decodes sequentially where it can — `sequentialPlan.ts`, `sequentialDecode.ts`
+and the frame override in `videoEngine.ts` — and still encodes through JPEG to
+ffmpeg, so the 17.8 fps and 33.7s figures below describe the pipeline tier 1
+replaced, not the one that ships. **The end-to-end gain on a real project has
+not been measured yet**: every number in this section comes from a harness
+decoding one synthetic clip with no compositor in the loop, and removing the
+seek promotes compositing to the new floor. Quote none of it as a product
+claim. Everything under tiers 2-4 remains a decision recorded, not a
+capability.
 
 **What ships today.** The export dialog has two speed switches, both defaulting
 on: `superSpeed` (`ExportDialog.tsx:470`) batches 8 frames per IPC write, runs 8
@@ -3911,12 +3916,29 @@ with no JPEG and no IPC.
 
 #### The four tiers, in payoff order
 
-1. **Sequential decode instead of per-frame seek.** Replace
-   `seekVideosForFrame` with one sink per source clip pulled in presentation
-   order. This is 80% of the win and the only tier that changes the
-   architecture rather than the plumbing. The export loop's existing in-order
-   walk is what makes it possible; the preview keeps the `<video>` pool and the
-   seek path, which is the right tool for scrubbing.
+1. **Sequential decode instead of per-frame seek.** — **implemented
+   2026-09-11.** One `VideoSampleSink` per source, driven by
+   `samplesAtTimestamps`, which decodes each packet at most once for a
+   monotonic timestamp list. This is 80% of the win and the only tier that
+   changes the architecture rather than the plumbing. The export loop's
+   existing in-order walk is what makes it possible; the preview keeps the
+   `<video>` pool and the seek path, which is the right tool for scrubbing.
+
+   The compositor was not touched. `getVideoFrame` in `videoEngine.ts` is the
+   only place it reads video pixels, so the decoder publishes through a frame
+   override in front of that, and `compositor.ts` never learns which decoder
+   produced a frame — the same shape `gpuStage` already uses to stay invisible
+   to the export path.
+
+   **The fallback is per source, decided before the first frame.**
+   `planSequentialDecode` walks the whole export once and drops a source back
+   onto the seek path if any clip of it is reversed, if two of its clips are
+   visible at the same instant (the override holds one frame per URL), or if
+   its demands ever step backwards. Opening can fail too — an undecodable
+   codec, a URL that will not range-request — and that also costs one source,
+   not the export. `tests/sequential-plan.test.mjs` covers the decision; it
+   takes a demand function rather than a timeline, so it runs with no DOM and
+   no media.
 2. **WebCodecs encode instead of JPEG → IPC → ffmpeg.** Deletes the JPEG
    encode, the IPC copy, ffmpeg's JPEG decode and the 0.82 generation loss in
    one move. ffmpeg keeps the muxing and the audio, fed H.264 it can `-c:v

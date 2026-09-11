@@ -41,7 +41,14 @@ import {
   hasTaintedMedia,
   getTaintedMediaUrls,
 } from './compositor';
-import { seekVideosForFrame } from './videoEngine';
+import {
+  seekVideosForFrame,
+  clearDecodedFrames,
+  visibleVideoClips,
+  sourceSecondsFor,
+} from './videoEngine';
+import { planSequentialDecode, describePlans } from './sequentialPlan';
+import { openSequentialDecoders, type SequentialDecoders } from './sequentialDecode';
 import { audioEngine } from './audioEngine';
 import {
   classifyMediaUrl,
@@ -285,6 +292,7 @@ export async function runExport(request: ExportRequest): Promise<ExportOutcome> 
   audioEngine.stopAll();
 
   let sessionId: string | null = null;
+  let decoders: SequentialDecoders | null = null;
 
   try {
     abortIfCancelled();
@@ -351,6 +359,37 @@ export async function runExport(request: ExportRequest): Promise<ExportOutcome> 
     /* ── The frame loop ── */
 
     const { totalFrames, startMs, frameIntervalMs } = bounds;
+
+    /* ── Sequential decode ──
+       80% of this loop's wall clock used to be `currentTime` seeks
+       re-decoding from a keyframe every frame (DESIGN.md §3, "Export
+       throughput: the seek is the render"). Sources whose demands run
+       forward are pulled in order instead; anything reversed, doubled or
+       non-monotonic is planned back onto the seek path, per source. */
+    const plans = planSequentialDecode(
+      (timestampMs) => visibleVideoClips(tracks, timestampMs)
+        .filter(({ clip }) => Boolean(clip.mediaUrl))
+        .map(({ clip, offsetMs }) => ({
+          url: clip.mediaUrl!,
+          seconds: sourceSecondsFor(clip, offsetMs),
+          reversed: Boolean(clip.speed?.reversed),
+        })),
+      startMs,
+      totalFrames,
+      frameIntervalMs,
+    );
+    decoders = await openSequentialDecoders(plans);
+    abortIfCancelled();
+
+    /* One output frame's worth of picture, however each source provides
+       it. The decoders advance in strict order and the seek path handles
+       only what they did not take. */
+    const prepareFrame = (frame: number, timestampMs: number): Promise<void> =>
+      Promise.all([
+        decoders!.advance(frame),
+        seekVideosForFrame(tracks, timestampMs, decoders!.urls),
+      ]).then(() => undefined);
+
     const beganAt = performance.now();
     let lastReportAt = 0;
     let sliceBeganAt = performance.now();
@@ -363,6 +402,7 @@ export async function runExport(request: ExportRequest): Promise<ExportOutcome> 
       engine: 'ffmpeg',
       lanes: isSuperSpeed ? [{ worker: 1, chunk: 1, frames: 0, totalFrames }] : undefined,
     });
+    console.info(`[export] ${describePlans(plans)}`);
 
     const CHUNK_SIZE = isSuperSpeed ? 8 : 1;
     const inFlightWrites: Promise<void>[] = [];
@@ -370,7 +410,7 @@ export async function runExport(request: ExportRequest): Promise<ExportOutcome> 
     let chunkBytes: Uint8Array[] = [];
 
     // Pipeline: kick off seek for frame 0
-    let nextSeekPromise: Promise<void> | null = seekVideosForFrame(tracks, startMs);
+    let nextSeekPromise: Promise<void> | null = prepareFrame(0, startMs);
 
     for (let frame = 0; frame < totalFrames; frame += 1) {
       abortIfCancelled();
@@ -398,7 +438,7 @@ export async function runExport(request: ExportRequest): Promise<ExportOutcome> 
       const nextFrame = frame + 1;
       if (nextFrame < totalFrames) {
         const nextTimestampMs = startMs + nextFrame * frameIntervalMs;
-        nextSeekPromise = seekVideosForFrame(tracks, nextTimestampMs);
+        nextSeekPromise = prepareFrame(nextFrame, nextTimestampMs);
       }
 
       const jpeg = await canvasToJpeg(activeCanvas, frameQuality);
@@ -525,5 +565,11 @@ export async function runExport(request: ExportRequest): Promise<ExportOutcome> 
       return { ok: false, canceled: true };
     }
     return fail(error instanceof Error ? error.message : String(error));
+  } finally {
+    /* A decoder holds real GPU buffers and a published frame outlives the
+       export that produced it — the preview would draw a frame from a
+       render that is over. Both go on every path, including cancel. */
+    if (decoders) void decoders.close();
+    clearDecodedFrames();
   }
 }

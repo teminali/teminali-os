@@ -305,6 +305,40 @@ export function videoFailed(url: string): boolean {
   return videos.get(url)?.failed ?? false;
 }
 
+/* ── The export's decoded frames ────────────────────────────────── */
+
+/*
+  An export that decodes sequentially (`sequentialPlan.ts`) does not seek
+  these elements at all — it hands the frame it already decoded to the
+  compositor through here. One slot per URL, which is why a source with
+  two clips visible at once is planned onto the seek path instead: the
+  slot cannot hold both.
+
+  It sits in front of `getVideoFrame` rather than inside the compositor so
+  that `compositor.ts` never learns which decoder produced a frame, the
+  same way it never learns whether a shader ran.
+*/
+const decodedFrames = new Map<string, { image: CanvasImageSource; width: number; height: number }>();
+
+/** Publish the frame the sequential decoder produced for this source. */
+export function setDecodedFrame(url: string, image: CanvasImageSource, width: number, height: number): void {
+  decodedFrames.set(url, { image, width, height });
+}
+
+/** Drop one source's decoded frame — it fell back to the seek path mid-export. */
+export function clearDecodedFrame(url: string): void {
+  decodedFrames.delete(url);
+}
+
+/**
+ * Drop every decoded frame. The export MUST call this when it finishes or
+ * fails: a stale entry here would outlive the export and feed the preview
+ * a frame from a render that is over.
+ */
+export function clearDecodedFrames(): void {
+  decodedFrames.clear();
+}
+
 /**
  * The element or cached frame, if it currently holds a frame that can be drawn.
  *
@@ -314,6 +348,9 @@ export function videoFailed(url: string): boolean {
  * Returns the cached last frame if seeking or buffering to prevent black-screen flash.
  */
 export function getVideoFrame(url: string): CanvasImageSource | null {
+  const decoded = decodedFrames.get(url);
+  if (decoded) return decoded.image;
+
   const entry = acquire(url);
   if (entry.failed) return null;
 
@@ -336,6 +373,9 @@ export function getVideoFrame(url: string): CanvasImageSource | null {
 
 /** Intrinsic pixel size once the metadata has decoded, else null. */
 export function getVideoNaturalSize(url: string): { width: number; height: number } | null {
+  const decoded = decodedFrames.get(url);
+  if (decoded) return { width: decoded.width, height: decoded.height };
+
   const entry = acquire(url);
   if (entry.failed || entry.el.videoWidth === 0) {
     if (entry.lastFrameCanvas && entry.lastFrameCanvas.width > 0) {
@@ -392,7 +432,7 @@ export function sourceSecondsFor(clip: Clip, offsetMs: number): number {
   return (clip.sourceStartMs + withinSource) / 1000;
 }
 
-function visibleVideoClips(tracks: Track[], playheadMs: number): Array<{ clip: Clip; offsetMs: number }> {
+export function visibleVideoClips(tracks: Track[], playheadMs: number): Array<{ clip: Clip; offsetMs: number }> {
   const out: Array<{ clip: Clip; offsetMs: number }> = [];
   /*
     Solo is PER STREAM. This used to read `tracks.some((t) => t.solo)`
@@ -588,10 +628,21 @@ function seekTo(entry: VideoEntry, seconds: number): Promise<void> {
  * holding, so without this an export writes the same stale frame over
  * and over — structurally a real video file, and completely wrong.
  */
-export async function seekVideosForFrame(tracks: Track[], playheadMs: number): Promise<void> {
+export async function seekVideosForFrame(
+  tracks: Track[],
+  playheadMs: number,
+  decodedElsewhere?: ReadonlySet<string>,
+): Promise<void> {
   const pending: Promise<void>[] = [];
 
   for (const { clip, offsetMs } of visibleVideoClips(tracks, playheadMs)) {
+    /*
+      A source the export is decoding in order must not also be seeked:
+      the seek would be the very cost this export exists to avoid, and it
+      would fight the decoder for the same pooled element.
+    */
+    if (decodedElsewhere?.has(clip.mediaUrl!)) continue;
+
     const entry = acquire(clip.mediaUrl!);
     /* A live capture has nothing to seek to and pausing it would end the
        stream's picture. It is already showing the only frame it has. */

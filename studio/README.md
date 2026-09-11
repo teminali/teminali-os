@@ -1309,7 +1309,7 @@ ollama serve              # local models on 127.0.0.1:11434
 
 ```bash
 npm run typecheck   # tsc --noEmit
-npm test            # 2332 tests
+npm test            # 2342 tests
 npm run eval:local  # the local lane against the real model — a score, not a pass/fail; needs Ollama
 npm run eval:voice  # the voice co-agent's spoken answers, same discipline; needs Ollama
 npm run eval:conversation  # Temi over a whole conversation: routing, fabrication, recall; needs Ollama
