@@ -1796,6 +1796,7 @@ Everything is optional; every default is loopback.
 | `TEMINALI_REALTIME_VOICE_PYTHON` | the checkout's `.venv` interpreter, found automatically |
 | `TEMINALI_REALTIME_VOICE_AUTOSTART` | on; set `0` to run the pipeline by hand |
 | `TEMINALI_REALTIME_VOICE_STARTUP_TIMEOUT_MS` | `300000` — weights load slowly on a cold cache |
+| `TEMI_MIC_STUCK_TIMEOUT` | `15.0` — seconds the pipeline's microphone gate may stay shut with nothing in flight before its watchdog reopens it (see DESIGN.md 6.0.11) |
 | `TEMINALI_ASR_ENGINE` | `auto` — `local` or `sidecar` pins which recogniser listens |
 | `TEMINALI_WHISPER_SERVER_PORT` | `8323` |
 | `TEMINALI_CUT_MCP_URL` | `http://127.0.0.1:3888` |

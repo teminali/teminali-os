@@ -6667,6 +6667,59 @@ Pinned by `tests/machine-action.test.mjs` (the verbatim sentence, the spoken
 pronoun forms, and the two state questions) and `tests/inspect-answer.test.mjs`
 (the empty-run wording, and that the raise precedes the summary).
 
+### 6.0.11 The microphone gate that only opened on the happy path (`realtime-voice/code/server.py`, 2026-09-11)
+
+After 6.0.9 the client was healthy and the recogniser still did not wake. The
+measurement that settled it needs no microphone and no app: a websocket client
+streaming 4.48s of real speech at **-1.8 dBFS peak** into the live :8000 server,
+198 frames, 8-byte header plus 2048 int16 samples each, flag 0, produced no
+partial, no final and no log line. The identical bytes against a **freshly
+started** server transcribed perfectly on the first try. So the defect was never
+in the audio. It was state the server had latched and could not release.
+
+The state is `AudioInputProcessor.interrupted`, the gate deciding whether
+incoming frames are offered to the recogniser at all. It was closed at the end of
+every user turn (`on_before_final`, then `on_final`) and reopened in exactly one
+place: `reset_turn_state`, called when a generation runs all the way to its last
+TTS chunk. Every other way a turn can end left it closed:
+
+* an empty final transcription, which returns before preparing a generation;
+* a final discarded as an echo or a silence artifact during playback;
+* a generation whose LLM stream fails to start, where `prepare_generation` sets
+  `running_generation = None` in its exception handler and nothing else runs.
+
+None of those is exotic, and the consequence is not scoped to the turn. The
+pipeline is a single-tenant process that outlives the app: `AudioInputProcessor`,
+the callbacks and the gate are built once in the lifespan and shared by every
+connection. So one such turn deafened the server **for the life of the process**,
+and closing and reopening the app changed nothing, because the app was never what
+held the state. That is why it read as "the recogniser is broken" rather than "a
+turn went wrong".
+
+Three changes, in order of how much they are relied on:
+
+1. **One gate, one log line.** `set_mic_gate(closed, reason, clear_audio=True)`
+   is now the only writer of `interrupted`, and it logs every transition with
+   the reason. `on_before_final` passes `clear_audio=False`, because Whisper is
+   transcribing exactly that buffer at that moment.
+2. **Every exit reopens.** The empty-final and discarded-final paths release the
+   gate explicitly, and a new websocket connection resets the session when
+   nothing is in flight, so a client that vanished mid-turn cannot leave the next
+   one deaf.
+3. **A watchdog, for the exits not yet found.** The abort worker already ticks
+   every 100ms; it now calls `reopen_mic_if_stuck`, which reopens a gate closed
+   longer than `TEMI_MIC_STUCK_TIMEOUT` (default 15s) with no generation running
+   and no audio playing. Whisper's final arrived 1.3s after speech end when
+   measured, so the headroom is an order of magnitude.
+
+`/health` now reports `mic_open`, `generating` and `tts_playing`. A gate that can
+swallow a healthy client silently must be answerable in one call; not being able
+to see it is what made this take two sessions.
+
+Pinned by `realtime-voice/code/test_mic_gate.py`, 11 tests: each turn ending
+reopens, a real final deliberately does not, and the watchdog holds the gate shut
+while a generation runs or the client is still playing.
+
 ### 6.1 Turn semantics while a run is in flight (2026-09-05)
 
 A directed utterance is not automatically an instruction. `turnIntent.ts`

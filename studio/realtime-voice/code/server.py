@@ -70,6 +70,12 @@ from speech_pipeline_manager import SpeechPipelineManager
 import history_window
 from colors import Colors
 
+# How long the microphone gate may stay closed with nothing in flight before
+# the watchdog decides it is stuck and reopens it. Whisper's final for a turn
+# arrived 1.3s after speech end when measured, so this is an order of
+# magnitude of headroom over the longest legitimate close.
+MIC_STUCK_TIMEOUT = float(os.getenv("TEMI_MIC_STUCK_TIMEOUT", "15.0"))
+
 LANGUAGE = "en"
 # TTS_FINAL_TIMEOUT = 0.5 # unsure if 1.0 is needed for stability
 TTS_FINAL_TIMEOUT = 1.0 # unsure if 1.0 is needed for stability
@@ -247,6 +253,13 @@ async def health(request: Request):
         "llm_model": LLM_START_MODEL,
         "half_duplex": HALF_DUPLEX,
         "connections": len(getattr(state, "active_connections", []) or []),
+        # The microphone gate, exposed because it is the one piece of server
+        # state that can silently swallow a perfectly healthy client. When a
+        # client is sending audio and nothing comes back, this field says in
+        # one call whether the recogniser is even being offered the frames.
+        "mic_open": not getattr(state, "AudioInputProcessor").interrupted if ready else False,
+        "generating": ready and pipeline.running_generation is not None,
+        "tts_playing": bool(getattr(getattr(state, "callbacks", None), "tts_client_playing", False)),
     })
 
 @app.get("/")
@@ -664,6 +677,7 @@ class TranscriptionCallbacks:
         self.partial_transcription: str = ""
         self.user_request_sent_for_turn: bool = False
 
+        self._mic_closed_since: float = 0.0
         self.reset_turn_state()
 
         self.abort_request_event = threading.Event()
@@ -691,10 +705,73 @@ class TranscriptionCallbacks:
         self.partial_transcription = ""
 
         # Re-enable microphone only once assistant turn has completely finished
-        if hasattr(self.app.state, "AudioInputProcessor"):
-            self.app.state.AudioInputProcessor.interrupted = False
-            if hasattr(self.app.state.AudioInputProcessor, "transcriber"):
-                self.app.state.AudioInputProcessor.transcriber.clear_audio()
+        self.set_mic_gate(False, "turn state reset")
+
+    def set_mic_gate(self, closed: bool, reason: str, clear_audio: bool = True) -> None:
+        """
+        The single place the microphone is opened or closed.
+
+        `AudioInputProcessor.interrupted` decides whether incoming frames are
+        offered to the recogniser at all, and it lives on a server-wide object
+        that outlives every client. So a close needs a matching release on
+        *every* path out of a turn, not only the one where the assistant
+        answers. Routing both directions through here is also what makes a
+        stuck gate visible in the log rather than silent.
+
+        Args:
+            closed: True to stop feeding the recogniser, False to resume.
+            reason: Logged on a transition; this log line is the whole point.
+            clear_audio: Drop the recogniser's buffered audio too. False while
+                Whisper is still transcribing the turn that just ended --
+                clearing there would destroy the audio being transcribed.
+        """
+        aip = getattr(self.app.state, "AudioInputProcessor", None)
+        if aip is None:
+            return
+        if aip.interrupted != closed:
+            state = "\u23f8\ufe0f closed" if closed else "\u25b6\ufe0f open"
+            logger.info(f"{Colors.apply(f'🖥️🎙️ Microphone {state}: {reason}').cyan}")
+        aip.interrupted = closed
+        self._mic_closed_since = time.time() if closed else 0.0
+        if clear_audio and hasattr(aip, "transcriber"):
+            aip.transcriber.clear_audio()
+
+    def reopen_mic_if_stuck(self) -> None:
+        """
+        Backstop for a microphone gate that was closed and never released.
+
+        Measured 2026-09-11: a server left in that state accepted 198
+        correctly framed frames of speech at -1.8 dBFS and produced no
+        partial, no final and no log line, while an identical client against
+        a freshly started server transcribed the same bytes perfectly. The
+        gate closes at the end of every user turn; anything that ends a turn
+        without starting a generation used to leave it closed for the life of
+        the process -- and the process outlives the app, so restarting the app
+        did not clear it.
+
+        The explicit releases below cover the paths we know. This covers the
+        ones we do not: a gate closed this long with no generation running and
+        no audio playing is broken, whatever closed it.
+        """
+        since = self._mic_closed_since
+        if not since or (time.time() - since) < MIC_STUCK_TIMEOUT:
+            return
+        aip = getattr(self.app.state, "AudioInputProcessor", None)
+        if aip is None or not aip.interrupted:
+            self._mic_closed_since = 0.0
+            return
+        if self.tts_client_playing or self.tts_chunk_sent:
+            self._mic_closed_since = time.time()  # legitimately closed; keep waiting
+            return
+        if self.app.state.SpeechPipelineManager.running_generation is not None:
+            self._mic_closed_since = time.time()
+            return
+        logger.warning(
+            f"🖥️🎙️ {Colors.YELLOW}Microphone was closed for "
+            f"{time.time() - since:.1f}s with no generation and no playback. "
+            f"Reopening.{Colors.RESET}"
+        )
+        self.set_mic_gate(False, "watchdog: closed with nothing in flight")
 
     def reset_state(self):
         """Resets state flags and triggers audio abort (e.g. on clear_history)."""
@@ -716,6 +793,10 @@ class TranscriptionCallbacks:
             was_set = self.abort_request_event.wait(timeout=0.1) # Check every 100ms
             if was_set:
                 self.abort_request_event.clear()
+            try:
+                self.reopen_mic_if_stuck()
+            except Exception as e:  # a watchdog that can die is not a watchdog
+                logger.error(f"🖥️💥 Microphone watchdog error: {e}", exc_info=True)
 
     def trigger_user_interruption(self, reason: str = "user interruption"):
         """
@@ -779,10 +860,7 @@ class TranscriptionCallbacks:
         self.abort_generations(reason)
 
         # Re-enable microphone so user speech is captured seamlessly
-        if hasattr(self.app.state, "AudioInputProcessor"):
-            self.app.state.AudioInputProcessor.interrupted = False
-            if hasattr(self.app.state.AudioInputProcessor, "transcriber"):
-                self.app.state.AudioInputProcessor.transcriber.clear_audio()
+        self.set_mic_gate(False, f"user interruption: {reason}")
 
     def on_partial(self, txt: str):
         """
@@ -864,10 +942,11 @@ class TranscriptionCallbacks:
         self.user_finished_turn = True
         self.user_interrupted = False
 
-        # Block further incoming audio while final transcription completes
+        # Block further incoming audio while final transcription completes.
+        # Deliberately without clearing the buffer: Whisper is transcribing
+        # exactly that audio right now.
         if not self.app.state.AudioInputProcessor.interrupted:
-            logger.info(f"{Colors.apply('🖥️🎙️ ⏸️ Microphone interrupted (end of turn)').cyan}")
-            self.app.state.AudioInputProcessor.interrupted = True
+            self.set_mic_gate(True, "end of turn", clear_audio=False)
             self.interruption_time = time.time()
 
     def on_final(self, txt: str):
@@ -876,6 +955,11 @@ class TranscriptionCallbacks:
         """
         txt = txt.strip()
         if not txt:
+            # The turn ended and produced nothing, so no generation will run
+            # and nothing downstream will reopen the gate that on_before_final
+            # just closed. Release it here or the session goes deaf.
+            logger.info("🖥️🫥 Empty final transcription; ending turn without a generation.")
+            self.set_mic_gate(False, "empty final transcription")
             return
 
         is_busy = (
@@ -887,9 +971,11 @@ class TranscriptionCallbacks:
             is_echo, echo_reason = asr_guard.is_echo(txt)
             if is_echo:
                 logger.warning(f"🖥️🔇 Discarding final echo during TTS playback: '{txt}' ({echo_reason})")
+                self.set_mic_gate(False, "discarded echo final")
                 return
             if asr_guard.is_silence_artifact(txt):
                 logger.warning(f"🖥️🔇 Discarding silence artifact final during TTS playback: '{txt}'")
+                self.set_mic_gate(False, "discarded silence artifact")
                 return
 
             logger.info(f"🖥️⚡ User speech final verified during playback: '{txt}' - interrupting assistant turn")
@@ -903,10 +989,7 @@ class TranscriptionCallbacks:
         self.tts_chunk_sent = False
 
         # Keep mic paused and clear STT buffer so room noise during synthesis doesn't produce ghost turns
-        if hasattr(self.app.state, "AudioInputProcessor"):
-            self.app.state.AudioInputProcessor.interrupted = True
-            if hasattr(self.app.state.AudioInputProcessor, "transcriber"):
-                self.app.state.AudioInputProcessor.transcriber.clear_audio()
+        self.set_mic_gate(True, "assistant turn starting")
 
         self.final_transcription = txt
         self.user_request_sent_for_turn = True
@@ -1100,6 +1183,20 @@ async def websocket_endpoint(ws: WebSocket):
     app.state.active_connections.append(message_queue)
 
     callbacks = getattr(app.state, "callbacks", None)
+
+    # A new client starts a fresh session. Turn state -- above all the
+    # microphone gate -- lives on server-wide objects that outlive any one
+    # connection, so a client that vanished mid-turn (a crash, a reload, a
+    # packaged app closing) left the gate closed and every later connection
+    # was deaf to a perfectly healthy microphone. Only reset when nothing is
+    # in flight, so a second client cannot cut the first one's turn short.
+    if callbacks is not None:
+        pipeline = getattr(app.state, "SpeechPipelineManager", None)
+        idle = (pipeline is None or pipeline.running_generation is None) and not callbacks.tts_chunk_sent
+        if idle:
+            callbacks.reset_turn_state()
+        else:
+            logger.info("🖥️ℹ️ Client connected while a turn was in flight; leaving session state alone.")
 
     # Create tasks for handling incoming client data, audio processing, and outgoing messages
     tasks = [
