@@ -49,6 +49,7 @@ import {
 } from './videoEngine';
 import { planSequentialDecode, describePlans } from './sequentialPlan';
 import { openSequentialDecoders, type SequentialDecoders } from './sequentialDecode';
+import { createFrameEncoder, type FrameEncoder } from './webcodecsEncoder';
 import { audioEngine } from './audioEngine';
 import {
   classifyMediaUrl,
@@ -293,6 +294,7 @@ export async function runExport(request: ExportRequest): Promise<ExportOutcome> 
 
   let sessionId: string | null = null;
   let decoders: SequentialDecoders | null = null;
+  let frameEncoder: FrameEncoder | null = null;
 
   try {
     abortIfCancelled();
@@ -343,11 +345,35 @@ export async function runExport(request: ExportRequest): Promise<ExportOutcome> 
       ctxB = canvasB.getContext('2d', { alpha: false });
     }
 
+    /* ── Tier 2 ──
+       Encode here and hand ffmpeg an elementary stream it can copy, rather
+       than a JPEG it has to decode and re-encode. Null means this export
+       keeps the JPEG path: ProRes, a browser build, or a codec the UA will
+       not take.
+
+       The bitrate is the same number `exportFilters.cjs:64` hands a hardware
+       encoder — 40 Mbps above 1080p, 12 below — so switching paths does not
+       quietly change the quality of the file. Keep the two in step. */
+    frameEncoder = await createFrameEncoder(
+      request.codec,
+      width,
+      height,
+      (height >= 2000 ? 40 : 12) * 1_000_000,
+      project.fps,
+    );
+    if (frameEncoder) {
+      console.info(
+        `[export] encoding ${frameEncoder.format} in the renderer`,
+        frameEncoder.acceptedConfig,
+      );
+    }
+
     const started = await exporter.start({
       width,
       height,
       fps: project.fps,
       codec: request.codec,
+      frameFormat: frameEncoder?.format ?? 'jpeg',
       outputPath: request.outputPath ?? suggestedFileName(project.name, request.codec),
       hardware: request.hardware,
       superSpeed: isSuperSpeed,
@@ -408,6 +434,11 @@ export async function runExport(request: ExportRequest): Promise<ExportOutcome> 
     const inFlightWrites: Promise<void>[] = [];
     const MAX_IN_FLIGHT = isSuperSpeed ? 8 : 1;
     let chunkBytes: Uint8Array[] = [];
+    /* Bytes and frames stopped being the same thing at tier 2: one
+       `encode()` can return two access units or none, while the mux's
+       `-t` comes from the frame COUNT. Under-report it and the file is
+       truncated with the audio cut to match. */
+    let framesPending = 0;
 
     // Pipeline: kick off seek for frame 0
     let nextSeekPromise: Promise<void> | null = prepareFrame(0, startMs);
@@ -441,14 +472,24 @@ export async function runExport(request: ExportRequest): Promise<ExportOutcome> 
         nextSeekPromise = prepareFrame(nextFrame, nextTimestampMs);
       }
 
-      const jpeg = await canvasToJpeg(activeCanvas, frameQuality);
-      chunkBytes.push(jpeg);
+      if (frameEncoder) {
+        /* A keyframe every two seconds: seekable output without spending the
+           bitrate an all-intra stream would. */
+        const keyFrame = frame % Math.max(1, Math.round(project.fps * 2)) === 0;
+        for (const bytes of await frameEncoder.encode(activeCanvas, frame, keyFrame)) {
+          chunkBytes.push(bytes);
+        }
+      } else {
+        chunkBytes.push(await canvasToJpeg(activeCanvas, frameQuality));
+      }
+      framesPending += 1;
 
       const done = frame + 1;
-      const shouldFlushChunk = chunkBytes.length >= CHUNK_SIZE || done === totalFrames;
+      const shouldFlushChunk = framesPending >= CHUNK_SIZE || done === totalFrames;
 
-      if (shouldFlushChunk) {
-        const count = chunkBytes.length;
+      if (shouldFlushChunk && chunkBytes.length > 0) {
+        const count = framesPending;
+        framesPending = 0;
         let payload: Uint8Array;
         if (count === 1) {
           payload = chunkBytes[0];
@@ -520,6 +561,26 @@ export async function runExport(request: ExportRequest): Promise<ExportOutcome> 
 
     abortIfCancelled();
 
+    /* Whatever the encoder is still holding. `framesPending` is normally 0
+       here — the last iteration flushes — but it is carried rather than
+       assumed, because a trailing access unit that arrives only on flush
+       would otherwise be written with nothing counting it. */
+    if (frameEncoder) {
+      const tail = await frameEncoder.flush();
+      if (tail.length > 0 || framesPending > 0) {
+        const total = tail.reduce((sum, b) => sum + b.byteLength, 0);
+        const payload = new Uint8Array(total);
+        let offset = 0;
+        for (const b of tail) {
+          payload.set(b, offset);
+          offset += b.byteLength;
+        }
+        const written = await exporter.frame(sessionId, payload, framesPending);
+        if (!written.ok) throw new Error(written.error ?? 'The encoder stopped accepting frames.');
+        framesPending = 0;
+      }
+    }
+
     // Ensure all in-flight frame chunk writes have finished before muxing audio
     if (inFlightWrites.length > 0) {
       await Promise.all(inFlightWrites);
@@ -570,6 +631,7 @@ export async function runExport(request: ExportRequest): Promise<ExportOutcome> 
        export that produced it — the preview would draw a frame from a
        render that is over. Both go on every path, including cancel. */
     if (decoders) void decoders.close();
+    frameEncoder?.close();
     clearDecodedFrames();
   }
 }

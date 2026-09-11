@@ -3848,12 +3848,14 @@ component re-rendering one `translateX`.
 
 ### Export throughput: the seek is the render (`engine/exportPipeline.ts`, `engine/videoEngine.ts`, 2026-09-11)
 
-**Tier 1 is implemented (2026-09-11); tiers 2-4 are not.** The export now
+**Tiers 1 and 2 are implemented (2026-09-11); tiers 3-4 are not.** The export now
 decodes sequentially where it can — `sequentialPlan.ts`, `sequentialDecode.ts`
 and the frame override in `videoEngine.ts` — and still encodes through JPEG to
-ffmpeg. The figures below under "Measured" describe the pipeline tier 1
-replaced, not the one that ships; see "Tier 1, on real footage" for what it is
-now. Tiers 2-4 remain a decision recorded, not a capability.
+ffmpeg — and, where WebCodecs will take the codec, encodes there too and hands
+ffmpeg an elementary stream to copy. The figures below under "Measured"
+describe the pipeline these replaced, not the one that ships; see "Tier 1, on
+real footage" and "Tier 2, measured" for what it is now. Tiers 3-4 remain a
+decision recorded, not a capability.
 
 **Two cautions on every number in this section.** None of them has a
 compositor in the loop — the harness decodes one clip and draws it, where a
@@ -3970,10 +3972,13 @@ next thing to build: removing the JPEG round-trip should take 4.8s toward the
    not the export. `tests/sequential-plan.test.mjs` covers the decision; it
    takes a demand function rather than a timeline, so it runs with no DOM and
    no media.
-2. **WebCodecs encode instead of JPEG → IPC → ffmpeg.** Deletes the JPEG
-   encode, the IPC copy, ffmpeg's JPEG decode and the 0.82 generation loss in
-   one move. ffmpeg keeps the muxing and the audio, fed H.264 it can `-c:v
-   copy`.
+2. **WebCodecs encode instead of JPEG → IPC → ffmpeg.** — **implemented
+   2026-09-11**, `webcodecsEncoder.ts`. Deletes the JPEG encode, the IPC copy,
+   ffmpeg's JPEG decode and the 0.82 generation loss in one move. ffmpeg keeps
+   the muxing and the audio, fed H.264 it can `-c:v copy`. ProRes, a browser
+   build and any codec the UA refuses keep the JPEG path — the encoder is
+   built before the session starts and `frameFormat` tells the main process
+   which contract this export is using.
 3. **Smart rendering.** A stretch of timeline with no effect, no transform and
    a codec/resolution/frame-rate match against the source is a stream copy, not
    a re-encode — Premiere ships this under that name and it is lossless as well
@@ -4005,6 +4010,43 @@ does not reach this product's source, which is what makes it a safe shape to
 depend on beside an LGPL ffmpeg. When tier 1 lands it becomes a shipped
 component like any other: named on the About surface off the manifest, with its
 licence text copied into `licences/` and checked rather than attempted.
+
+#### Tier 2, measured — 2026-09-11
+
+Same real 1080p30 source, 600 frames, cold Electron process:
+
+| stage | fps | 600 frames |
+| --- | --- | --- |
+| tier 1 only: sequential decode + JPEG | 125.1 | 4.8s |
+| **tiers 1+2: decode + WebCodecs encode** | **187** | **3.2s** |
+
+**49.3s to 3.2s end to end — 15.4x on real footage.** The encode stage itself
+went 4.2s to 2.6s; the rest of tier 2's value is not on this clock at all,
+because it also deletes ffmpeg's JPEG decode and re-encode in the other
+process, and a generation of lossy recompression.
+
+Quality improved, which is the point worth making twice: **SSIM 0.994977,
+PSNR 45.46 dB** against the source, where the section's own figure for the
+JPEG pipeline is 0.9930 and 41.9 dB. 600 encoder chunks for 600 frames — the
+`latencyMode: 'realtime'` request did keep B-frames out, which is what makes
+an elementary stream safe to time from the input flag.
+
+**Two bugs this build shipped into the harness before measurement caught them,
+both silent:**
+
+1. **`-r` is an INPUT option.** Written as `-f h264 -framerate 30 -i pipe:0`
+   the flag does not take and the demuxer uses its own default: 600 frames
+   muxed as **1.74 seconds** instead of 20, playing 11x fast, while
+   `nb_frames` read a correct 600. `-r` must precede `-i`.
+2. **Forcing `-color_range pc` is wrong, and SSIM cannot see that it is.** A
+   canvas is full-range sRGB so `pc` looks right; measured, the encoder emits
+   LIMITED range and writes `tv`/bt709 into the VUI itself. Forcing `pc` makes
+   the container contradict the bitstream and a player renders it washed out —
+   and the forced and unforced muxes scored an **identical** SSIM 0.994977 and
+   PSNR 45.46 dB, because those filters compare decoded YUV and never read the
+   range tag. This is the same class of failure as the colour landmine below,
+   caught the second time by `ffprobe` rather than by a metric. **Verify colour
+   with `ffprobe`; a quality score is not evidence.**
 
 #### Landmines, measured
 

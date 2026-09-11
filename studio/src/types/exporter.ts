@@ -26,6 +26,16 @@ export interface ExportStartOptions {
   superSpeed?: boolean;
   /** Keep rendering at full speed in the background without timer throttling */
   background?: boolean;
+  /**
+   * What the renderer will pipe.
+   *
+   * `jpeg` is the original contract: one complete JPEG per frame, which
+   * ffmpeg decodes and re-encodes. `h264`/`hevc` mean the renderer already
+   * encoded through WebCodecs and is sending an Annex-B elementary stream,
+   * so ffmpeg stream-copies it and never touches a pixel. Absent means
+   * `jpeg`, which is what a ProRes export and a browser build still use.
+   */
+  frameFormat?: 'jpeg' | 'h264' | 'hevc';
 }
 
 export interface ExportStartResult {

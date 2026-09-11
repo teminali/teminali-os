@@ -128,10 +128,13 @@ function startExport(options, sender) {
     assumed. ProRes is the one codec that does not ask: `prores_ks` is in every
     build, LGPL or not, and `encoderArgs` ignores the name for it.
   */
-  const encoder = opts.codec === "prores"
-    ? "prores_ks"
-    : chooseEncoder(opts.codec === "hevc" ? "hevc" : "h264", ff, { allowHardware: opts.hardware });
-  if (!encoder) {
+  const rendererEncoded = opts.frameFormat === "h264" || opts.frameFormat === "hevc";
+  const encoder = rendererEncoded
+    ? null
+    : opts.codec === "prores"
+      ? "prores_ks"
+      : chooseEncoder(opts.codec === "hevc" ? "hevc" : "h264", ff, { allowHardware: opts.hardware });
+  if (!encoder && !rendererEncoded) {
     return { error: "This ffmpeg build has no usable video encoder. Reinstall Teminali OS, or set FFMPEG_PATH to a full ffmpeg." };
   }
 
@@ -143,11 +146,45 @@ function startExport(options, sender) {
     ? ["-probesize", "32", "-analyzeduration", "0", "-threads", "0"]
     : [];
 
-  const args = [
-    "-y", ...speedFlags, "-f", "image2pipe", "-framerate", String(opts.fps), "-i", "pipe:0",
-    ...encoderArgs(opts, encoder),
-    "-r", String(opts.fps), videoPath,
-  ];
+  /*
+    Two input shapes, decided by the renderer.
+
+    `jpeg` is the original: one complete JPEG per frame, which ffmpeg decodes
+    and re-encodes. `h264`/`hevc` mean the renderer already encoded through
+    WebCodecs and this is an Annex-B elementary stream — ffmpeg copies it and
+    never touches a pixel, which is the whole of tier 2.
+
+    Two things here are measured, not reasoned, and both were wrong first.
+
+    **`-r` goes BEFORE `-i`.** An Annex-B stream carries no timestamps, so the
+    frame rate is an INPUT property. Written as `-f h264 -framerate N -i` the
+    flag does not take, the demuxer falls back to its own default, and 600
+    frames land in the container as 1.74 seconds instead of 20 — a file that
+    plays 11x too fast while `nb_frames` reads correct.
+
+    **The colour tags are NOT forced.** A canvas is full-range sRGB, so forcing
+    `-color_range pc` looks right; measured, the encoder emits limited range
+    and tags the VUI `tv`/bt709 itself, and `-c:v copy` preserves that. Forcing
+    `pc` makes the container contradict the bitstream, and a player — which
+    reads the tag — renders it washed out. SSIM CANNOT SEE THIS: it compares
+    decoded YUV, and scored an identical 0.994977 either way. That is how this
+    shipped once before. Let the bitstream speak; assert it with ffprobe, not
+    with a quality metric.
+  */
+  const preEncoded = opts.frameFormat === "h264" || opts.frameFormat === "hevc";
+  const args = preEncoded
+    ? [
+        "-y", ...speedFlags,
+        "-r", String(opts.fps), "-f", opts.frameFormat, "-i", "pipe:0",
+        "-c:v", "copy",
+        ...(opts.frameFormat === "hevc" ? ["-tag:v", "hvc1"] : []),
+        videoPath,
+      ]
+    : [
+        "-y", ...speedFlags, "-f", "image2pipe", "-framerate", String(opts.fps), "-i", "pipe:0",
+        ...encoderArgs(opts, encoder),
+        "-r", String(opts.fps), videoPath,
+      ];
 
   const proc = spawn(ff, args, { stdio: ["pipe", "ignore", "pipe"], windowsHide: true });
 
@@ -190,6 +227,10 @@ function startExport(options, sender) {
  * partial write is not a short frame — it is a corrupt stream from that point
  * on. The renderer therefore sends whole encoded images and this never
  * concatenates.
+ *
+ * An Annex-B stream (tier 2) has the same property for the opposite reason:
+ * start codes delimit NAL units, so concatenating whole access units is
+ * exactly right and this function does not need to know which it is holding.
  */
 function writeFrame(sessionId, jpeg, frames = 1) {
   const session = sessions.get(sessionId);
