@@ -66,9 +66,9 @@ is the complete list.
 | `GET` | `/api/frontier/status` | bearer | Current model mode and whether an expert-qualified provider is reachable. |
 | `POST` | `/api/frontier/resolve-mode` | bearer | Resolves a requested mode against what the machine and providers can actually serve. Answers `402 PLAN_UPGRADE_REQUIRED` when the resolved profile needs a capability the licence does not carry. |
 | `GET` | `/api/models` · `/api/models/local` | bearer | Models installed in Ollama, from its `api/tags`. |
-| `GET` | `/api/models/library` | bearer | The catalog, filtered against the detected device and what is already installed. |
+| `GET` | `/api/models/library` | bearer | The catalog, filtered against the detected device and what is already installed. Carries `routing.suggested`: what would fill a lane nothing installed can serve, chosen by the rules that would then route to it. |
 | `POST` | `/api/models/resolve` | bearer | Picks a model for a given prompt. |
-| `POST` | `/api/models/pull` | bearer | Pulls an Ollama model. |
+| `POST` | `/api/models/pull` | bearer | Pulls an Ollama model, **streaming NDJSON progress** — `{type:"progress",status,digest,completed,total}` throttled to 200 ms, then `{type:"done"}` or `{type:"error"}`. |
 | `GET` | `/api/system/device` | bearer | Detected device class — the memory ceiling the model picker respects. |
 
 ### Hosted providers

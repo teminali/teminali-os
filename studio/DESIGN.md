@@ -4868,6 +4868,39 @@ about on paper. It costs the ramp nothing new: `#6b6b6b` is already the palette'
 reached every switch; the other `bg-surface-hover` pills are hover states on
 round buttons and are none of this.
 
+**A download that says nothing is a button people press twice (2026-09-11).**
+`ModelLibrary`'s Download control span a `Loader2` and read *Pulling* for the
+whole of a pull. These weights run from two to thirty gigabytes, so that is a
+control that looks inert for tens of minutes — and an inert control is one the
+operator presses again. `/api/models/pull` now streams NDJSON and the row shows
+what arrived: the percentage in the button, a 2px accent bar under it, and
+Ollama's own status word as the title. Two decisions inside that are not
+cosmetic. **The bar only exists where a number does** — Ollama sends byte counts
+for layer downloads and not for the manifest, verify or write steps, and a bar
+invented to cover those gaps would be exactly the decoration this pane refuses;
+those frames show a word instead (*Manifest*, *Verifying*, *Finishing*).
+And **the percentage is per layer, not per download**, because that is all
+Ollama reports — measured against the real daemon, one 135M model was 314
+frames across **6 layers**, so the bar genuinely restarts six times. The status
+word beside it is what makes that legible rather than looking broken; inventing
+a whole-download percentage would have meant summing totals the daemon only
+reveals one layer at a time.
+
+**An empty lane now names its own fix.** `LaneRow`'s empty state was the words
+*nothing installed for this lane* and nothing to press — it told the operator
+they had a problem and left them to find the answer among thirty models. The
+row now names the model that would take the lane and offers to download it.
+What makes this honest rather than a guess is where the suggestion comes from:
+`planRouting` gained an `{ installed: false }` option and the server runs the
+**same chooser** over what this machine could install, so the model offered is
+the model that would actually win the lane once it lands. A separate
+"recommended" heuristic beside the router was the obvious shortcut and is the
+wrong one — the moment the two drift, the pane recommends a download the router
+would then decline to use, and nothing would report it. A suggestion is only
+ever rendered for a lane that is genuinely empty, and `planRouting` will not
+return a model this machine cannot run, so the offer cannot be one that would
+swap the laptop once accepted.
+
 ### Verifying a change against the reference
 
 The four capture files this system was measured from are Cursor screenshots at

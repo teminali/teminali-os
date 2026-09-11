@@ -191,6 +191,47 @@ function abortWhenClientLeaves(response, controller) {
   });
 }
 
+/**
+ * Parsed objects from an upstream NDJSON body, one per line, as they arrive.
+ *
+ * A chunk boundary lands wherever the network puts it, so the tail of a chunk
+ * is usually half a line; that remainder is held back and prefixed onto the
+ * next one. Reading this wrong does not fail loudly — it drops or corrupts
+ * whichever lines happen to straddle a boundary, which for a progress stream
+ * looks like a bar that sticks rather than an error.
+ *
+ * A line that does not parse is skipped rather than thrown: the caller is
+ * reporting progress, and one malformed frame is not worth failing a download
+ * that is otherwise arriving.
+ */
+async function* ndjsonLines(body) {
+  // `fetchImpl` is a web fetch here and a stub in tests; accept either a web
+  // stream or anything already async-iterable rather than making callers care.
+  const source = typeof body?.getReader === "function" ? Readable.fromWeb(body) : body;
+  const decoder = new TextDecoder();
+  let buffer = "";
+  const parse = (line) => {
+    const trimmed = line.trim();
+    if (!trimmed) return undefined;
+    try {
+      return JSON.parse(trimmed);
+    } catch {
+      return undefined;
+    }
+  };
+  for await (const chunk of source) {
+    buffer += decoder.decode(chunk, { stream: true });
+    const lines = buffer.split("\n");
+    buffer = lines.pop() ?? "";
+    for (const line of lines) {
+      const parsed = parse(line);
+      if (parsed !== undefined) yield parsed;
+    }
+  }
+  const last = parse(buffer);
+  if (last !== undefined) yield last;
+}
+
 async function readBoundedResponse(response, maxBytes, source) {
   const chunks = [];
   let total = 0;
@@ -1844,11 +1885,25 @@ export async function createGateway(options = {}) {
           // every entry simply shows as not installed.
         }
         const library = buildLibrary(device, installed);
+        const routing = planRouting(library);
+        // What would fill a lane that nothing installed can serve, chosen by the
+        // same rules that would then route to it. Only ever named for a lane
+        // that is actually empty: suggesting a download beside a lane already
+        // answered is noise, and suggesting one this machine cannot run is
+        // worse than saying nothing — `planRouting` refuses those either way.
+        const fillable = planRouting(library, { installed: false });
         replyJson(response, 200, {
           connected,
           device,
           models: library,
-          routing: planRouting(library),
+          routing: {
+            ...routing,
+            suggested: {
+              light: routing.light ? null : fillable.light,
+              heavy: routing.heavy ? null : fillable.heavy,
+              vision: routing.vision ? null : fillable.vision,
+            },
+          },
         });
         return;
       }
@@ -1971,23 +2026,88 @@ export async function createGateway(options = {}) {
         if (typeof modelName !== "string" || !modelName.trim()) {
           throw new GatewayError(400, "INVALID_MODEL_NAME", "A valid model name/tag is required to download.");
         }
+
+        /* This streams, and the reason is the size. These weights run from two
+           to thirty gigabytes; the route used to ask Ollama for `stream: false`
+           and hold one request open until the whole thing landed, so the button
+           span a spinner for forty minutes and told the user nothing — not how
+           far along, not whether it had stalled, not whether it was still
+           alive. A control that looks inert is one people press again, and
+           pressing again is how you start a second pull.
+
+           Ollama reports `completed`/`total` per layer, not for the download as
+           a whole, so the percentages walk back to zero as each new layer
+           starts. The layer digest is passed through with them: the client can
+           say which of how many, and a bar that restarts is then legible
+           instead of looking like a bug. */
+        const abort = new AbortController();
+        abortWhenClientLeaves(response, abort);
+
+        response.writeHead(200, {
+          "content-type": "application/x-ndjson; charset=utf-8",
+          "cache-control": "no-store",
+          "x-correlation-id": correlationId,
+        });
+        const send = (event) => {
+          if (!response.writableEnded) response.write(`${JSON.stringify(event)}\n`);
+        };
+
         try {
-          const pullUrl = joinUrl(config.ollamaUrl, "api/pull");
-          const ollamaPullRes = await fetchImpl(pullUrl, {
+          const ollamaPullRes = await fetchImpl(joinUrl(config.ollamaUrl, "api/pull"), {
             method: "POST",
             headers: { "content-type": "application/json" },
-            body: JSON.stringify({ name: modelName.trim(), stream: false }),
+            body: JSON.stringify({ name: modelName.trim(), stream: true }),
+            signal: abort.signal,
           });
-          if (!ollamaPullRes.ok) {
-            const errData = await ollamaPullRes.text();
-            throw new GatewayError(502, "OLLAMA_PULL_FAILED", `Failed to pull model: ${errData}`);
+          if (!ollamaPullRes.ok || !ollamaPullRes.body) {
+            const detail = ollamaPullRes.ok ? "no progress stream" : await ollamaPullRes.text();
+            send({ type: "error", code: "OLLAMA_PULL_FAILED", message: `Failed to pull model: ${detail}` });
+            response.end();
+            return;
           }
-          const pullResult = await ollamaPullRes.json();
-          replyJson(response, 200, { status: "success", model: modelName, result: pullResult });
-        } catch (err) {
-          if (err instanceof GatewayError) throw err;
-          throw new GatewayError(502, "OLLAMA_PULL_ERROR", err instanceof Error ? err.message : "Failed to pull model from Ollama.");
+
+          // Throttled for the same reason the update download is: Ollama emits
+          // a line per chunk, and relaying every one of them would cost more
+          // than it describes. `completed === total` always goes out, so the
+          // last frame of each layer is never the one that got dropped.
+          let lastSentAt = 0;
+          let failed = null;
+          for await (const line of ndjsonLines(ollamaPullRes.body)) {
+            if (line.error) { failed = String(line.error); break; }
+            const status = typeof line.status === "string" ? line.status : "";
+            const total = Number.isFinite(line.total) ? line.total : null;
+            const completed = Number.isFinite(line.completed) ? line.completed : null;
+            const now = Date.now();
+            const finishedLayer = total !== null && completed === total;
+            if (now - lastSentAt < 200 && !finishedLayer && total !== null) continue;
+            lastSentAt = now;
+            send({ type: "progress", status, digest: line.digest ?? null, completed, total });
+          }
+
+          if (failed) {
+            send({ type: "error", code: "OLLAMA_PULL_FAILED", message: failed });
+          } else {
+            send({ type: "done", model: modelName.trim() });
+            await audit.write({
+              event: "model-pulled",
+              correlationId,
+              method: request.method,
+              route,
+              model: modelName.trim(),
+            });
+          }
+        } catch (error) {
+          // An aborted pull is the user leaving, not a failure to report: the
+          // socket is already gone and `send` would write into nothing.
+          if (!abort.signal.aborted) {
+            send({
+              type: "error",
+              code: "OLLAMA_PULL_ERROR",
+              message: error instanceof Error ? error.message : "Failed to pull model from Ollama.",
+            });
+          }
         }
+        response.end();
         return;
       }
 

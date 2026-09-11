@@ -868,3 +868,111 @@ test("an agent turn has its own body allowance without widening other JSON ingre
   });
   assert.equal(rejected.status, 413);
 });
+
+/* ── Model downloads ──────────────────────────────────────────────────────
+   These weights are gigabytes. The route used to ask Ollama for
+   `stream: false` and hold one request open until the whole pull landed, so
+   the UI span a spinner and could not say how far along it was, whether it had
+   stalled, or whether it was still alive. What follows asserts the thing that
+   replaced it: progress that actually arrives, and failures that arrive as
+   frames rather than as a stream that simply stops.
+   ──────────────────────────────────────────────────────────────────────── */
+
+/** An Ollama pull response: NDJSON, one frame per line, as a real stream. */
+function ollamaPull(lines) {
+  return new Response(
+    new ReadableStream({
+      start(controller) {
+        for (const line of lines) controller.enqueue(new TextEncoder().encode(`${JSON.stringify(line)}\n`));
+        controller.close();
+      },
+    }),
+    { headers: { "content-type": "application/x-ndjson" } },
+  );
+}
+
+/** Every frame the gateway relayed, parsed. */
+async function readNdjson(response) {
+  return (await response.text())
+    .split("\n")
+    .filter((line) => line.trim())
+    .map((line) => JSON.parse(line));
+}
+
+test("a model pull streams progress rather than holding one silent request open", async (t) => {
+  const fetchImpl = async (url) => {
+    if (String(url).includes("api/pull")) {
+      return ollamaPull([
+        { status: "pulling manifest" },
+        { status: "downloading", digest: "sha256:aaa", completed: 5, total: 10 },
+        // The finished frame of a layer is exempt from throttling, so this one
+        // has to survive arriving in the same millisecond as the one above.
+        { status: "downloading", digest: "sha256:aaa", completed: 10, total: 10 },
+        { status: "success" },
+      ]);
+    }
+    return new Response("{}", { headers: { "content-type": "application/json" } });
+  };
+  const { gateway, baseUrl, audit } = await startGateway({ fetchImpl });
+  t.after(() => gateway.close());
+
+  const response = await fetch(`${baseUrl}/api/models/pull`, {
+    method: "POST",
+    headers: authHeaders(),
+    body: JSON.stringify({ model: "qwen2.5-coder:7b" }),
+  });
+  assert.equal(response.status, 200);
+  assert.match(response.headers.get("content-type"), /application\/x-ndjson/);
+
+  const events = await readNdjson(response);
+  const progress = events.filter((event) => event.type === "progress");
+  assert.ok(progress.length >= 2, "no progress reached the client");
+
+  // The layer's last frame is the one a throttle would most likely eat, and
+  // the one a progress bar needs in order to ever reach the end.
+  const completed = progress.find((event) => event.completed === 10 && event.total === 10);
+  assert.ok(completed, "the frame that completes a layer was dropped");
+  assert.equal(completed.digest, "sha256:aaa", "the layer digest is not relayed, so a restarting bar is unexplainable");
+
+  assert.equal(events.at(-1).type, "done");
+  assert.equal(events.at(-1).model, "qwen2.5-coder:7b");
+  assert.ok(audit.entries.some((entry) => entry.event === "model-pulled"));
+});
+
+test("a pull that fails upstream says so in the stream, not by falling silent", async (t) => {
+  const fetchImpl = async (url) => {
+    if (String(url).includes("api/pull")) {
+      return ollamaPull([{ status: "pulling manifest" }, { error: "model 'nope' not found" }]);
+    }
+    return new Response("{}", { headers: { "content-type": "application/json" } });
+  };
+  const { gateway, baseUrl } = await startGateway({ fetchImpl });
+  t.after(() => gateway.close());
+
+  const response = await fetch(`${baseUrl}/api/models/pull`, {
+    method: "POST",
+    headers: authHeaders(),
+    body: JSON.stringify({ model: "nope" }),
+  });
+  // The status is 200 because the headers went out before the failure did:
+  // that is what streaming costs, and why the error has to be a frame.
+  assert.equal(response.status, 200);
+  const events = await readNdjson(response);
+  assert.equal(events.at(-1).type, "error");
+  assert.match(events.at(-1).message, /not found/);
+  assert.ok(!events.some((event) => event.type === "done"), "a failed pull reported itself done");
+});
+
+test("a pull still refuses a model name that is not one", async (t) => {
+  const { gateway, baseUrl } = await startGateway();
+  t.after(() => gateway.close());
+
+  const response = await fetch(`${baseUrl}/api/models/pull`, {
+    method: "POST",
+    headers: authHeaders(),
+    body: JSON.stringify({ model: "   " }),
+  });
+  // Rejected before any header goes out, so this one is still a real status.
+  assert.equal(response.status, 400);
+  assert.equal((await response.json()).error.code, "INVALID_MODEL_NAME");
+});

@@ -353,3 +353,44 @@ test("no providers configured is reported, not papered over", () => {
   assert.equal(plan.degraded, true);
   assert.equal(plan.light, null);
 });
+
+/* ── What would fill an empty lane ────────────────────────────────────────
+   The pane used to say "nothing installed for this lane" and stop there,
+   which names a problem and leaves the user to find the fix among thirty
+   models. The answer has to come from the same chooser that will later route
+   to it — the moment the two disagree, the app recommends a model it would
+   then decline to use, and nothing reports that.
+   ──────────────────────────────────────────────────────────────────────── */
+
+test("an empty machine is told what would take each lane, by the rules that would route to it", () => {
+  const library = buildLibrary(M4_PRO_24, []);
+  const plan = planRouting(library);
+  assert.equal(plan.light, null, "a machine with nothing installed has no light lane");
+
+  const fillable = planRouting(library, { installed: false });
+  assert.ok(fillable.light, "nothing was offered for an empty light lane");
+  // It has to be something this machine does not already have, or the offer is
+  // to download what is already on disk.
+  assert.equal(library.find((model) => model.tag === fillable.light.tag).installed, false);
+  // The same rule the installed pass applies: the everyday lane wants a model
+  // that can actually write code, not merely the smallest thing that fits.
+  assert.ok(fillable.light.capabilities.includes("code"));
+});
+
+test("a suggestion is never a model this machine cannot run", () => {
+  // 8 GB: most of the catalogue is out of reach, and the wrong answer here is
+  // recommending a download that would swap the machine once it landed.
+  const fillable = planRouting(buildLibrary(M1_AIR_8, []), { installed: false });
+  for (const lane of [fillable.light, fillable.heavy, fillable.vision]) {
+    if (!lane) continue;
+    assert.ok(
+      ["recommended", "supported"].includes(lane.fit.level),
+      `${lane.tag} was offered to an 8 GB machine at fit level ${lane.fit.level}`,
+    );
+  }
+});
+
+test("the installed pass is unchanged by the option it gained", () => {
+  const library = buildLibrary(M4_PRO_24, REALISTIC_INSTALL);
+  assert.deepEqual(planRouting(library), planRouting(library, { installed: true }));
+});

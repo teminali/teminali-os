@@ -21,6 +21,38 @@ import { IconButton, StatusDot } from "../ui";
 
 type Filter = "all" | "installed" | "code" | "reasoning" | "vision" | "fits";
 
+/**
+ * How far a download has got.
+ *
+ * `fraction` is progress through the *current layer*, not the whole model —
+ * that is all Ollama reports — so it walks back to zero several times on the
+ * way to a finished pull. Showing the status word beside it is what keeps that
+ * legible: "downloading 12%" restarting is obviously a new layer, whereas a
+ * bare bar that resets looks broken.
+ */
+interface PullProgress {
+  tag: string;
+  status: string;
+  fraction: number | null;
+}
+
+/** Ollama's status words are lowercase and terse; these are the ones users see. */
+const PULL_COPY: Record<string, string> = {
+  starting: "Starting",
+  "pulling manifest": "Manifest",
+  "verifying sha256 digest": "Verifying",
+  "writing manifest": "Finishing",
+  "removing any unused layers": "Finishing",
+  success: "Done",
+};
+
+const pullLabel = (progress: PullProgress): string => {
+  const copy = PULL_COPY[progress.status];
+  if (copy) return copy;
+  if (progress.fraction !== null) return `${Math.min(100, Math.round(progress.fraction * 100))}%`;
+  return "Pulling";
+};
+
 const FILTERS: Array<{ id: Filter; label: string }> = [
   { id: "all", label: "All" },
   { id: "installed", label: "Installed" },
@@ -43,7 +75,7 @@ export const ModelLibrary: React.FC = () => {
   const [error, setError] = useState<string | null>(null);
   const [query, setQuery] = useState("");
   const [filter, setFilter] = useState<Filter>("all");
-  const [pulling, setPulling] = useState<string | null>(null);
+  const [pulling, setPulling] = useState<PullProgress | null>(null);
 
   const load = React.useCallback(async (signal?: AbortSignal) => {
     setLoading(true);
@@ -94,12 +126,30 @@ export const ModelLibrary: React.FC = () => {
   const available = visible.filter((model) => !model.installed);
 
   const pull = async (tag: string) => {
-    setPulling(tag);
+    setPulling({ tag, status: "starting", fraction: null });
+    // Held in an object because it is assigned inside a callback, which the
+    // compiler cannot see through to narrow a plain local.
+    const failure: { message: string | null } = { message: null };
     try {
-      await ModelService.pull(tag);
+      await ModelService.pull(tag, (event) => {
+        if (event.type === "progress") {
+          setPulling({
+            tag,
+            status: event.status ?? "",
+            fraction: event.total && event.completed !== null && event.completed !== undefined
+              ? event.completed / event.total
+              : null,
+          });
+        } else if (event.type === "error") {
+          failure.message = event.message ?? "The download failed.";
+        }
+      });
+      // The stream carries its own failures, so a rejected promise is not the
+      // only way this goes wrong — an error frame ends the pull just as surely.
+      if (failure.message) setError(failure.message);
       await load();
-    } catch (failure) {
-      setError((failure as Error).message);
+    } catch (caught) {
+      setError((caught as Error).message);
     } finally {
       setPulling(null);
     }
@@ -116,7 +166,14 @@ export const ModelLibrary: React.FC = () => {
   return (
     <div className="flex flex-col gap-4">
       {data && <DeviceStrip data={data} onRefresh={() => void load()} loading={loading} />}
-      {data && <RoutingCard routing={data.routing} connected={data.connected} />}
+      {data && (
+        <RoutingCard
+          routing={data.routing}
+          connected={data.connected}
+          pulling={pulling}
+          onPull={(tag) => void pull(tag)}
+        />
+      )}
 
       {error && (
         <div className="flex items-start gap-2 rounded-lg bg-danger/10 border border-danger/25 px-3 py-2 text-2xs text-danger">
@@ -170,7 +227,7 @@ export const ModelLibrary: React.FC = () => {
               key={model.tag}
               model={model}
               routing={data?.routing}
-              pulling={pulling === model.tag}
+              pulling={pulling?.tag === model.tag ? pulling : undefined}
               onPull={model.fit.level === "unsupported" ? undefined : () => void pull(model.tag)}
             />
           ))}
@@ -214,7 +271,12 @@ const DeviceStrip: React.FC<{ data: LibraryResponse; onRefresh: () => void; load
 
 /* ── Routing ──────────────────────────────────────────────────────────────── */
 
-const RoutingCard: React.FC<{ routing: LibraryResponse["routing"]; connected: boolean }> = ({ routing, connected }) => {
+const RoutingCard: React.FC<{
+  routing: LibraryResponse["routing"];
+  connected: boolean;
+  pulling: PullProgress | null;
+  onPull: (tag: string) => void;
+}> = ({ routing, connected, pulling, onPull }) => {
   if (routing.degraded) {
     return (
       <div className="flex items-start gap-2 rounded-lg bg-warning/10 border border-warning/25 px-3 py-2.5 text-2xs text-warning">
@@ -241,19 +303,32 @@ const RoutingCard: React.FC<{ routing: LibraryResponse["routing"]; connected: bo
           lane="Frontier Flash"
           detail="Every everyday turn"
           model={routing.light}
+          suggested={routing.suggested?.light ?? null}
+          pulling={pulling}
+          onPull={onPull}
         />
         <LaneRow
           icon={<Sparkles size={12} className="text-reason" />}
           lane="Frontier Auto — heavy lane"
           detail="Refactors, debugging, architecture"
           model={routing.heavy}
+          suggested={routing.suggested?.heavy ?? null}
+          pulling={pulling}
+          onPull={onPull}
         />
-        {routing.vision && (
+        {/* The vision row appears when a model holds the lane, or when one
+            could — an empty row nobody can fill is not worth the space, but a
+            machine with no vision model and a way to get one is exactly who
+            this row is for. */}
+        {(routing.vision || routing.suggested?.vision) && (
           <LaneRow
             icon={<Eye size={12} className="text-ink-muted" />}
             lane="Vision"
             detail="Screenshots and design cloning"
             model={routing.vision}
+            suggested={routing.suggested?.vision ?? null}
+            pulling={pulling}
+            onPull={onPull}
           />
         )}
       </div>
@@ -261,9 +336,24 @@ const RoutingCard: React.FC<{ routing: LibraryResponse["routing"]; connected: bo
   );
 };
 
-const LaneRow: React.FC<{ icon: React.ReactNode; lane: string; detail: string; model: RoutingLane | null }> = ({
-  icon, lane, detail, model,
-}) => (
+/**
+ * One routing lane, and — when nothing holds it — the way to fill it.
+ *
+ * The empty state used to be the words "nothing installed for this lane" and
+ * no way to act on them, which told the user they had a problem and left them
+ * to go find the fix in a list of thirty. `suggested` is the model the server
+ * would route here once it exists, chosen by the same rules, so the button
+ * downloads the thing that actually ends the empty state.
+ */
+const LaneRow: React.FC<{
+  icon: React.ReactNode;
+  lane: string;
+  detail: string;
+  model: RoutingLane | null;
+  suggested?: RoutingLane | null;
+  pulling?: PullProgress | null;
+  onPull?: (tag: string) => void;
+}> = ({ icon, lane, detail, model, suggested = null, pulling = null, onPull }) => (
   <div className="px-3 py-2 flex items-center gap-3">
     <span className="flex-shrink-0">{icon}</span>
     <div className="min-w-0 w-44 flex-shrink-0">
@@ -279,6 +369,36 @@ const LaneRow: React.FC<{ icon: React.ReactNode; lane: string; detail: string; m
             ~{model.fit.tokensPerSecond} tok/s
           </span>
         )}
+      </>
+    ) : suggested && onPull ? (
+      <>
+        <span className="text-2xs text-ink-disabled flex-1 min-w-0 truncate">
+          nothing installed — <span className="font-mono text-ink-muted">{suggested.tag}</span> would take it
+        </span>
+        <span className="font-mono text-3xs text-ink-faint flex-shrink-0">{formatBytes(suggested.bytes)}</span>
+        <button
+          type="button"
+          onClick={() => onPull(suggested.tag)}
+          disabled={Boolean(pulling)}
+          title={
+            pulling?.tag === suggested.tag
+              ? `${pulling.status || "downloading"} · ${suggested.tag}`
+              : `Download ${suggested.tag} for this lane`
+          }
+          className="h-6 px-2 flex-shrink-0 inline-flex items-center gap-1.5 rounded-md bg-accent text-frame-top text-3xs font-medium hover:bg-accent-hover disabled:opacity-50 transition-colors duration-ds ease-ds whitespace-nowrap"
+        >
+          {pulling?.tag === suggested.tag ? (
+            <>
+              <Loader2 size={10} className="animate-spin" />
+              {pullLabel(pulling)}
+            </>
+          ) : (
+            <>
+              <Download size={10} />
+              Download
+            </>
+          )}
+        </button>
       </>
     ) : (
       <span className="text-2xs text-ink-disabled flex-1">nothing installed for this lane</span>
@@ -301,9 +421,9 @@ const Section: React.FC<{ title: string; count: number; children: React.ReactNod
 const ModelRow: React.FC<{
   model: LibraryModel;
   routing?: LibraryResponse["routing"];
-  pulling?: boolean;
+  pulling?: PullProgress;
   onPull?: () => void;
-}> = ({ model, routing, pulling = false, onPull }) => {
+}> = ({ model, routing, pulling, onPull }) => {
   const fit = FIT_COPY[model.fit.level];
   const activeTag = model.installedTag ?? model.tag;
   const isFlash = routing?.light?.tag === activeTag;
@@ -362,15 +482,37 @@ const ModelRow: React.FC<{
             Installed
           </span>
         ) : onPull ? (
-          <button
-            type="button"
-            onClick={onPull}
-            disabled={pulling}
-            className="h-6 px-2 inline-flex items-center gap-1.5 rounded-md bg-accent text-frame-top text-3xs font-medium hover:bg-accent-hover disabled:opacity-50 transition-colors duration-ds ease-ds whitespace-nowrap"
-          >
-            {pulling ? <Loader2 size={10} className="animate-spin" /> : <Download size={10} />}
-            {pulling ? "Pulling" : "Download"}
-          </button>
+          <div className="flex flex-col items-end gap-1">
+            <button
+              type="button"
+              onClick={onPull}
+              disabled={Boolean(pulling)}
+              title={pulling ? `${pulling.status || "downloading"} · ${model.tag}` : undefined}
+              className="h-6 px-2 inline-flex items-center gap-1.5 rounded-md bg-accent text-frame-top text-3xs font-medium hover:bg-accent-hover disabled:opacity-50 transition-colors duration-ds ease-ds whitespace-nowrap"
+            >
+              {pulling ? <Loader2 size={10} className="animate-spin" /> : <Download size={10} />}
+              {pulling ? pullLabel(pulling) : "Download"}
+            </button>
+            {/* A bar only where there is a real number behind it. Ollama sends
+                sizes for layer downloads and not for the manifest or verify
+                steps, and a bar invented for those would be the decoration
+                this pane exists to avoid. */}
+            {pulling?.fraction !== null && pulling !== undefined && (
+              <div
+                className="w-20 h-0.5 rounded-full bg-edge overflow-hidden"
+                role="progressbar"
+                aria-valuemin={0}
+                aria-valuemax={100}
+                aria-valuenow={Math.round(pulling.fraction * 100)}
+                aria-label={`Downloading ${model.name}`}
+              >
+                <div
+                  className="h-full bg-accent transition-[width] duration-ds ease-ds"
+                  style={{ width: `${Math.min(100, Math.max(0, pulling.fraction * 100))}%` }}
+                />
+              </div>
+            )}
+          </div>
         ) : (
           <span className="text-3xs text-ink-disabled whitespace-nowrap" title={model.fit.reason}>
             too large

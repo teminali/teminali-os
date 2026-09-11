@@ -460,9 +460,15 @@ const USABLE_LEVELS = new Set(["recommended", "supported"]);
  * the wrong answer. Auto's heavy lane is the strongest installed model that
  * still fits comfortably; a model rated `tight` is deliberately never chosen
  * automatically, because a swapping machine is worse than a smaller answer.
+ *
+ * `{ installed: false }` runs the identical choice over the models this machine
+ * could install but has not, which answers a different question with the same
+ * rules: *what would fill this empty lane?* It is a parameter rather than a
+ * second function because the moment the two drift, the app starts recommending
+ * a model it would then decline to route to — and nothing would report that.
  */
-export function planRouting(library) {
-  const usable = library.filter((model) => model.installed && USABLE_LEVELS.has(model.fit.level));
+export function planRouting(library, { installed = true } = {}) {
+  const usable = library.filter((model) => model.installed === installed && USABLE_LEVELS.has(model.fit.level));
 
   // A model whose first capability is vision or embedding is built for that job
   // and is a poor general assistant, however small it happens to be. Size alone

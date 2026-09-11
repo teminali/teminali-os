@@ -73,11 +73,42 @@ export interface RoutingPlan {
   degraded: boolean;
 }
 
+/**
+ * The plan, plus what would fill any lane nothing installed can serve.
+ *
+ * A `suggested` entry is non-null only where the matching lane is null, and the
+ * server chooses it with the same rules it would later route by — so the model
+ * offered here is the model that would actually take the lane once it lands.
+ * Only `/api/models/library` computes this; `/api/models/resolve` answers a
+ * question about one prompt and has no use for it.
+ */
+export interface LibraryRouting extends RoutingPlan {
+  suggested: {
+    light: RoutingLane | null;
+    heavy: RoutingLane | null;
+    vision: RoutingLane | null;
+  };
+}
+
 export interface LibraryResponse {
   connected: boolean;
   device: DeviceInfo;
   models: LibraryModel[];
-  routing: RoutingPlan;
+  routing: LibraryRouting;
+}
+
+/** One frame of a model download. Ollama reports per layer, not per download. */
+export interface ModelPullEvent {
+  type: "progress" | "done" | "error";
+  /** Ollama's own words: "pulling manifest", "downloading", "verifying sha256". */
+  status?: string;
+  /** Which layer these bytes belong to — the reason a bar restarts. */
+  digest?: string | null;
+  completed?: number | null;
+  total?: number | null;
+  model?: string;
+  code?: string;
+  message?: string;
 }
 
 export interface ProviderLane {
@@ -163,7 +194,48 @@ export const ModelService = {
       hosted: { degraded: boolean; model?: ProviderLane & { provider: string }; providerLabel?: string };
     }>("/api/models/resolve", { prompt, mode }, signal),
 
-  pull: (model: string, signal?: AbortSignal) => postJson<unknown>("/api/models/pull", { model }, signal),
+  /**
+   * Downloads a model, reporting progress as it lands.
+   *
+   * These weights are gigabytes; the route streams NDJSON rather than holding
+   * one request open in silence, because a control that looks inert for forty
+   * minutes is one people press a second time. `onEvent` is called for every
+   * frame the gateway relays — throttled there, not here.
+   */
+  pull: async (
+    model: string,
+    onEvent: (event: ModelPullEvent) => void,
+    signal?: AbortSignal,
+  ): Promise<void> => {
+    const response = await GatewayClient.request("/api/models/pull", {
+      method: "POST",
+      signal,
+      body: JSON.stringify({ model }),
+    });
+    await GatewayClient.expectOk(response);
+    if (!response.body) throw new Error("The gateway returned no download stream.");
+
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = "";
+    const consume = (line: string) => {
+      if (!line.trim()) return;
+      try {
+        onEvent(JSON.parse(line) as ModelPullEvent);
+      } catch {
+        /* One malformed frame is not worth failing a download over. */
+      }
+    };
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split("\n");
+      buffer = lines.pop() ?? "";
+      for (const line of lines) consume(line);
+    }
+    consume(buffer);
+  },
 };
 
 export const ProviderService = {
