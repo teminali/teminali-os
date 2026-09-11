@@ -6720,6 +6720,46 @@ Pinned by `realtime-voice/code/test_mic_gate.py`, 11 tests: each turn ending
 reopens, a real final deliberately does not, and the watchdog holds the gate shut
 while a generation runs or the client is still playing.
 
+### 6.0.12 The installed app borrowed someone else's pipeline (`electron-builder.yml`, `server/realtime-voice.js`, 2026-09-11)
+
+Every release up to and including v0.0.10 shipped without the realtime voice
+pipeline. `server/config.js` resolves it at `<workspace root>/studio/realtime-voice`,
+and inside the asar that root is `<Resources>`, so a packaged launch logged
+"No voice pipeline at .../Contents/Resources/studio/realtime-voice" and fell back
+to the local engines. The lane worked on exactly one kind of machine: one with a
+dev checkout already serving `:8000`, which the supervisor then adopted. That is
+why it looked like it worked.
+
+What could not ship is the environment. The pipeline's virtualenv is **2.2 GB**
+of torch, mlx, onnxruntime and the gruut language packs, it is not relocatable,
+and `<Resources>` is inside a signed bundle so nothing can create one there
+after the fact. The source is **1.5 MB**. So the app carries the source and
+`requirements.txt`, and the interpreter is found at runtime:
+`TEMINALI_REALTIME_VOICE_PYTHON` first, then the checkout's `.venv`, then
+`~/.teminali/realtime-voice/.venv`, which is the only one an operator of an
+installed app can write. When none answers, the studio reports the two commands
+that make one, with both absolute paths filled in. A message naming only an
+environment variable is a fix for someone who already has an interpreter.
+
+The allowlist matters as much as the entry: `experiments/` (440 MB),
+`training/` (372 MB), `resources/` (57 MB), `wheels/` (30 MB),
+`code/static/bella_preview/` (35 MB of voice takes) and `code/scratch/` are all
+working material. `code/static/` itself ships, because `server.py` mounts it
+with `StaticFiles`, which raises at startup if the directory is missing, even
+though the studio is the client and never opens that page.
+
+Verified against a built bundle rather than reasoned about: `electron-builder
+--mac --arm64 --dir`, 1.5 MB under `<Resources>/studio/realtime-voice`, no
+tests and no scratch scripts in it; the packaged app then reported the install
+command instead of the missing directory; and the shipped source, started under
+the checkout's interpreter with the packaged `code/` as its working directory,
+answered a full spoken turn.
+
+Pinned by `tests/packaging-resources.test.mjs` (the entry, its destination, and
+the four filter lines that decide whether the thing can start) and
+`tests/realtime-voice.test.mjs` (the interpreter order, both platform layouts,
+and that the message carries a runnable install).
+
 ### 6.1 Turn semantics while a run is in flight (2026-09-05)
 
 A directed utterance is not automatically an instruction. `turnIntent.ts`

@@ -98,6 +98,11 @@ test("a checkout without an interpreter names the fix", () => {
   assert.equal(plan.action, "unavailable");
   assert.equal(plan.reason, "no-interpreter");
   assert.match(plan.detail, /TEMINALI_REALTIME_VOICE_PYTHON/);
+  // A message that only names the env var is a fix for someone who already
+  // has an interpreter. The operator of an installed app has none, so the
+  // message carries the two commands that make one.
+  assert.match(plan.detail, /python3 -m venv/);
+  assert.match(plan.detail, /requirements\.txt/);
 });
 
 test("an explicitly configured interpreter is believed without probing the filesystem", () => {
@@ -108,6 +113,33 @@ test("an explicitly configured interpreter is believed without probing the files
 test("the Windows virtualenv layout is found too", () => {
   const exists = (path) => path === `${ROOT}/.venv/Scripts/python.exe`;
   assert.equal(resolveRealtimeVoicePython(configure(), exists), `${ROOT}/.venv/Scripts/python.exe`);
+});
+
+/*
+  The packaged app ships the pipeline's source into <Resources>, which is
+  inside a signed bundle: a virtualenv cannot be created beside it, and the
+  2.2 GB it would hold is neither shippable nor relocatable. So an installed
+  app can only work if it looks somewhere the operator can write, and the
+  operator can only install if the message names that place.
+*/
+test("an installed app finds the interpreter the operator installed for itself", () => {
+  const home = "/Users/someone";
+  const userPython = `${home}/.teminali/realtime-voice/.venv/bin/python`;
+  const exists = (path) => path === userPython;
+  assert.equal(resolveRealtimeVoicePython(configure(), exists, home), userPython);
+});
+
+test("the checkout's own virtualenv wins over the per-user one", () => {
+  const home = "/Users/someone";
+  const exists = () => true;
+  assert.equal(resolveRealtimeVoicePython(configure(), exists, home), `${ROOT}/.venv/bin/python`);
+});
+
+test("the Windows per-user layout is found too", () => {
+  const home = "C:\\Users\\someone";
+  const userPython = `${home}/.teminali/realtime-voice/.venv/Scripts/python.exe`;
+  const exists = (path) => path === userPython;
+  assert.equal(resolveRealtimeVoicePython(configure(), exists, home), userPython);
 });
 
 test("the socket address is derived from the HTTP one, so the port has one source", () => {

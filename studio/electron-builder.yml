@@ -122,6 +122,44 @@ extraResources:
     filter:
       - "*.js"
       - "package.json"
+  # The realtime voice pipeline's source. `server/config.js` computes its root
+  # as <workspace root>/studio/realtime-voice, and from inside the asar that
+  # workspace root is <Resources>, which is why this entry's `to:` spells a
+  # path rather than a bare directory name. Without it a packaged launch logged
+  # "No voice pipeline at .../Contents/Resources/studio/realtime-voice" and the
+  # installed app had no :8000 lane at all: it worked only on a machine where a
+  # dev checkout happened to be serving one.
+  #
+  # The source only. The pipeline's interpreter is a 2.2 GB virtualenv (torch,
+  # mlx, onnxruntime, the gruut language packs) which is neither relocatable
+  # nor notarisable, so it is installed by the operator and found at runtime —
+  # see `resolveRealtimeVoicePython`, which probes ~/.teminali/realtime-voice
+  # as well as the checkout. Shipping the source is what makes that install
+  # possible from an installed app: requirements.txt and the entry point are
+  # both in <Resources> to point pip at.
+  #
+  # An allowlist, because what is NOT here is most of the directory:
+  # experiments/ (440 MB), training/ (372 MB), resources/ (57 MB), wheels/
+  # (30 MB) and code/static/bella_preview (35 MB of voice takes) are working
+  # material. `static/` itself must ship even though the studio is the client
+  # and never opens that page: server.py mounts it with StaticFiles, which
+  # raises at startup if the directory is absent.
+  - from: realtime-voice
+    to: studio/realtime-voice
+    filter:
+      - "code/**/*.py"
+      - "code/*.txt"
+      - "code/reference_audio.*"
+      - "code/static/**/*"
+      - "!code/static/bella_preview/**"
+      - "!code/**/__pycache__/**"
+      - "!code/**/test_*.py"
+      # Dev scripts that drive the pipeline from the outside; they are not
+      # part of it, and one of them is a test the pattern above would have
+      # caught only at the top level.
+      - "!code/scratch/**"
+      - "requirements.txt"
+      - "README.md"
   # ── The media stack: LGPL ffmpeg and mpv, built by us ──────────────
   #
   # `npm run build:media-stack` populates media-stack/ before packaging; the

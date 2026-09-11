@@ -1309,7 +1309,7 @@ ollama serve              # local models on 127.0.0.1:11434
 
 ```bash
 npm run typecheck   # tsc --noEmit
-npm test            # 2351 tests
+npm test            # 2355 tests
 npm run eval:local  # the local lane against the real model — a score, not a pass/fail; needs Ollama
 npm run eval:voice  # the voice co-agent's spoken answers, same discipline; needs Ollama
 npm run eval:conversation  # Temi over a whole conversation: routing, fabrication, recall; needs Ollama
@@ -1399,6 +1399,50 @@ the gateway down.
 `tests/packaged-imports.test.mjs` models the packaged tree and fails if any
 static import under `server/` lands somewhere neither the asar nor the extra
 resources carry.
+
+### The voice pipeline ships as source, not as an environment
+
+`server/config.js` resolves the realtime pipeline at
+`<workspace root>/studio/realtime-voice`, and inside the asar that workspace
+root is `<Resources>` — so the extra resource copies it to
+`studio/realtime-voice`, a nested `to:` rather than a bare directory name.
+Until v0.0.10 there was no entry at all: a packaged launch logged *"No voice
+pipeline at .../Contents/Resources/studio/realtime-voice"*, and the installed
+app had a realtime lane only when a dev checkout on the same machine happened
+to be serving one on `:8000`.
+
+What ships is 1.5 MB of Python, not the pipeline's environment. The virtualenv
+is 2.2 GB (torch, mlx, onnxruntime, the gruut language packs), it is not
+relocatable, and notarising it is not a thing anyone wants to attempt. The
+allowlist also leaves behind `experiments/` (440 MB), `training/` (372 MB),
+`resources/` (57 MB), `wheels/` (30 MB) and `code/static/bella_preview/`
+(35 MB of voice takes). `code/static/` itself does ship, small: `server.py`
+mounts it with `StaticFiles`, which raises at startup if the directory is
+absent, even though the studio is the client and never opens that page.
+
+The interpreter is found at runtime by `resolveRealtimeVoicePython`, which
+probes, in order:
+
+1. `TEMINALI_REALTIME_VOICE_PYTHON`, believed without inspection.
+2. `<pipeline root>/.venv` — the checkout case.
+3. `~/.teminali/realtime-voice/.venv` — the installed-app case, and the only
+   one an operator can create, since `<Resources>` is inside a signed bundle.
+
+When none of them answers, the studio says so in a command that can be pasted:
+
+```bash
+python3 -m venv ~/.teminali/realtime-voice/.venv
+~/.teminali/realtime-voice/.venv/bin/pip install -r \
+  "/Applications/Teminali OS.app/Contents/Resources/studio/realtime-voice/requirements.txt"
+```
+
+Voice still works without it, on the sidecar and then the browser engine;
+what is missing is the sub-second realtime lane.
+
+Verified against a built bundle, not inferred: `electron-builder --mac --arm64
+--dir`, then the shipped source started under the checkout's interpreter with
+`<Resources>/…/realtime-voice/code` as its working directory and answered a
+full spoken turn.
 
 ### A shim that rewrites its path must be unpacked (`asarUnpack`)
 
@@ -1793,7 +1837,7 @@ Everything is optional; every default is loopback.
 | `TEMINALI_VOICE_URL` | `http://127.0.0.1:8321` |
 | `TEMINALI_REALTIME_VOICE_URL` | `http://127.0.0.1:8000` — the realtime voice pipeline; its WebSocket is derived from this |
 | `TEMINALI_REALTIME_VOICE_ROOT` | `studio/realtime-voice/` |
-| `TEMINALI_REALTIME_VOICE_PYTHON` | the checkout's `.venv` interpreter, found automatically |
+| `TEMINALI_REALTIME_VOICE_PYTHON` | the checkout's `.venv`, else `~/.teminali/realtime-voice/.venv`, found automatically |
 | `TEMINALI_REALTIME_VOICE_AUTOSTART` | on; set `0` to run the pipeline by hand |
 | `TEMINALI_REALTIME_VOICE_STARTUP_TIMEOUT_MS` | `300000` — weights load slowly on a cold cache |
 | `TEMI_MIC_STUCK_TIMEOUT` | `15.0` — seconds the pipeline's microphone gate may stay shut with nothing in flight before its watchdog reopens it (see DESIGN.md 6.0.11) |

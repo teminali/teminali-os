@@ -35,6 +35,7 @@
 import { spawn } from "node:child_process";
 import { connect } from "node:net";
 import { existsSync } from "node:fs";
+import { homedir } from "node:os";
 import { join } from "node:path";
 
 /** Restart attempts before the supervisor stops trying and reports why. */
@@ -60,13 +61,32 @@ const LOG_LINES = 40;
  * @param {(path: string) => boolean} exists Filesystem probe, injected for tests.
  * @returns {string} An interpreter path, or "" when none was found.
  */
-export function resolveRealtimeVoicePython(config, exists = existsSync) {
+/**
+ * Where an operator installs the pipeline's virtualenv for an installed app.
+ *
+ * One documented location rather than a search: the message that reports a
+ * missing interpreter has to name a path the operator can act on, and a list
+ * of guesses is not that.
+ */
+export const USER_PIPELINE_HOME = join(homedir(), ".teminali", "realtime-voice");
+
+export function resolveRealtimeVoicePython(config, exists = existsSync, home = homedir()) {
   if (config.realtimeVoicePython) return config.realtimeVoicePython;
   const root = config.realtimeVoiceRoot;
   if (!root) return "";
+  // Beside the source first, which is the checkout case and the one a
+  // developer expects. Then the per-user install, which is the only one an
+  // installed app can use: <Resources> is inside a signed bundle, so a
+  // virtualenv cannot be created there, and the 2.2 GB of torch and mlx the
+  // pipeline needs is too large to ship and not relocatable if it were. The
+  // app carries the source and requirements.txt; the operator installs once
+  // into ~/.teminali/realtime-voice/.venv and every version of the app after
+  // that finds it.
   const candidates = [
     join(root, ".venv", "bin", "python"),
     join(root, ".venv", "Scripts", "python.exe"),
+    join(home, ".teminali", "realtime-voice", ".venv", "bin", "python"),
+    join(home, ".teminali", "realtime-voice", ".venv", "Scripts", "python.exe"),
   ];
   return candidates.find((candidate) => exists(candidate)) || "";
 }
@@ -121,7 +141,16 @@ export function planRealtimeVoiceLaunch({ config, healthy, portBusy = false, exi
 
   const python = resolveRealtimeVoicePython(config, exists);
   if (!python) {
-    return { action: "unavailable", reason: "no-interpreter", detail: `No Python with the voice pipeline's requirements under ${join(root, ".venv")}. Run its install, or set TEMINALI_REALTIME_VOICE_PYTHON.` };
+    return {
+      action: "unavailable",
+      reason: "no-interpreter",
+      detail:
+        `No Python with the voice pipeline's requirements under ${join(root, ".venv")} ` +
+        `or ${join(USER_PIPELINE_HOME, ".venv")}. Install them with ` +
+        `\`python3 -m venv ${join(USER_PIPELINE_HOME, ".venv")} && ` +
+        `${join(USER_PIPELINE_HOME, ".venv", "bin", "pip")} install -r ${join(root, "requirements.txt")}\`, ` +
+        "or set TEMINALI_REALTIME_VOICE_PYTHON.",
+    };
   }
 
   return {
