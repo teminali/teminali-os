@@ -3931,6 +3931,28 @@ with no JPEG and no IPC.
    get their numbers — but it multiplies a per-frame cost that tiers 1–3 have
    already removed, so it is last, not first.
 
+#### The decoder is a dependency, and it has a licence
+
+The tiers above name `VideoSampleSink.samplesAtTimestamps()` without naming what
+provides it. That is **mediabunny** (1.56.1, **MPL-2.0**) — a pure TypeScript
+demuxer/muxer over WebCodecs: no WASM blob, no native module, and no runtime
+dependencies, its only two being `@types/*` for the WebCodecs DOM definitions.
+The browser bundle is 673 KB minified. The sequential-decode row above was
+measured through it, not through a hand-rolled `VideoDecoder` loop, and the
+figure is partly its pipelining — it decodes ahead and reuses one packet across
+every output frame that maps to it. A port that swaps it for mp4box.js or a
+bare decoder has to re-measure rather than inherit the number.
+
+**It is not installed, and nothing MPL ships today.** The obligation attaches to
+what is distributed, not to what a design document names — the same reasoning
+`docs/MEDIA_LICENSING.md` already applies to the GPL encoders living inside a
+user's own ffmpeg. MPL-2.0 is file-level copyleft: it asks that the library's
+own files stay MPL and that modifications *to those files* be published, and it
+does not reach this product's source, which is what makes it a safe shape to
+depend on beside an LGPL ffmpeg. When tier 1 lands it becomes a shipped
+component like any other: named on the About surface off the manifest, with its
+licence text copied into `licences/` and checked rather than attempted.
+
 #### Landmines, measured
 
 **Colour management is not free, and getting it wrong is invisible until

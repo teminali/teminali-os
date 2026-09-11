@@ -380,6 +380,34 @@ governs mpv's own source rather than what it links. Both halves now state every
 optional dependency; `tests/media-stack-recipe.test.mjs` asserts they keep
 doing so.
 
+## The JavaScript side will have a licence too — mediabunny, MPL-2.0
+
+**Not yet true: nothing below ships in 0.0.8.** Recorded here 2026-09-11 so the
+obligation is known before it attaches, not discovered at a release.
+
+`DESIGN.md` §3, "Export throughput: the seek is the render", commits the export
+rewrite to decoding through WebCodecs rather than seeking a `<video>` element.
+The library that provides that — `VideoSampleSink.samplesAtTimestamps()` — is
+**mediabunny 1.56.1, MPL-2.0**: pure TypeScript, no WASM, no native module, no
+runtime dependencies beyond `@types/*` for the WebCodecs DOM definitions, 673 KB
+minified for the browser bundle.
+
+It is an npm dependency, not a binary in `media-stack/`, so none of the LGPL §6
+machinery above applies to it — there is no `.dylib` to keep replaceable and no
+source tarball to mirror. What MPL-2.0 §3.2 asks is narrower and file-scoped:
+the library's own files stay MPL, and modifications **to those files** are
+published. It does not reach this product's source. Depending on it therefore
+costs the same as depending on the LGPL ffmpeg beside it — a named component and
+a licence text, nothing structural.
+
+Two things to do when the rewrite actually installs it, and not before:
+
+1. **Name it on the About surface.** `AboutPane.tsx` lists components off the
+   manifest and reads each text out of `licences/`, so the entry has to exist in
+   both or it is silently absent — the same failure the kvazaar `|| true` caused.
+2. **Vendor the library unmodified.** Patching it in `node_modules` is what
+   triggers the publication duty; a wrapper module beside it does not.
+
 ## What has to ship beside the binaries
 
 LGPL-2.1 §6 asks that the user be able to replace the library with their own
