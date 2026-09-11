@@ -115,6 +115,32 @@ export class Realtime8000AudioEngine {
       await this.audioContext.resume();
     }
 
+    /*
+      All three processors stay on. Chromium's audio processing applies a gain
+      stage whenever noise suppression or AGC is enabled, and in a quiet room it
+      drives the peaks to full scale -- measured through this app's own
+      microphone, 2026-09-11, 102400 samples each, same room, back to back:
+
+        nothing on        peak -12.9 dBFS   rms -31.1   0 clipped
+        AEC only          peak  -9.8 dBFS   rms -31.2   0 clipped
+        AEC + NS          peak   0.0 dBFS   rms -23.8   5 clipped
+        AEC + AGC         peak   0.0 dBFS   rms -22.9   3 clipped
+        AEC + NS + AGC    peak  -0.0 dBFS   rms -24.5   clipping
+
+      Clipped audio is what Whisper answers with repetition loops and with its
+      canonical silence artifact, "Thank you very much", so it is worth fixing.
+      It was tried here and must not be tried again this way: turning AGC and NS
+      off dropped what actually reached the pipeline to peak -29.2 dBFS, rms
+      -58.3, measured off the wire in the frames the app sends. The recogniser
+      never triggered at all. AGC is not decoration; it is the only thing
+      putting a quiet room at a level the VAD can hear.
+
+      The fix, when someone takes it on, belongs downstream of the gain rather
+      than instead of it -- a limiter in `pcmWorkletProcessor`, which already
+      clamps to +/-1 and so has the peak in its hands -- and it needs to be
+      judged on what leaves the socket, not on what an AnalyserNode reads from a
+      separate stream. Those two disagreed by 20 dB here.
+    */
     this.mediaStream = await navigator.mediaDevices.getUserMedia({
       audio: {
         channelCount: 1,
