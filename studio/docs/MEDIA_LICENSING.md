@@ -452,6 +452,18 @@ build. Three things satisfy it, and all three are release-time work:
    because the offer names versions and an old tag would offer source we no
    longer ship.
 
+   **This offer covers the binary media stack and nothing else.** It is not a
+   general "everything with a licence" release, and reading it as one gets both
+   halves wrong. §6 attaches to libraries *we compiled and ship as binaries*,
+   and is discharged by publishing their corresponding source. An npm
+   dependency's licence attaches on its own terms — MPL-2.0 §3.2, for the one
+   below, is file-scoped and only bites on files we modify, which an unmodified
+   package pulled from the registry already satisfies by being public. Folding
+   the two into one rule would say to re-cut a tarball release because a
+   `package.json` bumped, which §6 never asks for, and would imply this tag
+   covers JavaScript, which it does not. See "The JavaScript side will have a
+   licence too" for the obligation that does apply there.
+
 ## Where the files land
 
 `<Resources>/mpv/mpv` (`mpv.exe` on Windows) and `<Resources>/ffmpeg/ffmpeg`
