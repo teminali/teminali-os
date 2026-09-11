@@ -91,6 +91,10 @@ export function avcCodecString(width: number, height: number): string {
   return 'avc1.64003E'; // 6.2  MaxFS 139264 — 8K
 }
 
+/**
+ * Unused while HEVC is held on the JPEG path — kept because the string is the
+ * fiddly part and rediscovering it is most of the work of trying again.
+ */
 export function hevcCodecString(): string {
   // Main profile, level 5.1 — the widest thing VideoToolbox and NVENC agree on.
   return 'hev1.1.6.L153.90';
@@ -112,7 +116,24 @@ export async function pickFrameFormat(
   if (codec === 'prores') return { format: 'jpeg', config: null };
   if (typeof VideoEncoder === 'undefined') return { format: 'jpeg', config: null };
 
-  const codecString = codec === 'hevc' ? hevcCodecString() : avcCodecString(width, height);
+  /*
+    HEVC stays on the JPEG path, measured 2026-09-11.
+
+    The renderer's HEVC encoder does not honour the bitrate it is given. Asked
+    for 12 Mbps at 1080p it produced **698 kbps** and scored SSIM 0.818 against
+    the source, where H.264 from the same frames at the same request produced
+    5.4 Mbps and 0.954. That is a visible quality regression, and an export is
+    the one artefact a user cannot re-render cheaply.
+
+    So HEVC keeps going through ffmpeg's `hevc_videotoolbox`, which does honour
+    it (`exportFilters.cjs`). H.264 — the default, and what almost every export
+    uses — keeps the fast path. Revisit by finding which field the encoder is
+    actually reading: `latencyMode: 'realtime'` and `bitrateMode` are the two
+    candidates, and neither has been tested apart yet.
+  */
+  if (codec === 'hevc') return { format: 'jpeg', config: null };
+
+  const codecString = avcCodecString(width, height);
   const config: VideoEncoderConfig = {
     codec: codecString,
     width,
@@ -121,14 +142,14 @@ export async function pickFrameFormat(
     framerate: 30,
     hardwareAcceleration: 'prefer-hardware',
     latencyMode: 'realtime',
-    ...(codec === 'hevc' ? { hevc: { format: 'annexb' } } : { avc: { format: 'annexb' } }),
+    avc: { format: 'annexb' },
   } as VideoEncoderConfig;
 
   try {
     const support = await VideoEncoder.isConfigSupported(config);
     if (!support.supported) return { format: 'jpeg', config: null };
     return {
-      format: codec === 'hevc' ? 'hevc' : 'h264',
+      format: 'h264',
       config: (support.config ?? config) as unknown as Record<string, unknown>,
     };
   } catch {

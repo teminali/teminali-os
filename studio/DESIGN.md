@@ -4094,22 +4094,49 @@ the demo project's timeline with its video clip pointed at local 1080p30
 footage, 600 frames, `superSpeed` and `hardware` on, the two paths one
 `localStorage['teminali.export.legacy']` apart.
 
-| timeline | legacy | tiers 1+2 | |
-| --- | --- | --- | --- |
-| 2 text + overlay + video | 24.4s | **4.01s** | **6.1x** |
-| video only | 24.4s | 3.73s | 6.5x |
+Every run restores the timeline from one pristine snapshot first. Without
+that the driver's own mutations carried between runs, and the first version of
+this table was measured on four subtly different timelines.
 
-**6x is the number to quote, not the 15.4x this section reported from the
-harness.** The harness overstated it by measuring a baseline the product does
+| codec | path | wall clock | bitrate | SSIM vs source |
+| --- | --- | --- | --- | --- |
+| **H.264** | **tiers 1+2** | **4.7s** | 5.4 Mbps | **0.9544** |
+| H.264 | legacy | 24.4s | 10.9 Mbps | 0.9317 |
+| HEVC | tiers 1+2 | 24.9s | 11.1 Mbps | 0.9329 |
+| HEVC | legacy | 24.4s | 11.2 Mbps | 0.9319 |
+
+**~5x on H.264, at better quality — and that is the number to quote, not the
+15.4x this section reported from the harness.** H.264 is the default and
+almost every export. HEVC is deliberately unchanged; see below. The harness overstated it by measuring a baseline the product does
 not ship: it waited on `seeked` ALONE, where `videoEngine.seekTo` races
 `seeked` against `requestVideoFrameCallback`. That race is about twice as fast
 — 24.4s against the harness's 49.3s for identical work — so the real pipeline
 was never as slow as the strict measurement implied. Both files came out
 correct: 600 frames, 20.000s exactly.
 
-Compositing again proved cheap: the text and overlay tracks cost 283ms across
-600 frames (4.01s against 3.73s), which agrees with the 0.1ms-per-frame floor
-measured separately.
+Compositing again proved cheap: text and overlay tracks cost 283ms across 600
+frames, which agrees with the 0.1ms-per-frame floor measured separately.
+
+#### HEVC keeps the old pipeline, whole — measured 2026-09-11
+
+It does not survive either half of the rewrite, and the reason is not known.
+
+Through the WebCodecs encoder, HEVC ignored the bitrate it was handed: asked
+for 12 Mbps at 1080p it produced **698 kbps** and SSIM 0.818, where H.264 from
+the same frames at the same request gave 5.4 Mbps and 0.954.
+
+Holding it off that encoder was not enough. On the new DECODE with the old
+ffmpeg encode — the same `hevc_videotoolbox`, the same arguments, differing
+only in how frames reached it — HEVC still came out at 3.7 Mbps and SSIM
+0.851 against the old path's 11.2 Mbps and 0.932. H.264 across that same pair
+moved the other way (0.954 against 0.932), so "the new decode is softer" does
+not explain it, and nothing else here does either.
+
+So `exportPipeline.ts` routes HEVC down the legacy path entirely. Verified
+back to parity: 24.9s and SSIM 0.9329, against the old path's 24.4s and
+0.9319. HEVC users get no faster, and nothing worse. **An export is the one
+artefact a user cannot cheaply re-render, which is why an unexplained 0.08
+SSIM is a blocker rather than a note.**
 
 **Quality is better, and the old path was not delivering wrong frames.**
 Against the same source through the same timeline, range-normalised: tiers 1+2

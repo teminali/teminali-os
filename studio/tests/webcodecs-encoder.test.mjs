@@ -47,6 +47,15 @@ test("ProRes never takes the renderer path", async () => {
   assert.equal(picked.config, null);
 });
 
+test("HEVC stays on the JPEG path until it honours a bitrate", async () => {
+  /* Measured: the renderer's HEVC encoder produced 698 kbps against a 12 Mbps
+     request and SSIM 0.818, where H.264 from the same frames gave 5.4 Mbps and
+     0.954. ffmpeg's hevc_videotoolbox does honour the number. */
+  const picked = await pickFrameFormat("hevc", 1920, 1080, 12_000_000);
+  assert.equal(picked.format, "jpeg");
+  assert.equal(picked.config, null);
+});
+
 test("no VideoEncoder means the JPEG path, not a crash", async () => {
   assert.equal(typeof VideoEncoder, "undefined", "this test's premise");
   for (const codec of ["h264", "hevc"]) {

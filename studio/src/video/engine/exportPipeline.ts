@@ -359,13 +359,30 @@ export async function runExport(request: ExportRequest): Promise<ExportOutcome> 
       It is also the only honest way to A/B the two on a real project: the same
       timeline, the same machine, one flag apart.
     */
-    const legacyExport = (() => {
+    const legacyFlag = (() => {
       try {
         return localStorage.getItem('teminali.export.legacy') === '1';
       } catch {
         return false;
       }
     })();
+
+    /*
+      HEVC takes the old path WHOLE, decode included — measured 2026-09-11.
+
+      Holding HEVC off the WebCodecs encoder was not enough. Driven through the
+      real exporter from an identical timeline, HEVC on the new decode still
+      came out at 3.7 Mbps and SSIM 0.851 where the old path gave 11.2 Mbps and
+      0.932 — the same `hevc_videotoolbox` with the same arguments, differing
+      only in how the frames reached it. H.264 across the same pair went the
+      other way (0.954 against 0.932), so this is not simply "the new decode is
+      softer", and the interaction is not understood.
+
+      An export is the one artefact a user cannot cheaply redo, so HEVC keeps
+      the pipeline it had until somebody explains that. H.264 — the default and
+      almost every export — gets the fast path.
+    */
+    const legacyExport = legacyFlag || request.codec === 'hevc';
     if (legacyExport) console.info('[export] legacy path forced: seek + JPEG');
 
     /* ── Tier 2 ──
