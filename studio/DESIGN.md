@@ -6809,14 +6809,69 @@ proves the options channel itself works. `temi:r2` also ships
 `repeat_penalty 1`, which is the penalty switched off, and the code cannot
 override it: `repeat_penalty` is not in `valid_options`, and adding it would
 change nothing anyway, as the table shows. The lever is elsewhere — the
-repetition filter, which already owns cross-turn memory, or the Modelfile. Not
-yet fixed, and not guessed at: the voice lane has an eval
-(`npm run eval:conversation`) and this is exactly the kind of change that has
-to be scored rather than reasoned about.
+repetition filter, which already owns cross-turn memory, or the Modelfile.
+
+Fixed at the filter, measured, in 6.0.14. The model still restates itself at
+the same rate; what changed is what reaches the operator.
 
 Pinned by `realtime-voice/code/test_mic_gate.py`, now 15 tests: the gate stays
 shut while the client is playing, opens when it is not, and the hard ceiling
 fires even while a latched flag claims playback is still running.
+
+### 6.0.14 The loop was never an exact repeat (`realtime-voice/code/repetition_filter.py`, 2026-09-12)
+
+`RepetitionFilter` drops a sentence whose normalised key was already spoken.
+The loop the operator reported never produced two identical sentences, so the
+filter saw nothing wrong with any of it:
+
+    "Nothing I cannot do is wrong. Nothing I do is wrong. Nothing is wrong."
+    "I can be wrong. I can be wrong and wrong. I can be wrong and wrong and wrong."
+    "It is loud because it is working. It is loud because it is loud."
+
+Each sentence is a nested version of one before it. `restates()` now catches
+that inside a turn, in two directions that are deliberately not symmetric:
+
+- A sentence whose words are a **subset** of an earlier one adds nothing by
+  construction, so it is always a restatement.
+- A sentence that **contains** an earlier one is only a restatement when what
+  it adds is padding (`and`, `still`, `just`, …) **or words already used in
+  this reply**. Otherwise it is elaboration and must survive. This is the half
+  that decides whether the rule is a fix or a way of deleting the answer:
+  "It is true." followed by "It is true that the build failed." keeps both.
+
+The word-already-used clause is what catches the last shape: "I can be wrong.
+I can be right. I can be right and wrong." adds `wrong` to "I can be right",
+and `wrong` is not new.
+
+Nesting applies **within a turn only**. Across turns the memory stays exact: a
+caller who says "Nice is a start" now and "Nice is a start of something" ten
+minutes later is holding a conversation, not looping.
+
+Measured against the live model, same contexts and seeds either side, replies
+drawn from the operator's session and the conversation eval's transcripts:
+
+| | before | after |
+| --- | --- | --- |
+| replies where the model restated itself | 5 / 20 | 5 / 20 |
+| **still heard after the filter** | **5** | **0** |
+
+And the check that matters more, over 44 replies across eleven contexts:
+7 replies had something dropped, 11 sentences in total, and **0 replies were
+left empty**. Every dropped sentence reads as redundant on its own: "I can be
+wrong and wrong and wrong.", "It is loud because it is loud.", "Nothing is
+wrong."
+
+`npm run eval:conversation` does **not** judge this, and saying so is the
+point: it scores the raw model over the real switch, and the filter is
+downstream of the model and written in Python. Its score before this change was
+**80% (43/54)** and it cannot move because nothing it measures changed. Wiring
+the shipping filter into that harness, so the eval scores what the operator
+hears rather than what the model emits, is the obvious next thing and is not
+done here.
+
+Pinned by `realtime-voice/code/test_repetition_filter.py`, now 40 tests: the
+three live failures by name, and four guards against the rule deleting real
+answers (elaboration, negation, parallel structure, and the cross-turn case).
 
 ### 6.1 Turn semantics while a run is in flight (2026-09-05)
 

@@ -81,6 +81,51 @@ def normalise(sentence: str) -> str:
     return re.sub(r"[^a-z ]", "", _LEADING_TAG.sub("", sentence).lower()).strip()
 
 
+# Words that can pad a sentence without adding anything to it. Used only to
+# decide whether a longer sentence is an elaboration or a restatement: "I can
+# be wrong" -> "I can be wrong and wrong" adds nothing but `and`, while "It is
+# true" -> "It is true that the build failed" adds a fact and must survive.
+_PADDING = frozenset(
+    "and or but so then too also again still yet very just really more quite".split()
+)
+
+
+def restates(key: str, said: str, seen: frozenset = frozenset()) -> bool:
+    """True if `key` is `said` over again rather than something new.
+
+    The failure this catches is the one the operator hears as the assistant
+    getting stuck. It is not an exact repeat, so `_keys` never sees it:
+
+        "Nothing I cannot do is wrong. Nothing I do is wrong. Nothing is wrong."
+        "I can be wrong. I can be wrong and wrong. I can be wrong and wrong and wrong."
+        "It is loud because it is working. It is loud because it is loud."
+
+    Each sentence is a nested version of one before it. Two directions, and
+    they are not symmetric:
+
+    - A sentence whose words are a SUBSET of an earlier one adds nothing by
+      construction. Always a restatement.
+    - A sentence that CONTAINS an earlier one is only a restatement when what
+      it adds is padding. Otherwise it is elaboration, and dropping it would
+      throw away the content the operator asked for.
+
+    `seen` is every word already used in this reply, and it counts as padding
+    too. That is what catches the last shape the first version of this let
+    through: "I can be wrong. I can be right. I can be right and wrong." adds
+    `wrong` to "I can be right", and `wrong` is not new — she said it two
+    sentences ago. Within one spoken reply, a sentence that only recombines
+    words already used is not telling the operator anything.
+    """
+    a, b = set(key.split()), set(said.split())
+    if not a or not b or a == b:
+        return a == b and bool(a)
+    if a < b:                      # says less than something already said
+        return True
+    if b < a:                      # says it again, with more words
+        return not (a - b) - _PADDING - seen
+    return False
+
+
 def is_tracked(key: str, question: bool = False) -> bool:
     """True if a key is long enough to count as a repeatable sentence.
 
@@ -168,6 +213,14 @@ class RepetitionFilter:
             key = normalise(sentence)
             tracked = is_tracked(key, is_question(sentence))
             if tracked and (key in self._keys or key in self._pending):
+                dropped.append(sentence)
+                continue
+            # Nested restatement, within this turn only. Cross-turn stays exact:
+            # a caller who says "Nice is a start" today and "Nice is a start of
+            # something" tomorrow is holding a conversation, not looping, and
+            # the memory reaches back MEMORY sentences.
+            seen = frozenset(word for said in self._pending for word in said.split())
+            if tracked and any(restates(key, said, seen) for said in self._pending):
                 dropped.append(sentence)
                 continue
             if tracked:

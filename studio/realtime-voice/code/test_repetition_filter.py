@@ -359,5 +359,70 @@ class TestAgainstTheRealChecker(unittest.TestCase):
         self.assertEqual(survivors, 1)
 
 
+class NestedRestatement(unittest.TestCase):
+    """The loop the operator hears is not an exact repeat, so exact match missed it.
+
+    Every sentence below was actually said by temi:r2 -- the first two in the
+    operator's own session on 2026-09-11, the third in the conversation eval's
+    transcripts. Measured over 20 replies drawn from those contexts, 5 restated
+    themselves and the filter caught none of them; with these rules, none
+    survive and no reply is left empty.
+    """
+
+    def test_the_session_that_was_reported(self):
+        f = RepetitionFilter()
+        heard = f.filter_reply(
+            "Nothing I cannot do is wrong. Nothing I do is wrong. Nothing is wrong.")
+        self.assertEqual(heard, "Nothing I cannot do is wrong.")
+
+    def test_the_escalating_one(self):
+        f = RepetitionFilter()
+        heard = f.filter_reply(
+            "I can be wrong. I can be wrong and wrong. I can be wrong and wrong and wrong.")
+        self.assertEqual(heard, "I can be wrong.")
+
+    def test_a_sentence_that_explains_nothing_by_repeating_itself(self):
+        f = RepetitionFilter()
+        heard = f.filter_reply(
+            "It is loud because it is working. It is loud because it is loud.")
+        self.assertEqual(heard, "It is loud because it is working.")
+
+    def test_recombining_words_already_used_this_turn_is_not_new(self):
+        f = RepetitionFilter()
+        heard = f.filter_reply(
+            "I can be better. I can be worse. I can be wrong. I can be right. "
+            "I can be right and wrong.")
+        self.assertNotIn("I can be right and wrong.", heard)
+        self.assertIn("I can be better.", heard)
+
+    def test_elaboration_survives(self):
+        # The failure mode of this rule is deleting the answer. A longer
+        # sentence that brings a fact is not a restatement.
+        f = RepetitionFilter()
+        heard = f.filter_reply("It is true. It is true that the build failed.")
+        self.assertIn("It is true that the build failed.", heard)
+
+    def test_a_negation_is_not_a_restatement(self):
+        f = RepetitionFilter()
+        heard = f.filter_reply("The build is broken. The build is not broken.")
+        self.assertIn("The build is not broken.", heard)
+
+    def test_parallel_structure_is_left_alone(self):
+        # Three clauses sharing a stem are ordinary speech, not a loop.
+        f = RepetitionFilter()
+        reply = ("I can listen better. I can tell you when the screen is wrong. "
+                 "I can stay quiet and let you work.")
+        self.assertEqual(f.filter_reply(reply), reply)
+
+    def test_nesting_does_not_reach_across_turns(self):
+        # Cross-turn memory stays exact: a caller who says "Nice is a start"
+        # and later "Nice is a start of something" is talking, not looping.
+        f = RepetitionFilter()
+        f.filter_reply("Nice is a start.")
+        f.commit()
+        self.assertIn("Nice is a start of something",
+                      f.filter_reply("Nice is a start of something."))
+
+
 if __name__ == "__main__":
     unittest.main()
