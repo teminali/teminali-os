@@ -22,6 +22,7 @@ import assert from "node:assert/strict";
 
 import {
   handleSpokenPlayerCommand,
+  isWakelessTransport,
   parsePlayerCommand,
   parseSpokenSeconds,
   spellSeconds,
@@ -411,4 +412,62 @@ test("the gate's new duration object belongs to playback and to nothing else", (
   assert.equal(classifyMachineAction("take me back to the editor")?.kind, "open");
   assert.equal(classifyMachineAction("stop the tests")?.kind, "shell");
   assert.equal(classifyMachineAction("don't turn the volume down"), null);
+});
+
+/* ── the wake-word exemption ─────────────────────────────────────────────── */
+
+/*
+  While the app itself is audible the stage demands a wake word, because a
+  film's dialogue is real speech that no addressing score can tell from the
+  operator's. Three transport actions are exempt, so that a bare "pause" works
+  at an in-app video exactly as it already worked at mpv, which plays out of
+  process and never registered as self-audio at all.
+
+  What matters here is the size of the hole, not the size of the grammar: every
+  phrase the parse accepts is tested above, and these assert only which of them
+  the gate will take with no wake word in front of it.
+*/
+
+test("the exemption admits the three transport actions and no others", () => {
+  for (const text of [
+    "pause", "pause it", "pause the video", "stop playing", "stop the movie",
+    "play", "hit play", "resume", "unpause it", "play it back",
+    "play/pause", "toggle playback",
+  ]) {
+    assert.equal(isWakelessTransport(text, live), true, `"${text}" should survive self-audio`);
+  }
+});
+
+test("everything else still needs the wake word while the app is audible", () => {
+  // Each of these parses — they are real commands, asserted above. The point is
+  // that a film saying them cannot run them.
+  for (const text of [
+    "skip forward thirty seconds", "go back ten seconds", "jump to two minutes",
+    "set the volume to 20 percent", "mute the video", "unmute it",
+    "full screen", "exit full screen", "double speed", "half speed",
+    "turn on subtitles", "subtitles off", "start the movie over",
+  ]) {
+    assert.notEqual(parse(text), null, `"${text}" should parse at all`);
+    assert.equal(isWakelessTransport(text, live), false, `"${text}" should still need the wake word`);
+  }
+});
+
+test("no pane, no exemption", () => {
+  // The audible thing may be the Browser panel or the operator's own footage on
+  // the timeline. With no player mounted the snapshot is null and the strict
+  // bar is unchanged, which also keeps "pause" meaning cancel-the-run.
+  for (const text of ["pause", "play", "play/pause"]) {
+    assert.equal(isWakelessTransport(text, null), false, `"${text}" needs a pane to be exempt`);
+  }
+});
+
+test("a sentence the parse refuses is not exempt either", () => {
+  // The exemption reads the parse rather than a phrase list of its own, so
+  // every deliberate refusal is inherited instead of re-litigated.
+  for (const text of [
+    "stop", "next", "go back", "turn it up", "louder", "restart it",
+    "did you pause it", "should I play it", "I paused the video",
+  ]) {
+    assert.equal(isWakelessTransport(text, live), false, `"${text}" should not be exempt`);
+  }
 });

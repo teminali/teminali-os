@@ -8025,6 +8025,35 @@ count and relative to the workspace, measured under 400 characters for a twelve 
 workspace. Nothing open renders as "none" rather than as nothing, so the model asks
 instead of inventing.
 
+### 6.0.37 Bare "pause" worked at mpv and not at the app's own player (`services/voice/playerActions.ts`, `components/voice/TemiVoiceStage.tsx`, 2026-09-12)
+
+The provenance gate in 6.0.31 required the wake word for any turn spoken while the
+app itself is audible, because a film's dialogue is real speech and no addressing
+score can tell it from an operator's. Correct, and it cost the one sentence most
+often said at a playing video: plain "pause" was dropped, and only "Temy, pause"
+landed.
+
+It was also **asymmetric**, which is what settled it. mpv plays out of process and
+never registers as self-audio (`selfAudio.ts`), so bare "pause" always worked
+there. The same word at the same film in the Files panel did nothing. The rule was
+not "the wake word protects you from recordings"; it was "the wake word is the
+price of using the player that happens to run in this process".
+
+Three actions are now exempt while a player pane is mounted: `pause`, `play` and
+`toggle`. Nothing else. `survivesSelfAudioWithoutWakeWord` asks
+`parsePlayerCommand` — the same parse that would run the sentence — and admits it
+only if the resulting action is one of the three, so the exemption inherits every
+deliberate refusal in that grammar instead of re-litigating it as a phrase list.
+Seek, volume, mute, fullscreen, speed and subtitles stay behind the wake word, as
+does every other lane, so a film still cannot delegate a run, open a folder or
+touch the timeline. The worst it can now do is pause or resume itself, undone by
+saying the same word again.
+
+With no pane mounted the snapshot is null and the exemption does not exist, which
+also leaves "pause" meaning cancel-the-run when the audible thing is the browser
+pane or the operator's own footage on the timeline. **The operator chose this
+trade-off explicitly**; the strict bar is one edit away in `WAKELESS_TRANSPORT`.
+
 ### 6.1 Turn semantics while a run is in flight (2026-09-05)
 
 A directed utterance is not automatically an instruction. `turnIntent.ts`

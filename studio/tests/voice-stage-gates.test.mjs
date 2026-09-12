@@ -158,6 +158,25 @@ test("the gate asks provenance before it asks addressing", () => {
   assert.ok(/hasProfile: false/.test(gate), "there is no enrolment on this surface and none must be claimed");
 });
 
+test("the only sentence that gets past provenance without the wake word is transport", () => {
+  /*
+    The operator's call. A bare "pause" at an in-app video used to be dropped
+    while the same word at mpv worked, because mpv plays out of process and
+    never registers as self-audio. The exemption is the parse's own answer, not
+    a phrase list here, and it is scoped to three actions in playerActions.ts.
+  */
+  const gate = stage.slice(stage.indexOf("const gateSpokenTurn ="), stage.indexOf("const gateSpokenTurnRef ="));
+  const self = gate.indexOf("selfAudio.audibleSince(turnStartedAt)");
+  const branch = gate.slice(self);
+  assert.ok(
+    /survivesSelfAudioWithoutWakeWord\(routed\)/.test(branch),
+    "the exemption must be asked inside the provenance branch",
+  );
+  const exemption = branch.indexOf("survivesSelfAudioWithoutWakeWord");
+  const dropped = branch.indexOf('traceVoice("dropped", { by: "self-audio" })');
+  assert.ok(exemption > 0 && dropped > exemption, "a turn is dropped only after the exemption refuses it");
+});
+
 test('"pause" pauses the video instead of cancelling the agent run', () => {
   /*
     CONTRACT P. "pause" is in STOP_PHRASES, so with a video playing and a run in

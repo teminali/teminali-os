@@ -459,3 +459,48 @@ export function handleSpokenPlayerCommand(text: string): SpokenPlayerOutcome {
   if (!dispatchPlayerCommand(parsed.command)) return { handled: false };
   return { handled: true, reply: parsed.spoken, action: parsed.command.action };
 }
+
+/* ── the wake-word exemption ─────────────────────────────────────────────── */
+
+/**
+ * The actions a sentence may carry past the self-audio gate without a wake word.
+ *
+ * While the app itself is audible, `TemiVoiceStage` normally demands the wake
+ * word, because the transcript of a film is real speech that no addressing
+ * score can tell from an operator's. That bar cost the one turn most needed at
+ * a playing video: "pause". It was also asymmetric, since mpv plays out of
+ * process, never registers as self-audio, and has always taken a bare "pause".
+ *
+ * These three close that gap and nothing else does. Every other action stays
+ * behind the wake word, so a film can still never seek, mute, delete, open a
+ * folder or start a run. The worst a film can now do is pause or resume itself,
+ * which is undone by saying the same word again.
+ */
+const WAKELESS_TRANSPORT: ReadonlySet<PlayerCommand["action"]> = new Set(["pause", "play", "toggle"]);
+
+/**
+ * Pure half, so the exemption is testable without a pane.
+ *
+ * The grammar is not duplicated here: the sentence goes through the same
+ * `parsePlayerCommand` that would run it, and only the resulting action is
+ * consulted. A phrase list would drift from the parse on the first edit.
+ */
+export function isWakelessTransport(text: string, snapshot: PlayerSnapshot | null): boolean {
+  if (!snapshot) return false;
+  const parsed = parsePlayerCommand(text, snapshot);
+  return parsed !== null && WAKELESS_TRANSPORT.has(parsed.command.action);
+}
+
+/**
+ * The half the gate calls. False whenever no player is mounted, so the
+ * exemption does not exist while the audible thing is the browser pane or the
+ * operator's own footage on the timeline.
+ */
+export function survivesSelfAudioWithoutWakeWord(text: string): boolean {
+  try {
+    return isWakelessTransport(text, usePlayerStore.getState().live);
+  } catch {
+    /* No store in this window — no pane, so no exemption. */
+    return false;
+  }
+}

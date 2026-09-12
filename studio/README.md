@@ -871,9 +871,13 @@ steps in one short line ("running the tests"), summarises long replies for
 speech instead of reading them in full, and filters its own voice out of the
 microphone. It also filters out the rest of the app: while a video or a page in
 one of the panels is playing, the microphone is hearing the speakers, so only a
-turn that names the assistant ("Temy, pause it") is taken and the playback
+turn that names the assistant ("Temy, open DukaBot") is taken and the playback
 cannot interrupt a spoken reply — the alternative, which the operator saw, is
-the assistant answering a film. Speech that was not addressed to it is kept for ten minutes rather
+the assistant answering a film. The one exception is player transport with a
+video open: "pause", "play" and "play/pause" are taken as they are, because that
+is the turn most often said at a playing video and it already worked that way at
+mpv. A film can therefore pause or resume itself and do nothing else — seeking,
+volume, subtitles and every other lane still need the name. Speech that was not addressed to it is kept for ten minutes rather
 than discarded, so "what did she just say?" has an answer; where the sidecar can
 name sounds, so does "did you hear that car?" — bounded, never sent
 anywhere, cleared when the session stops, and switched off with one toggle. Speech is paced for listening: short lines at the chosen rate
@@ -928,8 +932,9 @@ returns no figure.
 #### What a spoken turn reaches
 
 A turn is gated before it is acted on. While the app itself is audible only a turn
-that names her is taken, because the audible thing may be a film; otherwise
-`scoreAddressing` decides whether the room or the operator was talking. What
+that names her is taken, because the audible thing may be a film — the exception
+is "pause", "play" and "play/pause" with a player open, which are taken bare;
+otherwise `scoreAddressing` decides whether the room or the operator was talking. What
 survives the gate is tried in this order, and each step passes on what it does not
 claim: the media player, a spoken approval, the workspace, the video editor, then
 the router and the assistants.
@@ -1365,7 +1370,7 @@ ollama serve              # local models on 127.0.0.1:11434
 
 ```bash
 npm run typecheck   # tsc --noEmit
-npm test            # 2759 tests
+npm test            # 2764 tests
 npm run eval:local  # the local lane against the real model — a score, not a pass/fail; needs Ollama
 npm run eval:voice  # the voice co-agent's spoken answers, same discipline; needs Ollama
 npm run build       # tsc && vite build

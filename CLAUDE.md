@@ -75,7 +75,7 @@ because reasoning about this was wrong twice in one session.
 
 ```bash
 npm test              # root gateway/runner/licence/billing suite — 143 tests
-npm run studio:test   # application suite — 2759 tests
+npm run studio:test   # application suite — 2764 tests
 npm run verify:all    # both, plus studio typecheck and production build
 cd studio && npm run eval:local   # the chat's local lane vs the real model — a score, not a pass/fail
 ```

@@ -23,7 +23,7 @@ import { selfAudio } from "../../services/voice/selfAudio";
 /* Agent C owns this module and it lands separately; the call is written
    against its published signature. See the block at the head of
    `performVoiceTurn` for why the transport has to be asked first. */
-import { handleSpokenPlayerCommand } from "../../services/voice/playerActions";
+import { handleSpokenPlayerCommand, survivesSelfAudioWithoutWakeWord } from "../../services/voice/playerActions";
 import { classifyApprovalReply, describeApprovalRequest } from "../../services/voice/approvalIntent";
 import { DEFAULT_VOICE_SETTINGS } from "../../services/voice/types";
 import { commandHead } from "../../services/agentCommands";
@@ -480,12 +480,22 @@ export const TemiVoiceStage: React.FC<TemiVoiceStageProps> = ({
 
      1. PROVENANCE. While the app itself is making sound — a video in the Files
         panel, a page in the Browser panel, the operator's own footage on the
-        timeline — the bar is a wake word and only a wake word. The transcript
+        timeline — the bar is a wake word, with one exemption. The transcript
         of a film is real speech, correctly heard, addressed to nobody in this
         room, and no gate that asks *who a sentence was for* can tell it from
         an operator, because it genuinely is a person speaking. Not a closed
         microphone: "Temy, pause the video" is the turn most needed while
         something is playing, and it still lands. See services/voice/selfAudio.ts.
+
+        The exemption is transport, and only with a player pane mounted: a bare
+        "pause", "play" or "play/pause" is admitted, because the wake word was
+        costing the turn most often said at a playing video, and because mpv
+        plays out of process, never registers as self-audio, and has always
+        taken a bare "pause" — the strict bar made the same sentence work in one
+        player and not the other. Seek, volume, mute, fullscreen, speed and
+        subtitles all stay behind the wake word, along with every other lane, so
+        the worst a film can say to itself is pause or resume. Chosen by the
+        operator; see `survivesSelfAudioWithoutWakeWord` in playerActions.ts.
 
      2. ADDRESSING. The blend in `addressing.ts`. The context is honest about
         what this surface actually knows: there is no speaker enrolment here
@@ -510,8 +520,11 @@ export const TemiVoiceStage: React.FC<TemiVoiceStageProps> = ({
 
     if (selfAudio.audibleSince(turnStartedAt)) {
       if (!wakeWord) {
-        traceVoice("dropped", { by: "self-audio" });
-        return null;
+        if (!survivesSelfAudioWithoutWakeWord(routed)) {
+          traceVoice("dropped", { by: "self-audio" });
+          return null;
+        }
+        traceVoice("admitted", { by: "transport-exemption" });
       }
       return routed;
     }
