@@ -38,10 +38,10 @@ test("create and delete outrank the item type, which reports both as edits", () 
 });
 
 test("truncation keeps the end of a path, which is the part that identifies it", () => {
-  const long = "studio/src/services/voice/realtimeVoiceStatus.ts";
+  const long = "studio/src/services/voice/geminiLiveToken.ts";
   const short = shortenTarget(long);
   assert.ok(short.length <= MAX_TARGET + 2, short);
-  assert.ok(short.endsWith("realtimeVoiceStatus.ts"), short);
+  assert.ok(short.endsWith("geminiLiveToken.ts"), short);
   // Two files in different deep trees must not render identically.
   assert.notEqual(shortenTarget("a/very/deep/tree/alpha.ts"), shortenTarget("a/very/deep/tree/beta.ts"));
 });
@@ -96,7 +96,7 @@ test("the tooltip keeps the path the line had to shorten", () => {
   // `full` is what the elision took, so hovering recovers it. Hanging a title
   // off the shortened target — which is what the strip used to do — shows the
   // elided string back and answers nothing.
-  const long = "studio/src/services/voice/realtimeVoiceStatus.ts";
+  const long = "studio/src/services/voice/geminiLiveToken.ts";
   const phrase = describeActivity({ id: "1", type: "read", timestamp: 0, file: long });
   assert.equal(phrase.full, long);
   assert.notEqual(phrase.target, long);

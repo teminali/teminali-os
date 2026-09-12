@@ -61,15 +61,6 @@ function extraResources() {
   return entries;
 }
 
-/** The realtime-voice entry as raw YAML, filter included. */
-function config_text_block() {
-  const start = config.indexOf("- from: realtime-voice");
-  assert.notEqual(start, -1, "electron-builder.yml has no realtime-voice entry");
-  const rest = config.slice(start + 1);
-  const end = rest.indexOf("\n  - from:");
-  return end === -1 ? rest : rest.slice(0, end);
-}
-
 test("every extra resource names its own destination", () => {
   const entries = extraResources();
   assert.ok(entries.length > 0, "the block parsed to nothing");
@@ -88,7 +79,7 @@ test("a resource is copied to the directory its from: is named after", () => {
   // failure: it is what putting one entry above another's to: produces.
   for (const { from, to } of extraResources()) {
     /*
-      The media stack is the one exception, and it is an exception because the
+      The media stack is the exception, and it is an exception because the
       rule is about IMPORTS. `server/gateway.js` imports "../../gateway/…", so
       that entry's `to:` has to spell what module resolution will look for.
       Nothing imports an ffmpeg: it is spawned, by an absolute path the finders
@@ -97,14 +88,6 @@ test("a resource is copied to the directory its from: is named after", () => {
       actually matters — that they are the names the finders probe.
     */
     if (from.startsWith("media-stack/")) continue;
-    /*
-      The voice pipeline is the other exception, and for a related reason: it
-      is spawned, not imported. `server/config.js` looks for it at
-      <workspace root>/studio/realtime-voice, and the workspace root inside
-      the asar is <Resources>, so its `to:` has to spell that nested path.
-      Asserted properly in the test below, against the config that computes it.
-    */
-    if (from === "realtime-voice") continue;
     assert.equal(
       to, from.replace(/^\.\.\//, ""),
       `"${from}" is copied to "${to}", so an import of "../../${from.replace(/^\.\.\//, "")}/…" will not resolve`,
@@ -129,38 +112,6 @@ test("the staged media binaries land where the finders actually look", () => {
   assert.match(mediaAccess, /path\.join\(resourcesPath, "ffmpeg"/, "findFfmpeg must probe <Resources>/ffmpeg");
   const mpvProcess = readFileSync(join(root, "electron", "mpvProcess.cjs"), "utf8");
   assert.match(mpvProcess, /path\.join\(resourcesPath, "mpv"/, "findMpv must probe <Resources>/mpv");
-});
-
-test("the voice pipeline lands where config.js goes looking for it", () => {
-  /*
-    The failure this catches is silent in the same way the media one is: a
-    packaged app that carries the whole pipeline under a name nothing probes
-    logs "No voice pipeline at …" and quietly falls back to the local engines,
-    which is exactly what every build up to v0.0.10 did — there the entry was
-    missing altogether, so an installed app only had a realtime lane when a
-    dev checkout on the same machine happened to be serving one.
-  */
-  const entry = extraResources().find((item) => item.from === "realtime-voice");
-  assert.ok(entry, "no extraResources entry copies the realtime voice pipeline");
-  assert.equal(
-    entry.to, "studio/realtime-voice",
-    "server/config.js resolves the pipeline at <workspace root>/studio/realtime-voice, " +
-    "and the workspace root of a packaged app is <Resources>",
-  );
-
-  const config = readFileSync(join(root, "server", "config.js"), "utf8");
-  assert.match(
-    config, /"studio",\s*"realtime-voice"/,
-    "config.js no longer builds that path, so this entry's to: is now wrong",
-  );
-
-  // The entry point the supervisor spawns, and the file the operator installs
-  // from, both have to survive the filter.
-  const block = config_text_block();
-  assert.match(block, /code\/\*\*\/\*\.py/, "the filter must carry the pipeline's Python");
-  assert.match(block, /requirements\.txt/, "the filter must carry requirements.txt, or no one can install it");
-  assert.match(block, /code\/static/, "server.py mounts static/ with StaticFiles, which raises if it is absent");
-  assert.match(block, /!code\/static\/bella_preview/, "35 MB of voice takes must not ship");
 });
 
 test("every cross-package import has a resource that carries it", () => {

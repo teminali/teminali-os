@@ -75,10 +75,9 @@ because reasoning about this was wrong twice in one session.
 
 ```bash
 npm test              # root gateway/runner/licence/billing suite — 143 tests
-npm run studio:test   # application suite — 2355 tests
+npm run studio:test   # application suite — 2342 tests
 npm run verify:all    # both, plus studio typecheck and production build
-cd studio && npm run eval:local   # the local lane vs the real model — a score, not a pass/fail
-cd studio && npm run eval:conversation   # the voice lane over whole conversations — a score
+cd studio && npm run eval:local   # the chat's local lane vs the real model — a score, not a pass/fail
 ```
 
 Landmines worth knowing: `ELECTRON_RUN_AS_NODE=1` may be set in the shell — use

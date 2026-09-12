@@ -73,6 +73,7 @@
   },
   "main": "electron/main.cjs",
   "dependencies": {
+    "@google/genai": "^2.22.0",
     "mediabunny": "^1.56.1"
   }
 }

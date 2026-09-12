@@ -6219,19 +6219,30 @@ Codex gets none of it, for the fifth time and the same reason.
 
 ## 6. Voice (`studio/src/services/voice/`)
 
-Three tiers now, in descending order of what they can do and ascending order of
-what they need installed:
+Three tiers now, in descending order of what they can do:
 
 | Tier | Where it runs | Needs |
 | --- | --- | --- |
-| **Realtime pipeline** (`realtime8000Engine.ts`, `studio/realtime-voice/`) | one supervised Python process holding recognition, the conversation loop and synthesis together | a Python virtualenv of ~2 GB, and Ollama |
+| **Gemini Live** (`geminiLiveEngine.ts`, `voiceAudioEngine.ts`, `temiPersona.ts`) | the renderer's own live session to Google, opened on an ephemeral token the gateway mints | a Google Gemini API key, and a network |
 | **VibeVoice sidecar** (`providers/vibeVoice.ts`, `studio/voice-runtime/`) | a Node sidecar the gateway calls per request | `npm run voice:install` |
 | **Browser engine** (`providers/webSpeech.ts`) | the renderer | nothing |
 
 Two modes throughout: push-to-talk dictation, and hands-free conversation with
 barge-in.
 
+The top tier was a local Python pipeline on `:8000` until 2026-09-12 and is not
+any more. **§6.0.16 is what the code does now.** §6.0 and §6.0.1–§6.0.15 are
+kept deliberately: they are the record of that pipeline as it was on the date
+each carries, and every present-tense sentence in them describes a system that
+no longer exists. They were not rewritten, because a doctored history is worse
+than a dated one.
+
 ### 6.0 The realtime pipeline is a supervised process (2026-09-09)
+
+> **Superseded by §6.0.16 (2026-09-12).** The supervised Python pipeline, its
+> gateway supervisor and `GET /api/voice/realtime/status` are all deleted. What
+> follows is the record of how that tier worked while it existed; nothing in it
+> describes the shipping code.
 
 The realtime tier holds all three stages in one process on purpose: a
 transcript never crosses a process boundary to reach the model, and a token
@@ -7025,6 +7036,143 @@ it. A fresh clone has the model and no record of how it was made, and there is n
 history to roll back to when a run makes the assistant worse. That is the
 structural half of "it was good three days ago": nothing here was versioned, so
 nothing could be bisected.
+
+### 6.0.16 The local lane was not worth its next few years (`services/voice/geminiLiveEngine.ts`, `services/voice/temiPersona.ts`, 2026-09-12)
+
+Fifteen entries above this one are about a Python pipeline on `:8000`. The
+operator's decision, in his words, is the whole of why there is not a sixteenth
+of the same kind:
+
+> "i figured the local lane is not worth it for now at least and not for the
+> next few years perhaps"
+
+Read that as an abandonment of a direction, not a bypass while something is
+fixed. Nothing here is waiting for the pipeline to come back.
+
+**What went.** `studio/realtime-voice/` entire — a Python pipeline plus a 2.2 GB
+virtualenv the operator had to build by hand; `server/realtime-voice.js`, the
+supervisor §6.0 is about; `GET /api/voice/realtime/status`; the five
+`TEMINALI_REALTIME_VOICE_*` config keys; the `from: realtime-voice`
+`extraResources` entry in `electron-builder.yml`; and
+`tests/realtime-voice.test.mjs`. The installed app no longer ships a Python
+interpreter, a `requirements.txt`, or the paste-this-to-fix-it message §6.0.12
+was written about, because it no longer has a pipeline to find one for.
+
+**What replaced it.** The renderer opens its own Live session to
+`gemini-2.5-flash-native-audio-latest`. `GeminiLiveEngine` is a drop-in for the
+deleted `Realtime8000ProtocolManager` — same method names, same callbacks, so
+`TemiVoiceStage` and the turn router did not have to learn a new shape.
+
+The key never reaches the renderer. `GET /api/voice/realtime/token`
+(`server/gateway.js#mintGeminiLiveToken`) mints a **single-use** ephemeral token
+from the key in the provider store — `uses: 1` — and hands back only that. Every
+`connect()` spends a fresh one, because the last attempt's is already worthless.
+
+Google's mint returns one field, `{ name: "auth_tokens/<hex>" }`, and that name
+is the credential the Live client passes as its `apiKey`. **There is no expiry
+in the response**: the `expiresAt` the route reports is the gateway's own
+arithmetic, `now + 30 minutes`, which is also what it asked for as `expireTime`,
+alongside a 60-second `newSessionExpireTime` window in which the socket must
+actually open. A reader who treats `expiresAt` as Google's answer will trust it
+further than it deserves.
+
+**Failure is HTTP 200 with `ok: false`**, never a throw. Voice is a degradable
+tier and the renderer's job on a refusal is to fall back to the sidecar, not to
+surface an exception into the chat column. The route's reasons are `no-key`,
+`sdk-unavailable`, `quota` (a 429 or a `RESOURCE_EXHAUSTED` upstream, separated
+out because "you are rate limited" and "your key is wrong" are different actions)
+and `mint-failed`. `geminiLiveToken.ts` adds one the route cannot raise,
+`gateway-unreachable`, and it is the only one worth retrying: a cold gateway is
+up within seconds, whereas a missing or rejected key does not become valid in
+two, and looping on it would bury the note the operator can act on.
+
+`apiVersion: "v1alpha"` is pinned on both the client and the call, per Google's
+documentation. **It is not load-bearing** — measured at `@google/genai` 2.22.0,
+the default v1beta client mints ephemeral tokens perfectly well. Do not delete
+the pin on the strength of that, and do not document it as a requirement either.
+
+`voiceAudioEngine.ts` (was `realtime8000Engine.ts`; `VoiceAudioEngine`, was
+`Realtime8000AudioEngine`) survived the replacement untouched. The mic worklet,
+the playback worklet, the energy meter and mute never knew which model was on
+the other end, and that is exactly why the brain could be swapped without
+rewriting the audio graph. `realtimeVoiceStatus.ts` became `geminiLiveToken.ts`,
+which now fetches a token rather than a socket address.
+
+**Two sample-rate conversions now live in the engine, and both look deletable.**
+
+The mic `AudioContext` is pinned to 48000 Hz and `pcmWorkletProcessor` runs at
+context rate, so microphone Int16 arrives at 48 kHz and Gemini wants 16 kHz.
+`downsampleTo16k` averages 3:1, carrying leftover input samples into the next
+chunk so the ratio stays exactly 3:1 forever and the stream neither stretches
+nor drifts.
+
+The other direction is the one that will get tidied away by someone who does not
+know why it is there. Gemini returns PCM16 at **24 kHz**.
+`worklets/ttsPlaybackProcessor.js` writes exactly one queued sample per output
+frame and does no resampling anywhere, against a **48 kHz** context. The Python
+lane never hit this because it resampled before the renderer ever saw the audio
+— `realtime-voice/code/upsample_overlap.py:54`, `resample_poly(audio_float,
+48000, 24000)` — and that file is gone. So `upsampleTo48k` exists in the engine
+instead, and without it Temi plays back at **double speed and an octave high**.
+
+**She can sing now, and that is not a small thing.** The local lane could not,
+for three independent reasons, each measured from its own source before that
+source was deleted — the three `realtime-voice/code/` paths below are cited as
+the record of what was read, and are not in the tree any more:
+
+| | Why the Python lane could not sing |
+| --- | --- |
+| Kokoro exposes `voice` and `speed`, no pitch or melody | lyrics came out spoken. `audio_module.py:380` says it plainly about a *speaking* voice: "5.1 st of pitch movement vs 2.3 in the reference, which no Kokoro blend can reach" |
+| `num_predict` was 256 (`llm_module.py:774`) | a song was severed mid-clause |
+| `RepetitionFilter` dropped a sentence already spoken (§6.0.14) | the second chorus never reached the speaker |
+
+Three separate layers, each of which alone was sufficient. Gemini Live's native
+audio genuinely sings.
+
+`enableAffectiveDialog: true` also retires the bracketed delivery-tag mechanism
+the old prompt used — `[softly]`, `[firm]`, the tags §6.0.15's table shows
+`temi_moves` emitting. Delivery is now the model's, not a string the pipeline
+parsed out and morphed a Kokoro blend with.
+
+**The voice governs pace far more than the prompt does**, which is why the
+picker is four Gemini prebuilt voices described by measured speaking rate rather
+than by adjective. Auditioned 2026-09-12:
+
+| Voice | Measured | |
+| --- | --- | --- |
+| **Sulafat** | 153 wpm | the default, and `assistantActivityStore.selectedVoice` |
+| Gacrux | 129 wpm | measured and deliberate |
+| Aoede | 115 wpm | slower, unhurried |
+| Callirrhoe | 208 wpm | quick and bright |
+
+A conversational norm is 140–160 wpm; Sulafat is the only one inside it. The
+four Kokoro blends `TemiStagePanels.tsx` used to offer — `royal_velvet`,
+`deep_warmth`, `british_elegance`, `soft_whisper` — are gone with the engine
+that could render them. `sendSpeedChange` is now a no-op: Gemini's native audio
+has no rate control, so pace is asked for in `TEMI_PERSONA` and chosen with the
+voice.
+
+`temiPersona.ts` holds `TEMI_PERSONA` and `TEMI_DEFAULT_VOICE`. It is a merge of
+the retired OS prompt (§6.29, §6.33) with a persona tuned by ear against Gemini
+in a sandbox repo — so the character survived the lane she was written for, but
+the prompt she is carried by is not the one §6.29 describes.
+
+**A known regression, stated rather than buried: recall is bounded by the live
+session.** §6.0.15's conversation eval scored recall failures as "lost the fact
+(beyond the 20-message window)", and that window has not become larger — it has
+become a different thing. The Live session *is* the history, which is why
+`sendClearHistory()` reopens the session rather than sending a message. There is
+still **no durable cross-session memory**, nothing here built one, and it should
+not be described as shipped.
+
+That eval went with the lane. `evals/voice-conversation.mjs` read the persona
+from `realtime-voice/code/system_prompt.txt` and graded `temi:r2` on Ollama
+through `repetition_bridge.py`; on this lane that is not the assistant anybody
+talks to, and repointing its graders at Ollama as a cheap proxy would reintroduce
+precisely the defect §6.0.15 was written to remove. The half of it that was
+lane-independent — the route asserted across all 27 scripted turns, because
+`routeVoiceTurn` is TypeScript either way — moved into
+`tests/voice-turn-router.test.mjs`, where it runs with no model at all.
 
 ### 6.1 Turn semantics while a run is in flight (2026-09-05)
 

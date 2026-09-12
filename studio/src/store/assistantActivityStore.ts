@@ -52,7 +52,7 @@ const INITIAL_ITEMS: AssistantActivityItem[] = [];
 export const useAssistantActivityStore = create<AssistantActivityState>((set) => ({
   items: INITIAL_ITEMS,
   isOpen: false,
-  selectedVoice: "royal_velvet",
+  selectedVoice: "Sulafat",
   activeEngine: "codex",
   isTaskRunning: false,
   currentTaskPrompt: null,

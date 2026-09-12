@@ -1,29 +1,34 @@
 /**
  * The shell's own directive must not come back as a user turn.
  *
- * `sendAssistantDirective` is not a user turn, but the pipeline has one way in,
- * so `realtime-voice/code/server.py` wraps the line and delivers it through
- * `on_final` -- the same callback a spoken turn uses. It therefore returns as
- * `final_user_request`, which type alone cannot distinguish from speech.
+ * `sendAssistantDirective` is not a user turn, but the lane has one way in, so
+ * the directive is wrapped and delivered to the model as text. On the Gemini
+ * Live lane a text turn produces no input transcription, so the wrapped line
+ * cannot return as `final_user_request` the way the retired :8000 pipeline
+ * delivered it -- the loop below cannot form the same way there.
  *
- * Unguarded that closes a loop, observed live on 2026-09-10: the shell
- * delegates, speaks "On it.", the directive returns as a user turn, the turn
- * switch classifies it as work, and it delegates again -- the activity queue
- * filling with identical tasks while the assistant talks to itself. The Stop
- * button could not win, because each stop was followed by another delegation.
+ * The guard stays anyway, for two reasons. The wrapper is still the shape the
+ * shell puts on the wire, so anything that ever echoes a model turn back into
+ * the transcript -- a resumed session, a replayed history, an ASR that hears
+ * the speaker -- reintroduces exactly this input. And the failure it prevents
+ * was expensive: observed live on 2026-09-10, the shell delegates, speaks
+ * "On it.", the directive returns as a user turn, the turn switch classifies it
+ * as work, and it delegates again -- the activity queue filling with identical
+ * tasks while the assistant talks to itself. The Stop button could not win,
+ * because each stop was followed by another delegation.
  *
- * The guard is a pure predicate so the loop can be pinned without a socket, a
- * pipeline, or a 2 GB virtualenv.
+ * The guard is a pure predicate, so the loop can be pinned without a socket, a
+ * session, or an API key.
  */
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { Realtime8000ProtocolManager } from "../src/services/voice/realtime8000Engine.ts";
+import { GeminiLiveEngine } from "../src/services/voice/geminiLiveEngine.ts";
 
-const isEcho = (t) => Realtime8000ProtocolManager.isAssistantDirectiveEcho(t);
+const isEcho = (t) => GeminiLiveEngine.isAssistantDirectiveEcho(t);
 
-/** Exactly what server.py builds, so the test fails if either side drifts. */
-function asServerWrapsIt(directive) {
+/** Exactly what the shell wraps a directive in, so the test fails if either side drifts. */
+function asTheShellWrapsIt(directive) {
   return (
     "[Say this to the user now, in your own voice, warmly and in one or " +
     "two spoken sentences. Do not add any facts that are not in it: " +
@@ -31,15 +36,15 @@ function asServerWrapsIt(directive) {
   );
 }
 
-test("the directive server.py builds is recognised as an echo", () => {
-  assert.equal(isEcho(asServerWrapsIt("On it.")), true);
-  assert.equal(isEcho(asServerWrapsIt("The tests passed.")), true);
+test("the directive the shell builds is recognised as an echo", () => {
+  assert.equal(isEcho(asTheShellWrapsIt("On it.")), true);
+  assert.equal(isEcho(asTheShellWrapsIt("The tests passed.")), true);
   // The loop was driven by the short acknowledgement, so pin that one exactly.
-  assert.equal(isEcho(asServerWrapsIt("On it.")), true);
+  assert.equal(isEcho(asTheShellWrapsIt("On it.")), true);
 });
 
 test("leading whitespace and casing do not let an echo through", () => {
-  assert.equal(isEcho("   " + asServerWrapsIt("Done.")), true);
+  assert.equal(isEcho("   " + asTheShellWrapsIt("Done.")), true);
   assert.equal(isEcho("[say this to the user now: \"Done.\"]"), true);
 });
 

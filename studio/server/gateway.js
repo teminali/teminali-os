@@ -60,7 +60,6 @@ import {
   translateAnthropicToOpenAI,
 } from "./geminiBridge.js";
 import { createAutoUnloadSweep } from "./guardian-autounload.js";
-import { createRealtimeVoiceSupervisor } from "./realtime-voice.js";
 import { cloneRepo, githubStatus, listRepos } from "./github.js";
 import {
   assessStorage,
@@ -80,6 +79,7 @@ import {
   describeProviders,
   planHostedRouting,
   readStore,
+  resolveKey,
   setProviderKey,
   setProviderLanes,
   validateKey,
@@ -282,6 +282,98 @@ async function probe(fetchImpl, url, timeoutMs, validator) {
 
 function joinUrl(base, path) {
   return new URL(path, base.href.endsWith("/") ? base : new URL(`${base.href}/`));
+}
+
+/* ── Gemini Live ──────────────────────────────────────────────────────────
+   The realtime voice lane. The renderer dials Google's Live WebSocket
+   directly, which means it needs a credential of its own; what it must never
+   have is the API key, because a key in a renderer is a key in every devtools
+   session and every crash dump. So the gateway mints an ephemeral token from
+   the key it holds and returns only that: single use, valid for half an hour,
+   and only openable as a new session within the first minute.
+
+   Two things about the SDK are load-bearing. Ephemeral tokens exist only on
+   v1alpha while the SDK defaults to v1beta, so the apiVersion is pinned twice
+   over — once on the client, once on the call. And the import is dynamic: the
+   voice lane is a degradable tier, and a missing or broken dependency must
+   cost the caller a fallback, not the gateway its startup.
+   ---------------------------------------------------------------------- */
+
+/** The Live model and voice the minted token is issued for. */
+const GEMINI_LIVE_MODEL = "gemini-2.5-flash-native-audio-latest";
+const GEMINI_LIVE_VOICE = "Sulafat";
+/** A token outlives a long conversation but not an idle machine. */
+const GEMINI_LIVE_TOKEN_TTL_MS = 30 * 60_000;
+/** The window in which the renderer must actually open the socket. */
+const GEMINI_LIVE_SESSION_WINDOW_MS = 60_000;
+
+/**
+ * Mint an ephemeral Gemini Live token, or say why not.
+ *
+ * Never throws and never returns, logs or otherwise reveals the raw key: the
+ * caller replies 200 with this body whatever happened, so that "voice is
+ * unavailable" reaches the renderer as a tier decision rather than an error.
+ */
+async function mintGeminiLiveToken(config) {
+  const apiKey = (resolveKey(readStore(config.providerStorePath), "google") || "").trim();
+  if (!apiKey) {
+    return {
+      ok: false,
+      reason: "no-key",
+      detail: "No Google Gemini API key is configured. Add one in Provider Settings, or set GEMINI_API_KEY.",
+    };
+  }
+
+  let GoogleGenAI;
+  try {
+    ({ GoogleGenAI } = await import("@google/genai"));
+  } catch (error) {
+    return {
+      ok: false,
+      reason: "sdk-unavailable",
+      detail: `The @google/genai package could not be loaded: ${error?.message || "unknown error"}. Reinstall the studio dependencies.`,
+    };
+  }
+
+  const now = Date.now();
+  const expiresAt = new Date(now + GEMINI_LIVE_TOKEN_TTL_MS).toISOString();
+  try {
+    const client = new GoogleGenAI({ apiKey, httpOptions: { apiVersion: "v1alpha" } });
+    const token = await client.authTokens.create({
+      config: {
+        uses: 1,
+        expireTime: expiresAt,
+        newSessionExpireTime: new Date(now + GEMINI_LIVE_SESSION_WINDOW_MS).toISOString(),
+        httpOptions: { apiVersion: "v1alpha" },
+      },
+    });
+    // The mint returns the token's resource name and nothing else; that name
+    // is the credential the Live client passes as its apiKey.
+    const name = typeof token?.name === "string" ? token.name.trim() : "";
+    if (!name) {
+      return {
+        ok: false,
+        reason: "mint-failed",
+        detail: "Google accepted the request but returned no token name; retry, and check the key's Live API access if it repeats.",
+      };
+    }
+    return { ok: true, token: name, model: GEMINI_LIVE_MODEL, voice: GEMINI_LIVE_VOICE, expiresAt };
+  } catch (error) {
+    // The upstream message is the only thing that tells an operator whether
+    // the key is wrong, the project lacks Live access, or the quota is spent.
+    // It is Google's text about the request, never the key itself.
+    const detail = String(error?.message || error || "").replace(apiKey, "[redacted]").trim();
+    // Quota is worth separating because it is the one refusal the operator
+    // cannot fix by editing anything: the renderer has its own sentence for it.
+    const exhausted = error?.status === 429 || /RESOURCE_EXHAUSTED|\bquota\b/i.test(detail);
+    return {
+      ok: false,
+      reason: exhausted ? "quota" : "mint-failed",
+      detail: detail
+        ? `Google refused to mint a Live token: ${detail}`
+        : "Google refused to mint a Live token and gave no reason.",
+    };
+  }
 }
 
 function contentTypeIsJson(value) {
@@ -2607,9 +2699,10 @@ export async function createGateway(options = {}) {
       }
 
       /* ── Voice ────────────────────────────────────────────────────────────
-         Three routes in front of an optional local speech sidecar. Every one
-         of them treats "no sidecar" as a normal answer, because the studio is
-         designed to fall back to the browser engine rather than lose voice.
+         One route that mints a Gemini Live credential, and three in front of
+         an optional local speech sidecar. Every one of them treats "not
+         available" as a normal answer, because the studio is designed to fall
+         back a tier rather than lose voice.
 
          The entitlement enters here as a tier, not as a gate: `voice.vibevoice`
          is Pro, and a free caller is routed to the local engines rather than
@@ -2618,13 +2711,20 @@ export async function createGateway(options = {}) {
          substitute, while the sidecar has neither.
          ------------------------------------------------------------------ */
 
-      /* The realtime pipeline's own status. Separate from /api/voice/status
-         because that route describes engines the gateway calls per request,
-         while this one describes a supervised process with a lifecycle: it is
-         how the renderer learns the socket address, and how an operator sees
-         why voice is silent when it is. */
-      if (request.method === "GET" && route === "/api/voice/realtime/status") {
-        replyJson(response, 200, realtimeVoice.status());
+      /* An ephemeral Gemini Live auth token. The renderer opens the Live
+         WebSocket itself, so it needs a credential — but never the raw API
+         key, which would then live in a browser context and in any devtools
+         session attached to it. This route mints a short-lived, single-use
+         token from the key the gateway holds and hands back only that.
+
+         Ephemeral tokens are a v1alpha feature and the SDK defaults to
+         v1beta, so the apiVersion is pinned on both the client and the call.
+
+         Failure is reported as HTTP 200 with `ok: false`, not as a throw:
+         voice is a degradable tier here, and the renderer's job on a refusal
+         is to fall back, not to surface an exception. */
+      if (request.method === "GET" && route === "/api/voice/realtime/token") {
+        replyJson(response, 200, await mintGeminiLiveToken(config));
         return;
       }
 
@@ -3490,15 +3590,6 @@ export async function createGateway(options = {}) {
     onEvent: (event) => audit.write({ ...event, correlationId: null }),
   });
 
-  /* The realtime voice pipeline. Supervised here rather than in the renderer
-     because it must outlive any one window and be killed when the gateway
-     goes, and because the renderer has no business spawning processes. Its
-     failures are reported, never thrown: see realtime-voice.js. */
-  const realtimeVoice = createRealtimeVoiceSupervisor({
-    config,
-    log: (message) => process.stdout.write(`${message}\n`),
-  });
-
   return {
     server,
     config,
@@ -3506,7 +3597,6 @@ export async function createGateway(options = {}) {
     tokenFingerprint,
     health,
     autoUnload,
-    realtimeVoice,
     async listen() {
       await new Promise((resolve, reject) => {
         server.once("error", reject);
@@ -3516,15 +3606,10 @@ export async function createGateway(options = {}) {
         });
       });
       autoUnload.start();
-      // Deliberately not awaited: weights take tens of seconds to load and the
-      // gateway must answer immediately. Readiness is polled and reported by
-      // /api/voice/realtime/status, which is what the renderer waits on.
-      void realtimeVoice.start();
       return server.address();
     },
     async close() {
       autoUnload.stop();
-      await realtimeVoice.stop();
       if (server.listening) await new Promise((resolve, reject) => server.close((error) => (error ? reject(error) : resolve())));
       await audit.flush();
     },

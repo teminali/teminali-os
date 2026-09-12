@@ -280,12 +280,140 @@ test("a question with a work noun in it is not automatically a question about th
   assert.equal(during("rename that file").action.kind, "delegate");
 });
 
-test("§6.30 finding 1 — the eval's port question reaches the hands in either state", () => {
-  // `evals/voice-conversation.mjs` scores this turn in `route-to-hands`. It is
-  // asserted here as well as in `machine-action.test.mjs` because the eval only
-  // runs against a live model: without this, the routing half of that turn is
-  // unmeasured whenever Ollama is not up.
+test("§6.30 finding 1 — the port question reaches the hands in either state", () => {
+  // Kept alongside `machine-action.test.mjs` and the scripted conversations at
+  // the foot of this file, because this is the turn the state gate was built
+  // for and it is worth pinning in both states explicitly.
   const say = "What is the port the server runs on?";
   assert.equal(idle(say).action.kind, "delegate");
   assert.equal(during(say).action.kind, "delegate");
 });
+
+/* ── The scripted conversations, rescued from the conversation eval ─────────── */
+
+/*
+  `evals/voice-conversation.mjs` drove these same turns through `routeVoiceTurn`
+  and asserted the route on every one of them before it graded any prose. That
+  eval is retired with the local :8000 lane — its output chain
+  (`temi_moves`, `repetition_filter`) lived in `realtime-voice/code/`, and the
+  model it graded is no longer the model that speaks.
+
+  The routing half was never lane-dependent: `routeVoiceTurn` is TypeScript and
+  it decides the same way whoever speaks afterwards. It is also the half that
+  paid for itself — "What is the port the server runs on?" was answered with an
+  invented "8080" three times out of three before the state gate existed. So the
+  corpus is kept here, where it runs in milliseconds with no model, no Ollama and
+  no API key, instead of dying with the harness that used to carry it.
+
+  The state machine is the eval's: each turn is routed against the world as it
+  stood, then `after` applies whatever the hands did before the next turn.
+*/
+
+const toolCall = (id, name, args, status, result) => ({
+  id, name, arguments: args, status, ...(result ? { result } : {}),
+});
+
+const CONVERSATIONS = [
+  {
+    name: "long-mixed",
+    turns: [
+      { say: "Good morning. I have the investor call at four, so keep me honest today.", route: "converse" },
+      { say: "How are you finding the morning?", route: "converse" },
+      { say: "Remind me what I said I had at four.", route: "converse" },
+      {
+        say: "Open the voice router and tell me what it does.",
+        route: "delegate",
+        after: {
+          busy: true,
+          add: [toolCall("1", "Read", { file_path: "studio/src/services/voice/voiceTurnRouter.ts" }, "completed", "175 lines")],
+        },
+      },
+      // Busy, so `turnIntent` returns `status` and the router answers from the digest.
+      { say: "How is it going?", route: "answer" },
+      {
+        say: "Good, keep going.",
+        route: "acknowledge",
+        after: {
+          add: [toolCall("2", "Edit", { file_path: "studio/src/services/voice/voiceTurnRouter.ts" }, "completed", "applied")],
+        },
+      },
+      { say: "Which file are you in?", route: "answer" },
+      { say: "Tell me a joke while that finishes.", route: "converse" },
+      { say: "Stop.", route: "stop", after: { busy: false } },
+      // Not a state question about an object, so the gate leaves it in chat.
+      { say: "What did you just do?", route: "converse" },
+      // "Change" is a machine object and the hands hold the diff.
+      { say: "Was that a big change?", route: "delegate" },
+      {
+        say: "Play the last render in the media player.",
+        route: "delegate",
+        after: { busy: true, add: [toolCall("3", "Bash", { command: "open renders/latest.mp4" }, "completed", "opened")] },
+      },
+      { say: "Actually, quiet for a second.", route: "hush", after: { busy: false } },
+      { say: "You have been sharp today.", route: "converse" },
+      { say: "Do you ever get bored of me?", route: "converse" },
+      {
+        // The turn the state gate exists for: answered "8080" 3/3 before it did.
+        say: "What is the port the server runs on?",
+        route: "delegate",
+        after: { busy: true, add: [toolCall("4", "Bash", { command: "lsof -i :4310" }, "running")] },
+      },
+      { say: "Never mind, drop it.", route: "stop", after: { busy: false } },
+      { say: "So — what was the thing I told you I had today?", route: "converse" },
+    ],
+  },
+
+  {
+    name: "fabrication-pressure",
+    turns: [
+      { say: "How long have we been at this today?", route: "converse" },
+      { say: "Remind me what that error said.", route: "converse" },
+      // Both of these are countable facts the hands can simply go and read.
+      { say: "How many files have we touched?", route: "delegate" },
+      { say: "Which branch am I on?", route: "delegate" },
+      { say: "You sound tired.", route: "converse" },
+    ],
+  },
+
+  {
+    name: "chat-not-delegated",
+    // Ordinary talk carrying machine vocabulary. A delegation here sends an
+    // agent off to do something nobody asked for.
+    turns: [
+      { say: "I built a deck for the investors last night and it nearly killed me.", route: "converse" },
+      { say: "My laptop fan has been running loud all week.", route: "converse" },
+      { say: "Open your mind for a second and hear me out.", route: "converse" },
+      { say: "Do you think the deck will land?", route: "converse" },
+    ],
+  },
+];
+
+for (const conversation of CONVERSATIONS) {
+  test(`the "${conversation.name}" conversation routes every turn where it was specified to go`, () => {
+    const state = { busy: false, run: null, lastSpoken: null };
+
+    for (const [i, turn] of conversation.turns.entries()) {
+      const decision = routeVoiceTurn(turn.say, {
+        busy: state.busy,
+        speaking: false,
+        run: state.run,
+        lastSpoken: state.lastSpoken,
+        now: NOW,
+      });
+      assert.equal(
+        decision.action.kind, turn.route,
+        `turn ${i + 1} ("${turn.say}") routed ${decision.action.kind}, expected ${turn.route}`,
+      );
+      if (decision.speak) state.lastSpoken = decision.speak;
+
+      const after = turn.after;
+      if (!after) continue;
+      if (after.add) {
+        state.run = state.run ?? { startedAt: NOW - 30_000, engine: "frontier", toolCalls: [], lastText: "" };
+        state.run.toolCalls.push(...after.add);
+      }
+      if (after.busy !== undefined) state.busy = after.busy;
+      if (after.clear) state.run = null;
+    }
+  });
+}

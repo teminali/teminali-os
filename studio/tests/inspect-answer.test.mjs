@@ -4,7 +4,7 @@
  * `machineAction` classifies "did the tests pass" as `inspect`, Temi says
  * "Checking now.", and the truthful part is supposed to arrive afterwards from
  * the run. It does — the wire is whole: `delegateTask` -> `onCompleted` ->
- * `sendAssistantDirective` -> `server.py` -> spoken. What did not survive was
+ * `sendAssistantDirective` -> the voice lane -> spoken. What did not survive was
  * the answer itself. `firstSentence` strips markdown so a work narration does
  * not read punctuation aloud, and on a question that strip deleted the payload:
  * measured 2026-09-10, eight of eight realistic answers to a state question

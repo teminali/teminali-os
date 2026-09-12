@@ -11,12 +11,11 @@
  * panel, one level deep, with a way back.
  */
 
-import React, { useEffect, useState } from "react";
+import React, { useState } from "react";
 import { Check, ChevronLeft, FileCode, Library, Plug, Plus } from "lucide-react";
 
 import { useStudioStore } from "../../store/studioStore";
 import { useAssistantActivityStore } from "../../store/assistantActivityStore";
-import { fetchRealtimeVoiceStatus } from "../../services/voice/realtimeVoiceStatus";
 import type { EditorTab } from "../../types";
 
 const PANEL =
@@ -29,7 +28,7 @@ const SECTION = "px-3.5 pb-1 pt-2.5 text-[12px] font-normal text-[#9b9b9b]";
 
 export interface TemiChatMenuProps {
   onClose: () => void;
-  /** Clear the conversation and the pipeline's history, and start over. */
+  /** Clear the conversation and the live session's history, and start over. */
   onCreateNew: () => void;
   onOpenWorkspace?: () => void;
   onConnectGitHub?: () => void;
@@ -119,11 +118,23 @@ export const TemiChatMenu: React.FC<TemiChatMenuProps> = ({
   );
 };
 
+/*
+   Gemini Live's prebuilt voices, named as Gemini names them: the key is sent
+   verbatim as `prebuiltVoiceConfig.voiceName`, so these are not labels we are
+   free to invent. They replace the four Kokoro blends the Python lane mixed
+   ("Royal Velvet" and friends), which no longer exist anywhere.
+
+   The descriptions are speaking rate, because that is the one thing that was
+   actually measured -- auditions read the same passage, 2026-09-12 -- and
+   because pace is what an operator notices first. A conversational norm is
+   140-160 wpm, which is why Sulafat is the default. Nothing here claims a
+   timbre; that was not measured and would be invention.
+*/
 const VOICE_OPTIONS = [
-  { key: "royal_velvet", name: "Royal Velvet", desc: "Velvety British warmth" },
-  { key: "deep_warmth", name: "Deep Warmth", desc: "Rich intimate baritone" },
-  { key: "british_elegance", name: "British Elegance", desc: "Crisp articulate composure" },
-  { key: "soft_whisper", name: "Soft Whisper", desc: "Gentle late-night cadence" },
+  { key: "Sulafat", name: "Sulafat", desc: "Even conversational pace — 153 wpm" },
+  { key: "Gacrux", name: "Gacrux", desc: "Measured and deliberate — 129 wpm" },
+  { key: "Aoede", name: "Aoede", desc: "Slower, unhurried — 115 wpm" },
+  { key: "Callirrhoe", name: "Callirrhoe", desc: "Quick and bright — 208 wpm" },
 ];
 
 export interface TemiStageSettingsProps {
@@ -140,27 +151,11 @@ export const TemiStageSettings: React.FC<TemiStageSettingsProps> = ({
   const selectedVoice = useAssistantActivityStore((state) => state.selectedVoice);
   const setSelectedVoice = useAssistantActivityStore((state) => state.setSelectedVoice);
 
-  // Which voice the pipeline is actually speaking in. Its address comes from
-  // the gateway, which supervises the process — the port is not a fact this
-  // component is allowed to know.
-  useEffect(() => {
-    let mounted = true;
-    void (async () => {
-      const status = await fetchRealtimeVoiceStatus();
-      if (!mounted || !status.url) return;
-      try {
-        const response = await fetch(new URL("/api/voices", status.url).toString());
-        if (!response.ok) return;
-        const data = await response.json();
-        if (mounted && data?.current) setSelectedVoice(data.current);
-      } catch {
-        // No pipeline, no voice list. The picker keeps its default.
-      }
-    })();
-    return () => {
-      mounted = false;
-    };
-  }, [setSelectedVoice]);
+  /* No round trip to ask which voice is speaking. The Python pipeline held
+     that as server state and served it from `/api/voices`; Gemini Live takes
+     the voice as session config and has nothing to ask. The store is now the
+     only record, and it is the durable one -- the engine reads it when it
+     opens a session, and changing it reopens one. */
 
   return (
     <div role="menu" className={PANEL}>

@@ -56,7 +56,7 @@ route requires it. Roughly sixty routes across:
 | Terminal | `/api/terminal/exec` |
 | Agent CLIs | `/api/agents` · `/api/agents/models` · `/api/agents/inventory` · `/api/agents/run` · `/api/agents/permission` · `/api/agents/permission/resolve` |
 | Screen assistant | `/api/assistant/{capabilities,permissions,observe,act}` · `/api/assistant/agent/{observe,act}` (the chat pane's agent, on its run's token) |
-| Voice | `/api/voice/{status,transcribe,speak}`, `/api/voice/realtime/status` |
+| Voice | `/api/voice/{status,transcribe,speak}`, `/api/voice/realtime/token` |
 | Guardian | `/api/guardian/{snapshot,unload,governor,storage}` |
 | Benchmark arena | `/api/arena/{sandbox,measure,measure/stream,history,cleanup}` |
 | Usage, files, device | `/api/usage` · `/api/plan` · `/api/files/{capabilities,ingest}` · `/api/system/device` |
@@ -774,14 +774,32 @@ sentence saying so, not a failed turn.
 
 ### Voice
 
-Local by default: **whisper.cpp** for recognition, macOS `say` for synthesis. An
-optional sidecar on `127.0.0.1:8321` upgrades either or both, and
+Three engines answer a spoken turn, in descending order of what they can do.
+
+**Gemini Live** is the top tier and the one Temi speaks with. The renderer opens
+its own live session to `gemini-2.5-flash-native-audio-latest` — recognition, the
+conversation and the voice are all the one model, so nothing crosses a process
+boundary mid-turn. It needs a Google API key and a network and nothing else: no
+interpreter, no local weights, no install step. The key never reaches the
+renderer, because `GET /api/voice/realtime/token` mints a single-use ephemeral
+token from it and hands back only that. Voice is a degradable tier, so a refusal
+comes back as a reason rather than an error and the studio drops to the engines
+below instead of failing the turn. She can sing, which the retired local lane
+could not. Four prebuilt voices are offered, described by measured speaking rate
+rather than by adjective — Sulafat 153 wpm (the default), Gacrux 129, Aoede 115,
+Callirrhoe 208, against a conversational norm of 140–160. The voice governs pace
+far more than the prompt does. See `DESIGN.md` §6.0.16.
+
+The two lower tiers are unchanged. Local by default: **whisper.cpp** for
+recognition, macOS `say` for synthesis. An optional sidecar on
+`127.0.0.1:8321` (`TEMINALI_VOICE_URL`) upgrades either or both, and
 [`voice-runtime/`](voice-runtime/README.md) is the one shipped in this repo:
 Whisper, Kokoro-82M and an AudioSet sound classifier on CPU, started with
-`npm run voice:serve`. Temy speaks with a woman's voice: Kokoro's `af_heart`
-when the sidecar is up, and otherwise the best installed macOS voice with the
-same preference — an Enhanced or Premium Ava, Samantha, Serena or Kate wins
-over a man's voice across a region boundary, while a robotic one never does. Its synthesis streams clause by clause, so a long reply
+`npm run voice:serve`. On these tiers the voice is a woman's too: Kokoro's
+`af_heart` when the sidecar is up, and otherwise the best installed macOS voice
+with the same preference — an Enhanced or Premium Ava, Samantha, Serena or Kate
+wins over a man's voice across a region boundary, while a robotic one never
+does. Its synthesis streams clause by clause, so a long reply
 starts speaking after its first clause rather than after all of it — measured
 on an M4 Pro, a 35-word reply begins speaking at 0.29 s where the whole file
 takes 1.97 s. The browser
@@ -1309,15 +1327,18 @@ ollama serve              # local models on 127.0.0.1:11434
 
 ```bash
 npm run typecheck   # tsc --noEmit
-npm test            # 2355 tests
+npm test            # 2342 tests
 npm run eval:local  # the local lane against the real model — a score, not a pass/fail; needs Ollama
 npm run eval:voice  # the voice co-agent's spoken answers, same discipline; needs Ollama
-npm run eval:conversation  # Temi over a whole conversation, through the shipping output
-                           # chain: routing, fabrication, recall, audible repetition.
-                           # --no-moves / --no-filter score the stages apart. Needs Ollama.
 npm run build       # tsc && vite build
 npm run verify:core # all three
 ```
+
+`eval:conversation` was retired with the local voice lane: it graded `temi:r2`
+on Ollama through the deleted Python chain, which is not the assistant Gemini
+Live speaks as. The lane-independent half of it — the route asserted across all
+27 scripted turns — runs as `tests/voice-turn-router.test.mjs`, with no model at
+all. See `DESIGN.md` §6.0.16.
 
 `npm run assistant:doctor` exits non-zero until macOS Accessibility is granted.
 That is the doctor working, not a regression.
@@ -1402,49 +1423,32 @@ the gateway down.
 static import under `server/` lands somewhere neither the asar nor the extra
 resources carry.
 
-### The voice pipeline ships as source, not as an environment
+### The installed app no longer carries a Python pipeline
 
-`server/config.js` resolves the realtime pipeline at
-`<workspace root>/studio/realtime-voice`, and inside the asar that workspace
-root is `<Resources>` — so the extra resource copies it to
-`studio/realtime-voice`, a nested `to:` rather than a bare directory name.
-Until v0.0.10 there was no entry at all: a packaged launch logged *"No voice
-pipeline at .../Contents/Resources/studio/realtime-voice"*, and the installed
-app had a realtime lane only when a dev checkout on the same machine happened
-to be serving one on `:8000`.
+Until 2026-09-12 the realtime voice tier was a Python pipeline, and packaging it
+was its own chapter: an `extraResources` entry copying 1.5 MB of source to
+`<Resources>/studio/realtime-voice`, an allowlist keeping `experiments/`,
+`training/`, `resources/` and `wheels/` out of it, a runtime probe for an
+interpreter, and a message telling the operator to build a 2.2 GB virtualenv by
+hand because a virtualenv is not relocatable and notarising one is not a thing
+anyone wants to attempt.
 
-What ships is 1.5 MB of Python, not the pipeline's environment. The virtualenv
-is 2.2 GB (torch, mlx, onnxruntime, the gruut language packs), it is not
-relocatable, and notarising it is not a thing anyone wants to attempt. The
-allowlist also leaves behind `experiments/` (440 MB), `training/` (372 MB),
-`resources/` (57 MB), `wheels/` (30 MB) and `code/static/bella_preview/`
-(35 MB of voice takes). `code/static/` itself does ship, small: `server.py`
-mounts it with `StaticFiles`, which raises at startup if the directory is
-absent, even though the studio is the client and never opens that page.
+All of it is gone. The voice lane is now a live session the renderer opens to
+Gemini (`DESIGN.md` §6.0.16), so there is no interpreter to find, no
+`requirements.txt` to install against, and no `from: realtime-voice` entry in
+`electron-builder.yml`. The top voice tier needs a Google API key and a network,
+and packaging does not participate in either.
 
-The interpreter is found at runtime by `resolveRealtimeVoicePython`, which
-probes, in order:
+What still ships for voice is the sidecar — `voice-runtime/` under
+`<Resources>/voice-runtime`, covered below — and it is unchanged.
 
-1. `TEMINALI_REALTIME_VOICE_PYTHON`, believed without inspection.
-2. `<pipeline root>/.venv` — the checkout case.
-3. `~/.teminali/realtime-voice/.venv` — the installed-app case, and the only
-   one an operator can create, since `<Resources>` is inside a signed bundle.
-
-When none of them answers, the studio says so in a command that can be pasted:
-
-```bash
-python3 -m venv ~/.teminali/realtime-voice/.venv
-~/.teminali/realtime-voice/.venv/bin/pip install -r \
-  "/Applications/Teminali OS.app/Contents/Resources/studio/realtime-voice/requirements.txt"
-```
-
-Voice still works without it, on the sidecar and then the browser engine;
-what is missing is the sub-second realtime lane.
-
-Verified against a built bundle, not inferred: `electron-builder --mac --arm64
---dir`, then the shipped source started under the checkout's interpreter with
-`<Resources>/…/realtime-voice/code` as its working directory and answered a
-full spoken turn.
+One thing did arrive rather than leave. `@google/genai` is the **first
+third-party runtime dependency the gateway has ever had**: until this, `server/`
+imported nothing but `node:` builtins. electron-builder ships production
+dependencies into the asar regardless of the files allowlist, so it ships
+without an entry, at roughly 16 MB — against the ~1 GB source entry that was
+removed. The gateway imports it dynamically anyway, so a broken or missing
+install costs the caller a fallback rather than costing the gateway its startup.
 
 ### A shim that rewrites its path must be unpacked (`asarUnpack`)
 
@@ -1837,12 +1841,7 @@ Everything is optional; every default is loopback.
 | `FRONTIER_ALLOWED_ORIGINS` | `127.0.0.1`/`localhost` on ports 3000 and 3001 |
 | `OLLAMA_BASE_URL` | `http://127.0.0.1:11434` |
 | `TEMINALI_VOICE_URL` | `http://127.0.0.1:8321` |
-| `TEMINALI_REALTIME_VOICE_URL` | `http://127.0.0.1:8000` — the realtime voice pipeline; its WebSocket is derived from this |
-| `TEMINALI_REALTIME_VOICE_ROOT` | `studio/realtime-voice/` |
-| `TEMINALI_REALTIME_VOICE_PYTHON` | the checkout's `.venv`, else `~/.teminali/realtime-voice/.venv`, found automatically |
-| `TEMINALI_REALTIME_VOICE_AUTOSTART` | on; set `0` to run the pipeline by hand |
-| `TEMINALI_REALTIME_VOICE_STARTUP_TIMEOUT_MS` | `300000` — weights load slowly on a cold cache |
-| `TEMI_MIC_STUCK_TIMEOUT` | `15.0` — seconds the pipeline's microphone gate may stay shut with nothing in flight before its watchdog reopens it (see DESIGN.md 6.0.11) |
+| `GEMINI_API_KEY` | unset — the key `/api/voice/realtime/token` mints Gemini Live tokens from, and the fallback when Provider Settings holds no Google key. Read by `server/providers.js`; the key itself never reaches the renderer |
 | `TEMINALI_ASR_ENGINE` | `auto` — `local` or `sidecar` pins which recogniser listens |
 | `TEMINALI_WHISPER_SERVER_PORT` | `8323` |
 | `TEMINALI_CUT_MCP_URL` | `http://127.0.0.1:3888` |

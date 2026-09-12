@@ -42,9 +42,6 @@ async function startGateway(options = {}) {
     resolveFrontierMode: options.resolveFrontierMode,
     config: {
       port: 0,
-      // No test wants a 2 GB Python pipeline spawned underneath it. Adoption of
-      // an already-running one is still exercised, since that costs nothing.
-      realtimeVoiceAutostart: false,
       requestTimeoutMs: 250,
       healthTimeoutMs: 100,
       maxJsonBytes: 1024,

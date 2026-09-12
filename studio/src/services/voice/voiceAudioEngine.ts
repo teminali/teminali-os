@@ -1,6 +1,18 @@
 /**
- * Teminali OS Port 8000 Realtime Voice Engine
- * Full-duplex Web Audio pipeline + Binary WebSocket Protocol
+ * Teminali OS full-duplex Web Audio pipeline.
+ *
+ * This file used to be "Port 8000 Realtime Voice Engine" and carried both
+ * halves of the lane: the Web Audio graph and the binary WebSocket protocol
+ * that talked to the local Python pipeline on :8000. The protocol half is gone
+ * — the lane is Gemini Live now, and `geminiLiveEngine.ts` owns the wire.
+ *
+ * What is left is engine-agnostic and stays that way. It captures the
+ * microphone through `pcmWorkletProcessor`, batches it into 8-byte-header +
+ * 2048-Int16 frames at the AudioContext rate (pinned to 48000 Hz below), plays
+ * assistant PCM through `ttsPlaybackProcessor`, and reports energy for the two
+ * meters. Every processing choice here was settled by measurement — see the
+ * AEC/NS/AGC table in `start()` — so a new protocol drives this class rather
+ * than reimplementing it.
  */
 
 /*
@@ -43,7 +55,7 @@ async function addWorklet(context: AudioContext, load: () => Promise<{ default: 
   }
 }
 
-export class Realtime8000AudioEngine {
+export class VoiceAudioEngine {
   audioContext: AudioContext | null = null;
   mediaStream: MediaStream | null = null;
   micWorklet: AudioWorkletNode | null = null;
@@ -273,206 +285,5 @@ export class Realtime8000AudioEngine {
       this.mediaStream = null;
     }
     this.isTTSPlaying = false;
-  }
-}
-
-export class Realtime8000ProtocolManager {
-  socket: WebSocket | null = null;
-  currentGenId = 0;
-  ignoreTTS = false;
-  explicitlyDisconnected = false;
-  reconnectTimer: ReturnType<typeof setTimeout> | null = null;
-  /** Set by connect(); the gateway is the only source of this address. */
-  serverUrl = "";
-
-  onConnected: (() => void) | null = null;
-  onDisconnected: (() => void) | null = null;
-  onError: ((err: Event) => void) | null = null;
-  onMessage: ((msg: any) => void) | null = null;
-
-  connect(url: string) {
-    if (!url) return;
-    this.serverUrl = url;
-    this.explicitlyDisconnected = false;
-    if (this.socket && (this.socket.readyState === WebSocket.OPEN || this.socket.readyState === WebSocket.CONNECTING)) {
-      return;
-    }
-    if (this.reconnectTimer) {
-      clearTimeout(this.reconnectTimer);
-      this.reconnectTimer = null;
-    }
-
-    try {
-      this.socket = new WebSocket(url);
-      this.socket.binaryType = "arraybuffer";
-
-      this.socket.onopen = () => {
-        this.onConnected?.();
-      };
-
-      this.socket.onmessage = (event) => {
-        if (typeof event.data === "string") {
-          try {
-            const msg = JSON.parse(event.data);
-            this.handleInboundMessage(msg);
-          } catch (e) {
-            console.error("Protocol parse error:", e);
-          }
-        }
-      };
-
-      this.socket.onclose = () => {
-        this.onDisconnected?.();
-        if (!this.explicitlyDisconnected) {
-          this.scheduleReconnect();
-        }
-      };
-
-      this.socket.onerror = (err) => {
-        this.onError?.(err);
-      };
-    } catch {
-      this.scheduleReconnect();
-    }
-  }
-
-  private scheduleReconnect() {
-    if (this.reconnectTimer || this.explicitlyDisconnected) return;
-    this.reconnectTimer = setTimeout(() => {
-      this.reconnectTimer = null;
-      if (!this.explicitlyDisconnected) {
-        this.connect(this.serverUrl);
-      }
-    }, 2000);
-  }
-
-  sendAudioChunk(buffer: ArrayBuffer) {
-    if (this.socket && this.socket.readyState === WebSocket.OPEN) {
-      this.socket.send(buffer);
-    }
-  }
-
-  sendJSON(payload: unknown) {
-    if (this.socket && this.socket.readyState === WebSocket.OPEN) {
-      this.socket.send(JSON.stringify(payload));
-    }
-  }
-
-  sendUserText(text: string) {
-    this.sendJSON({ type: "user_text", text });
-  }
-
-  /**
-   * Cancel the reply the pipeline started generating the moment it sent us the
-   * transcript. Used whenever the turn is answered here instead — a status
-   * question, a stop, praise — so two voices never answer one sentence.
-   */
-  sendBargeIn() {
-    this.sendJSON({ type: "user_barge_in" });
-  }
-
-  /**
-   * A line the Teminali OS shell wants spoken now, in Temi's voice: an answer
-   * built from the live agent run, or its final report.
-   *
-   * It is not a user turn, but the pipeline has one way in, so it enters as a
-   * bracketed directive. `user_text` cannot carry these — the server drops
-   * bracketed prose there, because an unrefreshed browser tab on the pipeline's
-   * own preview page can replay it. A build old enough to be that stale tab
-   * does not know this message type, which is the whole point of it existing.
-   */
-  /**
-   * Is this "user turn" actually our own directive coming back?
-   *
-   * `sendAssistantDirective` is not a user turn, but the pipeline has one way
-   * in, so `server.py` wraps it and delivers it through `on_final` -- the same
-   * callback a spoken turn uses. It therefore returns to us as
-   * `final_user_request`, indistinguishable from speech by type alone.
-   *
-   * Left unguarded that closes a loop: the shell delegates, speaks "On it.",
-   * the directive returns as a user turn, the switch classifies it as work and
-   * delegates again. Observed 2026-09-10 with the queue filling with identical
-   * tasks and the assistant talking to itself.
-   *
-   * The prefix is `server.py`'s, and it is matched here rather than in the
-   * consumer so the sender and the recogniser stay in one file.
-   */
-  static isAssistantDirectiveEcho(text: string): boolean {
-    return /^\[\s*Say this to the user now\b/i.test((text ?? "").trim());
-  }
-
-  sendAssistantDirective(text: string) {
-    const line = (text ?? "").trim();
-    if (!line) return;
-    this.sendJSON({ type: "assistant_directive", text: line });
-  }
-
-  sendTTSStart() {
-    this.sendJSON({ type: "tts_start" });
-  }
-
-  sendTTSStop() {
-    this.sendJSON({ type: "tts_stop" });
-  }
-
-  sendVoiceChange(voice: string) {
-    this.sendJSON({ type: "set_voice", voice });
-  }
-
-  sendSpeedChange(speed: number) {
-    this.sendJSON({ type: "set_speed", speed });
-  }
-
-  sendClearHistory() {
-    this.sendJSON({ type: "clear_history" });
-  }
-
-  handleInboundMessage(msg: { type: string; gen_id?: number; content?: string }) {
-    const { type, gen_id } = msg;
-
-    if (gen_id !== undefined) {
-      if (type === "tts_chunk" && gen_id < this.currentGenId) {
-        return;
-      }
-      if (gen_id > this.currentGenId) {
-        this.ignoreTTS = false;
-        this.currentGenId = gen_id;
-      }
-    }
-
-    if (type === "final_user_request" || type === "partial_user_request" || type === "partial_assistant_answer") {
-      this.ignoreTTS = false;
-    }
-
-    if (type === "tts_interruption" || type === "stop_tts") {
-      this.ignoreTTS = type === "stop_tts";
-      this.onMessage?.({ type: "tts_interrupt", gen_id });
-      return;
-    }
-
-    if (type === "tts_chunk" && msg.content) {
-      if (this.ignoreTTS) return;
-      const raw = atob(msg.content);
-      const buf = new ArrayBuffer(raw.length);
-      const view = new Uint8Array(buf);
-      for (let i = 0; i < raw.length; i++) view[i] = raw.charCodeAt(i);
-      const int16 = new Int16Array(buf);
-      this.onMessage?.({ type: "tts_audio", int16, gen_id });
-      return;
-    }
-
-    this.onMessage?.(msg);
-  }
-
-  disconnect() {
-    this.explicitlyDisconnected = true;
-    if (this.reconnectTimer) {
-      clearTimeout(this.reconnectTimer);
-      this.reconnectTimer = null;
-    }
-    if (this.socket) {
-      this.socket.close();
-      this.socket = null;
-    }
   }
 }

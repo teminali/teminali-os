@@ -9,9 +9,9 @@ import { ConnectedAgentActivity } from "./AgentActivityTicker";
 import { useAssistantActivityStore } from "../../store/assistantActivityStore";
 import { PROFILES_LIST, useStudioStore } from "../../store/studioStore";
 import { PERMISSION_LABELS } from "../chat/ModelPicker";
-import { Realtime8000AudioEngine, Realtime8000ProtocolManager } from "../../services/voice/realtime8000Engine";
+import { VoiceAudioEngine } from "../../services/voice/voiceAudioEngine";
+import { GeminiLiveEngine } from "../../services/voice/geminiLiveEngine";
 import { CaptionPacer } from "../../services/voice/captionPacer";
-import { fetchRealtimeVoiceStatus, describeRealtimeVoice } from "../../services/voice/realtimeVoiceStatus";
 import { TeminaliAgentBridge } from "../../services/voice/teminaliAgentBridge";
 import { routeVoiceTurn } from "../../services/voice/voiceTurnRouter";
 import { runProgressFromActivity } from "../../services/voice/runProgressFromActivity";
@@ -76,7 +76,7 @@ export const TemiVoiceStage: React.FC<TemiVoiceStageProps> = ({
   const [inputText, setInputText] = useState("");
   const [toastMessage, setToastMessage] = useState<string | null>(null);
   const [isWsConnected, setIsWsConnected] = useState(false);
-  // What the gateway says about the supervised pipeline. Empty while it is
+  // What the voice engine says about reaching Gemini Live. Empty while it is
   // healthy: a working assistant should not narrate that it is working.
   const [voiceNote, setVoiceNote] = useState("");
   /*
@@ -167,7 +167,7 @@ export const TemiVoiceStage: React.FC<TemiVoiceStageProps> = ({
     setActiveEngine(agentSelection?.engine ?? (currentProfile === "max" ? "gemini" : "frontier"));
   }, [agentSelection?.engine, currentProfile, setActiveEngine]);
 
-  const audioRef = useRef<Realtime8000AudioEngine | null>(null);
+  const audioRef = useRef<VoiceAudioEngine | null>(null);
 
   /* The caption is paced by the speaker, not by the model — see captionPacer.
      `pendingFinal` is the finished reply held back until the voice has caught up
@@ -211,11 +211,11 @@ export const TemiVoiceStage: React.FC<TemiVoiceStageProps> = ({
   }, []);
   const commitSpokenTurnRef = useRef(commitSpokenTurn);
   commitSpokenTurnRef.current = commitSpokenTurn;
-  const protocolRef = useRef<Realtime8000ProtocolManager | null>(null);
+  const protocolRef = useRef<GeminiLiveEngine | null>(null);
   const toastTimerRef = useRef<number | null>(null);
   const animFrameRef = useRef<number | null>(null);
   // The socket effect runs once and must keep running once — putting the turn
-  // handler in its dependency list would reconnect the pipeline on every render.
+  // handler in its dependency list would reopen the live session on every render.
   const performTurnRef = useRef<((text: string, source: "spoken" | "typed") => void) | null>(null);
   // What Temi last said, so "say that again" has something to say again.
   const lastSpokenRef = useRef<string | null>(null);
@@ -272,8 +272,8 @@ export const TemiVoiceStage: React.FC<TemiVoiceStageProps> = ({
 
   // ── Initialize the Real 8000 AudioEngine & ProtocolManager ───────────────
   useEffect(() => {
-    const audio = new Realtime8000AudioEngine();
-    const protocol = new Realtime8000ProtocolManager();
+    const audio = new VoiceAudioEngine();
+    const protocol = new GeminiLiveEngine();
 
     audioRef.current = audio;
     protocolRef.current = protocol;
@@ -323,7 +323,7 @@ export const TemiVoiceStage: React.FC<TemiVoiceStageProps> = ({
       if (type === "partial_user_request") {
         // Our own directive, mid-flight back to us -- not speech. Showing it
         // would caption the operator with words they never said.
-        if (Realtime8000ProtocolManager.isAssistantDirectiveEcho(content ?? "")) return;
+        if (GeminiLiveEngine.isAssistantDirectiveEcho(content ?? "")) return;
         setLiveUserSpeech(content);
       } else if (type === "final_user_request") {
         setLiveUserSpeech(null);
@@ -332,7 +332,7 @@ export const TemiVoiceStage: React.FC<TemiVoiceStageProps> = ({
           // A directive re-entering as a user turn must not be transcribed and
           // must not reach the switch: classified as work it delegates again,
           // and the loop never closes. See `isAssistantDirectiveEcho`.
-          if (Realtime8000ProtocolManager.isAssistantDirectiveEcho(clean)) return;
+          if (GeminiLiveEngine.isAssistantDirectiveEcho(clean)) return;
           // Update last user bubble if from this same turn, or append new turn
           setDialogueHistory((prev) => {
             const last = prev[prev.length - 1];
@@ -380,7 +380,7 @@ export const TemiVoiceStage: React.FC<TemiVoiceStageProps> = ({
         }
       }
 
-      // 3. Live Kokoro / Orpheus TTS Audio Playback
+      // 3. Spoken audio from the model, already resampled to the context rate
       else if (type === "tts_audio" && msg.int16) {
         audio.playTTSChunk(msg.int16);
       }
@@ -393,16 +393,18 @@ export const TemiVoiceStage: React.FC<TemiVoiceStageProps> = ({
       }
     };
 
-    // The gateway owns the pipeline's lifecycle, so it owns its address too.
-    // Asking costs one request and replaces a port literal that had drifted
-    // into two files and two languages.
+    /* The engine reaches Gemini Live directly and mints its own credential on
+       the way: the gateway holds the API key and hands back a single-use
+       ephemeral token, so the renderer never sees the key and the stage never
+       learns an address. That is why `connect()` takes no argument any more,
+       and why the operator's one-line note arrives through the engine rather
+       than from a status call here -- a token is `uses: 1`, so a second fetch
+       just to render a sentence would burn one. */
     let cancelled = false;
-    void (async () => {
-      const status = await fetchRealtimeVoiceStatus();
-      if (cancelled) return;
-      setVoiceNote(describeRealtimeVoice(status));
-      protocol.connect(status.socketUrl);
-    })();
+    protocol.onNote = (note) => {
+      if (!cancelled) setVoiceNote(note);
+    };
+    void protocol.connect();
 
     // Continuous audio energy sampling for the 3D Orb
     const sampleEnergy = () => {
@@ -446,8 +448,8 @@ export const TemiVoiceStage: React.FC<TemiVoiceStageProps> = ({
       });
 
       const protocol = protocolRef.current;
-      // A spoken turn is already being answered by the pipeline — it began
-      // generating the moment it sent us the transcript. A typed one is not.
+      // A spoken turn is already being answered by the model — it begins
+      // generating the moment its own VAD closes the turn. A typed one is not.
       if (source === "spoken" && decision.suppressPipelineAnswer) {
         protocol?.sendBargeIn();
         audioRef.current?.stopTTSPlayback();
@@ -457,7 +459,7 @@ export const TemiVoiceStage: React.FC<TemiVoiceStageProps> = ({
       switch (action.kind) {
         case "delegate": {
           showToast("Handing this to the assistant…");
-          // Temi says one grounded line, and the pipeline's own reply is
+          // Temi says one grounded line, and the model's own reply is
           // suppressed above. Asking the persona to improvise the "on it" is
           // what produced invented accounts of work that had not started:
           // a prompt to acknowledge an action it cannot observe gets answered
@@ -487,7 +489,7 @@ export const TemiVoiceStage: React.FC<TemiVoiceStageProps> = ({
 
         case "answer":
         case "repeat":
-          // Answered here, from the run. The pipeline never sees the question,
+          // Answered here, from the run. The model never sees the question,
           // because its persona prompt has never heard of the work in flight.
           setDialogueHistory((prev) => [
             ...prev,
@@ -655,7 +657,7 @@ export const TemiVoiceStage: React.FC<TemiVoiceStageProps> = ({
     showToast("Voice off — type instead");
   }, [isMicMuted, showToast]);
 
-  // ── Start over: this clears the conversation, here and in the pipeline ───
+  // ── Start over: clears the conversation here, and the live session too ───
   const handleCreateNew = useCallback(() => {
     audioRef.current?.stopTTSPlayback();
     TeminaliAgentBridge.stopCurrentTask();
@@ -693,14 +695,14 @@ export const TemiVoiceStage: React.FC<TemiVoiceStageProps> = ({
           : "bg-[#00994f]";
 
   const statusTitle = !isWsConnected
-    ? voiceNote || "Connecting to the voice pipeline…"
+    ? voiceNote || "Connecting Temi's voice…"
     : isSpeaking
       ? "Temi is speaking"
       : isHearing
         ? "Listening"
         : isThinking
           ? "Thinking"
-          : "Voice pipeline live";
+          : "Voice is live";
 
   const closePopovers = useCallback(() => {
     setMenuOpen(false);
