@@ -40,7 +40,8 @@ import {
 } from "@google/genai";
 import { TEMI_PERSONA, TEMI_DEFAULT_VOICE } from "./temiPersona.ts";
 import { fetchGeminiLiveToken, describeGeminiLive } from "./geminiLiveToken.ts";
-import { DEFAULT_ENDPOINTER } from "./turnTaking.ts";
+import { DEFAULT_ENDPOINTER, endpointStall } from "./turnTaking.ts";
+import { MicEndpointer } from "./micEndpoint.ts";
 
 /**
  * Native-audio Live model. Measured working with `enableAffectiveDialog`, which
@@ -93,6 +94,22 @@ const FRAME_HEADER_BYTES = 8;
  * a silence window, so it is the bound this sits under, not the target.
  */
 export const END_OF_TURN_SILENCE_MS = DEFAULT_ENDPOINTER.maxSilenceMs;
+
+/**
+ * How much audio to hold while the detector makes up its mind. Onset is three
+ * voiced frames at 20 ms plus the 32 ms window they are seen in, so a little
+ * over 90 ms; eight 42.7 ms chunks is 340 ms, comfortably more, and 11 KB.
+ */
+const PREBUFFER_CHUNKS = 8;
+
+/** A single utterance is never this long. Lifted from `conversation.ts`. */
+const MAX_UTTERANCE_MS = 15_000;
+
+/** Frames stop arriving for this long and the mic is gone, not quiet. */
+const FRAME_STALL_MS = 2_000;
+
+export const ENDPOINT_STALL_NOTE =
+  "I could not tell when you stopped, so I took the turn. Say that again if I cut you off.";
 
 /**
  * Reconnect backoff after a socket that opened and then closed.
@@ -229,6 +246,21 @@ function withTimeout<T>(promise: Promise<T>, ms: number, message: string): Promi
     `tool_call` is the newest and the only one with no ancestor in the Python
     lane: it is the model asking for hands, and the stage is expected to answer
     every one of them through `sendToolResponse()`. */
+/**
+ * What one turn cost, in milliseconds from the moment he stopped speaking.
+ * `commitMs` is ours, `firstAudioMs` is what he waits.
+ */
+export interface TurnTiming {
+  /** Our endpointer's verdict to `activityEnd` on the wire. */
+  commitMs: number;
+  /** He stopped speaking to her first content back. */
+  turnStartMs: number;
+  /** He stopped speaking to the first byte of her voice. This is the wait. */
+  firstAudioMs: number;
+  /** The silence window the endpointer sized for this turn. */
+  windowMs: number;
+}
+
 export type GeminiLiveMessage =
   | { type: "partial_user_request"; content: string }
   | { type: "final_user_request"; content: string }
@@ -417,6 +449,13 @@ export class GeminiLiveEngine {
    */
   onNote: ((note: string) => void) | null = null;
 
+  /**
+   * One turn's latency, emitted when her first audio lands. Separate from
+   * `onMessage` so that adding measurement could not change the message union
+   * the shell switches on.
+   */
+  onTiming: ((timing: TurnTiming) => void) | null = null;
+
   private ai: GoogleGenAI | null = null;
   private session: Session | null = null;
   private connecting = false;
@@ -470,6 +509,31 @@ export class GeminiLiveEngine {
    * correct if Gemini ever issues two calls in one turn.
    */
   private pendingToolCalls = new Set<string>();
+
+  /**
+   * Our own end-of-turn detector, replacing Google's. Fed from
+   * `sendAudioChunk` with the same 16 kHz PCM that goes on the wire.
+   */
+  private readonly endpointer = new MicEndpointer();
+
+  /**
+   * The stopwatch, four stamps long. Before this the live lane contained no
+   * `Date.now()` at all: the thing he was complaining about was the one thing
+   * nothing measured, and two successive opinions about its cause were wrong.
+   *
+   * `spokeAt` is the last frame we judged to be speech; `committedAt` is when
+   * we told Gemini the turn was over; `turnStartedAt` is her first content
+   * back; `firstAudioAt` is the first byte of her voice. The number he
+   * actually feels is `firstAudioAt - spokeAt`, and `committedAt - spokeAt` is
+   * the part this file owns.
+   */
+  private timing = { spokeAt: 0, committedAt: 0, turnStartedAt: 0, firstAudioAt: 0 };
+
+  /** Is a user-activity bracket open on the wire? */
+  private activityOpen = false;
+  private activityOpenedAt = 0;
+  /** Chunks captured before the bracket opened, oldest first. */
+  private readonly prebuffer: Int16Array[] = [];
 
   private micCarry: Int16Array = new Int16Array(0);
   /** Odd trailing byte of a base64 audio chunk. Gemini's chunks are not
@@ -555,12 +619,21 @@ export class GeminiLiveEngine {
           inputAudioTranscription: {},
           outputAudioTranscription: {},
           realtimeInputConfig: {
-            // Only the end-of-turn wait is tuned. Measured in the sandbox:
-            // LOW start sensitivity stopped hearing the user at all, and a
-            // shorter silence window cut her off mid-sentence at every comma.
-            // The number itself comes from `turnTaking.ts`; see
-            // `END_OF_TURN_SILENCE_MS`.
-            automaticActivityDetection: { silenceDurationMs: END_OF_TURN_SILENCE_MS },
+            // We do our own endpointing. Google's server VAD waits a flat
+            // `END_OF_TURN_SILENCE_MS` after he stops, and a measured
+            // conversational turn here is a little over three seconds, so that
+            // one constant was about half of the wait. `micEndpoint.ts` runs
+            // the adaptive endpointer the dictation lane has always used and
+            // commits between 600 and 1800 ms depending on how finished the
+            // sentence sounds, so `sendAudioChunk` sends `activityEnd` itself.
+            //
+            // Disabling this is also what makes `activityStart`/`activityEnd`
+            // legal to send at all: the SDK rejects them while automatic
+            // detection is on. The cost is that `serverContent.interrupted`
+            // stops being server-driven, which is why the endpointer's
+            // `speech-start` sends `activityStart` rather than being ignored —
+            // that is what still interrupts her when he talks over her.
+            automaticActivityDetection: { disabled: true },
           },
           speechConfig: {
             voiceConfig: { prebuiltVoiceConfig: { voiceName: this.voice } },
@@ -779,6 +852,17 @@ export class GeminiLiveEngine {
     this.micCarry = new Int16Array(0);
     this.pcmByteCarry = new Uint8Array(0);
     this.upsampleAnchor = 0;
+    // A bracket belongs to the socket it was opened on. Carried across a
+    // reconnect it would leave `activityOpen` true against a session that
+    // never saw the `activityStart`, and every turn after it would stream
+    // audio Gemini has been told nothing about. The learned pause rhythm is
+    // deliberately kept: it is a fact about him, not about the socket.
+    this.activityOpen = false;
+    this.activityOpenedAt = 0;
+    this.prebuffer.length = 0;
+    this.endpointer.reset();
+    this.endpointer.setTranscript("");
+    this.timing = { spokeAt: 0, committedAt: 0, turnStartedAt: 0, firstAudioAt: 0 };
   }
 
   // ---------------------------------------------------------------- inbound
@@ -826,6 +910,7 @@ export class GeminiLiveEngine {
    * either, so the first frame still finds the anchor at zero.
    */
   private beginTurn(): void {
+    if (this.timing.turnStartedAt === 0) this.timing.turnStartedAt = Date.now();
     if (this.turnActive) return;
     this.turnActive = true;
     this.generation += 1;
@@ -893,6 +978,10 @@ export class GeminiLiveEngine {
     const inputText = content?.inputTranscription?.text;
     if (inputText) {
       this.inputTranscript += inputText;
+      // What he has said so far is how the endpointer sizes its wait: a
+      // sentence that already parses as finished is committed sooner than
+      // one still hanging on "and".
+      this.endpointer.setTranscript(this.inputTranscript);
       this.emit({ type: "partial_user_request", content: this.inputTranscript });
     }
 
@@ -1042,7 +1131,13 @@ export class GeminiLiveEngine {
       this.turnActive = false;
       const answer = this.outputTranscript;
       this.outputTranscript = "";
-      if (answer) this.emit({ type: "final_assistant_answer", content: answer });
+      if (answer) {
+        // A question means his answer is already on its way, so the next
+        // turn commits on a shorter silence. Same rule the dictation lane
+        // has always used.
+        if (answer.trimEnd().endsWith("?")) this.endpointer.markQuestionAsked();
+        this.emit({ type: "final_assistant_answer", content: answer });
+      }
     }
   }
 
@@ -1050,10 +1145,22 @@ export class GeminiLiveEngine {
     if (!this.inputTranscript) return;
     const request = this.inputTranscript;
     this.inputTranscript = "";
+    this.endpointer.setTranscript("");
     this.emit({ type: "final_user_request", content: request });
   }
 
   private emitAudio(b64: string) {
+    // The stopwatch reads out here and nowhere else: the first byte of her
+    // voice is the moment he stops waiting.
+    if (this.timing.firstAudioAt === 0 && this.timing.spokeAt !== 0) {
+      this.timing.firstAudioAt = Date.now();
+      this.onTiming?.({
+        commitMs: this.timing.committedAt - this.timing.spokeAt,
+        turnStartMs: Math.max(0, this.timing.turnStartedAt - this.timing.spokeAt),
+        firstAudioMs: this.timing.firstAudioAt - this.timing.spokeAt,
+        windowMs: this.endpointer.stats.windowMs,
+      });
+    }
     const incoming = base64ToBytes(b64);
 
     // Re-attach any half sample left over from the previous chunk before
@@ -1099,6 +1206,104 @@ export class GeminiLiveEngine {
     this.micCarry = carry;
     if (!out.length) return;
 
+    // The header we do not forward is still worth reading. Its flags word says
+    // whether our own speaker was live when this batch was captured, which is
+    // exactly the `ducked` signal the detector needs, and it is per frame
+    // rather than per event: a start/stop callback can only ever be right
+    // about the frames after it.
+    this.endpointer.setDucked((new DataView(buffer).getUint32(4, false) & 1) === 1);
+
+    const events = this.endpointer.push(out, MIC_RATE);
+    const started = events.some((event) => event.type === "speech-start");
+    const ended = events.find((event) => event.type === "speech-end" || event.type === "discarded");
+
+    if (started && !this.activityOpen) this.openActivity();
+
+    // Audio only flows inside an open bracket. Before one opens it goes to the
+    // prebuffer, because the detector cannot call speech-start until it has
+    // heard the onset — three voiced frames plus a window to see them in, a
+    // little over 90 ms. Sent bare, that onset would fall outside the bracket
+    // and his first word would go missing. Held, it arrives immediately after
+    // `activityStart`, in order, and nothing is lost.
+    if (this.activityOpen) this.sendPcm(out);
+    else this.holdPcm(out);
+
+    if (ended) this.closeActivity(this.endpointer.stats.lastVoicedAt);
+    else if (this.activityOpen) this.guardAgainstEndlessTurn();
+  }
+
+  /**
+   * Tell Gemini a turn has begun, and release everything we were holding.
+   *
+   * With automatic detection off this is also the interrupt: the default
+   * `activityHandling` is `START_OF_ACTIVITY_INTERRUPTS`, so this is what cuts
+   * her off when he talks over her. The endpointer reports a `speech-start`
+   * inside `resumeWindowMs` of an endpoint it already fired as
+   * `resumedAfterEndpoint` — he carried on and we called the turn too early —
+   * and that lands here too, which is the right answer to being wrong.
+   */
+  private openActivity(): void {
+    if (!this.session || this.activityOpen) return;
+    this.activityOpen = true;
+    this.activityOpenedAt = Date.now();
+    try {
+      this.session.sendRealtimeInput({ activityStart: {} });
+    } catch (err) {
+      this.onError?.(err);
+    }
+    for (const held of this.prebuffer) this.sendPcm(held);
+    this.prebuffer.length = 0;
+  }
+
+  /** Tell Gemini the turn is over, and start the stopwatch. */
+  private closeActivity(spokeAt: number): void {
+    if (!this.session || !this.activityOpen) return;
+    this.activityOpen = false;
+    this.activityOpenedAt = 0;
+    this.timing = {
+      spokeAt: spokeAt || Date.now(),
+      committedAt: Date.now(),
+      turnStartedAt: 0,
+      firstAudioAt: 0,
+    };
+    try {
+      this.session.sendRealtimeInput({ activityEnd: {} });
+    } catch (err) {
+      this.onError?.(err);
+    }
+  }
+
+  /**
+   * The failure mode that server VAD used to make impossible.
+   *
+   * Google always closed a turn eventually. Ours will not if the detector
+   * never says he stopped — a fan, a held note, a floor that learned wrong —
+   * and the turn would then hang forever with no reply and no error. Same
+   * ceiling the dictation lane uses, same helper.
+   */
+  private guardAgainstEndlessTurn(): void {
+    const now = Date.now();
+    const stall = endpointStall({
+      turnStartedAt: this.activityOpenedAt,
+      lastFrameAt: now,
+      now,
+      maxUtteranceMs: MAX_UTTERANCE_MS,
+      frameStallMs: FRAME_STALL_MS,
+    });
+    if (!stall) return;
+    this.onNote?.(ENDPOINT_STALL_NOTE);
+    this.endpointer.reset();
+    this.closeActivity(now);
+  }
+
+  /** Hold a chunk until a bracket opens, keeping only the recent past. */
+  private holdPcm(out: Int16Array): void {
+    this.prebuffer.push(out);
+    while (this.prebuffer.length > PREBUFFER_CHUNKS) this.prebuffer.shift();
+  }
+
+  private sendPcm(out: Int16Array): void {
+    if (!this.session) return;
     const data = bytesToBase64(new Uint8Array(out.buffer, out.byteOffset, out.byteLength));
     try {
       this.session.sendRealtimeInput({ audio: { data, mimeType: `audio/pcm;rate=${MIC_RATE}` } });

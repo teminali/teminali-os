@@ -25,7 +25,13 @@ const VOICED_RMS = 0.012;
 
 /* ── Minimal radix-2 FFT (in-place, real input) ───────────────────────────── */
 
-function fft(real: Float32Array, imag: Float32Array): void {
+/**
+ * Exported so the mic endpointer can borrow it rather than carry a second
+ * copy: `micEndpoint.ts` needs a spectral centroid and this is the only FFT
+ * in the repo. Two implementations of the same transform is how one of them
+ * quietly stops matching the other.
+ */
+export function fft(real: Float32Array, imag: Float32Array): void {
   const n = real.length;
   for (let i = 1, j = 0; i < n; i += 1) {
     let bit = n >> 1;

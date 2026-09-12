@@ -14,7 +14,7 @@
  */
 
 import { estimatePitch } from "./prosody";
-import { isVoicedFrame } from "./voiceActivity";
+import { isVoicedFrame, NoiseFloor } from "./voiceActivity";
 import { VoiceError } from "./types";
 
 export interface AudioFrame {
@@ -53,37 +53,6 @@ const DEFAULT_HISTORY_SECONDS = 12;
  * permanently desensitise the detector but walking into a quiet room does make
  * it more sensitive within a second or so.
  */
-class NoiseFloor {
-  private value = 0.004;
-  private readonly attack = 0.0006;
-  private readonly release = 0.02;
-
-  update(rms: number, voiced: boolean, ducked = false): number {
-    // Never learn the floor from frames we already believe are speech.
-    // Also NEVER raise the noise floor while audio is ducked (assistant speaking),
-    // because speaker bleed into the laptop mic would inflate the floor to ~0.03
-    // and deafen the detector for 4-5 seconds after speech stops.
-    if (voiced || ducked) return this.value;
-    if (rms > this.value) this.value += (rms - this.value) * this.attack;
-    else this.value += (rms - this.value) * this.release;
-    // Keep a sane range: silence never reads as exactly zero on real hardware.
-    this.value = Math.min(0.08, Math.max(0.0015, this.value));
-    return this.value;
-  }
-
-  clamp(max = 0.006): void {
-    if (this.value > max) this.value = max;
-  }
-
-  reset(): void {
-    this.value = 0.004;
-  }
-
-  get current(): number {
-    return this.value;
-  }
-}
-
 export class AudioGraph {
   private context: AudioContext | null = null;
   private stream: MediaStream | null = null;

@@ -8367,6 +8367,65 @@ turn on the installed build writes a line that says which phase owns those
 seconds, and that is the input the fix needs. Do not spend a release on the VAD
 before reading one.
 
+#### 6.0.46 The end of his turn is ours to call (2026-09-13)
+
+The live lane opened its session with
+`automaticActivityDetection: { silenceDurationMs: 1800 }`, so Google decided he
+had stopped talking 1.8 seconds after he had. An earlier note here said that
+was under 4% of a turn and not worth a release. That divided it into an *agent*
+turn of 47 seconds, which was itself a bad number — the tail of an audit file
+rather than the file. His conversational turn is a little over three seconds,
+and against that the constant was about half the wait.
+
+It is now ours. `realtimeInputConfig.automaticActivityDetection` is
+`{ disabled: true }` and `sendAudioChunk` brackets his speech itself, sending
+`activityStart` when he begins and `activityEnd` when the endpointer says he has
+finished. The window is no longer flat: it is sized between
+`minSilenceMs` 600 and `maxSilenceMs` 1800 by how finished the sentence sounds,
+from the live transcript and from prosody, and it learns his own pause rhythm as
+it goes.
+
+Almost none of that is new code. `voiceActivity.ts` and the `Endpointer` in
+`turnTaking.ts` have run the dictation lane for releases; they were simply
+unreachable from here, because the chain they hang off (`audioGraph.ts` ->
+`conversation.ts`) needs an AudioContext and is not mounted on Temi's lane. The
+only missing piece was PCM to the five numbers `isVoicedFrame` judges, which is
+`micEndpoint.ts`: a 512-sample window on a 320-sample hop, 32 ms every 20 ms,
+the same geometry the graph runs at 48 kHz, with the same magnitude-weighted
+centroid and the same adaptive noise floor. `NoiseFloor` moved out of
+`audioGraph.ts` into `voiceActivity.ts` and the repo's one FFT is now exported
+from `speakerProfile.ts`, so neither exists twice.
+
+**Measured, not argued.** `studio/src/services/voice/geminiLiveEngine.ts`
+contained no `Date.now()` at all before this: the thing he complained about was
+the one thing nothing measured, and two successive opinions about its cause were
+wrong. It now carries four stamps — his last voiced frame, our `activityEnd`,
+her first content, her first audio — reported on `onTiming`. A harness plays a
+recorded utterance into a real session at real time and reads the clock; run as
+four alternating pairs against a worktree at the previous commit, first audio
+came back at a median of 4586 ms before and 3594 ms after, **993 ms sooner**,
+with every run of the new path beating every run of the old one. Our own commit
+is steady at ~1198 ms against Google's effective ~2200 ms, and the window sized
+itself to 976 or 1216 ms across those runs rather than sitting at the ceiling.
+
+Three things this costs, each answered in code rather than hoped about:
+
+- **Server-side interrupt stops firing.** `serverContent.interrupted` was
+  Google's, and disabling detection takes it away. `speech-start` therefore
+  sends `activityStart`, and the default `START_OF_ACTIVITY_INTERRUPTS` is what
+  still cuts her off when he talks over her.
+- **The onset would be lost.** The detector cannot call `speech-start` until it
+  has heard three voiced frames, so the audio containing his first word would
+  fall outside the bracket. Chunks are held in a prebuffer of eight (340 ms) and
+  flushed in order immediately after `activityStart`.
+- **A turn could never end.** Google always closed one eventually; a detector
+  that never fires would hang forever. `endpointStall` closes the bracket at the
+  15-second ceiling the dictation lane uses, with a spoken note.
+
+Her own voice cannot open a turn: the mic batch header carries an
+`isTTSPlaying` flag set at capture time, which `sendAudioChunk` reads for the
+`ducked` state — per frame, which a start/stop callback can never be.
+
 ### 6.1 Turn semantics while a run is in flight (2026-09-05)
 
 A directed utterance is not automatically an instruction. `turnIntent.ts`

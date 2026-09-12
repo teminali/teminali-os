@@ -66,3 +66,44 @@ export function isVoicedFrame(frame: VoicingFrame, ducked = false): boolean {
   const pitchFloor = ducked ? Math.max(noiseFloor * 2.8, 0.02) : Math.max(noiseFloor * 1.5, 0.007);
   return periodic && rms > pitchFloor;
 }
+
+/**
+ * The running estimate of the room, which `isVoicedFrame` judges every frame
+ * against.
+ *
+ * It lives here rather than in `audioGraph.ts` because it is the other half of
+ * the same decision and, like the verdict, it is arithmetic with no
+ * AudioContext in it. The mic endpointer on Temi's lane needs exactly this
+ * behaviour, and a second copy of an adaptive floor would drift from this one
+ * within a release.
+ */
+export class NoiseFloor {
+  private value = 0.004;
+  private readonly attack = 0.0006;
+  private readonly release = 0.02;
+
+  update(rms: number, voiced: boolean, ducked = false): number {
+    // Never learn the floor from frames we already believe are speech.
+    // Also NEVER raise the noise floor while audio is ducked (assistant speaking),
+    // because speaker bleed into the laptop mic would inflate the floor to ~0.03
+    // and deafen the detector for 4-5 seconds after speech stops.
+    if (voiced || ducked) return this.value;
+    if (rms > this.value) this.value += (rms - this.value) * this.attack;
+    else this.value += (rms - this.value) * this.release;
+    // Keep a sane range: silence never reads as exactly zero on real hardware.
+    this.value = Math.min(0.08, Math.max(0.0015, this.value));
+    return this.value;
+  }
+
+  clamp(max = 0.006): void {
+    if (this.value > max) this.value = max;
+  }
+
+  reset(): void {
+    this.value = 0.004;
+  }
+
+  get current(): number {
+    return this.value;
+  }
+}

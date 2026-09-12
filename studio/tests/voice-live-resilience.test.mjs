@@ -239,19 +239,29 @@ test("the slow ladder is the one a failed mint is put on", () => {
 
 // ─────────────────────────────────────────── one breath, one turn
 
-test("the end-of-turn silence window is the measured ceiling, not a thinking pause", () => {
+test("the end-of-turn wait is ours and adaptive, not Google's flat ceiling", () => {
   // "Open dukabot" — pause — "and run the tests" arrived as two turns at
   // 700 ms, so each half was routed on its own and the tests ran against a
-  // project the first half had not finished opening.
+  // project the first half had not finished opening. 1800 ms is still the
+  // ceiling that stops that happening; what changed is that it is now only
+  // the ceiling. The window closes at 600 ms on a sentence that sounds
+  // finished, and the difference was measured: on a recorded utterance
+  // against the live model over four alternating pairs, first audio
+  // back came 992 ms sooner at the median, and every run of the new path
+  // beat every run of the old one.
   assert.equal(END_OF_TURN_SILENCE_MS, DEFAULT_ENDPOINTER.maxSilenceMs);
   assert.equal(END_OF_TURN_SILENCE_MS, 1800, "the measured ceiling in turnTaking.ts has moved");
   assert.ok(END_OF_TURN_SILENCE_MS <= DEFAULT_ENDPOINTER.pacingCeilingMs);
   assert.ok(END_OF_TURN_SILENCE_MS > 1000, "600–1000 ms is a pause between phrases, not the end of a sentence");
   assert.match(
     engineSource,
-    /automaticActivityDetection: \{ silenceDurationMs: END_OF_TURN_SILENCE_MS \}/,
-    "the VAD is back on a hard-coded number that no measurement stands behind",
+    /automaticActivityDetection: \{ disabled: true \}/,
+    "server VAD is back on, and with it a flat wait no measurement stands behind",
   );
+  // Disabling it is only half the change. If these ever go missing the model
+  // is told nothing about when he speaks, and the turn never ends at all.
+  assert.match(engineSource, /sendRealtimeInput\(\{ activityStart: \{\} \}\)/);
+  assert.match(engineSource, /sendRealtimeInput\(\{ activityEnd: \{\} \}\)/);
 });
 
 // ──────────────────────────────────── StrictMode, and sockets nobody wanted
