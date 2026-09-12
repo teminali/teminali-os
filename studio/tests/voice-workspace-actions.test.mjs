@@ -354,3 +354,136 @@ test("widening the roots did not widen the guard", () => {
   assert.equal(isPathAllowed("/Users/teminali"), false, "the home directory is not a project");
   assert.equal(isPathAllowed("/Users/teminali/Downloads/MyProject"), true);
 });
+
+/* ── 2026-09-12: the name window widened from three words to four ──────────
+ *
+ * `4K Video Downloader+` is the folder the operator asked for three times in
+ * one call transcript and the fast path never gave him, because it is spoken
+ * either "4K video downloader plus" or "four K video downloader" -- both FOUR
+ * words. The name sits between the verb's lead-in and the place noun, so a
+ * four-word name matched no pattern at all: the command died before the
+ * scorer ever ran, which is why the failure did not show up as a wrong
+ * answer, only as silence.
+ *
+ * Widening the window on its own would have traded one failure for a worse
+ * one: a longer capture can cross a phrase boundary, and the old cleanName
+ * deleted filler wherever it found it, so "move the video into the downloads
+ * folder" -- a FILE MOVE -- would capture "video into the downloads", delete
+ * "into" and "the", and weld what was left into "video downloads", which is a
+ * confident match for `4K Video Downloader+`. cleanName now trims filler only
+ * from the edges and refuses the whole reading if filler survives inside it.
+ * Both changes are pinned together below, because shipping the first without
+ * the second is the regression that would have mattered most.
+ */
+
+test("the four-word window: 4K Video Downloader+ resolves every way it is actually spoken", () => {
+  const candidates = [
+    { name: "teminaliCode", path: `${PROJECTS_ROOT}/teminali/teminaliCode` },
+    { name: "4K Video Downloader+", path: "/Users/teminali/Downloads/4K Video Downloader+" },
+    { name: "MyProject", path: "/Users/teminali/Downloads/MyProject" },
+  ];
+  const want = "/Users/teminali/Downloads/4K Video Downloader+";
+
+  for (const spoken of [
+    "open the 4K video downloader plus folder",
+    "open the four k video downloader folder",
+    "switch to the 4k video downloader plus folder",
+  ]) {
+    const action = parseWorkspaceCommand(spoken, { candidates });
+    assert.equal(action?.kind, "switch-workspace", `"${spoken}" did not resolve`);
+    assert.equal(action.path, want);
+    assert.equal(action.label, "4K Video Downloader+");
+  }
+});
+
+test("a four-word name resolves generally, not just the one folder that was measured", () => {
+  // `Mocro.Maffia.S06.MULTi` is the other real directory the source comment
+  // names: a long, dotted, four-word release name. It skeletonises to exactly
+  // what the operator said, so this is a clean exact match, not a fuzzy one --
+  // proof the window covers four words as a rule, not as a special case for
+  // one downloader.
+  const candidates = [
+    ...SIBLINGS.map((name) => ({ name, path: at(name) })),
+    { name: "Mocro.Maffia.S06.MULTi", path: "/Users/teminali/Downloads/Mocro.Maffia.S06.MULTi" },
+  ];
+  const action = parseWorkspaceCommand("open the mocro maffia s06 multi folder", { candidates });
+  assert.equal(action?.kind, "switch-workspace");
+  assert.equal(action.path, "/Users/teminali/Downloads/Mocro.Maffia.S06.MULTi");
+});
+
+test("the three-word form that already worked still works, and so do shorter names", () => {
+  // The window widened, it did not shift. `4K Video Downloader+` without the
+  // "plus" is the three-word form that resolved before this fix and must go
+  // on resolving; a single word and a two-word name from the real siblings
+  // pin the other end of the window the same way.
+  const fourK = [{ name: "4K Video Downloader+", path: "/Users/teminali/Downloads/4K Video Downloader+" }];
+  assert.equal(
+    parseWorkspaceCommand("open the 4K video downloader folder", { candidates: fourK })?.path,
+    "/Users/teminali/Downloads/4K Video Downloader+",
+  );
+
+  assert.equal(parse("open the teminali folder")?.path, at("teminali"));
+  assert.equal(parse("open the gs project folder")?.path, at("gs_project"));
+});
+
+test("the interior-filler guard refuses a capture that crosses a phrase boundary", () => {
+  /*
+    The point of change 2. A four-word window can capture across a phrase
+    boundary the old three-word window never reached, and a filler word
+    surviving in the MIDDLE of that capture is the tell: it is not riding
+    along with a name, it is the rest of the sentence carrying on.
+
+    The first one is the case that was actually measured. "move the video
+    into the downloads folder" is an instruction to move a FILE. It captures
+    "video into the downloads", and the old cleanName deleted "into" and "the"
+    and welded what was left into "video downloads" -- which scores 0.76
+    against `4K Video Downloader+`, clears the 0.7 floor, and would have
+    silently switched the operator's workspace root out from under a command
+    that never named a project at all. That is the most expensive failure on
+    this lane, arriving through the front door.
+
+    The next two are the same shape against different targets, and neither
+    weld happens to clear the floor this time (0.27 and 0.65 measured). That
+    is exactly why the fix refuses the SHAPE of the capture instead of relying
+    on the score: the guard must not depend on being lucky.
+  */
+  const downloads = [{ name: "4K Video Downloader+", path: "/Users/teminali/Downloads/4K Video Downloader+" }];
+  assert.equal(
+    parseWorkspaceCommand("move the video into the downloads folder", { candidates: downloads }),
+    null,
+    "a file move must never become a workspace switch",
+  );
+
+  const untitled = [{ name: "Untitled Project", path: "/Users/teminali/Downloads/Untitled Project" }];
+  assert.equal(
+    parseWorkspaceCommand("move that clip into my untitled project folder", { candidates: untitled }),
+    null,
+  );
+  assert.equal(
+    parseWorkspaceCommand("go back to the video in the downloads folder", { candidates: downloads }),
+    null,
+  );
+});
+
+test("cleanName's contract, exercised through the parser since it is not exported", () => {
+  /*
+    cleanName has no export, deliberately, so every caller including this test
+    reaches it only through parseWorkspaceCommand -- the same door the fast
+    path itself uses.
+
+    Edge filler rides along with a name and is trimmed, even two words of it,
+    and even a word LEAD_IN itself never looks for. LEAD_IN's own literal
+    words are things like "back", "to", "into", "the", "my" -- not "up" -- so
+    "up" survives into the raw capture as "up the dukabot", and it is
+    cleanName, not LEAD_IN, doing the trim here.
+  */
+  assert.equal(parse("open up the dukabot folder")?.path, at("dukabot"));
+  assert.equal(parse("switch to a dukabot folder")?.path, at("dukabot"));
+
+  // Filler in the interior is refused outright rather than deleted. This uses
+  // only the four real siblings, apart from the scenario-specific cases
+  // above, so it pins the mechanism on its own: "move the file into the
+  // dukabot folder" is a file move, it captures "file into the dukabot", and
+  // "into" and "the" both survive inside it.
+  assert.equal(parse("move the file into the dukabot folder"), null);
+});

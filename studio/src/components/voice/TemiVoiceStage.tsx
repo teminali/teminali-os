@@ -15,6 +15,7 @@ import { CaptionPacer } from "../../services/voice/captionPacer";
 import { TeminaliAgentBridge } from "../../services/voice/teminaliAgentBridge";
 import { routeVoiceTurn } from "../../services/voice/voiceTurnRouter";
 import { runProgressFromActivity } from "../../services/voice/runProgressFromActivity";
+import { traceVoice } from "../../services/voice/voiceTrace";
 import {
   candidatesFromEntries,
   parseWorkspaceCommand,
@@ -351,6 +352,12 @@ export const TemiVoiceStage: React.FC<TemiVoiceStageProps> = ({
      it is not a candidate and that turn correctly falls through to the
      assistant, which can reach the disk. */
   const workspaceCandidatesRef = useRef<FolderCandidate[]>([]);
+  /* The two halves of the candidate list, kept apart so either can be replaced
+     without dropping the other. `absorbProjects` runs again after every switch;
+     if the discovered folders lived only in the merged list they would be wiped
+     by the first switch and voice would silently shrink back to the recents. */
+  const projectsRef = useRef<ProjectsResponse | null>(null);
+  const discoveredRef = useRef<readonly { path: string; name: string }[]>([]);
   /* Whether the root the shell is bound to is a video project.
 
      The editor grammar is small but its words are not rare: "undo that",
@@ -414,10 +421,59 @@ export const TemiVoiceStage: React.FC<TemiVoiceStageProps> = ({
   /* The gateway's project list, folded into candidates the resolver can score.
      `current` goes in first so "open the folder I'm already in" resolves to a
      no-op rather than falling through to a delegate. */
-  const absorbProjects = useCallback((projects: ProjectsResponse) => {
-    workspaceCandidatesRef.current = candidatesFromEntries([projects.current, ...projects.recent]);
-    isVideoProjectRef.current = projects.current.kind === "video";
+  /* Everything the resolver is allowed to score, in one list: the project he is
+     in, the ones he has opened before, then every folder found under the
+     allowed roots.
+
+     THE DEDUPE IS LOAD BEARING, not tidiness. `resolveFolder` refuses when the
+     winner has no margin over the runner up and there is not exactly one exact
+     match. A folder that is both recent AND discovered -- which is every folder
+     he actually uses -- would therefore appear twice, score 1.0 twice, and be
+     REFUSED. Adding discovery without this would have broken the one command
+     that already worked. Path order is preserved so `current` still wins, which
+     is what makes "open the folder I'm already in" a no-op rather than a
+     delegate. */
+  const rebuildCandidates = useCallback(() => {
+    const projects = projectsRef.current;
+    const seenPath = new Set<string>();
+    const seenName = new Set<string>();
+    const entries: { path: string; name?: string }[] = [];
+    for (const entry of [
+      ...(projects ? [projects.current, ...projects.recent] : []),
+      ...discoveredRef.current,
+    ]) {
+      const key = entry?.path?.replace(/\/+$/, "") ?? "";
+      if (!key || seenPath.has(key)) continue;
+      /* One folder per NAME, and the first one wins because the list above is
+         already in priority order. This is not tidiness either: `resolveFolder`
+         refuses outright when two candidates match the spoken name EXACTLY
+         (`exactCount > 1`), because it will not guess between them -- and that
+         refusal is correct and stays. But the operator really does have two
+         different directories called `4K Video Downloader+`, one in ~/Downloads
+         and one in ~/Movies, and scanning the roots put both in the list, so
+         the command that worked against the 12-entry store started resolving to
+         nothing the moment discovery was added. A name lookup cannot tell two
+         identical names apart, so the one he has actually opened is the only
+         defensible answer, and it is decided HERE rather than by weakening the
+         resolver's refusal. Cost, stated plainly: a folder whose name duplicates
+         one he has used more recently is not reachable by that name. */
+      const label = (entry?.name ?? key.split("/").filter(Boolean).pop() ?? "").toLowerCase();
+      if (label && seenName.has(label)) continue;
+      seenPath.add(key);
+      if (label) seenName.add(label);
+      entries.push(entry);
+    }
+    workspaceCandidatesRef.current = candidatesFromEntries(entries);
   }, []);
+
+  const absorbProjects = useCallback(
+    (projects: ProjectsResponse) => {
+      projectsRef.current = projects;
+      isVideoProjectRef.current = projects.current.kind === "video";
+      rebuildCandidates();
+    },
+    [rebuildCandidates],
+  );
 
   /* Fetched once, on mount. A failure here is not worth a line to the operator:
      it costs the fast path, and every spoken folder name then falls through to
@@ -427,8 +483,22 @@ export const TemiVoiceStage: React.FC<TemiVoiceStageProps> = ({
     void WorkspaceService.listProjects(controller.signal)
       .then(absorbProjects)
       .catch(() => undefined);
+    /* The folders he has never opened. Without this the fast path could only
+       reach what was already in the recent-projects store, so a folder he has
+       not opened before was unreachable by voice however clearly he said its
+       name -- it fell through to the assistant, which is the slow path this
+       whole lane exists to avoid. Fetched alongside the recents rather than
+       after them: the two settle independently and `rebuildCandidates` merges
+       whichever has arrived. A failure here is not worth a line to the
+       operator, for the same reason the projects fetch is silent. */
+    void WorkspaceService.discoverProjectFolders(controller.signal)
+      .then((discovered) => {
+        discoveredRef.current = discovered.folders;
+        rebuildCandidates();
+      })
+      .catch(() => undefined);
     return () => controller.abort();
-  }, [absorbProjects]);
+  }, [absorbProjects, rebuildCandidates]);
 
   // ── Initialize the Real 8000 AudioEngine & ProtocolManager ───────────────
   useEffect(() => {
@@ -490,11 +560,21 @@ export const TemiVoiceStage: React.FC<TemiVoiceStageProps> = ({
         setLiveUserSpeech(null);
         if (content && content.trim()) {
           const clean = content.trim();
+          // What the microphone actually produced, before anything can drop it.
+          // The whole diagnosis of a dead spoken turn starts here; see
+          // `voiceTrace.ts` for why this is a ring and not a console line.
+          traceVoice("heard", { text: clean });
           // A directive re-entering as a user turn must not be transcribed and
           // must not reach the switch: classified as work it delegates again,
           // and the loop never closes. See `isAssistantDirectiveEcho`.
-          if (GeminiLiveEngine.isAssistantDirectiveEcho(clean)) return;
-          if (isAssistantReportEcho(clean)) return;
+          if (GeminiLiveEngine.isAssistantDirectiveEcho(clean)) {
+            traceVoice("dropped", { by: "directive-echo" });
+            return;
+          }
+          if (isAssistantReportEcho(clean)) {
+            traceVoice("dropped", { by: "report-echo" });
+            return;
+          }
           // Update last user bubble if from this same turn, or append new turn
           setDialogueHistory((prev) => {
             const last = prev[prev.length - 1];
@@ -740,6 +820,15 @@ export const TemiVoiceStage: React.FC<TemiVoiceStageProps> = ({
         workspacePath: store.workspaceRootConfirmed ? store.workspacePath : undefined,
       });
 
+      /* The line that tells a turn the parser refused apart from one the gate
+         held: both end in silence and they need opposite fixes. */
+      traceVoice("turn", {
+        source,
+        busy,
+        workspace: workspaceAction ? workspaceAction.kind : null,
+        candidates: workspaceCandidatesRef.current.length,
+      });
+
       if (workspaceAction && !busy) {
         // She is mid-sentence and the model is already answering the spoken
         // turn. Cut both, exactly as the delegate path does.
@@ -783,6 +872,42 @@ export const TemiVoiceStage: React.FC<TemiVoiceStageProps> = ({
             const reason = error instanceof Error ? error.message : String(error);
             speakLineRef.current(`I could not open ${target}: ${reason}`, "verbatim");
           });
+        return;
+      }
+
+      /* Named a folder while a run is in flight.
+         The gate above is right to refuse -- see its note, a switch mid-run
+         sends the run's next Edit into a different repository -- but refusing
+         in SILENCE is most of why this lane looked broken. He says "switch to
+         DukaBot", nothing happens, and a refusal he agrees with is
+         indistinguishable from a command that was never heard. One of those
+         needs him to wait and the other needs him to say it again.
+
+         So the turn is answered here rather than falling through to the
+         assistant, which would answer a workspace command with talk. */
+      if (workspaceAction) {
+        const held =
+          workspaceAction.kind === "reveal-folder"
+            ? (workspaceAction.relativePath.split("/").filter(Boolean).pop() ?? "it")
+            : workspaceAction.label;
+        if (source === "spoken") {
+          protocolRef.current?.sendBargeIn();
+          audioRef.current?.stopTTSPlayback();
+        }
+        /* Says only what is true. There is NO QUEUE: `busy` is read once, here,
+           and nothing re-issues the action later. An earlier draft of this line
+           said "I'll switch once this run finishes", which promised a mechanism
+           that does not exist -- the same fabrication failure the report path is
+           built to refuse, arriving through a line of UI copy. Deferring the
+           switch would also be its own hazard: a run can end minutes later, by
+           which time an unannounced root change is the silent wrong switch the
+           gate exists to prevent. So it refuses, out loud, and he decides. */
+        const verb = workspaceAction.kind === "reveal-folder" ? "open" : "switch to";
+        speakLineRef.current(
+          `I can't ${verb} ${held} while this run is going. Tell me again when it's done.`,
+          "verbatim",
+        );
+        showToast(`Refused: a run is in flight. Say it again when it finishes.`);
         return;
       }
 

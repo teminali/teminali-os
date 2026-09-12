@@ -57,7 +57,12 @@ test("the workspace command is parsed before the turn is routed", () => {
 
 test("a handled workspace turn never falls through to the router", () => {
   const block = stage.slice(stage.indexOf("if (workspaceAction && !busy)"), stage.indexOf("const editorCommand ="));
-  assert.equal(block.match(/\n\s+return;/g)?.length, 3, "reveal, already-there and switch each return early");
+  assert.equal(
+    block.match(/\n\s+return;/g)?.length,
+    4,
+    "reveal, already-there, switch and the busy refusal each return early; the fourth was added when " +
+      "the `!busy` gate stopped falling through in silence, which was indistinguishable from not being heard",
+  );
 });
 
 /* ── Which argument goes where ────────────────────────────────────────────── */
@@ -101,9 +106,22 @@ test("switching to the root already open is skipped rather than re-applied", () 
 /* ── Where the candidates come from ───────────────────────────────────────── */
 
 test("candidates come from the gateway, because the renderer has no filesystem", () => {
+  /* Two sources now, both over HTTP. `listProjects` is where he has been and
+     `discoverProjectFolders` is everywhere he could go -- before the second one
+     existed, a folder he had never opened was unreachable by voice however
+     clearly he said its name. Neither reads a disk from the renderer. */
   assert.ok(
-    /candidatesFromEntries\(\[projects\.current, \.\.\.projects\.recent\]\)/.test(stage),
-    "the gateway's project list is the renderer's only source of real directory names",
+    /projects\.current, \.\.\.projects\.recent/.test(stage),
+    "the gateway's project list is still folded into the candidates",
+  );
+  assert.ok(
+    /WorkspaceService\.discoverProjectFolders\(/.test(stage),
+    "discovered folders are the other source; without them voice reaches only the recents",
+  );
+  assert.ok(
+    /seenName/.test(stage),
+    "candidates must be deduped by NAME: `resolveFolder` refuses outright when two candidates " +
+      "match exactly, so two folders sharing a name would refuse the command instead of picking one",
   );
   assert.ok(
     !/from "node:fs"|require\("fs"\)/.test(stage),
@@ -127,7 +145,11 @@ test("the candidate list is a ref, so the socket's installed handler sees it", (
 test("every workspace confirmation is spoken, not written alongside", () => {
   const block = stage.slice(stage.indexOf("if (workspaceAction && !busy)"), stage.indexOf("const editorCommand ="));
   const spoken = block.match(/speakLineRef\.current\(/g)?.length ?? 0;
-  assert.equal(spoken, 4, "reveal, already-there, switched and failed each say exactly one line");
+  assert.equal(
+    spoken,
+    5,
+    "reveal, already-there, switched, failed and the busy refusal each say exactly one line",
+  );
   assert.ok(
     !/appendAssistant|setTurns\(/.test(block),
     "a bubble written beside the spoken line is the double-render defect of DESIGN.md 6.0.21",
@@ -140,4 +162,65 @@ test("a spoken turn cuts the model off before acting, as the delegate path does"
   const acts = block.indexOf("store.revealPath");
   assert.ok(bargeIn > 0 && acts > 0, "both must exist inside the block");
   assert.ok(bargeIn < acts, "the model is already answering the spoken turn; cut it before the shell answers instead");
+});
+
+/* ── The trace: heard before it can be dropped ────────────────────────────── */
+
+test("the raw transcript is traced before either echo filter can drop it", () => {
+  const heard = stage.indexOf('traceVoice("heard"');
+  const directiveDrop = stage.indexOf('traceVoice("dropped", { by: "directive-echo" }');
+  const reportDrop = stage.indexOf('traceVoice("dropped", { by: "report-echo" }');
+  assert.ok(heard > 0 && directiveDrop > 0 && reportDrop > 0, "all three call sites must exist");
+  assert.ok(
+    heard < directiveDrop && heard < reportDrop,
+    "what the microphone actually produced must be recorded before anything downstream can drop it, or the one datum the whole diagnosis turns on is lost exactly when it matters",
+  );
+});
+
+test("the directive-echo filter records a dropped trace before its silent return", () => {
+  const block = stage.slice(
+    stage.indexOf("if (GeminiLiveEngine.isAssistantDirectiveEcho(clean))"),
+    stage.indexOf("if (isAssistantReportEcho(clean))"),
+  );
+  const traced = block.indexOf('traceVoice("dropped"');
+  const returned = block.indexOf("return;");
+  assert.ok(traced > 0 && returned > 0, "both must exist inside this branch");
+  assert.ok(
+    traced < returned,
+    "a drop with no trace before the return is exactly the silent drop this trace exists to end",
+  );
+  assert.ok(/traceVoice\("dropped", \{ by: "directive-echo" \}\);/.test(block));
+});
+
+test("the report-echo filter records a dropped trace before its silent return", () => {
+  const block = stage.slice(
+    stage.indexOf("if (isAssistantReportEcho(clean))"),
+    stage.indexOf("// Update last user bubble"),
+  );
+  const traced = block.indexOf('traceVoice("dropped"');
+  const returned = block.indexOf("return;");
+  assert.ok(traced > 0 && returned > 0, "both must exist inside this branch");
+  assert.ok(
+    traced < returned,
+    "a drop with no trace before the return is exactly the silent drop this trace exists to end",
+  );
+  assert.ok(/traceVoice\("dropped", \{ by: "report-echo" \}\);/.test(block));
+});
+
+/* ── The trace: refused and held look the same ────────────────────────────── */
+
+test("the turn trace records busy and lands before the workspace gate branches on it", () => {
+  const traced = stage.indexOf('traceVoice("turn"');
+  const gate = stage.indexOf("if (workspaceAction && !busy)");
+  assert.ok(traced > 0 && gate > 0, "both must exist");
+  assert.ok(
+    traced < gate,
+    "a turn the parser refused and one the busy gate held both end in silence; only a trace written ahead of the branch that treats them alike can tell them apart afterwards",
+  );
+
+  const block = stage.slice(traced, gate);
+  assert.ok(
+    /\bbusy,/.test(block),
+    "the turn trace must carry `busy`, or a refused parse and a held gate are indistinguishable in the ring",
+  );
 });

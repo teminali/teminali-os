@@ -85,7 +85,7 @@ import {
   validateKey,
   writeStore,
 } from "./providers.js";
-import { forgetProject, listRecentProjects, rememberProject, validateProjectRoot } from "./projects.js";
+import { discoverProjectFolders, forgetProject, listRecentProjects, rememberProject, validateProjectRoot } from "./projects.js";
 import { addBookmark, clearHistory, isBrowsableUrl, mergeImported, readBrowserData, recordDownload, recordVisit, removeBookmark, searchHistory } from "./browser-data.js";
 import { BrowserImportError, discoverImportSources, readImport } from "./browser-import.js";
 import { resolveProjectPhrase } from "./project-phrase.js";
@@ -2208,6 +2208,25 @@ export async function createGateway(options = {}) {
           current: { path: config.workspaceRoot, name: basename(config.workspaceRoot) || config.workspaceRoot },
           recent: await listRecentProjects(config.projectsStorePath),
         });
+        return;
+      }
+
+      /*
+        Every folder under the discovery roots, opened or not.
+
+        Separate from `GET /api/workspace/projects` rather than a field on it,
+        because the two answer different questions at different costs. That
+        route reads a twelve-entry store and classifies each one; this one
+        scans up to three directories on disk and is the slower call by an
+        order of magnitude. A panel that only wants the recents should not pay
+        for a scan it will not read.
+
+        It takes no parameters on purpose. The roots are the server's own — see
+        `DISCOVERY_ROOTS` in projects.js — so there is nothing for a caller to
+        name, and nothing a caller can widen.
+      */
+      if (request.method === "GET" && route === "/api/workspace/projects/discover") {
+        replyJson(response, 200, await discoverProjectFolders());
         return;
       }
 

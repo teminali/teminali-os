@@ -418,15 +418,28 @@ const NON_ACTION_FRAMES: readonly RegExp[] = [
 /** The nouns that mark the object as a place on disk rather than a surface. */
 const PLACE_NOUN = "(?:workspace|project|repo|repository|codebase|folder|directory|dir)";
 /**
- * Up to three words of name, which is what a hyphenated project transcribes as.
+ * Up to four words of name, which is what a real directory is spoken as.
+ *
+ * Three was the original window and it was measured wrong on 2026-09-12, by the
+ * folder the operator actually tried: `4K Video Downloader+` is said either
+ * "4K video downloader plus" or "four K video downloader", and both are FOUR
+ * words. The name is pinned between the verb's lead-in and the place noun, so a
+ * four-word name matched no pattern at all and the scorer was never reached --
+ * the command died before anything could even refuse it, which is why the
+ * failure was invisible. `Mocro.Maffia.S06.MULTi` was unreachable for the same
+ * reason.
+ *
+ * Widening this ALONE is not safe, and the guard is in `cleanName`: a longer
+ * window lets a capture cross a phrase boundary, and "move the video into the
+ * downloads folder" then reads as a name. See the note there.
  *
  * Read twice, once shortest first and once longest first, because a place noun
  * can sit INSIDE the name: `gs_project` is spoken "gs project", so "switch to
  * the gs project repo" has two honest readings and the short one resolves to
  * "gs", which is nothing. Both readings are scored and the better one wins.
  */
-const NAME_SHORTEST = "([\\w.'\\-]+(?:[ \\t]+[\\w.'\\-]+){0,2}?)";
-const NAME_LONGEST = "([\\w.'\\-]+(?:[ \\t]+[\\w.'\\-]+){0,2})";
+const NAME_SHORTEST = "([\\w.'\\-]+(?:[ \\t]+[\\w.'\\-]+){0,3}?)";
+const NAME_LONGEST = "([\\w.'\\-]+(?:[ \\t]+[\\w.'\\-]+){0,3})";
 
 const SWITCH_VERB = "(?:switch|change|move|jump|hop|flip|take\\s+me|bring\\s+me|go)";
 const OPEN_VERB = "(?:open|show|reveal|bring\\s+up|pull\\s+up|go\\s+to|navigate\\s+to)";
@@ -460,13 +473,33 @@ const OPEN_THEN_NAME = [
 /** Words that ride along with the name and are not part of it. */
 const FILLER = /^(?:to|into|the|my|our|that|this|a|an|me|back|over|up|please|now|again)$/i;
 
+/**
+ * The name inside a capture, or nothing if the capture is not a name.
+ *
+ * Filler is trimmed from the EDGES, where it rides along with a name: "open my
+ * dukabot folder" captures "my dukabot" and means `dukabot`.
+ *
+ * Filler that survives in the MIDDLE is the opposite signal. It is not a word
+ * riding along, it is the sentence carrying on, which means the pattern
+ * swallowed across a phrase boundary and the capture is not a directory name at
+ * all. Deleting it welds the two sides together into a name nobody said. The
+ * case that proves it, and the reason this is a refusal rather than a filter:
+ * "move the video into the downloads folder" is an instruction to move a FILE,
+ * it captures "video into the downloads", and deleting `into` and `the` leaves
+ * "video downloads" -- which scores well enough against `4K Video Downloader+`
+ * to switch his workspace root. That is the silent wrong switch this whole file
+ * is written to refuse, arriving through the front door.
+ */
 function cleanName(raw: string | undefined): string {
   if (!raw) return "";
-  const words = raw
-    .trim()
-    .split(/[ \t]+/)
-    .filter((word) => word && !FILLER.test(word));
-  return words.join(" ");
+  const words = raw.trim().split(/[ \t]+/).filter(Boolean);
+  let start = 0;
+  let end = words.length;
+  while (start < end && FILLER.test(words[start])) start += 1;
+  while (end > start && FILLER.test(words[end - 1])) end -= 1;
+  const inner = words.slice(start, end);
+  if (inner.some((word) => FILLER.test(word))) return "";
+  return inner.join(" ");
 }
 
 /**

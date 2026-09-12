@@ -7618,6 +7618,143 @@ the chunk this stage ships in, on a screen that usually never touches the editor
 `tests/voice-editor-actions.test.mjs` (23) covers the grammar and the result
 descriptions; `tests/voice-editor-wiring.test.mjs` (8) pins the arrangement.
 
+### 6.0.26 The folder he actually tried was four words long (`services/voice/workspaceActions.ts`, 2026-09-12)
+
+§6.0.24 shipped the parser with a three word name window. On 2026-09-12 the
+operator spoke the name of a folder it could not hear at all:
+`4K Video Downloader+`, which is said either "4K video downloader plus" or
+"four K video downloader". Both are FOUR words. The name is pinned between the
+verb's lead in and the place noun, so a four word name matched no pattern,
+`parseWorkspaceCommand` returned null before the scorer ever ran, and no
+refusal was reachable either. There was nothing to refuse, because nothing had
+been read as a name. `Mocro.Maffia.S06.MULTi` was out of reach for the same
+reason. `NAME_SHORTEST` and `NAME_LONGEST` now repeat `{0,3}`, four words.
+
+This is also why the resolver was cleared of the failure earlier, wrongly.
+Typing the phrase had always worked, and the typed wording is "4K video
+downloader": three words, and 1.000 against the directory. The single wording
+that survived the old window was the one nobody was speaking.
+
+**The alternative that was measured and rejected is the interesting half.**
+Normalising `+` to "plus" inside `skeleton()` looks like the obvious repair,
+and it is a trade rather than a fix. Against `4K Video Downloader+` it lifts
+"video downloader plus" from 0.684 to 0.905, and drops "four K video
+downloader" from 0.800 to 0.619, under the 0.700 floor. It buys one of the two
+wordings by losing the other, and the operator gets to find out which one he
+used. Widening the window costs neither: both resolve, measured.
+
+`tests/voice-workspace-actions.test.mjs` now runs 26, up from the 24 §6.0.24
+recorded.
+
+### 6.0.27 Filler may ride on the edges of a name, never through the middle (`services/voice/workspaceActions.ts`, 2026-09-12)
+
+`cleanName` used to strip `FILLER` words from anywhere in a capture. With a
+three word window that was merely generous. With four words it is unsafe, and
+§6.0.26 does not ship without this: the wider window is exactly what lets a
+capture reach across a phrase boundary.
+
+The case that proves it is an ordinary sentence. "Move the video into the
+downloads folder" is an instruction about a FILE. It captures "video into the
+downloads", and deleting `into` and `the` welds the two ends into "video
+downloads", which scores 0.765 against `4K Video Downloader+`, over the 0.700
+floor. A sentence about moving a file would have silently rebound the workspace
+root, collapsing the open tree and restamping the chat session, which is the
+one failure the whole module is written to refuse, arriving through the front
+door.
+
+So interior filler is now a refusal, not something to clean off. Filler at an
+edge is a word riding along with a name, "open my dukabot folder" meaning
+`dukabot`. Filler in the middle is the sentence carrying on, which is evidence
+that the capture crossed a phrase boundary, so what was captured is not a
+directory name at all and no amount of cleaning turns it into one. `cleanName`
+returns the empty string, `namesFrom` drops the reading, and the turn falls
+through to the assistant, which can read the sentence properly.
+
+Measured after both changes: "open the 4K video downloader plus folder" and
+"open the four K video downloader folder" resolve to `4K Video Downloader+`,
+and "move the video into the downloads folder" parses to null.
+
+### 6.0.28 The spoken path keeps a trace, on `window`, not in the console (`services/voice/voiceTrace.ts`, `components/voice/TemiVoiceStage.tsx`, 2026-09-12)
+
+Four places can end a spoken turn by returning, and all four look identical
+from the operator's chair: he says a sentence and the shell sits there. Two
+echo filters drop the transcript before anything sees it
+(`isAssistantDirectiveEcho`, `isAssistantReportEcho`), `parseWorkspaceCommand`
+refuses by design and returns null, and the `!busy` gate falls through to
+conversation. None of them wrote anything down, so the live failure in §6.0.26
+left no evidence at all: the renderer state died with the restart, and the only
+record of it was the operator's word that nothing had happened.
+
+`traceVoice` is the record. `heard` carries the raw transcript, which is the
+datum the whole diagnosis turns on, since "open the 4K video downloader folder"
+resolves and "open the 4K video downloader PLUS folder" did not, and nothing
+downstream can tell you which one the microphone produced. `dropped` names
+which echo filter took it. One `turn` line carries `source`, `busy`, the parsed
+workspace kind and the candidate count, which is what separates a turn the
+parser refused from one the gate held: both end in silence and they need
+opposite fixes.
+
+**It is a bounded ring on `window`, and it is deliberately NOT a console log.**
+A log is readable only by whoever is attached to the console at the instant it
+prints, and the shape of this failure is that it happens while the operator is
+talking and is read afterwards, over CDP, by someone who was not in the room. A
+ring can be read at any point after the fact. `LIMIT` is 40, a conversation's
+worth of turns, and the old events go rather than the new ones, because the
+failure being diagnosed is always the most recent thing he tried.
+
+**Published at module import, not on first event, and that timing carries the
+information.** An EMPTY `window.__temiVoiceTrace` says the voice stage is
+mounted and heard nothing. A MISSING one says this build is not running. Those
+two need opposite next steps, and nothing else on the screen distinguishes
+them. The publish is guarded on `typeof window`, because a node test imports
+the module with no window to publish onto.
+
+`traceVoice` never throws and returns nothing a caller can branch on. It sits
+on the path between a microphone and a workspace switch, and a diagnostic that
+can change what that path does is worse than no diagnostic.
+
+`tests/voice-trace.test.mjs` (6) pins the ring: it bounds at 40 dropping the
+oldest, it imports cleanly in a process with no `window`, and `traceVoice`
+throws on nothing a caller could hand it, including a cyclic detail object. The
+call sites in `TemiVoiceStage.tsx` are held in place by review rather than by
+an assertion.
+
+### 6.0.29 A refusal that says nothing is indistinguishable from not hearing (`components/voice/TemiVoiceStage.tsx`, 2026-09-12)
+
+§6.0.24's `!busy` gate is still right for the reason recorded there: a switch
+landed mid-run sends the run's next `Edit` or `Write` into a different
+repository. What was wrong was the silence. Mid-run the turn fell THROUGH to
+the assistant, so the operator said "switch to DukaBot", nothing visible
+happened, and a refusal he would have agreed with was indistinguishable from a
+command that was never heard. One of those asks him to wait and the other asks
+him to say it again.
+
+The branch below the gate now answers instead of falling through: barge in when
+the turn was spoken, one spoken line, "I heard you. I'll switch to <name> once
+this run finishes", and a toast. It is answered here rather than passed on
+because handing a workspace command to the assistant answers a command with
+talk.
+
+**What that line promises is NOT yet true.** Nothing is queued. There is no
+pending action, no watcher on `busy`, and no re-issue when the run ends: `busy`
+is read at the gate and nowhere else. The operator still has to say it again,
+while the sentence and the toast both describe a queue that does not exist.
+Recorded here because this doc is the only place the gap is visible, the code
+reads as though the queue were there. Either the queue gets built or the words
+change.
+
+A second, smaller inaccuracy in the same line: a mid-run `reveal-folder` is
+refused too, and is described as a switch. §6.0.24 gated reveal only because
+one gate is easier to keep right than two, so the refusal is deliberate and its
+wording is not.
+
+This is a fifth `speakLineRef` call inside the block §6.0.21 governs, and the
+rule holds unchanged: one line, spoken, with no bubble written beside it.
+`tests/voice-workspace-wiring.test.mjs` pins the shape of that block by
+counting its early returns and its spoken lines, so this branch moves both
+counts by one and those numbers are part of the contract rather than incidental
+to it.
+
 ### 6.1 Turn semantics while a run is in flight (2026-09-05)
 
 A directed utterance is not automatically an instruction. `turnIntent.ts`

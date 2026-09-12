@@ -51,12 +51,49 @@ export interface ProjectsResponse {
   recent: ProjectEntry[];
 }
 
+/**
+ * A folder found on disk under one of the gateway's discovery roots.
+ *
+ * The first two fields of `ProjectEntry`, and no more, so a caller can
+ * concatenate a discovered list onto the recents without translating either.
+ * There is no `kind`: classifying would mean opening a project.json in each of
+ * up to four hundred directories, and nothing consuming this list asks.
+ */
+export interface DiscoveredFolder {
+  path: string;
+  name: string;
+}
+
+export interface DiscoveredFoldersResponse {
+  folders: DiscoveredFolder[];
+  /** True when the scan hit the gateway's entry cap and stopped early. */
+  truncated: boolean;
+}
+
 export class WorkspaceService {
   /** Current project root plus the recently opened list. */
   static async listProjects(signal?: AbortSignal): Promise<ProjectsResponse> {
     const response = await GatewayClient.request("/api/workspace/projects", { method: "GET", signal });
     await GatewayClient.expectOk(response);
     return (await response.json()) as ProjectsResponse;
+  }
+
+  /**
+   * Every immediate subdirectory of the roots the operator's projects live
+   * under, whether or not he has ever opened them.
+   *
+   * `listProjects` answers what he has opened before, which is why a folder he
+   * has never opened was unreachable by a spoken name. This answers what is
+   * actually on disk. The roots and the entry cap belong to the gateway — this
+   * sends no path, so there is nothing here that could widen them.
+   *
+   * Costlier than `listProjects`: it walks directories rather than reading a
+   * twelve-entry store. Call it when the list is needed, not on every mount.
+   */
+  static async discoverProjectFolders(signal?: AbortSignal): Promise<DiscoveredFoldersResponse> {
+    const response = await GatewayClient.request("/api/workspace/projects/discover", { method: "GET", signal });
+    await GatewayClient.expectOk(response);
+    return (await response.json()) as DiscoveredFoldersResponse;
   }
 
   /** Switches the workspace root every workspace and terminal route is bound to. */
