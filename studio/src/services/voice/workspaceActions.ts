@@ -37,12 +37,41 @@
 export const PROJECTS_ROOT = "/Users/teminali/Documents/my_projects";
 
 /**
+ * The operator's home, read off `PROJECTS_ROOT` rather than imported.
+ *
+ * `os.homedir()` would be the obvious way and is not available: this module is
+ * bundled for the browser and imports nothing. See the header.
+ */
+const HOME = PROJECTS_ROOT.slice(0, PROJECTS_ROOT.indexOf("/Documents/"));
+
+/**
  * The only roots a spoken name may ever resolve inside.
  *
- * One entry today. It is a list because the guard reads a list, and because the
- * second root, if it ever arrives, must not be added by loosening the guard.
+ * It began as one entry, and the second and third were added the way the note
+ * here always said they would have to be — by naming another root, never by
+ * loosening `isPathAllowed`, which still refuses `/etc`, a relative path, a
+ * `..` escape and a sibling directory whose name merely starts the same way.
+ *
+ * They were added because the single root made the feature resolve almost
+ * nothing. Measured against the live gateway on 2026-09-12, the operator's
+ * `recent` list held nine projects and exactly one of them — `teminaliCode` —
+ * sat under `my_projects`. The rest were `~/Downloads/4K Video Downloader+`,
+ * `~/Downloads/MyProject` and four recordings under `~/Movies`, so every spoken
+ * name but one resolved to null. That is not a cautious fast path, it is a
+ * feature that only ever agrees you are already where you are — and the
+ * operator's own call transcript from that day has him asking three times to be
+ * switched to the 4K Video Downloader project, which is in `~/Downloads`.
+ *
+ * `~/Movies` is where the app writes its own recordings, so a video project
+ * living there is the app's doing rather than the operator's choice. Candidates
+ * still arrive from the gateway's list of projects he actually opened, which is
+ * the narrower guard of the two and the one doing most of the work.
  */
-export const ALLOWED_ROOTS: readonly string[] = [PROJECTS_ROOT];
+export const ALLOWED_ROOTS: readonly string[] = [
+  PROJECTS_ROOT,
+  `${HOME}/Downloads`,
+  `${HOME}/Movies`,
+];
 
 /**
  * How close a heard name must be to a real directory name before it counts.

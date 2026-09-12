@@ -99,11 +99,26 @@ monitor and transport bars clip, because the Cut never runs that column below
 ## P2 — the chat edits the timeline
 
 `mcp/toolRegistry.ts` is a **reduction of the Cut's 6,230-line file of the same
-name to three tools**: `describe_timeline`, `patch_clip` and `set_effect_param`.
-Same path, same exports (`KERF_TOOLS`, `getTool`, `executeTool`,
-`getToolManifest`), same Zod schemas — so adding a fourth is a copy-paste out of
-the Cut, and syncing is a diff. It cost one dependency, `zod ^3.24.2`, pinned to
-the range the Cut declares.
+name**. It began at three — `describe_timeline`, `patch_clip` and
+`set_effect_param` — and is **thirteen**, all of them exposed. Same path, same
+exports (`KERF_TOOLS`, `getTool`, `executeTool`, `getToolManifest`), same Zod
+schemas — so the next one is a copy-paste out of the Cut, and syncing is a diff.
+It cost one dependency, `zod ^3.24.2`, pinned to the range the Cut declares.
+
+| | tools |
+|---|---|
+| read | `describe_timeline`, `list_media_pool` |
+| edit | `patch_clip`, `set_effect_param` |
+| drive | `timeline_command`, `set_track`, `insert_clip` |
+| media | `import_media_from_path`, `ffmpeg_process` |
+| produce | `perfect_captions`, `generate_captions`, `build_recording`, `export_project` |
+
+`timeline_command` is one dispatcher over eleven verbs — `play_pause`, `play`,
+`pause`, `set_playhead`, `nudge`, `split`, `delete_selected`, `undo`, `redo`,
+`select_clip`, `clear_selection` — rather than eleven tools, because the ceiling
+below is on names and not on capability. `play` and `pause` are absolute and
+`play_pause` flips: an operator who says "play" to a running transport would
+otherwise get a pause, the command doing the opposite of the word.
 
 Two things the Cut's `executeTool` does are gone, because neither store came
 across: it logs every call to `useMcpStore`, and it calls `followToolCall` so
@@ -122,11 +137,22 @@ Nothing in this folder knows about the chat. The wiring lives in the host:
 Those two are the only files that import this registry, and they are the two
 trust boundaries: the chat runs in this renderer, the CLIs do not.
 
-**There is no approval gate on these tools**, unlike shell commands. A command
-can delete a file; these three write to two in-memory Zustand stores that
-nothing persists, each call is exactly **one** entry on the undo stack, and the
-panel is on screen while it happens. Import and export are the tools that will
-need a gate, and they are P3/P4.
+**Two tools carry an approval gate; the rest carry none**, unlike shell
+commands. `import_media_from_path` and `ffmpeg_process` declare `consent` and
+name the paths they will touch, because a caller hands them a path on the
+operator's disk — `services/videoToolBridge.ts` is the wiring and
+[P3-import-gate.md](./P3-import-gate.md) the design. Everything else moves
+numbers in two in-memory Zustand stores that nothing persists, each call is
+exactly **one** entry on the undo stack, and the panel is on screen while it
+happens.
+
+`export_project` is the one that writes a file and still declares nothing, so
+the reason is written beside it in `toolRegistry.ts` as well as here: the gate
+decides about a path the CALLER named, and there is none. `runExport` writes
+`suggestedFileName(project.name, codec)` into the app's own Videos folder, and
+`ExportRequest.outputPath` is deliberately not offered as an argument — adding
+it would make this a tool that needs `consent: ['write-path']` and a bridge that
+checks it.
 
 `aiService` used to intercept every prompt matching
 `/video|timeline|silence|beat|caption|track/` and answer it with one hardcoded
@@ -138,15 +164,23 @@ one.
 ## The exposed surface is an allowlist
 
 `getToolManifest()` is built from `EXPOSED_TOOLS`, not from every tool defined
-in the file, and `TOOL_BUDGET` caps it at 15. This is the only part of the
-design that costs tokens, so the numbers are measured rather than guessed:
+in the file, and `TOOL_BUDGET` caps it at 15. **Thirteen are listed**, so there
+are two names left before someone has to argue for raising the ceiling. This is
+the only part of the design that costs tokens, so the numbers are measured
+rather than guessed:
 
 | | chars | ~tokens |
 |---|---:|---:|
-| the three tools' descriptions | 912 | <1k |
+| the first three tools' descriptions | 912 | <1k |
 | their full manifest, schemas included | 1,798 | ~450 |
+| **today's thirteen descriptions** | **4,470** | ~1.1k |
+| **their full manifest, schemas included** | **12,025** | ~3k |
 | the Cut's **115** descriptions | 34,660 | ~8.7k |
 | the same with their schemas | — | 15-20k |
+
+The two bold rows are `getToolManifest()` on the current file, counted at the
+character; the `~tokens` column is chars ÷ 4, the same estimate the rows above
+it use.
 
 That cost is paid on every request that advertises the panel, and it is
 identical whichever transport carries the call: a function pointer in this
@@ -160,9 +194,9 @@ where import and export will want an approval gate before they are listed.
 `brief`: the same capability in one line, for the local lane's system prompt
 only. The long form is written for an MCP client with room for it — Claude Code
 and Codex read it and are deliberately ungoverned — while the local lane reads
-the whole catalogue into an 8k window, where the nine exposed descriptions came
-to **3,395 characters, 43% of its entire system-prompt budget**, and crowded
-out the block that lets the assistant ask the operator a question.
+the whole catalogue into an 8k window, where the nine exposed descriptions of
+the day came to **3,395 characters, 43% of its entire system-prompt budget**,
+and crowded out the block that lets the assistant ask the operator a question.
 
 Shortening `description` would have made the manifest worse for the lanes that
 can afford it, and truncating it mechanically would have deleted the parts that
@@ -171,7 +205,10 @@ operator is asked", the paragraph above about what `full` costs. So the short
 form is written by hand and lives in the same object as the long one, where the
 two cannot drift. `getToolManifest()` carries both and an MCP client reads only
 `description`; `videoToolSummaries()` in `services/aiService.ts` prefers
-`brief`. Catalogue: **2,238 characters**. The guard is `editor-patch-clip` in
+`brief`. Catalogue at nine tools: **2,238 characters**; the thirteen `brief`
+strings themselves now total **2,178**, against **4,470** for their
+`description`s — which is the whole point of carrying both, and the reason four
+more verbs cost the local lane almost nothing. The guard is `editor-patch-clip` in
 `evals/local-lane.mjs`, which asks for a rotation by clip id and therefore only
 passes if the dotted-path examples survived.
 
@@ -185,7 +222,7 @@ track (`muted`, `locked`, `solo`) means false.
 
 ## The MCP bridge
 
-The three tools reach the **Claude Code** and **Codex** engines too, and those
+All thirteen tools reach the **Claude Code** and **Codex** engines too, and those
 run as real processes with no access to this renderer's stores. The chain:
 
 ```
@@ -231,9 +268,12 @@ running app.
 
 ## Still to come
 
-- **P3** — media import. Designed but not built: the approval gate, the
-  staging order, and three findings that change its scope are in
-  [P3-import-gate.md](./P3-import-gate.md). No tool touches the disk until
-  that gate exists.
-- **P4** — export (`export:*`, `render:*`). Until then, export stays in
-  Teminali Cut, which is why that app is still shipping.
+- **P3** — media import. Built: `import_media_from_path` and `ffmpeg_process`
+  declare `consent`, and `services/mediaConsent.ts` is the gate they go
+  through. [P3-import-gate.md](./P3-import-gate.md) is the design it was built
+  from, and `tests/media-consent-gate.test.mjs` the ten tests it owes.
+- **P4** — export. `export_project` renders the sequence through the same
+  `runExport` and the same dialog a person uses, so an agent's export can be
+  watched and cancelled. What it does not do is take a destination: the file
+  lands in the app's Videos folder under the project name. A tool that writes
+  where the caller says needs a write gate first, and that is not built.

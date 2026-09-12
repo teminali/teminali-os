@@ -327,3 +327,30 @@ test("the module imports nothing, so the renderer bundle still builds", async ()
   assert.equal(/^\s*import\b/m.test(source), false, "no imports, pure rules");
   assert.equal(/\brequire\s*\(/.test(source), false);
 });
+
+/* ── the roots, after the measurement that widened them ───────────────────── */
+
+test("the operator's real projects resolve, which one root did not allow", () => {
+  /* Measured against the live gateway on 2026-09-12: of the nine projects in
+     his `recent` list, exactly one sat under `my_projects`. With a single root
+     every spoken name but that one resolved to null, and his own call
+     transcript from that day has him asking three times to be switched to a
+     project in `~/Downloads`. */
+  const candidates = [
+    { name: "teminaliCode", path: `${PROJECTS_ROOT}/teminali/teminaliCode` },
+    { name: "4K Video Downloader+", path: "/Users/teminali/Downloads/4K Video Downloader+" },
+    { name: "MyProject", path: "/Users/teminali/Downloads/MyProject" },
+    { name: "2026-09-10 20.37.26", path: "/Users/teminali/Movies/Teminali OS Recordings/2026-09-10 20.37.26" },
+  ];
+  assert.equal(resolveFolder("my project", { candidates })?.label, "MyProject");
+  assert.equal(resolveFolder("4k video downloader", { candidates })?.label, "4K Video Downloader+");
+});
+
+test("widening the roots did not widen the guard", () => {
+  // The mechanism is untouched; only the list it reads got longer.
+  assert.equal(isPathAllowed("/etc/dukabot"), false);
+  assert.equal(isPathAllowed("/Users/teminali/Downloads/../../../etc"), false);
+  assert.equal(isPathAllowed("/Users/teminali/Downloads_backup/thing"), false);
+  assert.equal(isPathAllowed("/Users/teminali"), false, "the home directory is not a project");
+  assert.equal(isPathAllowed("/Users/teminali/Downloads/MyProject"), true);
+});

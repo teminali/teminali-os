@@ -15,6 +15,17 @@ import { CaptionPacer } from "../../services/voice/captionPacer";
 import { TeminaliAgentBridge } from "../../services/voice/teminaliAgentBridge";
 import { routeVoiceTurn } from "../../services/voice/voiceTurnRouter";
 import { runProgressFromActivity } from "../../services/voice/runProgressFromActivity";
+import {
+  candidatesFromEntries,
+  parseWorkspaceCommand,
+  type FolderCandidate,
+} from "../../services/voice/workspaceActions";
+import {
+  describeEditorResult,
+  parseEditorCommand,
+  type EditorCommand,
+} from "../../services/voice/editorActions";
+import { WorkspaceService, type ProjectsResponse } from "../../services/workspaceService";
 import { dialogueFromMessages, messagesFromDialogue } from "../../utils/sessionDialogue";
 import { EMPTY_HISTORY, newer, older, remember, stopBrowsing, type PromptHistory } from "../../utils/promptHistory";
 import { useInterruptKey } from "../../hooks/useInterruptKey";
@@ -326,6 +337,30 @@ export const TemiVoiceStage: React.FC<TemiVoiceStageProps> = ({
   // What Temi last said, so "say that again" has something to say again.
   const lastSpokenRef = useRef<string | null>(null);
   const isSpeakingRef = useRef(false);
+  /* The folders a spoken name is allowed to resolve to.
+
+     A ref rather than state because it is read from `performVoiceTurn`, which
+     lives in `performTurnRef` and is installed into the socket once: a state
+     copy would be the empty array the socket opened with, forever. It is also
+     never rendered, so there is nothing for state to buy.
+
+     The gateway is the only source of these in the renderer. `workspaceActions`
+     can list a directory itself, but only through an injected `fs.readdirSync`,
+     and the renderer is a browser bundle with no `fs`. The cost is the known
+     limitation: a project the operator has never opened is not in `recent`, so
+     it is not a candidate and that turn correctly falls through to the
+     assistant, which can reach the disk. */
+  const workspaceCandidatesRef = useRef<FolderCandidate[]>([]);
+  /* Whether the root the shell is bound to is a video project.
+
+     The editor grammar is small but its words are not rare: "undo that",
+     "delete that clip", "pause it" are all things an operator says to an agent
+     working on code, and answering them by reaching for a timeline that is not
+     there would turn ordinary conversation into "That didn't work". The gateway
+     already answers this question — it classifies a directory as `video` from
+     the `teminali-video-project` marker in its `project.json` — so the shell
+     does not have to guess and no new state has to be invented. */
+  const isVideoProjectRef = useRef(false);
   const scrollRef = useRef<HTMLDivElement | null>(null);
   // Whether the operator is reading the live end of the conversation. Scrolling
   // up to re-read something must not be yanked back by the next turn arriving.
@@ -375,6 +410,25 @@ export const TemiVoiceStage: React.FC<TemiVoiceStageProps> = ({
     if (!el) return;
     el.scrollTo({ top: el.scrollHeight, behavior: "smooth" });
   }, [turns]);
+
+  /* The gateway's project list, folded into candidates the resolver can score.
+     `current` goes in first so "open the folder I'm already in" resolves to a
+     no-op rather than falling through to a delegate. */
+  const absorbProjects = useCallback((projects: ProjectsResponse) => {
+    workspaceCandidatesRef.current = candidatesFromEntries([projects.current, ...projects.recent]);
+    isVideoProjectRef.current = projects.current.kind === "video";
+  }, []);
+
+  /* Fetched once, on mount. A failure here is not worth a line to the operator:
+     it costs the fast path, and every spoken folder name then falls through to
+     the assistant, which is exactly where it went before this existed. */
+  useEffect(() => {
+    const controller = new AbortController();
+    void WorkspaceService.listProjects(controller.signal)
+      .then(absorbProjects)
+      .catch(() => undefined);
+    return () => controller.abort();
+  }, [absorbProjects]);
 
   // ── Initialize the Real 8000 AudioEngine & ProtocolManager ───────────────
   useEffect(() => {
@@ -596,6 +650,48 @@ export const TemiVoiceStage: React.FC<TemiVoiceStageProps> = ({
     };
   }, [logAction]);
 
+  /**
+   * One parsed editor command, executed, and reported honestly.
+   *
+   * Exactly one line is spoken per command, and it is derived from the result
+   * rather than from the request. `splitAtPlayhead` succeeds with `cut: 0` when
+   * the playhead is over nothing, so announcing "Cut." on a successful call
+   * tells the operator about an edit that did not happen — and he finds out at
+   * the export. `describeEditorResult` is where that judgement lives.
+   *
+   * The export is the one command that speaks twice, deliberately: it holds the
+   * machine for minutes, and the delegate path already established that silence
+   * across a long job reads as a command that was never heard. Two lines at two
+   * different times is not the double-render defect of DESIGN.md 6.0.21, which
+   * was one line landing on two surfaces at once.
+   */
+  const runEditorCommand = useCallback(
+    (command: EditorCommand) => {
+      const slow = command.tool === "export_project";
+      if (slow) speakLineRef.current(command.spoken, "verbatim");
+      showToast(command.spoken);
+
+      void import("../../video/mcp/toolRegistry")
+        .then(({ executeTool }) => executeTool(command.tool, command.args, "Temi (voice)"))
+        .then((result) => {
+          const line = describeEditorResult(command, result);
+          // A slow command has already said what it was doing; saying it again
+          // on success would be the same sentence twice.
+          if (!slow || !result.success || line !== command.spoken) {
+            speakLineRef.current(line, "verbatim");
+          }
+        })
+        .catch((error: unknown) => {
+          /* The import itself failing means this build has no editor in it —
+             a different thing from the editor refusing, and worth saying so
+             rather than reporting a tool error the operator cannot act on. */
+          const reason = error instanceof Error ? error.message : String(error);
+          speakLineRef.current(`I could not reach the editor: ${reason}`, "verbatim");
+        });
+    },
+    [showToast],
+  );
+
   // ── One switch for everything the operator says (spoken or typed) ────────
   //
   // `routeVoiceTurn` decides; this performs. The split is deliberate: the
@@ -610,6 +706,120 @@ export const TemiVoiceStage: React.FC<TemiVoiceStageProps> = ({
       // run as it looked when the socket opened.
       const activity = useAssistantActivityStore.getState();
       const busy = activity.isTaskRunning;
+
+      /* ── The workspace fast path, ahead of the router ──────────────────────
+         Naming a project he already has is a name lookup, not a job. The slow
+         path still exists and is still correct — `machineAction.ts` files this
+         under `workspace` and the assistant opens it — but that is a delegate,
+         a prompt, a tool call and a report for a decision about four sibling
+         directories. This is ahead of `routeVoiceTurn` for the same reason
+         `mute` is: the router would file "switch to DukaBot" as conversation
+         and answer it with talk.
+
+         It resolves or it returns null; `parseWorkspaceCommand` under-matches
+         on purpose, so a name it will not swear to falls through to the two
+         paths that were already here rather than opening a guess.
+
+         THE `!busy` GATE IS LOAD BEARING, and it is a measured hazard rather
+         than caution. `openProject` rebinds the workspace root that every
+         workspace and terminal route resolves against (`workspaceService.ts`),
+         and an agent run in flight resolves its relative paths against that
+         same root — so switching mid-run sends the run's next Edit or Write
+         into a DIFFERENT REPOSITORY. A silent wrong-file write is the most
+         expensive failure on this lane. `reveal-folder` is genuinely safe
+         mid-run, since it only touches `expandedPaths` and `revealTarget`, but
+         one gate is easier to keep right than two and mid-run the assistant
+         answers instead. */
+      const store = useStudioStore.getState();
+      const workspaceAction = parseWorkspaceCommand(clean, {
+        candidates: workspaceCandidatesRef.current,
+        /* Only when the gateway has confirmed it. The initial `workspacePath`
+           is a hardcoded guess (`studioStore.ts`), and an unconfirmed root must
+           not get to decide that a folder is "local" — that turns a switch into
+           a reveal against a root we are not actually bound to. */
+        workspacePath: store.workspaceRootConfirmed ? store.workspacePath : undefined,
+      });
+
+      if (workspaceAction && !busy) {
+        // She is mid-sentence and the model is already answering the spoken
+        // turn. Cut both, exactly as the delegate path does.
+        if (source === "spoken") {
+          protocolRef.current?.sendBargeIn();
+          audioRef.current?.stopTTSPlayback();
+        }
+
+        if (workspaceAction.kind === "reveal-folder") {
+          /* `relativePath`, not `path`: `revealPath` keys the open set by
+             workspace-relative path, so an absolute one opens nothing. */
+          store.revealPath(workspaceAction.relativePath);
+          const name = workspaceAction.relativePath.split("/").filter(Boolean).pop() ?? "it";
+          speakLineRef.current(`Opening ${name} in the tree.`, "verbatim");
+          showToast(`Revealed ${workspaceAction.relativePath}`);
+          return;
+        }
+
+        if (workspaceAction.path === store.workspacePath) {
+          /* Already there. Not merely redundant: `setWorkspacePath` collapses
+             every open folder, clears the reveal target and restamps the active
+             chat session onto the root, so re-applying the root the shell is
+             already bound to would throw away the operator's open tree to
+             arrive where he is. */
+          speakLineRef.current(`We're already in ${workspaceAction.label}.`, "verbatim");
+          return;
+        }
+
+        const target = workspaceAction.label;
+        showToast(`Opening ${target}…`);
+        void WorkspaceService.openProject(workspaceAction.path)
+          .then((projects) => {
+            /* The gateway's confirmed path, never the parsed one. The gateway
+               owns which root the routes read; passing the path we guessed
+               would stamp a guess into the store as a confirmed fact. */
+            useStudioStore.getState().setWorkspacePath(projects.current.path);
+            absorbProjects(projects);
+            speakLineRef.current(`Switched to ${projects.current.name || target}.`, "verbatim");
+          })
+          .catch((error: unknown) => {
+            const reason = error instanceof Error ? error.message : String(error);
+            speakLineRef.current(`I could not open ${target}: ${reason}`, "verbatim");
+          });
+        return;
+      }
+
+      /* ── The editor's hands ───────────────────────────────────────────────
+         The video editor has had a programmatic surface since P2 and the chat
+         has used it since; the voice lane never could. `routeVoiceTurn` knows
+         `converse`, `stop`, `repeat`, `hush` and `mute`, and none of those is a
+         tool call — so "cut here", spoken aloud, arrived as conversation and
+         was answered with a sentence about cutting. This is the link.
+
+         `parseEditorCommand` refuses far more than it accepts; null here means
+         the turn carries on to the assistant exactly as it did before.
+
+         THIS ONE IS NOT GATED ON `!busy`, and the difference from the workspace
+         block above is the point rather than an oversight. A workspace switch
+         redirects an in-flight run's writes into another repository, silently.
+         An edit does not: it lands on the timeline in front of the operator,
+         who asked for it while watching, and hands-free control that switches
+         itself off whenever an agent is working is control he does not have
+         when he most wants it. `export_project` is the one heavy verb, and the
+         pipeline's own `canExport` is a better judge of whether it can run than
+         a flag about some unrelated agent.
+
+         The registry is reached by dynamic import on purpose. `toolRegistry`
+         pulls the ffmpeg and caption surfaces behind it, and a static import
+         here would drag all of it into the chunk this stage ships in, on a
+         screen that usually never touches the editor at all. */
+      const editorCommand = isVideoProjectRef.current ? parseEditorCommand(clean) : null;
+      if (editorCommand) {
+        if (source === "spoken") {
+          protocolRef.current?.sendBargeIn();
+          audioRef.current?.stopTTSPlayback();
+        }
+        runEditorCommand(editorCommand);
+        return;
+      }
+
       const decision = routeVoiceTurn(clean, {
         busy,
         speaking: isSpeakingRef.current,
@@ -730,7 +940,7 @@ export const TemiVoiceStage: React.FC<TemiVoiceStageProps> = ({
           break;
       }
     },
-    [showToast]
+    [absorbProjects, runEditorCommand, showToast]
   );
 
   useEffect(() => {

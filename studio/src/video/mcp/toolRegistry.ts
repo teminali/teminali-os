@@ -31,7 +31,7 @@ import { z } from 'zod';
 import type { ConsentCapability, RequestedPath } from '../../services/mediaConsent';
 import { useTimelineStore, findClipById, getContentEndMs } from '../store/timelineStore';
 import { useProjectStore } from '../store/projectStore';
-import type { ClipType, MediaAsset } from '../types/edl';
+import type { ClipType, MediaAsset, Track, TrackType } from '../types/edl';
 import { describeClipProperties } from '../engine/propertyPath';
 import { runCaptionWorkflow } from '../engine/captionWorkflow';
 import { useRecorderStore, type StickySettings } from '../store/recorderStore';
@@ -177,6 +177,132 @@ function requireUnlocked(clipId: string): void {
   if (track?.locked) {
     throw new Error(`"${clip.name}" is on locked track "${track.name}". Unlock it first.`);
   }
+}
+
+/**
+ * Resolve a track reference: an id, "selected", a name, or a 0-based index.
+ *
+ * Resolution happens HERE rather than in the store because of what the
+ * store does with a reference it cannot place. `setTrackMute` returns
+ * false and changes nothing, which is survivable; `insertClip` falls back
+ * to `tracks[0]`, which is not — a mistyped id would put the clip on a
+ * different track and report the id it was given. So the track is found
+ * first and the store is only ever handed one it already holds.
+ *
+ * Both `trackId` and `index` together is refused rather than ranked: a
+ * caller that sent both has two tracks in mind and neither is a safe
+ * guess. "selected" is here for the same reason it is in `resolveClipId`
+ * — a person saying "mute that track" cannot produce an id.
+ */
+function resolveTrack(ref?: string, index?: number): Track {
+  const state = timeline();
+
+  if (ref !== undefined && index !== undefined) {
+    throw new Error('Pass trackId or index, not both. They can name two different tracks.');
+  }
+
+  if (index !== undefined) {
+    if (!Number.isInteger(index) || index < 0) {
+      throw new Error(`index must be a whole number from 0. The timeline has ${state.tracks.length} tracks.`);
+    }
+    const at = state.tracks[index];
+    if (!at) {
+      throw new Error(
+        `There is no track at index ${index}; the timeline has ${state.tracks.length}. ` +
+        'Call describe_timeline to list them.'
+      );
+    }
+    return at;
+  }
+
+  if (ref === undefined || ref === '') {
+    throw new Error('Name the track: trackId, "selected", or a 0-based index.');
+  }
+
+  if (ref === 'selected' || ref === 'current') {
+    const selected = state.selectedTrackId;
+    if (!selected) {
+      throw new Error('No track is selected. Pass trackId or index, or select a track first.');
+    }
+    const track = state.tracks.find((t) => t.id === selected);
+    if (!track) throw new Error(`The selected track "${selected}" is no longer on the timeline.`);
+    return track;
+  }
+
+  const byId = state.tracks.find((t) => t.id === ref);
+  if (byId) return byId;
+
+  // Fall back to a name match, so the agent can say "the music track".
+  const needle = ref.toLowerCase();
+  const named = state.tracks.filter((t) => t.name.toLowerCase().includes(needle));
+  if (named.length === 1) return named[0];
+  if (named.length > 1) {
+    throw new Error(
+      `"${ref}" matches ${named.length} tracks (${named.map((t) => `${t.name} (${t.id})`).join(', ')}). Pass the id.`
+    );
+  }
+  throw new Error(`No track matching "${ref}". Call describe_timeline to list the tracks.`);
+}
+
+/**
+ * Resolve a media-pool asset by id, else by name.
+ *
+ * An ambiguous name is refused rather than resolved to the first hit.
+ * Two takes called "interview" are the normal state of a media pool, and
+ * inserting the wrong one is an edit the operator has to notice before
+ * they can undo it — an error naming both ids costs them one more call.
+ */
+function resolveAsset(assetId?: string, name?: string): MediaAsset {
+  const pool = timeline().mediaPool;
+
+  if (assetId) {
+    const byId = pool.find((a) => a.id === assetId);
+    if (byId) return byId;
+    if (!name) {
+      throw new Error(`No asset "${assetId}" in the media pool. Call list_media_pool for the ids.`);
+    }
+  }
+
+  if (!name) {
+    throw new Error('Name the asset: assetId, or name. Call list_media_pool for both.');
+  }
+
+  const needle = name.toLowerCase();
+  // An exact name beats a substring, so "intro" is not ambiguous against
+  // "intro" and "intro-alt" when the caller typed the whole name.
+  const exact = pool.filter((a) => a.name.toLowerCase() === needle);
+  const matches = exact.length ? exact : pool.filter((a) => a.name.toLowerCase().includes(needle));
+
+  if (matches.length === 1) return matches[0];
+  if (matches.length === 0) {
+    throw new Error(`No asset matching "${name}" in the media pool. Call list_media_pool.`);
+  }
+  throw new Error(
+    `"${name}" matches ${matches.length} assets (${matches.map((a) => `${a.name} (${a.id})`).join(', ')}). Pass assetId.`
+  );
+}
+
+/**
+ * The track a clip of this type belongs on when the caller named none.
+ *
+ * A type match first, then any unlocked track — except for audio, which
+ * is refused when the project has no audio track. That one is a policy
+ * and not a limitation: dropping a take's sound onto a video track is
+ * recoverable but never what was meant, and `trackId` overrides it.
+ */
+function defaultTrackFor(type: ClipType): Track {
+  const open = timeline().tracks.filter((t) => !t.locked);
+  const wants: TrackType = type === 'audio' ? 'audio' : type === 'text' ? 'text' : 'video';
+
+  const typed = open.find((t) => t.type === wants);
+  if (typed) return typed;
+
+  if (type === 'audio') {
+    throw new Error('There is no unlocked audio track for an audio asset. Pass trackId to place it anyway.');
+  }
+  const fallback = open.find((t) => t.type === 'overlay') ?? open[0];
+  if (!fallback) throw new Error('Every track is locked. Unlock one, or pass trackId.');
+  return fallback;
 }
 
 /* ═══════════════════════════════════════════════════════════════════
@@ -364,6 +490,290 @@ defineTool({
       if (!result.ok) throw new Error(result.error ?? `Could not set ${param} on "${effect}".`);
       return { clipId: id, effect, param, value };
     });
+  },
+});
+
+/* ═══════════════════════════════════════════════════════════════════
+   TRANSPORT, TRACKS AND ASSEMBLY — the editor's core verbs
+
+   One dispatcher, not eleven tools, and the budget is the reason rather
+   than taste: every exposed name is paid for on every request that
+   advertises the panel, so a tool per store action is the shape
+   `TOOL_BUDGET` exists to forbid. `timeline_command` takes the verb as
+   an argument, which costs one schema instead of eleven.
+
+   All three move numbers in the same in-memory stores the panel renders
+   from, so none of them declares `consent` — the MEDIA section below is
+   still where the first tool that reads a caller's disk begins.
+   ═══════════════════════════════════════════════════════════════════ */
+
+const TIMELINE_COMMANDS = [
+  'play_pause', 'play', 'pause', 'set_playhead', 'nudge', 'split',
+  'delete_selected', 'undo', 'redo', 'select_clip', 'clear_selection',
+] as const;
+
+defineTool({
+  name: 'timeline_command',
+  brief:
+    'The transport, razor and history in one verb: play_pause | play | pause | set_playhead | nudge | split | delete_selected | undo | redo | select_clip | clear_selection. set_playhead and nudge need ms; select_clip needs clipId.',
+  category: 'timeline',
+  description:
+    'Drive the editor: play_pause, play, pause, set_playhead, nudge, split, delete_selected, ' +
+    'undo, redo, select_clip, clear_selection. "set_playhead" takes an absolute ms and "nudge" ' +
+    'a signed delta in ms; "select_clip" takes clipId (an id, a clip name, or "selected"). ' +
+    '"play" and "pause" are absolute and report whether the transport was already there; ' +
+    '"play_pause" flips. "split" cuts every selected clip the playhead is inside — it reports ' +
+    'how many it aimed at and how many it took, and refuses rather than claim a cut it did not ' +
+    'make. Each call is one entry on the undo stack.',
+  schema: z.object({
+    command: z.enum(TIMELINE_COMMANDS).describe('Which verb to run'),
+    ms: z.number().optional().describe('Absolute position for set_playhead; a signed delta for nudge'),
+    clipId: z.string().optional().describe('For select_clip: a clip id, a clip name, or "selected"'),
+  }),
+  handler: ({ command, ms, clipId }) => {
+    const state = timeline();
+
+    /*
+      `ms` cannot be required by the schema — nine of the eleven commands
+      do not take it — so the check is here, and it is an error rather
+      than a default. A nudge of an unstated amount is a silent no-op,
+      and a playhead defaulted to 0 is a jump to the top that nobody
+      asked for; both look like the tool worked.
+    */
+    const requireMs = (): number => {
+      if (typeof ms !== 'number' || !Number.isFinite(ms)) {
+        throw new Error(
+          `"${command}" needs ms: ${command === 'nudge' ? 'a signed delta in milliseconds' : 'the position in milliseconds'}.`
+        );
+      }
+      return ms;
+    };
+
+    switch (command) {
+      case 'play_pause': {
+        state.togglePlay(project().project.durationMs);
+        const after = timeline();
+        return { command, playing: after.isPlaying, playheadMs: after.playheadMs, changed: true };
+      }
+
+      case 'play': {
+        /*
+          Absolute, because `togglePlay` alone made "play" mean "pause"
+          whenever it was already running — the command doing the
+          opposite of the word. Having established it is paused, the flip
+          IS the start, and going through it is what gives "play" the
+          rewind rule a finished pass needs: the playhead parks on the
+          end and starting from there is undone on the next frame.
+          Copying that rule here would drift from the store's
+          `outPointMs ?? programEndMs` the first time it changed.
+        */
+        if (state.isPlaying) {
+          return { command, playing: true, changed: false, note: 'Already playing.' };
+        }
+        state.togglePlay(project().project.durationMs);
+        const after = timeline();
+        return { command, playing: after.isPlaying, playheadMs: after.playheadMs, changed: true };
+      }
+
+      case 'pause': {
+        if (!state.isPlaying) {
+          return { command, playing: false, changed: false, note: 'Already paused.' };
+        }
+        state.setIsPlaying(false);
+        return { command, playing: false, playheadMs: timeline().playheadMs, changed: true };
+      }
+
+      case 'set_playhead': {
+        const to = requireMs();
+        const from = state.playheadMs;
+        state.setPlayheadMs(to);
+        const at = timeline().playheadMs;
+        // The store clamps, so `at` is where it landed and not where it was sent.
+        return { command, playheadMs: at, fromMs: from, changed: at !== from };
+      }
+
+      case 'nudge': {
+        const delta = requireMs();
+        const from = state.playheadMs;
+        state.nudgePlayhead(delta);
+        const at = timeline().playheadMs;
+        // Nudging back from 0 clamps to 0; that is a move that did not happen.
+        return { command, playheadMs: at, fromMs: from, deltaMs: delta, changed: at !== from };
+      }
+
+      case 'split': {
+        const result = state.splitAtPlayhead();
+        if (result.cut === 0) {
+          /*
+            The store's own comment calls this out: attempted 0 / cut 0
+            is exactly what a successful razor used to look like. The
+            numbers go in the message because throwing is the only way
+            the transport's `success` flag is honest too.
+          */
+          throw new Error(
+            result.attempted === 0
+              ? 'Nothing was cut: the playhead is over no clip. Move it onto one, or select the clip first.'
+              : `Nothing was cut: the razor aimed at ${result.attempted} clip(s) and split 0. ` +
+                'The playhead is not inside them, or they are locked.'
+          );
+        }
+        return { command, attempted: result.attempted, cut: result.cut, changed: true };
+      }
+
+      case 'delete_selected': {
+        const result = state.deleteSelected();
+        if (result.deleted.length === 0) {
+          throw new Error(
+            result.refused.length
+              ? `Nothing was deleted. ${result.refused.map((r) => `${r.clipId}: ${r.reason}`).join('; ')}`
+              : 'Nothing was deleted: no clip is selected.'
+          );
+        }
+        return {
+          command,
+          deleted: result.deleted,
+          ...(result.refused.length ? { refused: result.refused } : {}),
+          changed: true,
+        };
+      }
+
+      case 'undo':
+      case 'redo': {
+        // Both report whether the stack actually moved, so "undone" is
+        // never a guess about a stack that was already at its end.
+        const moved = command === 'undo' ? state.undo() : state.redo();
+        return {
+          command,
+          changed: moved,
+          ...(moved ? {} : { note: command === 'undo' ? 'Nothing to undo.' : 'Nothing to redo.' }),
+        };
+      }
+
+      case 'select_clip': {
+        if (!clipId) {
+          throw new Error('"select_clip" needs clipId: a clip id, a clip name, or "selected".');
+        }
+        const id = resolveClipId(clipId);
+        state.selectClip(id);
+        return { command, selectedClipIds: timeline().selectedClipIds, changed: true };
+      }
+
+      case 'clear_selection': {
+        const before = state.selectedClipIds.length;
+        state.clearSelection();
+        return {
+          command,
+          cleared: before,
+          changed: before > 0,
+          ...(before ? {} : { note: 'Nothing was selected.' }),
+        };
+      }
+    }
+  },
+});
+
+defineTool({
+  name: 'set_track',
+  brief:
+    'Mute, solo or set the volume of a track, named by trackId (an id, a name, or "selected") or by 0-based index. Only the fields you pass are touched.',
+  category: 'audio',
+  description:
+    'Mute, solo or set the volume of one track. Name it with trackId — an id, a track name, or ' +
+    '"selected" for the currently selected track — or with a 0-based index into the track list ' +
+    'describe_timeline returns; passing both is refused. Only the fields you send are applied, ' +
+    'and each is a value, not a toggle: muted:false unmutes. Volume runs 0 to 2, where 1 is ' +
+    'unity. Reports which fields moved and which were already where you asked for.',
+  schema: z.object({
+    trackId: z.string().optional().describe('Track id, track name, or "selected"'),
+    index: z.number().optional().describe('0-based position in the track list'),
+    muted: z.boolean().optional(),
+    solo: z.boolean().optional(),
+    volume: z.number().optional().describe('0 to 2, where 1 is unity'),
+  }),
+  handler: ({ trackId, index, muted, solo, volume }) => {
+    const track = resolveTrack(trackId, index);
+    if (muted === undefined && solo === undefined && volume === undefined) {
+      throw new Error(`Nothing to set on "${track.name}". Pass muted, solo or volume.`);
+    }
+
+    const before = { muted: track.muted, solo: track.solo, volume: track.volume };
+
+    asOneEdit(`Set ${track.name}`, () => {
+      /*
+        The store's setters answer "is there such a track", not "did that
+        change anything": an already-muted track is left alone and still
+        comes back true. So the before and after values are read here
+        instead, and the report draws `patch_clip`'s distinction between
+        an edit and a value that was already correct.
+      */
+      if (muted !== undefined) timeline().setTrackMute(track.id, muted);
+      if (solo !== undefined) timeline().setTrackSolo(track.id, solo);
+      if (volume !== undefined && !timeline().setTrackVolume(track.id, volume)) {
+        throw new Error(`Volume ${volume} was refused. Pass a finite number from 0 to 2, where 1 is unity.`);
+      }
+    });
+
+    const after = timeline().tracks.find((t) => t.id === track.id) ?? track;
+    const changes: { field: string; from: boolean | number; to: boolean | number }[] = [];
+    const unchanged: string[] = [];
+    for (const field of ['muted', 'solo', 'volume'] as const) {
+      if ({ muted, solo, volume }[field] === undefined) continue;
+      if (Object.is(before[field], after[field])) unchanged.push(field);
+      else changes.push({ field, from: before[field], to: after[field] });
+    }
+
+    return {
+      trackId: track.id,
+      name: track.name,
+      changes,
+      ...(unchanged.length ? { unchanged } : {}),
+    };
+  },
+});
+
+defineTool({
+  name: 'insert_clip',
+  brief:
+    'Put a media-pool asset on the timeline and return the new clip id. Name the asset by assetId or name; trackId defaults to a track of the right type and startTimeMs to the playhead.',
+  category: 'timeline',
+  description:
+    'Insert an asset from the media pool onto a track. Name the asset with assetId, or with ' +
+    'name — an ambiguous name is refused rather than guessed. trackId defaults to an unlocked ' +
+    'track matching the asset type (an audio asset needs an audio track, or an explicit ' +
+    'trackId), and startTimeMs defaults to the current playhead. Returns the new clip id, which ' +
+    'patch_clip takes. Call list_media_pool first for the ids.',
+  schema: z.object({
+    assetId: z.string().optional().describe('Asset id from list_media_pool'),
+    name: z.string().optional().describe('Asset name, when you do not have the id'),
+    trackId: z.string().optional().describe('Track id, track name, or "selected"; defaults by asset type'),
+    startTimeMs: z.number().optional().describe('Defaults to the current playhead'),
+  }),
+  handler: ({ assetId, name, trackId, startTimeMs }) => {
+    const asset = resolveAsset(assetId, name);
+    const track = trackId === undefined ? defaultTrackFor(asset.type) : resolveTrack(trackId);
+    if (track.locked) throw new Error(`"${track.name}" is locked. Unlock it first, or pass another trackId.`);
+
+    const at = startTimeMs === undefined ? timeline().playheadMs : Math.max(0, Math.round(startTimeMs));
+    const clipId = timeline().insertClip(track.id, asset, at);
+
+    /*
+      `insertClip` returns the id it MINTED, not the id it landed: it
+      bails inside the setter on a locked track and hands that id back
+      anyway. The lock is checked above, so this is the cheap second half
+      of the same honesty rather than a duplicate of it.
+    */
+    const landed = findClipById(timeline().tracks, clipId);
+    if (!landed) throw new Error(`"${asset.name}" was not inserted on "${track.name}".`);
+
+    return {
+      clipId,
+      trackId: track.id,
+      trackName: track.name,
+      assetId: asset.id,
+      name: asset.name,
+      startTimeMs: landed.startTimeMs,
+      durationMs: landed.durationMs,
+    };
   },
 });
 
@@ -926,6 +1336,82 @@ defineTool({
 });
 
 /* ═══════════════════════════════════════════════════════════════════
+   EXPORT — writes a file, and still declares no consent
+
+   It is the one tool here that leaves a file on the disk, so the
+   omission is deliberate and this is where it is written down: the gate
+   exists to decide about a path the CALLER named, and there is no such
+   path. `runExport` writes `suggestedFileName(project.name, codec)` into
+   the app's own Videos folder, and `ExportRequest.outputPath` is not
+   offered here for exactly that reason — adding it would turn this into
+   a tool that needs `consent: ['write-path']` and a bridge that checks
+   it, which is a larger change than an export button.
+   ═══════════════════════════════════════════════════════════════════ */
+
+defineTool({
+  name: 'export_project',
+  brief:
+    'Render the sequence and write the video file. resolution/codec/hardware are optional; the destination is the app\'s Videos folder, not a path you name. Long-running.',
+  category: 'project',
+  description:
+    'Render the whole sequence and write the video file, reporting through the same export ' +
+    'dialog a person uses — so the operator can watch it and cancel it. resolution is 720p, ' +
+    '1080p (default), 1440p or 4k; codec is h264 (default), hevc or prores; hardware turns GPU ' +
+    'encoding on and is on by default. There is no destination argument: the file is written ' +
+    'into the app\'s Videos folder under the project name. This takes minutes, not seconds.',
+  schema: z.object({
+    resolution: z.enum(['720p', '1080p', '1440p', '4k']).optional(),
+    codec: z.enum(['h264', 'hevc', 'prores']).optional(),
+    hardware: z.boolean().optional().describe('GPU encoding. On by default, as in the dialog'),
+  }),
+  handler: async ({ resolution, codec, hardware }) => {
+    /*
+      Dynamic, and it has to stay dynamic. `exportPipeline` statically
+      imports the WebCodecs encoder and the audio engine — browser-only,
+      and heavy — while this registry is reached from the shell bundle
+      through `services/videoToolBridge.ts`. A top-level import would
+      pull the whole export stack into a bundle with no use for it, and
+      into plain Node wherever this file is loaded without a DOM.
+    */
+    const { canExport, runExport } = await import('../engine/exportPipeline');
+
+    if (!canExport()) {
+      /*
+        `canExport` is a boolean with no reason attached — it is the
+        presence of the exporter bridge and nothing else. This sentence
+        is the reason, verbatim from the two places that already say it:
+        the dialog's own banner and `runExport`'s first failure.
+      */
+      throw new Error('Export needs the desktop app. A browser cannot write video files.');
+    }
+
+    const outcome = await runExport({
+      resolution: resolution ?? '1080p',
+      codec: codec ?? 'h264',
+      hardware: hardware ?? true,
+    });
+
+    if (!outcome.ok) {
+      throw new Error(
+        outcome.canceled
+          ? 'The export was cancelled.'
+          : outcome.error ?? 'The export did not finish, and gave no reason.'
+      );
+    }
+
+    return {
+      outputPath: outcome.outputPath,
+      frames: outcome.frames,
+      bytes: outcome.bytes,
+      hasAudio: outcome.hasAudio,
+      // Sources the mix had to leave out. Silence nobody was told about
+      // is the failure this reports rather than hides.
+      ...(outcome.droppedAudio?.length ? { droppedAudio: outcome.droppedAudio } : {}),
+    };
+  },
+});
+
+/* ═══════════════════════════════════════════════════════════════════
    EXECUTION
    ═══════════════════════════════════════════════════════════════════ */
 
@@ -975,6 +1461,16 @@ export const EXPOSED_TOOLS: readonly string[] = [
      Builder. No consent: it reads no path a caller names — the take it
      builds is the one the recorder already wrote. */
   'build_recording',
+  /* The editor's core verbs, so an outside caller can cut and assemble
+     rather than only describe and patch. Three of the four move numbers
+     in the stores and declare nothing; the fourth writes a video file,
+     and the section that defines it says why the gate is still not the
+     right tool for a destination the caller cannot name. Thirteen of a
+     budget of fifteen. */
+  'timeline_command',
+  'set_track',
+  'insert_clip',
+  'export_project',
 ];
 
 /**

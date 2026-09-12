@@ -272,7 +272,11 @@ stop working. What was actually crowding it out was the editor tool catalogue �
 3,395 characters of descriptions written for an MCP client, shipped to an 8k
 window on every turn. Editor tools now carry a short form for the local lane
 and keep the long one for Claude Code and Codex, which have room for it; the
-catalogue is 2,238 characters and the lane can ask with a file open.
+catalogue is 2,238 characters and the lane can ask with a file open. Both
+figures were measured at the nine-tool surface. At thirteen — the four editor
+commands voice needs, added 2026-09-12 — the short forms total 2,178 characters
+against 4,470 for the long ones, so the saving is the point rather than the
+number.
 
 **A folder opens as a gallery.** Click any folder — in the tree, or through
 the agent's `open_file` — and the **Gallery** panel shows what is in it as
@@ -826,7 +830,19 @@ are passing" are looks for the hands, because a voice with no eyes asked such a
 question invents a plausible answer — measured, three times out of three, on the
 model the pipeline runs. Nothing spoken at the end of a run is asserted rather
 than observed: line counts are diffed, the tool count is counted, and a failed
-call is reported as one. Which assistant does that work — Frontier, Claude Code
+call is reported as one.
+
+Two kinds of instruction skip the assistant entirely, because they are lookups
+rather than jobs. **"Switch to m-digital"** is resolved locally against the
+projects the gateway already knows and the workspace root changes at once — but
+never while an agent is running, since that root is what the run resolves its
+relative paths against and switching mid-run would send its next write into
+another repository. **"Cut here", "mute track 2", "undo that", "export it"**
+reach the video editor's tool surface directly, and only inside a video project.
+Both grammars refuse far more than they accept: an unclear folder name, a "cut"
+with no "here" in it, a question, a negation and a hypothetical all fall through
+to the assistant, which is where they went before. What she says afterwards
+comes from what the tool did, so a razor that cut nothing says so. Which assistant does that work — Frontier, Claude Code
 or Codex — is chosen from the picker in the voice composer, the same picker the
 chat used to own. Neither of them has a chat log: the stage
 shows the last exchange only, centred under the orb, held six seconds after she
@@ -1327,7 +1343,7 @@ ollama serve              # local models on 127.0.0.1:11434
 
 ```bash
 npm run typecheck   # tsc --noEmit
-npm test            # 2489 tests
+npm test            # 2553 tests
 npm run eval:local  # the local lane against the real model — a score, not a pass/fail; needs Ollama
 npm run eval:voice  # the voice co-agent's spoken answers, same discipline; needs Ollama
 npm run build       # tsc && vite build

@@ -2015,7 +2015,11 @@ tools through `services/videoToolBridge.ts`, they have large windows, and they
 are **deliberately ungoverned** — nothing truncates their context. So those
 descriptions are long on purpose and say everything a caller could need.
 
-The local lane reads the same nine tools into an 8k system prompt. Measured:
+The local lane reads the same tools into an 8k system prompt. Everything below
+was measured at the **nine-tool** surface; the four editor commands voice needs
+took it to thirteen on 2026-09-12, where the short forms total **2,178**
+characters against **4,470** for the long ones. The ratio is what the decision
+rests on, not the absolute figure. Measured at nine:
 **3,395 characters, 43% of the entire system-prompt budget**, on every turn
 whether or not the operator has a timeline open. That is what pushed the ask
 block out of the prompt on any turn with a file open in the player.
@@ -7488,9 +7492,131 @@ has four append sites instead of three. The rule is unchanged: no site may
 write a bubble ALONGSIDE a line she is also saying, and the muted branch writes
 instead of the speaker rather than beside it.
 
-Not yet true, and marked as such: `workspaceActions.ts` landed with this work,
-a pure parser and fuzzy resolver for "open my DukaBot folder". It is tested and
-is NOT wired into the stage, so no spoken phrase reaches it yet.
+`workspaceActions.ts` landed with this work, a pure parser and fuzzy resolver
+for "open my DukaBot folder". It was unwired when this entry was first written;
+§6.0.24 is where it reached the stage.
+
+### 6.0.24 A spoken folder name took an agent round trip (`components/voice/TemiVoiceStage.tsx`, `services/voice/workspaceActions.ts`, 2026-09-12)
+
+"Switch to m-digital" already worked. `machineAction.ts` classified it as
+`workspace`, the router delegated, and the assistant opened it — a prompt, a
+tool call, a report, and seconds of waiting for a decision that is a name
+lookup against four sibling directories. What the operator asked for was that
+it happen now.
+
+`parseWorkspaceCommand` is consulted in `performVoiceTurn` ahead of
+`routeVoiceTurn`, for the same reason `mute` is: the router files a folder name
+as conversation and answers it with a sentence. Null is its ordinary answer and
+costs nothing — the turn carries on to `machineAction` and the assistant, which
+is where every one of these sentences went before. Measured resolutions: "em
+digital" to `m-digital` at 0.89, "duke about" to `dukabot` at 0.78, "bot" to
+`dukabot` at 0.43 and refused, against a floor of 0.7 and a 0.08 margin over
+the runner-up.
+
+**The `!busy` gate is a measured hazard, not caution.**
+`WorkspaceService.openProject` rebinds the workspace root that every workspace
+and terminal route resolves against. An agent run in flight resolves its
+relative paths against that same root, so a switch landed mid-run sends the
+run's next `Edit` or `Write` into a different repository — silently, in a
+project the operator was not looking at. Mid-run the turn falls through to the
+assistant instead. `reveal-folder` is genuinely safe mid-run, touching only
+`expandedPaths` and `revealTarget`, but one gate is easier to keep right than
+two.
+
+Three smaller decisions, each of which is a way to be wrong:
+
+- The store is given the path the **gateway confirmed**, never the parsed one.
+  The gateway owns which root the routes read; passing our guess would stamp it
+  into the store as a fact. See `setWorkspacePath` in `studioStore.ts`.
+- A reveal is given `relativePath`. `revealPath` keys the open set by
+  workspace-relative path, so an absolute one opens nothing and reads as a
+  command that was ignored.
+- `workspacePath` is passed to the parser **only when `workspaceRootConfirmed`**.
+  The initial value is a hardcoded guess, and an unconfirmed root deciding that
+  a folder is "local" turns a switch into a reveal against a root we are not
+  bound to.
+
+Switching to the root already open is skipped rather than re-applied:
+`setWorkspacePath` collapses every open folder, clears the reveal target and
+restamps the active chat session, so re-applying it would throw away the
+operator's tree to arrive where he already is.
+
+**Known limitation, by design.** Candidates come from `/api/workspace/projects`,
+the renderer's only fs-free source — the module can list a directory itself but
+only through an injected `readdirSync`, and this is a browser bundle. A project
+the operator has never opened is not in `recent`, so it is not a candidate and
+that turn correctly falls through to the assistant, which can reach the disk.
+
+`tests/voice-workspace-actions.test.mjs` (24) covers the parser;
+`tests/voice-workspace-wiring.test.mjs` (12) pins the arrangement above.
+
+### 6.0.25 The voice lane had no route into the editor at all (`services/voice/editorActions.ts`, `components/voice/TemiVoiceStage.tsx`, 2026-09-12)
+
+The video editor has had a programmatic surface since P2 and the chat has used
+it since (`aiService.ts#runVideoTool`). The voice lane never had one.
+`routeVoiceTurn` knows `converse`, `stop`, `repeat`, `hush`, `mute` and a
+delegate, and none of those is a tool call — so "cut here", spoken aloud,
+arrived as conversation and was answered with a sentence about cutting. An
+audit on 2026-09-12 found this was the load-bearing gap, ahead of any question
+about which tools exist.
+
+`editorActions.ts` is the missing half, modelled on `workspaceActions.ts` and
+inheriting its posture: pure, importless, and written to under-match. The verbs
+it reaches are worse than the workspace ones — `split` and `delete_selected`
+destroy work and `export_project` occupies the machine for minutes — so the
+grammar refuses far more than it accepts, and the refusals are specific:
+
+- `cut` is only a razor when the sentence says **where** ("cut here", "at the
+  playhead"). "Cut to the chase" and "cut that scene" fall through, which is
+  correct. `split` and `razor` carry themselves, being editing words in almost
+  any context.
+- `delete` fires only with a timeline noun after it. "Delete that branch" and
+  "delete that file" are left alone; `deleteSelected` acting on the wrong
+  sentence destroys work only the editor's own undo can recover.
+- **Bare "stop" is never claimed.** `voiceTurnRouter` reads it as cancel-the-run,
+  which is the reading the operator needs under pressure, so pausing playback
+  must name its object.
+- A command needing an identifier voice cannot pronounce is not emitted at all.
+  "Add that clip" needs an asset id and falls through to the assistant, which
+  can read the pool. "That track" resolves to the literal `"selected"` and the
+  tool refuses it when nothing is selected, rather than guessing track 0.
+- Questions, negations and hypotheticals never act — the same frames
+  `workspaceActions` rejects, plus "should I…". "Can you cut here" deliberately
+  is NOT a question: on a voice call it is the politest form of the command.
+
+**`play` and `pause` are distinct commands, not `togglePlay`.** The store offers
+a toggle; the word "play" names a state. An operator saying "play" while it is
+already playing would have got a pause — the command doing the opposite of the
+word.
+
+**One line is spoken per command, and it is derived from the result rather than
+the request.** `splitAtPlayhead` succeeds with `{ attempted: 0, cut: 0 }` when
+the playhead is over nothing, so announcing "Cut." on a successful call reports
+an edit that did not happen, and the operator finds out at the export.
+`describeEditorResult` is where that judgement lives; `deleteSelected`'s
+`{ deleted, refused }` gets the same treatment. The export is the one command
+that speaks twice, at two different times, because silence across a job that
+holds the machine for minutes reads as a command never heard — that is not
+§6.0.21's defect, which was one line landing on two surfaces at once.
+
+**Unlike the workspace path this is NOT gated on `!busy`, and the difference is
+the point.** A workspace switch redirects an in-flight run's writes into another
+repository; an edit lands on the timeline in front of the operator who asked for
+it while watching. Hands-free control that switches itself off whenever an agent
+is working is control he does not have when he most wants it.
+
+It IS gated on the root being a video project — `projects.current.kind ===
+"video"`, which the gateway already classifies from the `teminali-video-project`
+marker. "Undo that" and "pause it" are things an operator says to an agent
+working on code, and reaching for a timeline that is not there would answer
+ordinary conversation with "That didn't work".
+
+The registry is reached by **dynamic import**: `toolRegistry` pulls the ffmpeg
+and caption surfaces behind it, and a static import would drag all of it into
+the chunk this stage ships in, on a screen that usually never touches the editor.
+
+`tests/voice-editor-actions.test.mjs` (23) covers the grammar and the result
+descriptions; `tests/voice-editor-wiring.test.mjs` (8) pins the arrangement.
 
 ### 6.1 Turn semantics while a run is in flight (2026-09-05)
 
