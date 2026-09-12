@@ -5,7 +5,8 @@ import { basename, dirname, parse, resolve, sep } from "node:path";
 export const MAX_RECENT_PROJECTS = 12;
 
 /**
- * The roots a never-opened folder may be discovered under.
+ * The roots a never-opened folder may be discovered under, and how deep each
+ * one is worth scanning.
  *
  * MIRRORED from `ALLOWED_ROOTS` in `studio/src/services/voice/workspaceActions.ts`,
  * and mirrored rather than imported for two reasons that both matter:
@@ -22,13 +23,27 @@ export const MAX_RECENT_PROJECTS = 12;
  * derives the home from a literal because it cannot ask, this can, and the two
  * agree on the operator's machine.
  *
+ * **Depth is per root, because the roots are not the same kind of place, and
+ * this was measured before it was chosen.** `my_projects` is a folder of
+ * folders of projects: 15 entries at the top, of which 6 are containers whose
+ * children — `teminali/claude-context-guard`, `m-digital/m-digital-web` — are
+ * the projects the operator names, and until depth 2 they were unreachable by
+ * voice however clearly he said them. Depth 2 there costs 12 entries, because
+ * `PROJECT_MARKERS` keeps the generic ones out. `~/Downloads` and `~/Movies` are the
+ * opposite: their top-level entries already ARE what he names, and a second
+ * level there is 126 directories of `src`, `dist`, `tests` and `node_modules`
+ * from two cloned repos. Those are not projects, and short generic names are
+ * precisely what a mis-transcription scores above the 0.7 floor. Binding the
+ * workspace root to a `node_modules` by mis-hearing is the silent wrong switch
+ * this whole lane is built to refuse.
+ *
  * Keep the two lists in step. Adding a root is how this feature is widened —
  * never by loosening the containment check in `discoverProjectFolders`.
  */
 export const DISCOVERY_ROOTS = [
-  resolve(homedir(), "Documents", "my_projects"),
-  resolve(homedir(), "Downloads"),
-  resolve(homedir(), "Movies"),
+  { path: resolve(homedir(), "Documents", "my_projects"), depth: 2 },
+  { path: resolve(homedir(), "Downloads"), depth: 1 },
+  { path: resolve(homedir(), "Movies"), depth: 1 },
 ];
 
 /**
@@ -37,14 +52,123 @@ export const DISCOVERY_ROOTS = [
  * The renderer holds this whole list in memory and scores a heard name against
  * every entry on every voice turn, so an unbounded answer is a stall on the one
  * lane that is supposed to be the fast path. A few hundred covers every root
- * here with room to spare; past that the operator has a downloads folder, not a
- * set of projects, and the tail of an alphabetised list is the least likely
- * thing he is asking for by name.
+ * here with room to spare — the roots above return 45 on the operator's
+ * machine, measured, with depth 2 in force; past that the operator has a
+ * downloads folder, not a set of projects, and the tail of an alphabetised
+ * list is the least likely thing he is asking for by name.
  */
 export const MAX_DISCOVERED_FOLDERS = 400;
 
 /**
- * Every immediate subdirectory of the discovery roots, as `{ path, name }`.
+ * The markers that make a directory a project in its own right.
+ *
+ * They answer two questions below the top level of a root, and it is the same
+ * answer both times:
+ *
+ *   - **Stop.** A directory carrying one of these IS the thing the operator
+ *     names. Its children are its source tree, and `src`, `dist` and
+ *     `node_modules` are not places to bind a workspace root.
+ *   - **Include.** A directory below the top level is a candidate only if it
+ *     carries one. Measured on the operator's machine, depth 2 under
+ *     `my_projects` finds 21 directories: 12 carry a marker and are the
+ *     projects he names — `teminali/claude-context-guard`, all five
+ *     `m-digital/*` apps — and the other 9 are `build`, `docs`, `tests`,
+ *     `tools`, `__pycache__` and a bare clone. Those nine are the dangerous
+ *     ones: short generic names are exactly what a mis-transcription scores
+ *     above the 0.7 floor, and "open the tests folder" must not rebind the
+ *     workspace to some unrelated project's test directory.
+ *
+ * More than `package.json`, because the operator's projects are not all
+ * JavaScript: `xslm_project` is Python and was read as a container until
+ * `pyproject.toml`/`requirements.txt` were here, which put its `tests` and
+ * `tools` into the candidate list.
+ */
+const PROJECT_MARKERS = [
+  "package.json",
+  ".git",
+  "pyproject.toml",
+  "requirements.txt",
+  "Cargo.toml",
+  "go.mod",
+];
+
+/** A root entry may be written as a bare path; bare means one level. */
+function normaliseRoot(root) {
+  if (typeof root === "string") return { path: root, depth: 1 };
+  const depth = Number.isInteger(root?.depth) && root.depth > 0 ? root.depth : 1;
+  return { path: root?.path ?? "", depth };
+}
+
+/** Does this directory carry a project's own marker? Never throws. */
+async function isProjectItself(directory) {
+  for (const marker of PROJECT_MARKERS) {
+    try {
+      await stat(resolve(directory, marker));
+      return true;
+    } catch {
+      // Absent, or unreadable, which for this question are the same answer.
+    }
+  }
+  return false;
+}
+
+/**
+ * The directories directly inside `directory`, resolved and contained.
+ *
+ * `root` is the scan's own root, not the parent: a symlink two levels down
+ * still may not point outside the root it was found under.
+ *
+ * Never throws. A directory that is absent or unreadable is one fewer place to
+ * look, not an error — `~/Movies` does not exist on a fresh machine and a voice
+ * turn must not die of it.
+ */
+async function listChildDirectories(directory, root) {
+  let entries;
+  try {
+    entries = await readdir(directory, { withFileTypes: true });
+  } catch {
+    return [];
+  }
+
+  entries.sort((a, b) => a.name.localeCompare(b.name, "en", { sensitivity: "base" }));
+
+  const children = [];
+  for (const entry of entries) {
+    // Dot-directories are the machine's business, not the operator's: `.git`,
+    // `.cache`, `.Trash`. None of them is a project he would ask for by name.
+    if (entry.name.startsWith(".")) continue;
+
+    let path = resolve(directory, entry.name);
+
+    if (entry.isSymbolicLink()) {
+      // A link is followed only as far as proving where it lands. A symlink
+      // in ~/Downloads pointing at ~/Library is the whole reason this check
+      // exists, and `isInside` alone would not catch it — the link's own path
+      // is inside the root, its target is not.
+      try {
+        path = await realpath(path);
+      } catch {
+        continue;
+      }
+      if (!isInside(root, path) || path === root) continue;
+      try {
+        if (!(await stat(path)).isDirectory()) continue;
+      } catch {
+        continue;
+      }
+    } else if (!entry.isDirectory()) {
+      continue;
+    }
+
+    children.push({ path, name: basename(path) || entry.name });
+  }
+
+  return children;
+}
+
+/**
+ * Every directory under the discovery roots the operator might name, as
+ * `{ path, name }`.
  *
  * The gap this closes: the voice lane's candidate list came only from the
  * recents, so a folder the operator had never opened was unreachable by voice
@@ -56,77 +180,73 @@ export const MAX_DISCOVERED_FOLDERS = 400;
  * in each of up to four hundred directories to answer a question the candidate
  * list never asks; `listRecentProjects` classifies twelve, which is affordable.
  *
- * One level, never a walk. Depth is the difference between listing the projects
- * and indexing the disk.
+ * A bounded descent, never a walk: each root goes as deep as `DISCOVERY_ROOTS`
+ * says and no deeper, the descent stops early at any directory that is itself
+ * a project, and below the top level only a project is listed at all — see
+ * `PROJECT_MARKERS`. Unbounded depth is the difference between listing the
+ * projects and indexing the disk.
+ *
+ * **Level by level, deliberately.** Every entry at one distance is collected
+ * before any entry at the next, so the alphabetised top level is complete
+ * whatever happens below it, and when the cap bites it takes the deepest and
+ * least likely entries first rather than truncating the roots he names most.
  *
  * Never throws. A root that is absent, unreadable, or not a directory is one
- * fewer place to look, not an error — `~/Movies` does not exist on a fresh
- * machine and a voice turn must not die of it.
+ * fewer place to look.
  */
 export async function discoverProjectFolders(roots = DISCOVERY_ROOTS) {
   const seen = new Set();
   const folders = [];
   let truncated = false;
 
-  for (const candidateRoot of roots) {
+  scan: for (const candidateRoot of roots) {
+    const { path: rootPath, depth } = normaliseRoot(candidateRoot);
+
     // The root is resolved first so every containment check below compares real
     // paths against a real path. On macOS `/tmp` is a link to `/private/tmp`,
     // and comparing a resolved child against an unresolved root rejects
     // everything.
     let root;
     try {
-      root = await realpath(resolve(candidateRoot));
+      root = await realpath(resolve(rootPath));
     } catch {
       continue;
     }
 
-    let entries;
-    try {
-      entries = await readdir(root, { withFileTypes: true });
-    } catch {
-      continue;
-    }
+    let level = [root];
+    for (let distance = 1; distance <= depth && level.length; distance += 1) {
+      const next = [];
 
-    entries.sort((a, b) => a.name.localeCompare(b.name, "en", { sensitivity: "base" }));
+      for (const parent of level) {
+        for (const child of await listChildDirectories(parent, root)) {
+          if (seen.has(child.path)) continue;
+          seen.add(child.path);
 
-    for (const entry of entries) {
-      // Dot-directories are the machine's business, not the operator's: `.git`,
-      // `.cache`, `.Trash`. None of them is a project he would ask for by name.
-      if (entry.name.startsWith(".")) continue;
+          // The marker answers both questions below, so it is asked once — and
+          // only when one of them is live. A depth-1 root never asks it at all,
+          // which is why `~/Downloads` costs exactly what it used to.
+          const project =
+            distance > 1 || distance < depth ? await isProjectItself(child.path) : false;
 
-      let path = resolve(root, entry.name);
+          // The top level of a root is listed whole, a level down is not. The
+          // asymmetry is the point: the top level is a place the operator put
+          // things — `argus-vpn-landing` is three loose files and he still
+          // names it — while a level down is the inside of someone's folder,
+          // where a directory has to prove it is a project to be named.
+          if (distance === 1 || project) {
+            if (folders.length >= MAX_DISCOVERED_FOLDERS) {
+              truncated = true;
+              break scan;
+            }
+            folders.push(child);
+          }
 
-      if (entry.isSymbolicLink()) {
-        // A link is followed only as far as proving where it lands. A symlink
-        // in ~/Downloads pointing at ~/Library is the whole reason this check
-        // exists, and `isInside` alone would not catch it — the link's own path
-        // is inside the root, its target is not.
-        try {
-          path = await realpath(path);
-        } catch {
-          continue;
+          if (distance < depth && !project) next.push(child.path);
         }
-        if (!isInside(root, path) || path === root) continue;
-        try {
-          if (!(await stat(path)).isDirectory()) continue;
-        } catch {
-          continue;
-        }
-      } else if (!entry.isDirectory()) {
-        continue;
       }
 
-      if (seen.has(path)) continue;
-      seen.add(path);
-
-      if (folders.length >= MAX_DISCOVERED_FOLDERS) {
-        truncated = true;
-        break;
-      }
-      folders.push({ path, name: basename(path) || entry.name });
+      level = next;
     }
-
-    if (truncated) break;
   }
 
   return { folders, truncated };

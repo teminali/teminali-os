@@ -7730,23 +7730,27 @@ command that was never heard. One of those asks him to wait and the other asks
 him to say it again.
 
 The branch below the gate now answers instead of falling through: barge in when
-the turn was spoken, one spoken line, "I heard you. I'll switch to <name> once
-this run finishes", and a toast. It is answered here rather than passed on
-because handing a workspace command to the assistant answers a command with
-talk.
+the turn was spoken, one spoken line, and a toast. It is answered here rather
+than passed on because handing a workspace command to the assistant answers a
+command with talk.
 
-**What that line promises is NOT yet true.** Nothing is queued. There is no
-pending action, no watcher on `busy`, and no re-issue when the run ends: `busy`
-is read at the gate and nowhere else. The operator still has to say it again,
-while the sentence and the toast both describe a queue that does not exist.
-Recorded here because this doc is the only place the gap is visible, the code
-reads as though the queue were there. Either the queue gets built or the words
-change.
+**The words were the hard part, and the first draft was a fabrication.** It
+said "I heard you. I'll switch to <name> once this run finishes". Nothing is
+queued: `busy` is read at the gate and nowhere else, there is no watcher and no
+re-issue when the run ends, so that sentence described a mechanism that does
+not exist — the same failure the report path is built to refuse, arriving
+through a line of UI copy. The line now says what is true: "I can't
+<switch to|open> <name> while this run is going. Tell me again when it's done."
 
-A second, smaller inaccuracy in the same line: a mid-run `reveal-folder` is
-refused too, and is described as a switch. §6.0.24 gated reveal only because
-one gate is easier to keep right than two, so the refusal is deliberate and its
-wording is not.
+**The queue is not a to-do, it is refused.** A run can end minutes later, and an
+unannounced root change then is precisely the silent wrong switch the gate
+exists to prevent. Refusing out loud and letting him re-issue keeps the change
+attached to the moment he asked for it.
+
+The verb is chosen from the action, because a mid-run `reveal-folder` is
+refused too and calling that a switch is its own small inaccuracy. §6.0.24
+gated reveal only because one gate is easier to keep right than two, so the
+refusal is deliberate and the wording now matches it.
 
 This is a fifth `speakLineRef` call inside the block §6.0.21 governs, and the
 rule holds unchanged: one line, spoken, with no bubble written beside it.
@@ -7754,6 +7758,59 @@ rule holds unchanged: one line, spoken, with no bubble written beside it.
 counting its early returns and its spoken lines, so this branch moves both
 counts by one and those numbers are part of the contract rather than incidental
 to it.
+
+### 6.0.30 Depth is per root, and below the top level a folder must prove itself (`server/projects.js`, 2026-09-12)
+
+§6.0.26's discovery scanned one level and stopped, which left the operator's
+deepest-held assumption unserved: `my_projects` is a folder of folders, and
+`teminali/claude-context-guard` and `m-digital/m-digital-web` are projects he
+names out loud. One level deep, neither existed as far as the voice lane was
+concerned, and "switch to the claude context guard folder" returned null.
+
+**A blind second level was measured and refused.** Depth 2 everywhere adds 204
+directories, and 126 of them are under `~/Downloads` and `~/Movies` — in
+Downloads, the insides of two cloned repositories (`src`, `dist`, `tests`,
+`public`, `node_modules`); in Movies, the insides of the app's own recordings.
+Those are not projects, they are short generic names, and short generic names are exactly
+what a mis-transcription scores above the 0.7 floor. Binding the workspace root
+to a `node_modules` by mis-hearing is the silent wrong switch this lane exists
+to refuse, so the depth is per root: `my_projects` 2, `~/Downloads` and
+`~/Movies` 1. Their top level is already what he names.
+
+**Two rules, one question.** `my_projects` is not uniform either — 15 entries,
+of which 8 are repositories and 6 are containers — so a directory carrying a
+project marker (`package.json`, `.git`, `pyproject.toml`, `requirements.txt`,
+`Cargo.toml`, `go.mod`) IS the project: the descent stops there, and below a
+root's top level nothing without a marker is listed at all. Measured: depth 2
+finds 21 directories under `my_projects`, 12 of them projects; the other 9 are
+`build`, `docs`, `tests`, `tools`, `__pycache__` and a bare clone. The whole
+scan returns 45 folders in 16 ms.
+
+The marker list is longer than JavaScript because his projects are: `xslm_project`
+is Python and read as a container until `pyproject.toml` was on the list, which
+put its `tests` and `tools` into the candidate list.
+
+**The top level keeps the permissive rule, deliberately.** `argus-vpn-landing`
+is three loose files with no repository and no manifest, and reaching it by
+name is what discovery was added for. The top level of a root is a place he put
+things; a level down is the inside of someone's folder, and the stricter rule
+belongs there.
+
+The walk is level by level rather than directory by directory so that the cap
+takes the deepest, least likely entries first. Truncating the top of
+`~/Downloads` would drop `4K Video Downloader+` and silently undo §6.0.26.
+
+`tests/project-discovery.test.mjs` (16) is the scan's first test of its own —
+it had been proved only by live probe against one machine on one day — and it
+pins the rules that keep entries OUT, including that `DISCOVERY_ROOTS` still
+mirrors the resolver's `ALLOWED_ROOTS`. Discovering a folder the resolver would
+then refuse to bind is a turn that finds the right directory and says no.
+
+**Known, and not fixed here:** `~/Downloads/frontier code tests` answers "open
+the tests folder". It is a top-level folder that was already a candidate before
+this change, so it is the scorer's doing, not the scan's, and the floor and
+margin in `workspaceActions.ts` are calibrated numbers that do not get moved
+in passing.
 
 ### 6.1 Turn semantics while a run is in flight (2026-09-05)
 
