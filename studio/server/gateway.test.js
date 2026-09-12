@@ -579,6 +579,47 @@ test("persistent audit log rotates and stores only its allowlisted metadata", as
   assert.equal(contents.join("").includes("must-never-persist"), false);
 });
 
+test("an agent turn's timing survives the allowlist instead of being dropped", async () => {
+  // Written against the real log rather than the `MemoryAudit` above, which
+  // keeps whatever it is handed. That is the whole reason this was needed: the
+  // route had been passing `engine` since 1.1.0 and every gateway test saw it,
+  // while the allowlist dropped it before it reached disk, leaving a log that
+  // could say a turn took 47 seconds and nothing about which part of it did.
+  const directory = await mkdtemp(join(tmpdir(), "frontier-gateway-audit-turn-"));
+  const path = join(directory, "gateway-audit.jsonl");
+  const audit = new BoundedAuditLog(path);
+  await audit.initialize();
+  await audit.write({
+    event: "agent-turn",
+    correlationId: "c-1",
+    route: "/api/agents/run",
+    engine: "claude",
+    durationMs: 47_000,
+    preflightMs: 120,
+    startupMs: 3_400,
+    firstTokenMs: 9_100,
+    toolMs: 21_000,
+    toolCalls: 4,
+    truncated: false,
+    reason: null,
+    promptBytes: 64,
+    prompt: "must-never-persist",
+  });
+  await audit.flush();
+
+  const line = JSON.parse((await readFile(path, "utf8")).trim());
+  assert.equal(line.engine, "claude");
+  assert.equal(line.preflightMs, 120);
+  assert.equal(line.startupMs, 3_400);
+  assert.equal(line.firstTokenMs, 9_100);
+  assert.equal(line.toolMs, 21_000);
+  assert.equal(line.toolCalls, 4);
+  assert.equal(line.promptBytes, 64);
+  assert.equal(line.truncated, false);
+  // The prompt's size is recorded; its text never is.
+  assert.equal(Object.hasOwn(line, "prompt"), false);
+});
+
 test("terminal execution requires auth, runs for real, and streams a true exit status", async (t) => {
   const workspaceRoot = await mkdtemp(join(tmpdir(), "frontier-terminal-route-"));
   await writeFile(join(workspaceRoot, "hello.txt"), "from disk\n");

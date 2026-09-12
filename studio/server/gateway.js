@@ -3328,6 +3328,11 @@ export async function createGateway(options = {}) {
       }
 
       if (request.method === "POST" && route === "/api/agents/run") {
+        // Everything before the CLI is spawned is the gateway's own, and
+        // `durationMs` has never covered it: that clock starts inside
+        // `runAgentTurn`. Reading the body, validating it, writing the
+        // attachments and asking macOS about Accessibility all land here.
+        const preflightStartedAt = Date.now();
         const agentRequest = await readJson(request, config.maxAgentJsonBytes ?? config.maxJsonBytes);
         const engine = agentRequest?.engine;
         if (!isAgentEngine(engine)) {
@@ -3424,6 +3429,8 @@ export async function createGateway(options = {}) {
           /* No answer is a no. */
         }
 
+        const preflightMs = Date.now() - preflightStartedAt;
+
         let outcome;
         try {
           outcome = await runAgentTurn({
@@ -3473,6 +3480,17 @@ export async function createGateway(options = {}) {
           route,
           engine,
           durationMs: outcome.durationMs,
+          /*
+            The split of that duration. Without it the log could time a turn and
+            say nothing about which part of it ran long, which is how a plan to
+            shave 1.8 seconds off the microphone's silence window got as far as
+            it did against a median turn of 29.6 seconds.
+          */
+          preflightMs,
+          startupMs: outcome.timing?.startupMs ?? null,
+          firstTokenMs: outcome.timing?.firstTokenMs ?? null,
+          toolMs: outcome.timing?.toolMs ?? null,
+          toolCalls: outcome.timing?.toolCalls ?? null,
           truncated: outcome.truncated,
           reason: outcome.reason,
           // The prompt itself is deliberately not written to the audit log.

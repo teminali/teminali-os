@@ -291,6 +291,33 @@ test("claude session, cost and duration are carried through verbatim", async () 
   assert.equal(outcome.sessionId, "sess-1");
 });
 
+test("a turn reports where its seconds went, not just how many", async () => {
+  // One number per turn was enough to know the median turn takes 47 seconds
+  // and nothing about which part of it does.
+  const { outcome } = await collect("claude", [
+    { type: "system", subtype: "init", session_id: "s", model: "m", cwd: ".", tools: [] },
+    { type: "assistant", message: { content: [{ type: "tool_use", id: "t1", name: "WebFetch", input: { url: "https://example.com" } }] } },
+    { type: "user", message: { content: [{ type: "tool_result", tool_use_id: "t1", is_error: false, content: "ok" }] } },
+    { type: "stream_event", event: { type: "content_block_delta", delta: { type: "text_delta", text: "hi" } } },
+    { type: "result", subtype: "success", is_error: false, duration_ms: 1, session_id: "s", result: "hi", permission_denials: [] },
+  ]);
+  assert.notEqual(outcome.timing.startupMs, null);
+  assert.notEqual(outcome.timing.firstTokenMs, null);
+  assert.equal(outcome.timing.toolCalls, 1);
+  assert.ok(outcome.timing.toolMs >= 0);
+  assert.ok(outcome.timing.startupMs <= outcome.durationMs);
+});
+
+test("a tool that never reported starting is not charged the whole turn", async () => {
+  const { outcome } = await collect("claude", [
+    { type: "system", subtype: "init", session_id: "s", model: "m", cwd: ".", tools: [] },
+    { type: "user", message: { content: [{ type: "tool_result", tool_use_id: "orphan", is_error: true, content: "boom" }] } },
+    { type: "result", subtype: "success", is_error: false, duration_ms: 1, session_id: "s", result: "", permission_denials: [] },
+  ]);
+  assert.equal(outcome.timing.toolCalls, 0);
+  assert.equal(outcome.timing.toolMs, 0);
+});
+
 test("plan windows are lifted off the turn's own stream", async () => {
   // Copied from a real `rate_limit_event`: the CLI reports the account's
   // headroom on the same stream it reports tokens on, which is the whole
@@ -395,6 +422,64 @@ test("an unrecognised codex item is shown rather than dropped", async () => {
   const tool = events.find((e) => e.type === "tool");
   assert.equal(tool.name, "some_future_thing");
   assert.equal(tool.status, "completed");
+});
+
+test("an unrecognised codex item that failed is an errored step, not a green one", async () => {
+  // The fallback above used to hardcode `completed` and blank the input, so a
+  // delegated tool that FAILED rendered as a finished step with no error on it
+  // and nothing to show what it had been asked. A lookup that returned nothing
+  // was indistinguishable from one that worked.
+  const { events } = await collect("codex", [
+    { type: "thread.started", thread_id: "th" },
+    { type: "item.completed", item: { id: "x", item_type: "web_fetch", url: "https://example.com", error: "fetch failed: 403" } },
+  ]);
+  const tool = events.find((e) => e.type === "tool");
+  assert.equal(tool.status, "error");
+  assert.equal(tool.isError, true);
+  assert.equal(tool.output, "fetch failed: 403");
+});
+
+test("an unrecognised codex item keeps what it was called with", async () => {
+  const { events } = await collect("codex", [
+    { type: "thread.started", thread_id: "th" },
+    { type: "item.completed", item: { id: "x", item_type: "web_fetch", url: "https://example.com" } },
+  ]);
+  const tool = events.find((e) => e.type === "tool");
+  assert.deepEqual(tool.arguments ?? tool.input, { url: "https://example.com" });
+});
+
+test("a codex web search that failed is an errored step, not an empty green one", async () => {
+  const { events } = await collect("codex", [
+    { type: "thread.started", thread_id: "th" },
+    { type: "item.completed", item: { id: "s1", item_type: "web_search", query: "astral projection", error: { message: "search unavailable" } } },
+  ]);
+  const tool = events.find((e) => e.type === "tool");
+  assert.equal(tool.status, "error");
+  assert.equal(tool.isError, true);
+  assert.equal(tool.output, "search unavailable");
+});
+
+test("a codex file change that failed is an errored step", async () => {
+  const { events } = await collect("codex", [
+    { type: "thread.started", thread_id: "th" },
+    { type: "item.completed", item: { id: "f1", item_type: "file_change", path: "a.txt", error: "permission denied" } },
+  ]);
+  const tool = events.find((e) => e.type === "tool");
+  assert.equal(tool.status, "error");
+  assert.equal(tool.isError, true);
+});
+
+test("a codex command that errored without an exit code still fails", async () => {
+  // A command the sandbox refused never runs, so it reports no exit code at
+  // all. The absence of one used to be read as success.
+  const { events } = await collect("codex", [
+    { type: "thread.started", thread_id: "th" },
+    { type: "item.completed", item: { id: "c1", item_type: "command_execution", command: "rm -rf /", error: "rejected by sandbox" } },
+  ]);
+  const tool = events.find((e) => e.type === "tool");
+  assert.equal(tool.status, "error");
+  assert.equal(tool.isError, true);
+  assert.equal(tool.output, "rejected by sandbox");
 });
 
 /* ── Process handling ────────────────────────────────────────────────────── */

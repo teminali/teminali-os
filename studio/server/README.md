@@ -305,6 +305,23 @@ correlation id and byte counts. Prompts, responses, file contents and
 transcripts are never written. Rotation is bounded by `FRONTIER_AUDIT_MAX_BYTES`
 and `FRONTIER_AUDIT_MAX_FILES`, and the path itself by `FRONTIER_AUDIT_PATH`.
 
+The field list is an allowlist in `server/audit-log.js`, applied on the way to
+disk. Anything a route passes that is not on it is dropped without complaint, so
+a new field has to be added there as well as written — `engine` was passed by
+`/api/agents/run` for weeks and never recorded.
+
+An `agent-turn` record splits its own duration, because one total per turn said
+the median turn ran half a minute and nothing about which part of it did:
+
+| Field | What it measures |
+| --- | --- |
+| `durationMs` | The turn, from spawn to the CLI exiting. Does not include the gateway's own work. |
+| `preflightMs` | Everything before the spawn: reading the body, validating it, writing attachments, asking macOS about Accessibility. |
+| `startupMs` | The CLI's own cold start — spawn to its first line of stdout. |
+| `firstTokenMs` | Spawn to the first token or reasoning text. |
+| `toolMs` / `toolCalls` | How much of the turn was spent inside tools, over how many of them. A tool that only ever reported settled counts as neither. |
+| `engine`, `truncated`, `reason`, `promptBytes` | Which CLI ran, whether its output hit the cap, why it ended, and the prompt's size. Never its text. |
+
 Every response carries `x-correlation-id`, echoing the request's own if it sent
 a well-formed one.
 

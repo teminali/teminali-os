@@ -25,6 +25,27 @@ const SAFE_FIELDS = new Set([
   /* Settings changes already passed these two and had them silently dropped. */
   "enabled",
   "maxApps",
+  /*
+    Agent turns. The route has passed all four of these since 1.1.0 and every
+    one was dropped here, which is why the log could time a turn but not say
+    which engine ran it or whether it finished. None is secret: an
+    engine name, two booleans-in-spirit, and the prompt's SIZE, never its text.
+  */
+  "engine",
+  "truncated",
+  "reason",
+  "promptBytes",
+  /*
+    ...and where those seconds went. See the timing ledger in
+    server/agent-cli.js: the CLI's own cold start, the wait for the first word,
+    and how much of the turn was tools rather than model. `preflightMs` is the
+    gateway's own work before the agent is spawned at all.
+  */
+  "preflightMs",
+  "startupMs",
+  "firstTokenMs",
+  "toolMs",
+  "toolCalls",
 ]);
 
 function sanitize(entry) {

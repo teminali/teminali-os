@@ -472,6 +472,42 @@ function normaliseClaude(event, state) {
  * in one piece at `item.completed`, and the pane fills in a step rather than a
  * stream. That is the CLI's contract, not a shortcut here.
  */
+/**
+ * What a Codex item says went wrong, or null if it says nothing.
+ *
+ * The CLI reports a failure as a field on the item itself rather than as a
+ * separate event, and it is not consistent about the shape — a string on some
+ * item types, an object carrying a message on others. Its presence is the
+ * signal either way; only the text differs.
+ */
+function codexItemError(item) {
+  const error = item.error ?? null;
+  if (!error) return null;
+  if (typeof error === "string") return error;
+  return error.message ?? JSON.stringify(error);
+}
+
+/** The keys that describe the envelope rather than what the item was asked to do. */
+const CODEX_ENVELOPE_KEYS = new Set([
+  "id", "item_type", "type", "status", "error", "result", "output", "aggregated_output", "unified_diff",
+]);
+
+/**
+ * The fields of an unfamiliar Codex item that say what it was called with.
+ *
+ * There is no known input shape for an item type this build has not seen, so
+ * the envelope keys come off and whatever is left is shown. Blanking it — which
+ * this used to do — renders a failed lookup as a step with no query on it,
+ * indistinguishable from one that was never asked anything.
+ */
+function codexItemInput(item) {
+  const input = {};
+  for (const [key, value] of Object.entries(item)) {
+    if (!CODEX_ENVELOPE_KEYS.has(key)) input[key] = value;
+  }
+  return input;
+}
+
 function normaliseCodex(event, state) {
   const out = [];
   const item = event.item ?? {};
@@ -487,6 +523,12 @@ function normaliseCodex(event, state) {
     case "item.updated":
     case "item.completed": {
       const done = event.type === "item.completed";
+      /*
+        A Codex item reports its own failure on itself. Reading that here rather
+        than in each branch is what stops a step that failed from rendering as a
+        green completed one: every branch below now derives its status from it.
+      */
+      const error = done ? codexItemError(item) : null;
 
       if (kind === "agent_message") {
         if (done && item.text) out.push({ type: "token", text: item.text });
@@ -494,14 +536,17 @@ function normaliseCodex(event, state) {
         const text = item.text ?? item.summary ?? "";
         if (done && text) out.push({ type: "reasoning", text });
       } else if (kind === "command_execution") {
+        // A command that never ran reports no exit code at all, so the absence
+        // of one stays a success — but an error on the item is still a failure.
+        const commandFailed = error != null || (item.exit_code != null && item.exit_code !== 0);
         out.push({
           type: "tool",
           id: item.id ?? `cmd-${out.length}`,
           name: "Bash",
           input: { command: item.command ?? "" },
-          status: done ? (item.exit_code === 0 || item.exit_code == null ? "completed" : "error") : "running",
-          isError: done && item.exit_code != null && item.exit_code !== 0,
-          output: done ? (item.aggregated_output ?? "") : undefined,
+          status: done ? (commandFailed ? "error" : "completed") : "running",
+          isError: done && commandFailed,
+          output: done ? (error ?? item.aggregated_output ?? "") : undefined,
         });
       } else if (kind === "file_change") {
         out.push({
@@ -509,8 +554,9 @@ function normaliseCodex(event, state) {
           id: item.id ?? `edit-${out.length}`,
           name: "Edit",
           input: { changes: item.changes ?? item.path ?? null },
-          status: done ? "completed" : "running",
-          output: done ? (item.unified_diff ?? "") : undefined,
+          status: done ? (error ? "error" : "completed") : "running",
+          isError: error != null,
+          output: done ? (error ?? item.unified_diff ?? "") : undefined,
         });
       } else if (kind === "mcp_tool_call") {
         out.push({
@@ -518,9 +564,9 @@ function normaliseCodex(event, state) {
           id: item.id ?? `mcp-${out.length}`,
           name: `${item.server ?? "mcp"}.${item.tool ?? item.tool_name ?? "call"}`,
           input: item.arguments ?? {},
-          status: done ? (item.error ? "error" : "completed") : "running",
-          isError: Boolean(item.error),
-          output: done ? JSON.stringify(item.result ?? null) : undefined,
+          status: done ? (error ? "error" : "completed") : "running",
+          isError: error != null,
+          output: done ? (error ?? JSON.stringify(item.result ?? null)) : undefined,
         });
       } else if (kind === "web_search") {
         out.push({
@@ -528,7 +574,9 @@ function normaliseCodex(event, state) {
           id: item.id ?? `search-${out.length}`,
           name: "WebSearch",
           input: { query: item.query ?? "" },
-          status: done ? "completed" : "running",
+          status: done ? (error ? "error" : "completed") : "running",
+          isError: error != null,
+          output: error ?? undefined,
         });
       } else if (kind === "error") {
         out.push({ type: "error", code: "AGENT_ITEM_ERROR", message: item.message ?? "The agent reported an error." });
@@ -536,13 +584,20 @@ function normaliseCodex(event, state) {
         // An item type this build has not seen. Showing it as a tool step is
         // wrong far less often than dropping it, and dropping it silently would
         // make the transcript quietly incomplete.
+        //
+        // What it must not do is claim the step succeeded. This branch used to
+        // hardcode "completed" with a blank input, so an unfamiliar tool that
+        // FAILED rendered green, with no error and nothing to show what it was
+        // asked — which is exactly how a delegated lookup came back empty and
+        // looked fine.
         out.push({
           type: "tool",
           id: item.id ?? `item-${out.length}`,
           name: kind,
-          input: {},
-          status: "completed",
-          output: JSON.stringify(item),
+          input: codexItemInput(item),
+          status: error ? "error" : "completed",
+          isError: error != null,
+          output: error ?? JSON.stringify(item),
         });
       }
       break;
@@ -730,6 +785,22 @@ export function runAgentTurn(options) {
   return new Promise((resolvePromise) => {
     const startedAt = Date.now();
     const state = { sessionId };
+    /*
+      Where a turn's seconds actually went.
+
+      The audit log recorded one number per turn — the whole thing — which is
+      enough to know that the median turn ran 29.6 seconds on 2026-09-12 and
+      nothing at all about which part of it does. These four split that number: how long the
+      CLI took to say anything (`startupMs`, its own cold start, measured from
+      spawn to its first line of stdout), how long until the first word of the
+      answer (`firstTokenMs`), and how much of the rest was spent inside tools
+      rather than in the model (`toolMs` over `toolCalls`).
+
+      Measured in the funnel every event already passes through, so no caller
+      has to opt in and no code path can forget.
+    */
+    const timing = { startupMs: null, firstTokenMs: null, toolMs: 0, toolCalls: 0 };
+    const toolStartedAt = new Map();
     let stdoutBytes = 0;
     let stderr = "";
     let buffer = "";
@@ -768,6 +839,7 @@ export function runAgentTurn(options) {
       resolvePromise({
         sessionId: state.sessionId,
         durationMs: Date.now() - startedAt,
+        timing,
         truncated,
         reason: reason ?? null,
         stderr: stderr.slice(-4_000),
@@ -790,6 +862,21 @@ export function runAgentTurn(options) {
 
     const emit = (event) => {
       if (event.type === "result") summary = event;
+      if (timing.firstTokenMs === null && (event.type === "token" || event.type === "reasoning")) {
+        timing.firstTokenMs = Date.now() - startedAt;
+      }
+      if (event.type === "tool" && event.id) {
+        // A tool is reported twice, running then settled. Anything that only
+        // ever arrives settled — an edit replayed from the watcher, say — has
+        // no start to subtract and is counted as a call with no duration
+        // rather than as one that took the whole turn.
+        if (event.status === "running") toolStartedAt.set(event.id, Date.now());
+        else if (toolStartedAt.has(event.id)) {
+          timing.toolMs += Date.now() - toolStartedAt.get(event.id);
+          timing.toolCalls += 1;
+          toolStartedAt.delete(event.id);
+        }
+      }
       try {
         onEvent(event);
       } catch {
@@ -815,6 +902,7 @@ export function runAgentTurn(options) {
     const consumeLine = (line) => {
       const text = line.trim();
       if (!text) return;
+      if (timing.startupMs === null) timing.startupMs = Date.now() - startedAt;
       let parsed;
       try {
         parsed = JSON.parse(text);

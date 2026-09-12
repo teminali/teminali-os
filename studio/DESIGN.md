@@ -8263,6 +8263,110 @@ release. `tests/voice-ack.test.mjs` went from 7 to 10; each new test asserts the
 pre-patch and post-patch behaviour side by side, so it carries its own mutation
 check.
 
+### 6.0.44 A delegated tool that failed rendered as a green completed step (`server/agent-cli.js`, 2026-09-13)
+
+He asked the voice assistant to look something up. A bitcoin price came back
+fast; "astral projection" failed twice, and both times the pane showed a tool
+step that had finished, with nothing in it. No error, no query, no answer. The
+transcript said the work was done.
+
+`normaliseCodex` translates the CLI's item lifecycle into our tool events. Three
+of its branches derived status from nothing at all. The unknown-item fallback was
+the worst: `status: "completed"` hardcoded, no `isError`, and `input: {}`, which
+blanks whatever the running event had already put on the step. `web_search` and
+`file_change` ignored `item.error` the same way. Only `mcp_tool_call` read it, and
+`command_execution` read only the exit code — so a command the sandbox refused,
+which never runs and therefore reports no exit code, counted as a success.
+
+The item's own failure is now read once, in `codexItemError(item)`, immediately
+after `done`, and every branch derives its status from it. The CLI is not
+consistent about the shape, a string on some item types and an object with a
+message on others, so the helper takes either and the branches never see the
+difference. The error text becomes the step's output, which is how the query's
+actual failure reaches the operator instead of `null`.
+
+The fallback also stops blanking the input. `codexItemInput` strips the envelope
+keys and shows what is left, so an unfamiliar tool arrives carrying the URL or
+query it was called with. **That is the half that made the bug invisible rather
+than merely wrong**: a step with no input and no error is indistinguishable from
+one that was never asked anything, and there was nothing on screen to suggest
+looking further.
+
+`tests/agent-cli.test.mjs` went from 36 to 41. Each of the five was run against
+the pre-fix file and fails there, so they are regression tests rather than
+descriptions of current behaviour.
+
+**The green pill was the smaller half.** `teminaliAgentBridge.ts:456` counts
+failures with `if (call.status === "error") failureCount++`, and lines 621-643
+turn that count into the turn's outcome. With the status hardcoded to
+`"completed"`, `failureCount` stayed 0 through a failed lookup, so the turn was
+recorded `status: "success"` and narrated as "Finished". **The voice assistant
+reported success on work that had failed, which is why he got no result and no
+sign that anything had gone wrong.** Nothing was needed on the voice side; it was
+reading a status the translator was fabricating.
+
+**WebFetch is not ours.** He saw the name because Claude Code ships that tool;
+we ship no such thing, in `studio/src`, `studio/server`, any runtime, or the
+gateway. The bug was never in a tool we own, it was in how we rendered one we do
+not.
+
+### 6.0.45 The audit log recorded how long a turn took, never which part of it (`server/audit-log.js`, `server/gateway.js`, `server/agent-cli.js`, 2026-09-13)
+
+Measured over every `agent-turn` line in his own
+`~/Library/Application Support/Teminali OS/gateway/gateway-audit.jsonl`, not a
+tail of it:
+
+| Day | n | min | median | p90 | max |
+| --- | --- | --- | --- | --- | --- |
+| 2026-09-06 | 16 | 5.0s | 19.0s | 160.1s | 167.3s |
+| 2026-09-07 | 10 | 5.7s | 14.5s | 26.2s | 36.9s |
+| 2026-09-12 | 18 | 7.5s | 29.6s | 54.6s | 77.1s |
+
+**The handover into this session quoted n=7, median 47s, p90 62s for 2026-09-12.
+That was the last seven lines of the file, not the day.** The real median is
+29.6s over 18 turns. The conclusion it was drawing survives the correction and
+is worth keeping: reclaiming the Gemini VAD's 1800ms silence window is 6% of a
+29.6 second turn, so it is not where a release goes. But the number was wrong,
+and the log could not have settled it either way, because `durationMs` was the
+only number in it.
+
+**`server/audit-log.js` holds a `SAFE_FIELDS` allowlist, applied on the way to
+disk, and it was silently eating four fields the route already passed.**
+`/api/agents/run` has written `engine`, `truncated`, `reason` and `promptBytes`
+since 1.1.0 (`6319f9f`, 2026-09-02) and not one reached the file. The allowlist
+already carried a comment reading "Settings changes already passed these two and
+had them silently dropped", so this is the second time. The drop is intentional
+design — an audit log must not persist a field nobody vetted — but it is silent,
+and silence is what cost eleven days of turns.
+
+Nothing in `server/gateway.test.js` could have caught it. Its `MemoryAudit`
+double keeps whatever it is handed and never sanitizes, so every field looked
+recorded from the test's side. The new test writes through a real
+`BoundedAuditLog` and parses the line back off disk, and asserts in the same
+breath that a `prompt` field passed alongside is still absent.
+
+Five new fields split the duration, stamped in the one funnel every event
+already passes through so no call site can forget:
+
+| Field | What it measures |
+| --- | --- |
+| `preflightMs` | The gateway's own work before the spawn. `durationMs` never covered it: that clock starts inside `runAgentTurn`. Reading the body, validating it, writing attachments, and the `assistantCapabilities()` call that asks macOS about Accessibility per turn all land here. |
+| `startupMs` | Spawn to the CLI's first line of stdout. Its own cold start: node boot, config, MCP connections. |
+| `firstTokenMs` | Spawn to the first token or reasoning text. |
+| `toolMs` / `toolCalls` | Time inside tools, over how many. |
+
+A tool is reported twice, running then settled, and `toolMs` pairs them by id. A
+step that only ever arrives settled — an edit replayed from the watcher — has no
+start to subtract, so it counts as neither a call nor a duration rather than as
+one that took the whole turn. `tests/agent-cli.test.mjs` asserts that case
+directly; without it the obvious implementation charges an orphan the entire
+elapsed time and the number reads plausibly.
+
+**This measures; it does not yet fix.** No latency was removed here. The next
+turn on the installed build writes a line that says which phase owns those
+seconds, and that is the input the fix needs. Do not spend a release on the VAD
+before reading one.
+
 ### 6.1 Turn semantics while a run is in flight (2026-09-05)
 
 A directed utterance is not automatically an instruction. `turnIntent.ts`
