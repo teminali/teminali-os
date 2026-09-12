@@ -281,6 +281,19 @@ export const TemiVoiceStage: React.FC<TemiVoiceStageProps> = ({
     (text: string, framing: "verbatim" | "report") => {
       const line = text.trim();
       if (!line) return;
+      /* Muted means muted, in both directions. Without this a muted Temi still
+         announced a delegated run the moment it finished, because `mute` closes
+         the capture path and nothing here consulted it. The line is not thrown
+         away: the transcript is the surface a muted assistant has, so the
+         written fallback becomes the only surface rather than the last resort.
+         See `unspokenLineRef` for why there is normally exactly one. */
+      if (audioRef.current?.isMuted) {
+        setDialogueHistory((prev) => [
+          ...prev,
+          { id: `asst-${Date.now()}`, role: "assistant", content: line },
+        ]);
+        return;
+      }
       const protocol = protocolRef.current;
       if (framing === "report") protocol?.sendUserText(frameAssistantReport(line));
       else protocol?.sendAssistantDirective(line);
@@ -664,6 +677,48 @@ export const TemiVoiceStage: React.FC<TemiVoiceStageProps> = ({
           isSpeakingRef.current = false;
           audioRef.current?.stopTTSPlayback();
           break;
+
+        case "mute": {
+          /* Stronger than `hush`, and in the other direction too: the ears
+             close as well as the mouth, and nothing reopens them until she is
+             asked to. The run itself is untouched, exactly as with `hush`, for
+             the reason §6.8 gives.
+
+             The order is not the obvious one. Whatever she is mid-sentence on
+             is killed first, then the confirmation goes out, and only then does
+             the mute land. Muting does not silence playback -- `isMuted` gates
+             the capture path alone, at `voiceAudioEngine.ts:102` -- so the last
+             line still reaches the operator. Nothing below this may clear the
+             TTS buffer again or that confirmation is dropped before it arrives.
+
+             `audio.isMuted` rather than the `isMicMuted` state, because this
+             callback is stored in `performTurnRef` and installed once, so the
+             render closure's copy of the state is stale. */
+          const audio = audioRef.current;
+          audio?.stopTTSPlayback();
+          setIsSpeaking(false);
+          isSpeakingRef.current = false;
+          if (decision.speak) speakLineRef.current(decision.speak, "verbatim");
+          if (audio?.audioContext && !audio.isMuted) audio.toggleMute();
+          setIsMicMuted(true);
+          showToast("Voice off — type instead");
+          break;
+        }
+
+        case "unmute": {
+          /* Reachable by typing, and by typing only. `flushBatch` drops the
+             captured batch while `isMuted` is set, so a spoken "unmute" never
+             reaches the socket, never comes back as a transcript, and never
+             reaches this router at all. That is why the mute confirmation names
+             the way back rather than just agreeing. The composer, the mic
+             toggle and the orb are the three doors that work. */
+          const audio = audioRef.current;
+          if (audio?.audioContext && audio.isMuted) audio.toggleMute();
+          setIsMicMuted(false);
+          if (decision.speak) speakLineRef.current(decision.speak, "verbatim");
+          showToast("Voice on — just speak");
+          break;
+        }
 
         case "acknowledge":
           // Praise. The right reply is to keep working.

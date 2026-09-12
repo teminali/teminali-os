@@ -16,6 +16,8 @@ import {
   EMPTY_RUN_ANSWER,
   IDLE_STATUS_ANSWER,
   STOP_ACKNOWLEDGEMENT,
+  MUTE_ACKNOWLEDGEMENT,
+  UNMUTE_ACKNOWLEDGEMENT,
 } from "../src/services/voice/voiceTurnRouter.ts";
 import { runProgressFromActivity } from "../src/services/voice/runProgressFromActivity.ts";
 
@@ -417,3 +419,138 @@ for (const conversation of CONVERSATIONS) {
     }
   });
 }
+
+/* ── Mute is not hush ───────────────────────────────────────────────────────
+   `hush` stops the sentence and leaves the mic open, so the next thing the
+   operator says is heard: that is what makes "quiet for a second" usable while
+   a build finishes. Mute closes the capture path and keeps it closed. The two
+   requests are spoken in words that are one syllable apart, and two of them
+   used to land somewhere actively wrong: "mute" was a hush, and "stop
+   listening" was a bare stop, which mid-run cancelled the run. An operator
+   closing the microphone must not lose the build to it.
+*/
+
+const MUTE_UTTERANCES = [
+  "mute",
+  "go mute",
+  "mute yourself",
+  "Mute yourself.",
+  "okay, mute yourself please",
+  "stop listening",
+  "stop listening to me",
+  "turn off your mic",
+  "mic off",
+  "close the mic",
+  "don't listen to me",
+];
+
+for (const utterance of MUTE_UTTERANCES) {
+  test(`"${utterance}" closes the microphone rather than just the mouth`, () => {
+    for (const decision of [idle(utterance), during(utterance)]) {
+      assert.equal(decision.action.kind, "mute", decision.reason);
+      assert.equal(decision.suppressPipelineAnswer, true, "two voices would answer it");
+      assert.equal(decision.speak, MUTE_ACKNOWLEDGEMENT);
+    }
+  });
+}
+
+const UNMUTE_UTTERANCES = [
+  "unmute",
+  "unmute yourself",
+  "Unmute.",
+  "you can listen again",
+  "start listening",
+  "listen to me again",
+  "turn the mic back on",
+  "mic on",
+  "open your mic",
+];
+
+for (const utterance of UNMUTE_UTTERANCES) {
+  test(`"${utterance}" asks for the microphone back`, () => {
+    for (const decision of [idle(utterance), during(utterance)]) {
+      assert.equal(decision.action.kind, "unmute", decision.reason);
+      assert.equal(decision.speak, UNMUTE_ACKNOWLEDGEMENT);
+    }
+  });
+}
+
+test("unmute routes in every state, including the ones a muted session is in", () => {
+  // The state a muted operator is actually in cannot be reached by voice at
+  // all: `voiceAudioEngine.flushBatch` drops the mic batch while `isMuted` is
+  // set, so nothing reaches the socket and no transcript comes back. A typed
+  // line reaches this same router, which is the path this pins: every
+  // combination of busy and speaking must still route the phrase.
+  for (const busy of [true, false]) {
+    for (const speaking of [true, false]) {
+      const decision = routeVoiceTurn("unmute", { busy, speaking, run: busy ? busyRun() : null, now: NOW });
+      assert.equal(decision.action.kind, "unmute", `busy=${busy} speaking=${speaking}: ${decision.reason}`);
+    }
+  }
+});
+
+test("asking for quiet is still a hush, and still leaves the mic open", () => {
+  // The regression that matters most in this file: if the mute whitelist ever
+  // grows a keyword, these four become mutes and "be quiet a second" costs the
+  // operator their microphone.
+  for (const utterance of ["be quiet", "keep quiet", "stop talking", "quiet for a second", "shut up", "shh"]) {
+    const decision = during(utterance);
+    assert.equal(decision.action.kind, "hush", `"${utterance}" should ask for quiet, not for silence`);
+    assert.equal(decision.speak, null);
+  }
+});
+
+test("\"shush\" is not a mute, though it is not a hush either yet", () => {
+  // Measured, not assumed: `classifyTurnIntent("shush")` returns `instruction`
+  // today. `HUSH_PHRASES` carries "shh", "shhh", "ssh" and "hush" and has never
+  // carried "shush", so it converses. That is a gap in `turnIntent.ts` and it
+  // predates the mute split; what this file can promise is the half it owns,
+  // which is that a request for quiet never costs the operator the microphone.
+  const decision = during("shush");
+  assert.notEqual(decision.action.kind, "mute");
+});
+
+test("a mute during a run mutes her and leaves the run running", () => {
+  // "stop listening" reached `turnIntent`'s bare-stop rule before this, so the
+  // operator who wanted the mic closed got the build cancelled instead.
+  const decision = during("stop listening");
+  assert.equal(decision.action.kind, "mute");
+  assert.notEqual(decision.action.kind, "stop");
+});
+
+test("the mute confirmation names a route that still works once she is muted", () => {
+  // She cannot be told "unmute" by voice after this line: the mic is shut. So
+  // the line has to say what does work, or it strands the operator.
+  assert.match(MUTE_ACKNOWLEDGEMENT, /type|orb/i, MUTE_ACKNOWLEDGEMENT);
+});
+
+test("muting the video is an editing command, not a request for her silence", () => {
+  // This shell is a video editor too. A mute gate that keyed on the word would
+  // close the microphone instead of muting a clip, and the operator could not
+  // then say so out loud.
+  for (const utterance of [
+    "mute the video",
+    "mute that track",
+    "mute the audio on that clip",
+    "mute the music",
+    "unmute the video",
+    "unmute that track",
+    "turn off the audio on the timeline",
+  ]) {
+    const decision = idle(utterance);
+    assert.notEqual(decision.action.kind, "mute", `"${utterance}" is the editor's, not hers`);
+    assert.notEqual(decision.action.kind, "unmute", `"${utterance}" is the editor's, not hers`);
+  }
+});
+
+test("the editor's mute commands still reach the hands", () => {
+  // Not swallowed is half of it; the other half is that they arrive.
+  assert.equal(idle("mute the video").action.kind, "delegate");
+  assert.equal(idle("mute that track").action.kind, "delegate");
+});
+
+test("ordinary talk that mentions listening is not an unmute", () => {
+  for (const utterance of ["go on, i'm listening", "i was listening to music all morning"]) {
+    assert.notEqual(idle(utterance).action.kind, "unmute", utterance);
+  }
+});

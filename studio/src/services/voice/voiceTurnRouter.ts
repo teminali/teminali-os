@@ -47,6 +47,20 @@ export type VoiceTurnAction =
   | { kind: "stop" }
   /** Stop the voice. The run keeps going — this is the split §6.8 insists on. */
   | { kind: "hush" }
+  /**
+   * Close the ears as well as the mouth, and keep them closed.
+   *
+   * `mute` is not a stronger `hush`, it is a different request, and the
+   * microphone is the whole difference. `hush` ends the sentence she is in the
+   * middle of and leaves the mic open, so the very next thing the operator says
+   * is heard and answered: that is what makes "quiet for a second" usable while
+   * a build finishes. `mute` closes the capture path too and stays closed until
+   * it is asked to open, which is why "be quiet" must never reach it. Neither
+   * touches the run, which is the same split §6.8 insists on.
+   */
+  | { kind: "mute" }
+  /** Open the ears again. See `classifySelfVoiceCommand` for what can carry it. */
+  | { kind: "unmute" }
   /** Say the last thing again. */
   | { kind: "repeat"; text: string }
   /** Praise. Carry on, quietly. */
@@ -96,6 +110,126 @@ export const IDLE_STATUS_ANSWER = "Nothing is running right now.";
 /** Said when a run is cancelled by voice. Short on purpose: the ask was for it to end. */
 export const STOP_ACKNOWLEDGEMENT = "Stopped.";
 
+/**
+ * Said when the microphone is closed by voice: before the silence, and audible
+ * despite it.
+ *
+ * The ordering is worth stating because it is not obvious from the call site.
+ * `speakLine` hands a verbatim line to the live socket as a directive and the
+ * audio comes back over that socket a moment later, so the line is not spoken
+ * synchronously and cannot be. Muting does not silence it: `isMuted` in
+ * `voiceAudioEngine` gates the capture path only, where `flushBatch` drops the
+ * mic batch, and playback is untouched. So a confirmation sent before the mute
+ * still lands, provided nothing clears the TTS buffer after it was sent. That
+ * is the one thing the renderer has to get right, and it is why this is a line
+ * rather than `null`.
+ *
+ * It names the way back on purpose. With the mic closed the operator cannot say
+ * "unmute" and be heard, so a confirmation that did not say what still works
+ * would leave them talking at a machine that had stopped listening.
+ */
+export const MUTE_ACKNOWLEDGEMENT = "Going quiet. Type or tap the orb when you want me back.";
+
+/** Said when the ears open again. Short: the ask was to get on with it. */
+export const UNMUTE_ACKNOWLEDGEMENT = "Listening again.";
+
+/**
+ * Whole utterances that ask her to close her own microphone.
+ *
+ * A whitelist of complete phrases rather than a keyword, because the costly
+ * false positive is right next door: this shell is a video editor as well, so
+ * "mute the video" and "mute that track" are ordinary editing commands that
+ * belong to the hands. A gate that keyed on the word `mute` would close the
+ * microphone instead of muting a clip, and the operator could not then say so
+ * out loud. Nothing counts here unless the utterance is the request entire and
+ * its object is her, her voice, or the session's microphone.
+ *
+ * "stop listening" is in this set and not in `turnIntent`'s: there it falls to
+ * the bare-stop rule, which mid-run cancels the run, so an operator closing the
+ * mic lost the build to it.
+ */
+const MUTE_PHRASES = new Set([
+  "mute", "go mute", "go on mute", "going mute", "mute now",
+  "mute yourself", "mute you", "mute your mic", "mute your microphone",
+  "mute the mic", "mute the microphone", "mute your voice",
+  "mic off", "mics off", "microphone off",
+  "turn off the mic", "turn off your mic", "turn the mic off", "turn your mic off",
+  "turn off the microphone", "turn off your microphone", "turn the microphone off",
+  "switch off the mic", "switch the mic off",
+  "cut the mic", "kill the mic", "close the mic", "close your mic", "close the microphone",
+  "stop listening", "stop listening to me", "stop the mic", "stop the microphone",
+  "stop your mic", "don't listen", "dont listen", "do not listen",
+  "don't listen to me", "dont listen to me", "do not listen to me",
+  "stop listening and talking", "stop talking and listening",
+]);
+
+/**
+ * Whole utterances that ask for the microphone back.
+ *
+ * Same whitelist discipline, for the same reason: "unmute the video" is the
+ * editor's business. The bare forms are what survives wrapper stripping, so
+ * "you can listen again" is matched twice over, once as spoken and once as
+ * "listen again".
+ */
+const UNMUTE_PHRASES = new Set([
+  "unmute", "un mute", "unmute yourself", "unmute you",
+  "unmute your mic", "unmute your microphone", "unmute the mic",
+  "unmute the microphone", "unmute your voice",
+  "mic on", "mic back on", "microphone on", "microphone back on",
+  "turn on the mic", "turn the mic on", "turn on your mic", "turn your mic on",
+  "turn the mic back on", "turn your mic back on", "turn on the microphone",
+  "turn the microphone on", "turn the microphone back on",
+  "switch on the mic", "switch the mic on",
+  "open the mic", "open your mic", "open the microphone", "open your ears",
+  "start listening", "start listening again", "listen again", "listen to me again",
+  "hear me again", "you can listen again", "you can hear me again",
+  "you can talk again", "you can speak again", "you can listen",
+]);
+
+/**
+ * Politeness and address that wrap a request without changing it, taken off
+ * both ends before the sets above are consulted.
+ *
+ * `turnIntent` has a filler set of its own and does not export it, so this is
+ * deliberately narrower rather than a copy: only the wrappers this particular
+ * request arrives in. Spoken mutes land as "okay, mute yourself", "Temi,
+ * mute", "can you mute yourself please". Nothing that carries meaning for
+ * these two sets is stripped, which is why "again" is absent from the tail.
+ */
+const WRAPPER_PREFIX =
+  /^(?:(?:ok|okay|alright|right|so|well|hey|yo|hi|please|now|just|and|then|also|actually|temi|temy|teminali|can you|could you|would you|will you|i need you to|i want you to|you can|you should|let's|lets)\s+)+/;
+
+const WRAPPER_SUFFIX =
+  /(?:\s+(?:please|now|ok|okay|thanks|thank you|temi|temy|teminali|for a second|for a sec|for a minute|for a moment|for a bit|for a while|for now))+$/;
+
+/**
+ * "Was that about her own microphone?" — and only that.
+ *
+ * Reachability, stated plainly rather than assumed: `unmute` cannot arrive by
+ * voice while she is muted. `voiceAudioEngine.flushBatch` drops the captured
+ * batch whenever `isMuted` is set, so no audio reaches the socket, no
+ * transcript comes back, and this function is never called on a muted lane.
+ * The routes that do work are typing, which reaches this same router, and the
+ * mic toggle. `unmute` is still routed in every state, because the router is
+ * not told who is muted and a redundant unmute costs a no-op.
+ */
+function classifySelfVoiceCommand(text: string): "mute" | "unmute" | null {
+  const flat = text
+    .toLowerCase()
+    .replace(/[’`]/g, "'")
+    .replace(/[^\p{L}\p{N}'\s]/gu, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (!flat) return null;
+  const stem = flat.replace(WRAPPER_PREFIX, "").replace(WRAPPER_SUFFIX, "").trim();
+  // Unmute is asked first because it is the phrase a muted session most needs
+  // to land. The two sets are disjoint, so the order is about reading, not
+  // about precedence.
+  if (UNMUTE_PHRASES.has(flat) || UNMUTE_PHRASES.has(stem)) return "unmute";
+  if (MUTE_PHRASES.has(flat) || MUTE_PHRASES.has(stem)) return "mute";
+  return null;
+}
+
 function decision(
   intent: TurnIntent,
   reason: string,
@@ -126,6 +260,39 @@ export function routeVoiceTurn(text: string, state: VoiceTurnState): VoiceTurnDe
   });
   const now = state.now ?? Date.now();
   const run = state.run ?? null;
+
+  /*
+    Read before the intent, because `turnIntent` cannot see this distinction and
+    two of its verdicts are wrong once it exists: "mute" and "mute yourself" sit
+    in its hush set, and "stop listening" falls through to its bare-stop rule,
+    which while a run is in flight cancels the run. Both are the same class of
+    mistake as the one §6.8 fixed for "stop talking" — the operator asks for one
+    kind of silence and loses something else.
+
+    The classifier's own verdict is still reported in `intent`, unchanged. It is
+    what the intent gate saw, and saying otherwise here would hide the very
+    disagreement this branch exists to settle; the appended reason carries the
+    rest.
+  */
+  const selfVoice = classifySelfVoiceCommand(clean);
+  if (selfVoice === "unmute") {
+    return decision(
+      intent,
+      `${reason} · Asked for the microphone back.`,
+      { kind: "unmute" },
+      true,
+      UNMUTE_ACKNOWLEDGEMENT,
+    );
+  }
+  if (selfVoice === "mute") {
+    return decision(
+      intent,
+      `${reason} · Asked for the microphone closed, not merely for quiet.`,
+      { kind: "mute" },
+      true,
+      MUTE_ACKNOWLEDGEMENT,
+    );
+  }
 
   switch (intent) {
     case "hush":

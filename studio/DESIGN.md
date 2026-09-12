@@ -7448,6 +7448,50 @@ transcript, `generationComplete`, `turnComplete`. The
 never fires. It stays for the model that does interleave one.
 
 
+### 6.0.23 "Go mute" had nothing behind it (`services/voice/voiceTurnRouter.ts`, `components/voice/TemiVoiceStage.tsx`, 2026-09-12)
+
+`hush` ends the sentence she is on and leaves the microphone open, so the next
+thing the operator says is heard and answered. That is the right response to
+"be quiet" and the wrong one to "go mute", which asks for something that
+persists. The operator asked for the second and got the first.
+
+`mute` now closes the capture path and keeps it closed; `unmute` opens it.
+Neither touches a run in flight, which is §6.8's rule about not confusing a
+request for quiet with a request to stop working, and it applies here for the
+same reason.
+
+**Routed ahead of the intent switch, which is necessary rather than tidy.**
+`turnIntent` files "mute yourself" under `HUSH_PHRASES`, and "stop listening"
+fell through to its bare-stop rule, which mid-run cancelled the run. The
+classifier's own verdict is still what `decision.intent` reports; where the two
+disagree, the disagreement is written into `reason`. Phrases are matched as
+whole utterances rather than keywords, and `tests/voice-turn-router.test.mjs`
+(35 tests before this, 63 after) pins seven editor commands as NOT self-mute,
+because "mute that track" is a video editing instruction and routing it to
+self-mute would be the more embarrassing failure.
+
+**Two limits, documented at the call site rather than deferred.**
+
+Spoken "unmute" cannot work, and cannot be made to work from the router.
+`voiceAudioEngine.ts:102` drops the captured batch while `isMuted` is set, so
+no audio reaches the socket, no transcript returns, and `routeVoiceTurn` is
+never called at all. The composer, the mic toggle and the orb are the three
+doors that do work. That is why the mute confirmation names the way back
+instead of merely agreeing, and why the confirmation is spoken BEFORE the mute
+lands: muting gates capture only, so playback of that last line survives it.
+
+Muting also had to gate `speakLine`. A muted Temi was still announcing
+delegated runs as they finished, because mute closed her ears and nothing had
+closed her mouth. The line is not discarded. It goes to the transcript, which
+is the only surface a muted assistant has, so §6.0.21's one-surface rule now
+has four append sites instead of three. The rule is unchanged: no site may
+write a bubble ALONGSIDE a line she is also saying, and the muted branch writes
+instead of the speaker rather than beside it.
+
+Not yet true, and marked as such: `workspaceActions.ts` landed with this work,
+a pure parser and fuzzy resolver for "open my DukaBot folder". It is tested and
+is NOT wired into the stage, so no spoken phrase reaches it yet.
+
 ### 6.1 Turn semantics while a run is in flight (2026-09-05)
 
 A directed utterance is not automatically an instruction. `turnIntent.ts`

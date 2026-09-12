@@ -118,13 +118,20 @@ test("the report reaches her as a turn of its own, never as the function respons
 
 test("only one place in the stage writes an assistant bubble that is not spoken", async () => {
   const stage = await readSource("../src/components/voice/TemiVoiceStage.tsx");
-  // Three sites, and the count is the test. Two are in `commitSpokenTurn`, the
-  // turn she was cut off in and the turn she finished, and both record words
-  // that were actually said. The third is the fallback inside `speakLine`, for
-  // a line the voice never took. A fourth means something is writing a bubble
-  // alongside the speaker again, which is the defect.
+  // Four sites, and the count is the test. The rule is that no site may write a
+  // bubble ALONGSIDE the speaker; each of these writes instead of it.
+  //
+  // Two are in `commitSpokenTurn`, the turn she was cut off in and the turn she
+  // finished, and both record words that were actually said. The third is the
+  // timeout fallback in `speakLine`, for a line the voice never took. The
+  // fourth is the muted branch of `speakLine`, added when `mute` arrived: a
+  // muted assistant has the transcript and nothing else, so there the written
+  // surface is the only surface rather than the last resort.
+  //
+  // A fifth means something is writing a bubble next to a line she is also
+  // saying, which is the defect this file exists for.
   const appends = stage.match(/id: `asst-\$\{Date\.now\(\)\}`/g) ?? [];
-  assert.equal(appends.length, 3, `expected 3 assistant append sites, found ${appends.length}`);
+  assert.equal(appends.length, 4, `expected 4 assistant append sites, found ${appends.length}`);
 });
 
 test("the delegate path no longer writes the report and speaks it too", async () => {
