@@ -193,11 +193,41 @@ export const TemiVoiceStage: React.FC<TemiVoiceStageProps> = ({
     }
     const pacer = pacerRef.current;
     const pending = pendingFinalRef.current;
-    assistantTurnActiveRef.current = false;
     if (!pending) {
+      /* Nothing has finished generating, so this is a GAP in her audio rather
+         than the end of her reply, and the two must not be confused.
+
+         The Python lane synthesised locally and streamed without stopping, so
+         120ms of worklet silence plus a 450ms debounce only ever meant "done".
+         Gemini's native audio arrives over a socket, in chunks, with real
+         pauses while it generates -- measured 2026-09-12, one reply arrived as
+         three transcript bubbles with the opening words repeated in each,
+         because ending the turn here cleared `assistantTurnActiveRef` and the
+         next chunk began a fresh turn against a running transcript that still
+         held the whole reply from its first word.
+
+         `turnComplete` is the only thing that means the reply is over, and it
+         arrives as `final_assistant_answer`, which is what sets `pending`. So
+         with nothing pending there is nothing to commit and nothing to reset:
+         leave the turn and its caption exactly as they are.
+
+         An interrupt is the exception. It ends the turn whether or not
+         generation finished, and whatever she managed to say is still a thing
+         she said, so it is committed rather than dropped. */
+      if (!truncateToSpoken) return;
+      assistantTurnActiveRef.current = false;
+      const cut = pacer.advanceTo(secondsPlayedRef.current);
+      if (cut) {
+        pacer.completeTurn(cut, secondsPlayedRef.current);
+        setDialogueHistory((prev) => [
+          ...prev,
+          { id: `asst-${Date.now()}`, role: "assistant", content: cut },
+        ]);
+      }
       setLiveAssistantStream(null);
       return;
     }
+    assistantTurnActiveRef.current = false;
     const spoken = truncateToSpoken
       ? pacer.advanceTo(secondsPlayedRef.current) || pending
       : pacer.revealAll();
@@ -327,7 +357,7 @@ export const TemiVoiceStage: React.FC<TemiVoiceStageProps> = ({
         setLiveUserSpeech(content);
       } else if (type === "final_user_request") {
         setLiveUserSpeech(null);
-        if (content) {
+        if (content && content.trim()) {
           const clean = content.trim();
           // A directive re-entering as a user turn must not be transcribed and
           // must not reach the switch: classified as work it delegates again,
@@ -390,6 +420,56 @@ export const TemiVoiceStage: React.FC<TemiVoiceStageProps> = ({
         audio.stopTTSPlayback();
         setIsSpeaking(false);
         commitSpokenTurnRef.current?.(true);
+      }
+
+      /* 5. She asked for the hands herself.
+
+         Until today the decision to delegate was taken for her, by a regex in
+         `machineAction.ts`, before she ever saw the turn. That gate is still
+         there and still useful as a fast path, but it cannot be the whole
+         story: it reads verbs and nouns, and what actually matters is whether
+         SHE knows the answer. Measured 2026-09-12, spoken: asked the size of
+         the operator's Desktop she said "12.4 gigabytes" (it is 38G), asked his
+         remaining storage she said "512 gigabytes" (27Gi free on a 460Gi disk,
+         so more than the whole drive), and challenged on it she said "the
+         system provided those numbers" -- inventing a source to defend an
+         invented number. No regex catches the general case of that, because the
+         general case is "she does not know and says something anyway".
+
+         So the model gets a tool and decides for itself. `machineAction` now
+         guards the fast, obvious commands; this handles everything else,
+         including the open-ended questions a search can answer and a
+         conversation model cannot. */
+      else if (type === "tool_call") {
+        const args = (msg.args ?? {}) as { task?: unknown; spoken_note?: unknown };
+        const task = typeof args.task === "string" ? args.task.trim() : "";
+        const note = typeof args.spoken_note === "string" ? args.spoken_note.trim() : "";
+        /* The one line she offers before the pause. It is a toast rather than
+           an activity row because the activity store types its rows as machine
+           events (cmd/edit/read/test) and this is a sentence she said. */
+        if (note) showToast(note);
+        if (!task) {
+          protocol.sendToolResponse(msg.id, msg.name, "No task was given, so nothing was run.");
+        } else {
+          void (async () => {
+            try {
+              /* `inspect` rather than `edit`: this path exists because she was
+                 missing a fact, and `summariseOutcome` needs to know a silent
+                 run answered a question rather than failed to do work. */
+              const report = await TeminaliAgentBridge.delegateTask(task, { action: "inspect" });
+              /* Capped because the whole report re-enters the live session as a
+                 function response and competes for the same window the
+                 conversation lives in. A voice answer never needs more. */
+              const capped = report.length > 4000 ? `${report.slice(0, 4000)}\n[report truncated]` : report;
+              protocol.sendToolResponse(msg.id, msg.name, capped || "The assistant finished but reported nothing.");
+            } catch (error) {
+              /* Told, not swallowed. A tool call with no response leaves her
+                 waiting mid-turn with the microphone open and nothing to say. */
+              const reason = error instanceof Error ? error.message : String(error);
+              protocol.sendToolResponse(msg.id, msg.name, `That could not be completed: ${reason}`);
+            }
+          })();
+        }
       }
     };
 

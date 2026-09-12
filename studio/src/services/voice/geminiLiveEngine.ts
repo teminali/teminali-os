@@ -9,6 +9,12 @@
  * `components/voice/TemiVoiceStage.tsx`, is a large state machine that was
  * tuned against that surface and should not have to learn a new one.
  *
+ * It has since grown exactly one thing that lane never had: a seventh inbound
+ * message, `tool_call`, and a `sendToolResponse()` to answer it. That is Gemini
+ * Live function calling, and it is how Temi reaches the Teminali OS assistant
+ * herself instead of a regex in `machineAction.ts` deciding for her before she
+ * ever sees the turn. `ASK_THE_ASSISTANT` below records what that cost.
+ *
  * Everything that changed is behind the surface:
  *
  *  - the SDK owns the socket, so there is no `url` to pass to `connect()`;
@@ -24,7 +30,14 @@
  * driving a real Gemini Live session for weeks.
  */
 
-import { GoogleGenAI, Modality, type LiveServerMessage, type Session } from "@google/genai";
+import {
+  GoogleGenAI,
+  Modality,
+  Type,
+  type FunctionDeclaration,
+  type LiveServerMessage,
+  type Session,
+} from "@google/genai";
 import { TEMI_PERSONA, TEMI_DEFAULT_VOICE } from "./temiPersona.ts";
 import { fetchGeminiLiveToken, describeGeminiLive } from "./geminiLiveToken.ts";
 
@@ -55,15 +68,19 @@ const PLAYBACK_RATE = 48000;
     suppression; Gemini does that server-side, so we only skip past them. */
 const FRAME_HEADER_BYTES = 8;
 
-/** The six shapes this engine emits, and nothing else. The consumer switches
-    on `type`, so adding a seventh here is a change to a contract, not a detail. */
+/** The seven shapes this engine emits, and nothing else. The consumer switches
+    on `type`, so adding an eighth here is a change to a contract, not a detail.
+    `tool_call` is the newest and the only one with no ancestor in the Python
+    lane: it is the model asking for hands, and the stage is expected to answer
+    every one of them through `sendToolResponse()`. */
 export type GeminiLiveMessage =
   | { type: "partial_user_request"; content: string }
   | { type: "final_user_request"; content: string }
   | { type: "partial_assistant_answer"; content: string }
   | { type: "final_assistant_answer"; content: string }
   | { type: "tts_audio"; int16: Int16Array }
-  | { type: "tts_interrupt" };
+  | { type: "tts_interrupt" }
+  | { type: "tool_call"; id: string; name: string; args: Record<string, unknown> };
 
 /**
  * Average 48 kHz Int16 down to 16 kHz Int16.
@@ -153,6 +170,77 @@ function base64ToBytes(b64: string): Uint8Array {
   return bytes;
 }
 
+/**
+ * The one tool Temi has, and the reason this file grew a function-calling path.
+ *
+ * Measured 2026-09-12, spoken to her over a live session with nothing
+ * delegated: asked the total size of the operator's Desktop she said "12.4
+ * gigabytes" — it is 38G. Asked how much storage he had left she said "512
+ * gigabytes", which is more than the whole 460Gi disk, of which 27Gi were
+ * actually free. Challenged on both, she said "the system provided those
+ * numbers, instantly": a fabricated provenance defending a fabricated number.
+ * Nothing had been delegated and nothing could be, because a regex in
+ * `machineAction.ts` decided what reached the agent, and it decided before she
+ * ever saw the turn.
+ *
+ * So the decision moves to her. She is a small, fast, native-audio model with
+ * no filesystem and no clock; the Teminali OS assistant behind her reads and
+ * edits files, runs commands, inspects the machine and searches the web. The
+ * declaration below is written for the MODEL to read, not for us, and the line
+ * doing the real work is the last one: a pause beats a confident wrong figure.
+ * The failure above was not a missing capability. It was a model that preferred
+ * any answer to a visible gap, and no list of tools fixes that on its own.
+ *
+ * One declaration, not several. Every one costs tokens in a session whose
+ * binding constraint is window, and a single obviously-correct door is easier
+ * for a small model to find than a menu it has to choose from.
+ *
+ * The call is left BLOCKING, which is the SDK default: `behavior` is unset, so
+ * the model stops and waits rather than talking over the agent. @google/genai
+ * 2.22.0 does expose the alternative — `FunctionDeclaration.behavior`, the
+ * `Behavior` enum, and `FunctionResponse.scheduling` / `willContinue` for
+ * NON_BLOCKING calls — and if an agent run ever runs long enough that the pause
+ * itself is the problem, that is the knob, not a second tool. It was not taken
+ * here because `spoken_note` already covers the silence and NON_BLOCKING would
+ * let her keep generating into a turn whose facts have not arrived yet, which
+ * is the exact failure mode above.
+ */
+const ASK_THE_ASSISTANT: FunctionDeclaration = {
+  name: "ask_the_assistant",
+  description:
+    "Ask the Teminali OS assistant, a far more capable agent sitting behind you. " +
+    "It can read and edit any file in this workspace, run shell commands, inspect this " +
+    "machine and its disks, and search the web for current information. You cannot do any " +
+    "of those things yourself. Call it whenever the answer depends on something you have " +
+    "not actually been told: file contents, folder sizes, free space, what is installed, " +
+    "what changed recently, anything happening on the web, anything about the state of this " +
+    "computer. Never guess a number, a path, a version or a date, and never claim a fact " +
+    "came from the system when it did not. A wrong specific answer is much worse than a " +
+    "pause: the user will happily wait a few seconds, but one confident wrong figure costs " +
+    "their trust in everything else you say. When in any doubt, call this.",
+  parameters: {
+    type: Type.OBJECT,
+    properties: {
+      task: {
+        type: Type.STRING,
+        description:
+          "The complete instruction to hand to the assistant. It has none of this " +
+          "conversation's context, so write a full, self-contained request: not 'how big is " +
+          "it' but 'Report the total size of the user's Desktop folder in gigabytes.' " +
+          "Include every path, name and detail the user gave you.",
+      },
+      spoken_note: {
+        type: Type.STRING,
+        description:
+          "One short, natural line you will say out loud while the assistant works, so the " +
+          "user is not left in silence. For example 'Let me look.' or 'One second, checking.' " +
+          "Keep it to a few words and do not promise a specific answer in it.",
+      },
+    },
+    required: ["task", "spoken_note"],
+  },
+};
+
 export class GeminiLiveEngine {
   onConnected: (() => void) | null = null;
   onDisconnected: (() => void) | null = null;
@@ -191,6 +279,18 @@ export class GeminiLiveEngine {
   private generation = 0;
   private suppressedGeneration = -1;
   private turnActive = false;
+
+  /**
+   * Ids of function calls the model has issued and is still waiting on.
+   *
+   * It does three jobs, and they are all the same question — is the model still
+   * waiting for THIS id. It gates `sendToolResponse()` so an answer is never
+   * posted to a call that was cancelled, abandoned or outlived by its session;
+   * it holds `turnComplete` back so a turn that pauses for a tool is not
+   * committed as if it had finished; and being a set rather than a flag, it is
+   * correct if Gemini ever issues two calls in one turn.
+   */
+  private pendingToolCalls = new Set<string>();
 
   private micCarry: Int16Array = new Int16Array(0);
   /** Odd trailing byte of a base64 audio chunk. Gemini's chunks are not
@@ -260,6 +360,13 @@ export class GeminiLiveEngine {
             voiceConfig: { prebuiltVoiceConfig: { voiceName: this.voice } },
           },
           systemInstruction: TEMI_PERSONA,
+          // Declared ALONGSIDE `enableAffectiveDialog`, not instead of it.
+          // Checked against this repo's own @google/genai 2.22.0 rather than
+          // from memory: `LiveConnectConfig` carries `tools?: ToolListUnion`
+          // and `enableAffectiveDialog?: boolean` as independent fields, and
+          // the native-audio model takes both. Nothing above was traded away
+          // for this line.
+          tools: [{ functionDeclarations: [ASK_THE_ASSISTANT] }],
         },
         callbacks: {
           onopen: () => {
@@ -349,6 +456,11 @@ export class GeminiLiveEngine {
     this.inputTranscript = "";
     this.outputTranscript = "";
     this.turnActive = false;
+    // A call issued by the old session cannot be answered into the new one:
+    // the id means nothing there, and the model behind it has no memory of
+    // asking. Dropping them here is also the release valve for the wedge
+    // described in `sendBargeIn()`.
+    this.pendingToolCalls.clear();
     this.micCarry = new Int16Array(0);
     this.pcmByteCarry = new Uint8Array(0);
     this.upsampleAnchor = 0;
@@ -363,6 +475,23 @@ export class GeminiLiveEngine {
   private handleServerMessage(message: LiveServerMessage) {
     const content = message.serverContent;
 
+    // Read before the `interrupted` branch below, which returns early. Gemini
+    // cancels outstanding calls exactly when the user talks over her, so a
+    // cancellation and an interrupt can ride in on the same message; handling
+    // it second would leave the id pending and let a late `sendToolResponse()`
+    // through.
+    //
+    // Nothing is emitted to the stage. It may well have an agent run in flight
+    // for this id and it should let that finish — killing real work because the
+    // user changed the subject is worse than wasting it. What must not happen
+    // is the answer going back: the model has stopped waiting, it is already
+    // generating the next turn, and a response arriving now would be read as
+    // the answer to a question nobody asked.
+    const cancelledIds = message.toolCallCancellation?.ids;
+    if (cancelledIds?.length) {
+      for (const id of cancelledIds) this.pendingToolCalls.delete(id);
+    }
+
     // Server-side barge-in: its VAD heard the user over her. Drop everything
     // still queued, because the audio already in the worklet is a reply to a
     // sentence the user has stopped waiting for.
@@ -370,6 +499,10 @@ export class GeminiLiveEngine {
       this.upsampleAnchor = 0;
       this.pcmByteCarry = new Uint8Array(0);
       this.turnActive = false;
+      // Same reasoning as the cancellation above, for the case where the server
+      // interrupts without naming ids. An interrupted turn is over; a tool call
+      // that belonged to it has nowhere to land.
+      this.pendingToolCalls.clear();
       this.emit({ type: "tts_interrupt" });
       return;
     }
@@ -413,10 +546,52 @@ export class GeminiLiveEngine {
       }
     }
 
+    // She is asking for hands. `toolCall` is a TOP-LEVEL field of the message,
+    // not part of `serverContent`, and it can arrive on the same message as the
+    // transcript deltas and audio above. Read after them, so the stage sees her
+    // spoken note before the call it belongs to; read before `turnComplete`
+    // below, which has to know a call is pending on this very message.
+    const calls = message.toolCall?.functionCalls;
+    if (calls?.length) {
+      for (const call of calls) {
+        // `FunctionCall.name` and `.id` are both optional in the SDK's types.
+        // A nameless call is unanswerable — there is nothing to send back a
+        // response *for* — so it is dropped rather than forwarded as a task the
+        // stage cannot close. An empty id is still tracked and still emitted:
+        // Gemini has populated it on every call seen on this API version, and
+        // if it ever does not, the server matches a response by name, which is
+        // unambiguous in a one-tool session.
+        const name = call.name ?? "";
+        if (!name) continue;
+        const id = call.id ?? "";
+        this.pendingToolCalls.add(id);
+        this.emit({ type: "tool_call", id, name, args: call.args ?? {} });
+      }
+    }
+
     if (content?.turnComplete) {
       // Backstop for a turn she answered with silence: the user's line still
-      // has to be finalised or it is lost.
+      // has to be finalised or it is lost. This runs even with a call pending —
+      // she heard the user either way, and a turn she answered by delegating is
+      // the turn whose transcript matters most.
       this.finalizeUserTurn();
+
+      // A turn that ends in a tool call has not ended. The model stops, waits
+      // for the response, and then keeps speaking in the SAME turn. Committing
+      // here would post "Let me look." as her final answer and hand the router
+      // a fragment of a sentence. It would also clear `turnActive`, and that
+      // flag is load-bearing for the audio: look at the chunk block above, the
+      // `generation` bump and the `upsampleAnchor` / `pcmByteCarry` resets are
+      // all gated on `!this.turnActive`. Clear it here and the continuation
+      // lands on a new generation, with the anchor back at zero, interpolating
+      // its first sample up from silence mid-sentence.
+      //
+      // Stated plainly because it was not measured: whether Gemini actually
+      // sends `turnComplete` around a tool call on this model was not verified
+      // here. The guard costs one set lookup and is correct either way, which
+      // is the right trade against a fragment reaching the router.
+      if (this.pendingToolCalls.size) return;
+
       this.turnActive = false;
       const answer = this.outputTranscript;
       this.outputTranscript = "";
@@ -560,7 +735,75 @@ export class GeminiLiveEngine {
     this.outputTranscript = "";
     this.upsampleAnchor = 0;
     this.pcmByteCarry = new Uint8Array(0);
+    // Abandon anything the assistant is still working on for her.
+    //
+    // A call in flight when the shell barges in belongs to a question the user
+    // has stopped waiting for. By the time the agent reports back, the operator
+    // has been answered here and has usually said something else. Delivering
+    // the result then would resume the superseded turn inside the new one, and
+    // the generation counter cannot save us: it gates AUDIO, and the model's
+    // continuation would still arrive as `outputTranscription`, accumulate into
+    // `outputTranscript` and surface as her caption and her
+    // `final_assistant_answer`. Answering a question nobody is still asking is
+    // the same class of failure as inventing the answer, which is what this
+    // whole path exists to stop.
+    //
+    // The honest cost, since this is a LOCAL guard and the server never hears
+    // it: the model is left waiting on a call we will never answer, and that
+    // half of the turn is wedged until the next `restartSession()` or reconnect
+    // runs `resetStreamState()`. That case is narrow. A real barge-in, the user
+    // genuinely talking over her, is caught by the server's own VAD, which
+    // sends `toolCallCancellation` and clears the model's wait for us. This
+    // line only covers the case where the shell decided to answer and the user
+    // never spoke at all.
+    this.pendingToolCalls.clear();
     this.emit({ type: "tts_interrupt" });
+  }
+
+  /**
+   * Hand the assistant's answer back to the model, which is mid-turn waiting
+   * for it. She then says it in her own words, in her own voice, continuing the
+   * sentence she paused rather than reading a report out.
+   *
+   * `result` is a plain string and goes in under one `result` key. The SDK's
+   * own note on `FunctionResponse.response` says that with neither an "output"
+   * nor an "error" key present the whole object is treated as the function's
+   * output, which is exactly what is wanted here: one field, no schema for a
+   * small model to pick apart, just the text to relay.
+   *
+   * Three ways this drops the response instead of sending it, and they collapse
+   * into a single membership test because they are one question — is the model
+   * still waiting for THIS id:
+   *
+   *  - no session, or one torn down under us between the call and the answer.
+   *    An agent run takes seconds to minutes and a reconnect inside that window
+   *    is ordinary, not exceptional; the new session never asked, and the id
+   *    means nothing to it. It drops silently rather than throwing, because
+   *    throwing would surface as an error on a run that actually succeeded, and
+   *    the stage has no repair to make.
+   *  - the server cancelled it (`toolCallCancellation`), which is what Gemini
+   *    sends when the user talks over her.
+   *  - the shell barged in locally and abandoned it (`sendBargeIn`).
+   */
+  sendToolResponse(id: string, name: string, result: string): void {
+    if (!this.session) return;
+    if (!this.pendingToolCalls.has(id)) return;
+    this.pendingToolCalls.delete(id);
+
+    const response: { id?: string; name: string; response: Record<string, unknown> } = {
+      name,
+      response: { result: result ?? "" },
+    };
+    // An empty id is better omitted than sent as "": with no id the server
+    // matches the response to the call by name, which is unambiguous while this
+    // session declares one tool. See the `call.id ?? ""` note in the handler.
+    if (id) response.id = id;
+
+    try {
+      this.session.sendToolResponse({ functionResponses: [response] });
+    } catch (err) {
+      this.onError?.(err);
+    }
   }
 
   /**

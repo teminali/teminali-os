@@ -135,6 +135,31 @@ const AssistantActions: React.FC<{
   );
 };
 
+/**
+ * A turn with nothing in it is not a turn, and must not be drawn.
+ *
+ * Neither side of this screen is invisible when its text is: the operator's
+ * side draws its shape first, so an empty turn is a green pill with 20px of
+ * padding and no words in it — a blob against the right margin — and Temi's
+ * side is a zero-height block that still spends the column's `gap-8`, so it is
+ * a 32px hole between two things she said.
+ *
+ * Both are reachable with nothing going wrong. This transcript renders
+ * `frontierMessages`, the same conversation the chat panel writes (see
+ * `dialogueFromMessages`), and the panel appends `{ role: "assistant",
+ * content: "" }` as its streaming placeholder before every answer — so the
+ * hole is on screen for the whole of every answer typed in the panel, and
+ * stays for good when a run ends having produced no text. On the operator's
+ * side, Gemini's input transcription arrives in fragments and a fragment can
+ * be a single space, which `final_user_request` trims to nothing and stores.
+ *
+ * Judged on trimmed content, because whitespace draws the same empty shape as
+ * no content at all. Pending turns are held to the same rule: the state they
+ * would be reporting is already on the orb and the status dot, and a caret
+ * inside an empty pill is not what "she is hearing you" looks like.
+ */
+const hasWords = (turn: DialogueTurn): boolean => turn.content.trim().length > 0;
+
 export const TemiTranscript: React.FC<TemiTranscriptProps> = ({
   turns,
   onRepeat,
@@ -142,7 +167,7 @@ export const TemiTranscript: React.FC<TemiTranscriptProps> = ({
   className = "",
 }) => (
   <div className={`flex flex-col gap-8 ${className}`}>
-    {turns.map((turn) =>
+    {turns.filter(hasWords).map((turn) =>
       turn.role === "user" ? (
         // The operator: a bubble, right-aligned, never wider than 70% of the
         // column so the ragged left edge stays legible.
@@ -176,8 +201,9 @@ export const TemiTranscript: React.FC<TemiTranscriptProps> = ({
             />
           </div>
           {/* No actions on a half-spoken answer — there is nothing settled to
-              copy yet, and the row would jump as the text grows. */}
-          {!turn.pending && turn.content.trim() && (
+              copy yet, and the row would jump as the text grows. Emptiness is
+              not re-checked here: `hasWords` has already dropped those turns. */}
+          {!turn.pending && (
             <AssistantActions text={turn.content} onRepeat={onRepeat} onCopied={onCopied} />
           )}
         </div>

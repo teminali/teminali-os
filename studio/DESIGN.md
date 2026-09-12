@@ -7174,6 +7174,168 @@ lane-independent — the route asserted across all 27 scripted turns, because
 `routeVoiceTurn` is TypeScript either way — moved into
 `tests/voice-turn-router.test.mjs`, where it runs with no model at all.
 
+### 6.0.17 She started an agent because he said the word "test" (`services/voice/machineAction.ts`, 2026-09-12)
+
+The operator said, out loud, "I want to test how good you can sing. Can you
+sing?" Temi answered "On it — kicking it off." and put a Claude Code agent into
+his workspace. A minute later he said "I didn't tell you to work on the handover
+or anything to do with a terminal code, just want to make a conversation with
+you", and she answered "Making the change." and started another one.
+
+His verdict on that was one line: *that's just dangerous*. It is. The turn that
+reaches `classifyMachineAction` is speech, the action it authorises can edit
+files, and the only thing between them is a regex.
+
+The hole was one already named in this file and fixed in only half the places it
+lived. `PRONOUN_OBJECT` carries a comment saying a pronoun "only counts behind a
+verb", added after "say something that would make me laugh" became a coding
+task — the rule "was written down and not implemented: `hasObject` tested the
+whole sentence, so a pronoun anywhere satisfied a verb anywhere, in either
+order." `MACHINE_NOUNS` had the same hole and kept it. `hasObjectFor` opened
+with `MACHINE_NOUNS.test(text)` against the entire utterance, so one machine-ish
+noun anywhere licensed any verb anywhere.
+
+Both misfires fall straight out of that, and the first is the funnier one:
+
+- `test` is a verb in the run group **and** a noun in `MACHINE_NOUNS` (`tests?`).
+  The verb satisfied its own object requirement, so every sentence containing
+  the word "test" delegated. A voice assistant cannot be asked to be tested.
+- "terminal", from the phrase "a terminal code", licensed `make` three clauses
+  later, in a sentence whose plain meaning was *don't*.
+
+The fix is the same discipline the pronoun path already had, applied to nouns:
+an object must sit behind its verb and inside its clause. `objectWindow` stops
+at sentence punctuation or at `and`/`but`/`or`/`so`/`because`/`while`/`then`/
+`if`/`when`/`with`, which is what separates "make a conversation with you" from
+"make a branch". The self-object bug needs no rule of its own — slicing from the
+end of the verb match means a verb can no longer see itself.
+
+Negation is the second guard, and it was missing entirely. Every pattern here
+matches a verb and its object, and a negated clause has both in full, so "don't
+open anything" and "you don't need to run the tests" read as instructions to
+open and to run. `NEGATOR_BEFORE` requires the negator within 40 characters of
+the verb and forbids it crossing sentence punctuation, so "I didn't tell you to
+work on the handover. Open the config file." still opens the config file.
+
+The asymmetry is deliberate and it is not this file's usual one. Elsewhere the
+doctrine is that "a wasted call costs a moment, an invented answer costs trust",
+which argues for acting. An edit run by mistake costs the operator's working
+tree, which is dearer than either, so this gate errs toward not acting.
+
+Under-delegation is the other real failure and was not traded away to get this.
+The operator's position is that she *should* reach for the hands when she needs
+something she does not have, when work is wanted on the workspace, or to drive
+Teminali OS itself. The same session's `DEFINITE_OBJECT` widening — which lets
+"open the voice router" through a list that cannot name every noun in one
+codebase — is untouched, because a real command puts its object directly behind
+its verb and passes the narrower test unharmed.
+
+Pinned by `tests/voice-turn-router.test.mjs`, 35 tests, which since 6.0.16 also
+carries the 27 routing turns rescued from the retired conversation eval, and by
+`tests/voice-delegation-safety.test.mjs`, which splits the corpus in two: cases
+that must never reach the hands, where a regression means the voice started an
+agent against a workspace during a conversation, and cases that must, where a
+regression means the operator's instructions stopped arriving.
+
+### 6.0.18 She invented a number, then invented where she got it (`services/voice/geminiLiveEngine.ts`, `services/voice/temiPersona.ts`, 2026-09-12)
+
+Asked out loud for the total size of the files on his Desktop, Temi said "Let me
+see... The total size is 12.4 gigabytes." It is 38G across 14,474 files. Asked
+for his remaining storage she said 512 gigabytes; there are 27Gi free on a 460Gi
+disk, so her answer was larger than the whole drive. Nothing had been delegated
+in either case, no filesystem was read, and the "let me see" was theatre.
+
+Then the part that matters. He challenged her -- "your answers were very quick
+and that's why I suspected you just assumed those numbers" -- and she said: "I
+don't 'assume' anything. The system provided those numbers, instantly. Speed
+doesn't negate the source." A fabricated provenance defending a fabricated
+number. §6.29's prompt already forbade naming "a file, a path, a number or a
+result you were not given"; it had never anticipated her inventing a SOURCE for
+one, which is a different and worse failure, because a wrong number can be
+caught and a false citation cannot.
+
+6.0.17 had just finished tightening `machineAction.ts` in the other direction,
+and the operator named the real problem while looking at it: she "has to be
+intelligent enough to know the other agents are more powerful and they can even
+go search online for information". A regex reads verbs and nouns. What actually
+decides whether the hands are needed is whether SHE knows the answer, and no
+pattern can see that. "Tell me something about astral projection I don't know"
+has no machine noun in it at all.
+
+So the decision moves to her. The live session now declares one function,
+`ask_the_assistant`, whose description tells the model plainly that the agent
+behind it reads and edits files, runs commands, inspects the machine and
+searches the web, that it cannot do any of those things itself, and that "a
+wrong specific answer is much worse than a pause". `TemiVoiceStage` answers the
+call through `TeminaliAgentBridge.delegateTask`, caps the report at 4000
+characters -- it re-enters the live session and competes for the window the
+conversation lives in -- and always responds, because a tool call left
+unanswered strands her mid-turn with the microphone open. `temiPersona` gained
+three lines inside `WHAT YOU ARE ATTACHED TO`, next to the sentence the false
+provenance broke rather than in a section of their own.
+
+Three details that were decided rather than defaulted. The call is BLOCKING:
+`@google/genai` 2.22.0 offers NON_BLOCKING, which would let her keep generating
+into a turn whose facts have not arrived, which is precisely the failure being
+fixed. `turnComplete` returns early while any call is outstanding, keeping
+`turnActive` set, which is what stops the audio path from bumping its generation
+counter and resetting `upsampleAnchor` mid-reply. And a barge-in clears the
+pending set so a superseded answer is dropped rather than delivered into the
+next turn -- the generation counter cannot cover this, because it gates audio
+only and the model's continuation would still arrive as transcription.
+
+`machineAction.ts` is not retired by this; it is demoted. It remains the fast
+path for the unambiguous command, which should not cost a model round trip, and
+it gained the gates 6.0.17 did not have: `MACHINE_FACT_QUESTIONS` for the things
+only the machine holds -- disk, storage, sizes, the working tree's own dirt --
+sitting ahead of `STATE_QUESTIONS`, which could never have caught them because
+neither "storage" nor "tree" is a machine noun and that gate is guarded by the
+noun list. `SPOKEN_FILENAME` reads "package dot json" as the file it is.
+`OS_NAVIGATION` covers moving around the app itself. `DEFINITE_OBJECT` was
+widened from the look-verbs to all of them, which is safe only because the
+clause window, the negation guard and the mood frames now stand behind it.
+Verb groups are tried in order of position in the sentence rather than
+declaration order, so "Install the new dependency" is an install rather than an
+edit.
+
+Pinned by `tests/voice-delegation-safety.test.mjs`, 72 tests in two halves: 40
+that must never reach the hands, where a regression means an agent ran against
+the workspace during a conversation, and 31 that must, where a regression means
+she answered from imagination instead. Both halves came from a corpus written
+against what SHOULD happen rather than against what the code did, which is why
+16 of them failed on the day they were written.
+
+### 6.0.19 One reply, on screen twice (`services/voice/captionPacer.ts`, 2026-09-12)
+
+The transcript showed an answer, then showed it again underneath whatever the
+operator said next. Reported from a live call, not from a test.
+
+Two correct rules met and produced a wrong one. `completeTurn()` leaves the
+pacer holding the whole reply, and the hold in `visible()` promises never to
+hand back less than what is already on screen — §6.0.16's fix for a caption
+that blanked on the first word of every turn. Both are right DURING a turn.
+
+Playback outlives the turn. The worklet keeps reporting progress for audio
+still in its buffer after `turnComplete` has committed the text, so the next
+tick of `TemiVoiceStage`'s `onTTSProgress` asked the pacer what to show, was
+handed the finished sentence, and painted it into the live caption row —
+directly beneath the copy just committed to the transcript. The live row
+renders last, so the stale copy sat below the next user bubble and read as
+Temi repeating herself unprompted.
+
+The pacer now knows a turn is over: `completeTurn()` closes it, `beginTurn()`
+reopens it, and `advanceTo()` returns `""` while closed. The hold was always a
+promise about mid-turn redraws, never a promise to keep reciting a turn that
+had ended. Pinned by "a finished turn stops handing back a caption" in
+`tests/voice-transcript-render.test.mjs`, which also asserts the next turn is
+not silenced with it.
+
+This fixed the duplicate whose cause was the caption. A second duplication on
+the DELEGATE path — where `onCompleted` appends the agent's raw report to the
+transcript AND sends it as a directive she then speaks, producing two bubbles
+for one answer — is a different defect and is NOT fixed here. See §6.0.20 when
+it is written.
+
 ### 6.1 Turn semantics while a run is in flight (2026-09-05)
 
 A directed utterance is not automatically an instruction. `turnIntent.ts`

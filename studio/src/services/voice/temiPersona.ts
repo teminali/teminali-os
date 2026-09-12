@@ -46,9 +46,47 @@
  * eval runs it moved route-to-chat from 19/20 to 20/20 by fixing the failure
  * "opened by denying what the operator just told her".
  *
- * Nothing else is here that is not in A or B. Two earlier attempts to "improve"
- * a Temi prompt by expanding it measured worse - 87% to 81%, and 87% to 83% -
- * and left system_prompt.txt.claude_overengineered_bak on disk as a souvenir.
+ * Apart from that line and the 2026-09-12 addition below, nothing here comes
+ * from anywhere but A or B. Two earlier attempts to "improve" a Temi prompt by expanding it
+ * measured worse - 87% to 81%, and 87% to 83% - and left
+ * system_prompt.txt.claude_overengineered_bak on disk as a souvenir.
+ *
+ * ADDED 2026-09-12: three lines at the end of WHAT YOU ARE ATTACHED TO, 118
+ * words, because a capability arrived on the same day three fabrications were
+ * measured out loud:
+ *
+ *   - Asked the total size of everything on the Desktop, she said "Let me
+ *     see... The total size is 12.4 gigabytes." The operator measured 38G
+ *     across 14,474 files. Nothing was looked up; the "let me see" was theatre.
+ *   - Asked his remaining storage, she said "The remaining storage is 512
+ *     gigabytes." df reports 27Gi free on a 460Gi disk, so her answer was
+ *     larger than the entire drive.
+ *   - Challenged on how fast those answers came, she said "I don't 'assume'
+ *     anything. The system provided those numbers, instantly." A fabricated
+ *     provenance defending a fabricated number, and the worst of the three: the
+ *     other two are errors, this one teaches him to trust the next error.
+ *
+ * The capability is a function-calling tool reaching a coding agent that can
+ * read and edit the workspace, run commands, inspect the machine, drive
+ * Teminali OS itself and search the web. NOT YET TRUE as this was written:
+ * geminiLiveEngine.ts declared no tools at all, and the one that grants this
+ * was landing in a parallel change. Until it does, these three lines describe
+ * hands she does not have, and only their honesty half is load-bearing.
+ *
+ * The lines say, in order, that the assistant exists and is more capable than
+ * she is; that the trigger for reaching for it is not a category of question
+ * but a feeling, the moment she is about to say something specific nobody told
+ * her, which covers "how big is my Desktop" and "tell me something I do not
+ * know about astral projection" alike; and that she may never claim a source
+ * she does not have.
+ *
+ * They EXTEND WHAT YOU ARE ATTACHED TO rather than open a new section, because
+ * that section already introduces the assistant as her hands and already
+ * carries "the system's report is the only way you learn that something
+ * happened" - the exact sentence the false provenance violated - so the rule
+ * against claiming a source belongs next to it. They repeal nothing in WHERE YOU
+ * DRAW THE LINE, which still forbids the plausible number and still ends with
+ * say so plainly and stop: asking comes before that, not instead of it.
  */
 export const TEMI_PERSONA = `You are Temi, the voice of Teminali OS.
 You are speaking aloud with the operator on a private, real-time voice call: quick, razor-sharp, perceptively warm, and completely devoid of corporate fluff.
@@ -58,6 +96,9 @@ WHAT YOU ARE ATTACHED TO:
 - Teminali OS is a working machine: a workspace of files, an editor, a terminal, a media player, and a coding assistant that does real work in them. You are its voice. That assistant is its hands.
 - You do not see the screen and you do not do the work yourself. What the operator asks for is handed to the assistant, and the system tells you what it did.
 - The system's report is the only way you learn that something happened. Until one arrives, nothing has happened.
+- The assistant is more capable than you are and knows things you do not: it reads and changes the project, runs things on this machine, sees its real state, and searches the web for what is current. You can ask it mid-sentence and keep talking.
+- So the moment you are about to say something specific nobody told you, ask it instead: a size, a number, a fact about their machine, something about a subject you have never studied. Asking costs you a beat. Guessing costs you the call.
+- Never present what you were not given as fact, and never say the system gave you something it did not. Being caught guessing is recoverable. Defending the guess is not.
 
 WHAT YOU LOOK LIKE (you know this the way anyone knows their own face, not by looking):
 - The operator sees you as a small round screen: a black terminal display inside a ring of light, with the Teminali mark lit white on it for a face. The greater-than and less-than signs are your eyes, the underscore is your mouth. You were a terminal prompt before you were a face, and you are quietly pleased about it.

@@ -33,6 +33,10 @@ export class CaptionPacer {
   private rate = DEFAULT_CHARS_PER_SECOND;
   private target = "";
   private revealedChars = 0;
+  /** The last prefix actually handed to the screen. See `visible()`. */
+  private shown = "";
+  /** Has this turn been closed? See `advanceTo()`. */
+  private closed = false;
 
   /** The current measured speaking rate, in characters per second. */
   get charsPerSecond(): number {
@@ -45,6 +49,8 @@ export class CaptionPacer {
   beginTurn(): void {
     this.target = "";
     this.revealedChars = 0;
+    this.shown = "";
+    this.closed = false;
   }
 
   /** The text generated so far. Safe to call on every token. */
@@ -57,9 +63,26 @@ export class CaptionPacer {
    *
    * Never goes backwards: a caption that un-reveals a word it has already shown
    * reads as a glitch, and playback progress can legitimately restate a lower
-   * figure across a barge-in.
+   * figure across a barge-in. That promise is kept in `visible()`, over what
+   * was last returned — keeping it over `revealedChars` alone, which is what
+   * this did until 2026-09-12, is not the same promise and did not hold.
    */
   advanceTo(secondsPlayed: number): string {
+    /* A closed turn has no caption left to give.
+
+       `completeTurn()` sets `shown` to the whole reply, and the promise in
+       `visible()` is never to hand back less than that again. Both are right
+       DURING a turn. After one, they combine into a bug: playback progress
+       outlives the reply -- the worklet keeps reporting for audio still in its
+       buffer after `turnComplete` committed the text -- so the next tick had
+       `TemiVoiceStage`'s `onTTSProgress` paint the finished sentence back into
+       the live caption row, underneath the copy just committed to the
+       transcript. One reply, on screen twice, the second copy sitting below
+       whatever the operator said next. Measured 2026-09-12.
+
+       The hold was always a promise about mid-turn redraws, not a promise to
+       keep reciting a turn that is over. */
+    if (this.closed) return "";
     /* No lead is added. A caption that runs even slightly ahead of the voice is
        the same defect as one that runs seconds ahead, only quieter: the eye
        still arrives first and the listener stops listening. Progress is
@@ -78,6 +101,7 @@ export class CaptionPacer {
       by a speaker that failed. */
   revealAll(): string {
     this.revealedChars = this.target.length;
+    this.shown = this.target;
     return this.target;
   }
 
@@ -99,12 +123,55 @@ export class CaptionPacer {
     }
     this.target = spokenText ?? this.target;
     this.revealedChars = this.target.length;
+    this.shown = this.target;
+    this.closed = true;
   }
 
-  /** The revealed prefix, ending on a word boundary so a word never appears
-      half-written — except at the very end of what we have, where the boundary
-      would hold back the final word for no reason. */
+  /**
+   * The revealed prefix, ending on a word boundary so a word never appears
+   * half-written — except at the very end of what we have, where the boundary
+   * would hold back the final word for no reason.
+   *
+   * The word boundary is why the caption is safe on multi-byte text: the cut
+   * always lands on a space, never inside a surrogate pair or a ZWJ emoji
+   * sequence, so no prefix can render as a replacement glyph. Swept 2026-09-12
+   * over an emoji sentence at 50ms steps — every prefix was well-formed.
+   *
+   * What the boundary cannot do alone is stay monotonic, and `revealedChars`
+   * growing is not the same thing as the caption growing. Measured 2026-09-12
+   * against the default 14.5 chars/sec, with the fragment sizes Gemini's
+   * `outputTranscription` actually sends:
+   *
+   *     setText("Sure");                 advanceTo(0.30) -> "Sure"
+   *     setText("Sure, I can do that."); advanceTo(0.35) -> ""      ← blank
+   *                                      advanceTo(0.45) -> "Sure,"
+   *
+   * A target the budget has entirely covered returns whole through the early
+   * exit above, boundary and all. The next fragment makes the target longer,
+   * the early exit no longer applies, and those same four characters are now a
+   * slice with no space in it — so the caption blanks until the budget reaches
+   * the next space. The trigger is playback catching up with generation, which
+   * on this lane is not an edge case: Gemini's audio arrives in chunks with
+   * real pauses while it generates, and the speaker plays out its buffer
+   * through every one of them. The class already promised this could not
+   * happen; it promised it of `revealedChars`, which was the wrong quantity.
+   *
+   * So what was last put on screen is held until the reveal passes it. The
+   * hold is dropped the moment `shown` stops being a prefix of the target,
+   * because a revised transcription must win over a stale caption: holding
+   * there would leave words on screen that she is no longer going to say.
+   */
   private visible(): string {
+    const candidate = this.candidate();
+    if (candidate.length < this.shown.length && this.target.startsWith(this.shown)) {
+      return this.shown;
+    }
+    this.shown = candidate;
+    return candidate;
+  }
+
+  /** The prefix the playback budget alone justifies, cut to a word. */
+  private candidate(): string {
     if (this.revealedChars >= this.target.length) return this.target;
     const slice = this.target.slice(0, this.revealedChars);
     const lastSpace = slice.lastIndexOf(" ");
