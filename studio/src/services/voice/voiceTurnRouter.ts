@@ -213,13 +213,17 @@ const WRAPPER_SUFFIX =
  * mic toggle. `unmute` is still routed in every state, because the router is
  * not told who is muted and a redundant unmute costs a no-op.
  */
-function classifySelfVoiceCommand(text: string): "mute" | "unmute" | null {
-  const flat = text
+function flatten(text: string): string {
+  return text
     .toLowerCase()
     .replace(/[’`]/g, "'")
     .replace(/[^\p{L}\p{N}'\s]/gu, " ")
     .replace(/\s+/g, " ")
     .trim();
+}
+
+function classifySelfVoiceCommand(text: string): "mute" | "unmute" | null {
+  const flat = flatten(text);
   if (!flat) return null;
   const stem = flat.replace(WRAPPER_PREFIX, "").replace(WRAPPER_SUFFIX, "").trim();
   // Unmute is asked first because it is the phrase a muted session most needs
@@ -228,6 +232,205 @@ function classifySelfVoiceCommand(text: string): "mute" | "unmute" | null {
   if (UNMUTE_PHRASES.has(flat) || UNMUTE_PHRASES.has(stem)) return "unmute";
   if (MUTE_PHRASES.has(flat) || MUTE_PHRASES.has(stem)) return "mute";
   return null;
+}
+
+/**
+ * Which assistant the operator asked for, out loud.
+ *
+ * The four values are `CodingEngine` in `store/assistantActivityStore.ts` —
+ * read, not invented — because that store is what `TeminaliAgentBridge` asks
+ * when it decides who runs a delegation. Nothing else in the app has a fifth.
+ */
+export type VoiceEngineChoice = "claude" | "codex" | "gemini" | "frontier";
+
+/**
+ * What Temi calls each engine when she confirms the switch.
+ *
+ * The labels are the product's own: `PROFILES_LIST` in `store/studioStore.ts`
+ * for the Frontier tiers, `agentCliService.ts` for the two CLIs.
+ *
+ * Two collapses are deliberate, and both exist so she cannot claim a switch
+ * that did not happen — the fabrication this whole intent was added to stop:
+ *
+ *   - **Frontier Max is `gemini`.** The bridge maps that engine onto the
+ *     Gemini-backed max lane; there is no separate `max` engine to set.
+ *   - **Frontier Flash and Frontier Auto are both `frontier`.** The delegation
+ *     lane has exactly one local mode (`streamMode` is "auto" for every
+ *     non-Gemini engine in `teminaliAgentBridge.runTask`), so asking for Flash
+ *     and asking for Auto land in the same place. She answers "Frontier",
+ *     which is true of both, rather than naming a tier she cannot select.
+ */
+export const ENGINE_LABELS: Record<VoiceEngineChoice, string> = {
+  claude: "Claude Code",
+  codex: "Codex",
+  gemini: "Frontier Max",
+  frontier: "Frontier",
+};
+
+/**
+ * The spoken names, and what each one means.
+ *
+ * "cloud code" and "code x" are here because that is how the two CLI names
+ * come back from recognition often enough to matter; a switch that works only
+ * when the transcript is perfect is a switch that works for nobody. Nothing
+ * bare and ambiguous is listed — no "max", no "flash", no "cloud" — because
+ * this is a video editor as well, and the cost of a false match is the work
+ * running on the wrong assistant.
+ */
+const ENGINE_NAMES: ReadonlyArray<readonly [string, VoiceEngineChoice]> = [
+  ["claude code", "claude"],
+  ["cloud code", "claude"],
+  ["claude cli", "claude"],
+  ["claude", "claude"],
+  ["open ai codex", "codex"],
+  ["openai codex", "codex"],
+  ["codex cli", "codex"],
+  ["codex", "codex"],
+  ["code x", "codex"],
+  ["frontier max", "gemini"],
+  ["gemini flash", "gemini"],
+  ["gemini", "gemini"],
+  ["frontier flash", "frontier"],
+  ["frontier auto", "frontier"],
+  ["frontier", "frontier"],
+];
+
+const ENGINE_BY_NAME = new Map<string, VoiceEngineChoice>(ENGINE_NAMES);
+
+/** Longest first, so "claude code" is never read as "claude" plus a stray word. */
+const NAME_ALTERNATION = [...ENGINE_NAMES]
+  .map(([name]) => name)
+  .sort((a, b) => b.length - a.length)
+  .join("|");
+
+/**
+ * The frames that make a name a *choice of engine* rather than a word.
+ *
+ * A bare mention is not enough. "Claude said the build was fine" names an
+ * assistant and asks for nothing; "ask Claude to check the build" hands over
+ * the work. The frame is the difference, and requiring one is what keeps this
+ * out of ordinary conversation.
+ */
+const ENGINE_FRAME =
+  "use|using|switch(?:\\s+(?:over|back))?\\s+to|switch\\s+engines?\\s+to|go\\s+(?:back\\s+)?to" +
+  "|change\\s+to|move\\s+to|delegate\\s+(?:it|this|that)?\\s*to" +
+  "|hand\\s+(?:it|this|that)\\s+(?:over\\s+|off\\s+)?to|give\\s+(?:it|this|that)\\s+to" +
+  "|send\\s+(?:it|this|that)\\s+to|put\\s+(?:it|this|that)\\s+on" +
+  "|run\\s+(?:it|this|that)?\\s*(?:on|with|through)" +
+  "|ask|tell|have|get|let|with|via|on|through";
+
+const FRAMED_ENGINE = new RegExp(`\\b(?:${ENGINE_FRAME})\\s+(?:the\\s+)?(${NAME_ALTERNATION})\\b`);
+
+/** "Codex, look at this file." The name is the address, the rest is the job. */
+const ADDRESSED_ENGINE = new RegExp(`^(?:hey\\s+|ok\\s+|okay\\s+)?(${NAME_ALTERNATION})\\b(?=\\s+\\S)`);
+
+/**
+ * Words that can be left over from a pure switch without making it a task.
+ *
+ * Curated tightly, and biased on purpose. Reading a task as a switch loses the
+ * task silently — Temi confirms the engine and the work never runs — while
+ * reading a switch as a task only falls back to what happens today. So no verb
+ * is in this set: "use Claude Code to run it" keeps "run it" and stays a job.
+ */
+const SWITCH_RESIDUE = new Set([
+  "the", "a", "an", "to", "for", "from", "on", "in", "of", "as", "and", "then", "now",
+  "instead", "please", "thanks", "temi", "temy", "teminali", "engine", "engines",
+  "model", "models", "assistant", "agent", "mode", "lane", "everything", "default",
+  "going", "forward", "future", "onwards", "onward", "again", "back", "over",
+  "next", "rest", "one", "time", "task", "tasks", "work", "this", "that", "it",
+  "all", "my", "i", "you", "we", "want", "would", "like", "let's", "lets", "can",
+  "could", "should", "ok", "okay", "yeah", "yes",
+]);
+
+export interface EngineChoice {
+  engine: VoiceEngineChoice;
+  /** What she says back. Never the spoken name — see `ENGINE_LABELS`. */
+  label: string;
+  /** The spoken name that matched, for the decision trail. */
+  heard: string;
+  /**
+   * True when the utterance chose an engine and asked for nothing else, so the
+   * right answer is to switch and say so rather than to start a run.
+   */
+  switchOnly: boolean;
+}
+
+/**
+ * "Which assistant did that sentence ask for?" — and nothing else.
+ *
+ * Pure, and shared with `teminaliAgentBridge`, which is the half that can act
+ * on it. Two different questions are answered by one parse:
+ *
+ *   - "use Frontier Max"            → `switchOnly`: change who does the work.
+ *   - "have Codex look at this file" → the engine for *this* job, which the
+ *     bridge used to discard entirely, so Codex work ran on Frontier.
+ */
+export function parseEngineChoice(text: string): EngineChoice | null {
+  const flat = flatten(text);
+  if (!flat) return null;
+
+  const build = (engine: VoiceEngineChoice, heard: string, switchOnly: boolean): EngineChoice => ({
+    engine,
+    label: ENGINE_LABELS[engine],
+    heard,
+    switchOnly,
+  });
+
+  // The whole utterance is the name: "Frontier Max." said on its own is a
+  // choice, even with no verb in front of it.
+  const bare = flat.replace(WRAPPER_PREFIX, "").replace(WRAPPER_SUFFIX, "").trim();
+  const whole = ENGINE_BY_NAME.get(bare) ?? ENGINE_BY_NAME.get(flat);
+  if (whole) return build(whole, bare || flat, true);
+
+  const match = FRAMED_ENGINE.exec(flat) ?? ADDRESSED_ENGINE.exec(flat);
+  if (!match) return null;
+  const heard = match[1];
+  const engine = ENGINE_BY_NAME.get(heard);
+  if (!engine) return null;
+
+  const rest = `${flat.slice(0, match.index)} ${flat.slice(match.index + match[0].length)}`;
+  const leftover = rest.split(" ").filter((word) => word && !SWITCH_RESIDUE.has(word));
+  return build(engine, heard, leftover.length === 0);
+}
+
+/**
+ * What she says once the engine has actually changed.
+ *
+ * Said *after* the store is written, never before, and it does not pretend the
+ * run in flight moved: a switch mid-run applies to the next job, because the
+ * one already streaming was started by another CLI and cannot be handed over.
+ */
+export function describeEngineSwitch(label: string, busy: boolean): string {
+  return busy
+    ? `${label} takes the next one. What's running now stays where it is.`
+    : `${label} has the work from here.`;
+}
+
+/**
+ * Questions about a run that has already finished.
+ *
+ * Asked while the run is live, these reach `status`/`explain` and are answered
+ * from the digest. Asked a moment after it ends, `turnIntent` sees an idle
+ * session, calls everything an instruction, and "what did it change" starts a
+ * *second* run to find out what the first one did. The bridge holds the report
+ * of the run that just ended and answers from it; this is the recogniser.
+ *
+ * Narrow on purpose, and safe when it is wrong: the bridge only answers from a
+ * report it actually has, and otherwise delegates exactly as before.
+ */
+const RUN_RECALL_PATTERNS: RegExp[] = [
+  /^(?:so|and|ok|okay)?\s*(?:what|which)\s+(?:files?\s+)?(?:did|has|have)\s+(?:it|that|you|the\s+(?:agent|assistant|run|task))\b/,
+  /^(?:so|and|ok|okay)?\s*what\s+(?:just\s+)?(?:happened|changed|broke)\b/,
+  /^(?:so|and|ok|okay)?\s*what\s+(?:was|were)\s+(?:that|those|changed|touched)\b/,
+  /^(?:so|and|ok|okay)?\s*(?:how\s+did|did)\s+(?:it|that)\s+(?:go|work|finish|pass|succeed|end)\b/,
+  /^(?:so|and|ok|okay)?\s*tell\s+me\s+what\s+(?:it|that|you)\s+(?:did|changed|found)\b/,
+  /^(?:so|and|ok|okay)?\s*(?:what|which)\s+files?\s+(?:did\s+it\s+)?(?:changed?|touched?|edited?)\b/,
+];
+
+export function isRunRecallQuestion(text: string): boolean {
+  const flat = flatten(text);
+  if (!flat) return false;
+  return RUN_RECALL_PATTERNS.some((pattern) => pattern.test(flat));
 }
 
 function decision(
@@ -335,6 +538,32 @@ export function routeVoiceTurn(text: string, state: VoiceTurnState): VoiceTurnDe
 
     case "instruction":
     default: {
+      /*
+        "Use Frontier Max." Nothing in `machineAction` has ever recognised a
+        choice of engine, so this reached the persona, which answered in
+        character — it said it had switched, and it had not. That is the exact
+        fabrication §6 forbids, and it is worse than silence because the
+        operator then believes the next run is on a different assistant.
+
+        Routed as a delegation with nothing to say yet, on purpose. The switch
+        is a store write and this module is pure, so `TeminaliAgentBridge`
+        performs it — it parses the same utterance with the same
+        `parseEngineChoice`, never starts a run, and speaks the confirmation
+        only once the store has actually changed. The kind is `workspace`
+        because that is the closest family the gate has; the bridge intercepts
+        before anything reads it.
+      */
+      const engineChoice = parseEngineChoice(clean);
+      if (engineChoice?.switchOnly) {
+        return decision(
+          intent,
+          `${reason} · Named ${engineChoice.label} and asked for nothing else — a change of engine, not a job.`,
+          { kind: "delegate", prompt: clean, action: "workspace" },
+          true,
+          null,
+        );
+      }
+
       const machine = classifyMachineAction(clean);
       if (machine) {
         // The pipeline's reply is suppressed here, reversing the original
@@ -344,9 +573,21 @@ export function routeVoiceTurn(text: string, state: VoiceTurnState): VoiceTurnDe
         // Temi says one grounded line; the truth arrives afterwards from the
         // activity record.
         const line = acknowledgeAction(machine.kind, now);
+        /*
+          "What did it change?", asked after the run ended rather than during
+          it. `turnIntent` sees an idle session and calls it an instruction, so
+          a question *about* work became a second lot of work — measured: a
+          fresh agent run, started to discover what the last one did, when the
+          report was already in hand. The bridge holds that report and answers
+          from it; this only marks the decision trail, because a router that
+          cannot see the report must not promise one.
+        */
+        const recall = isRunRecallQuestion(clean)
+          ? " · Asks about a run that has already finished — the bridge answers from its own report if it still holds one."
+          : "";
         return decision(
           intent,
-          `${reason} · ${machine.reason}`,
+          `${reason} · ${machine.reason}${recall}`,
           { kind: "delegate", prompt: clean, action: machine.kind },
           true,
           line,

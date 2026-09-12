@@ -925,6 +925,28 @@ include that model's cache reads and writes so the table sums to the headline.
 An unreported cost is `null`, never `$0.00` — Codex bills a subscription and
 returns no figure.
 
+#### What a spoken turn reaches
+
+A turn is gated before it is acted on. While the app itself is audible only a turn
+that names her is taken, because the audible thing may be a film; otherwise
+`scoreAddressing` decides whether the room or the operator was talking. What
+survives the gate is tried in this order, and each step passes on what it does not
+claim: the media player, a spoken approval, the workspace, the video editor, then
+the router and the assistants.
+
+| Say | Reaches |
+| --- | --- |
+| "pause", "skip forward thirty seconds", "turn the volume down", "full screen", "double speed", "subtitles off" | the mounted media pane, via `services/voice/playerActions.ts` |
+| "approve that", "yes go ahead" | the permission a delegated run is waiting on, answerable by voice or by the banner's Allow / Always / Refuse |
+| "open the dukabot folder", "open package.json", "close that file" | the workspace, the tabs, and the editor |
+| "add captions", "fix the captions", "trim the start here", "split this clip", "mark in", "duplicate this clip", "reverse this clip", "make this two times speed", "zoom to fit" | `timeline_command`, twenty-eight verbs on one schema |
+| "ask Claude Code to run the tests", "have Codex look at this file", "use Frontier Max" | the delegate lane, on the engine you named |
+| "stop", "hush", "go mute" | the run, her voice, and the microphone respectively, which are three different things |
+
+Bare "mute", "next", "go back", "restart", "turn it up" and "louder" are refused on
+purpose: each is the plainest way to say something else to her, and no wording
+separates them while a video is playing.
+
 ### Video editor
 
 A timeline editor ported from Teminali Cut, in a workspace panel (`⇧⌘V`). The
@@ -1343,7 +1365,7 @@ ollama serve              # local models on 127.0.0.1:11434
 
 ```bash
 npm run typecheck   # tsc --noEmit
-npm test            # 2584 tests
+npm test            # 2759 tests
 npm run eval:local  # the local lane against the real model — a score, not a pass/fail; needs Ollama
 npm run eval:voice  # the voice co-agent's spoken answers, same discipline; needs Ollama
 npm run build       # tsc && vite build

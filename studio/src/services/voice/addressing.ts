@@ -73,8 +73,17 @@ export interface AddressingContext {
   windowFocused: boolean;
 }
 
-/** How long after our turn a reply still counts as expected. */
-const FOLLOW_UP_WINDOW_MS = 9000;
+/**
+ * How long after our turn a reply still counts as expected.
+ *
+ * Exported because the stage needs the same number for the same reason: a
+ * one-word "yes" is an answer to the question she just asked for as long as
+ * this window is open, and praise for the work once it has closed. Two copies
+ * of that constant would drift, and the drift would be invisible — a "yes"
+ * that the addressing gate lets through and the turn switch then files as
+ * praise is silence with no error anywhere.
+ */
+export const FOLLOW_UP_WINDOW_MS = 9000;
 
 /** Strip a leading wake word so it never reaches the chat as content. */
 export function stripWakeWord(text: string, wakeWords: string[]): { text: string; matched: boolean } {
@@ -165,9 +174,28 @@ export function scoreAddressing(
     };
   }
 
-  // Emergency / explicit stop directive (e.g. "stop", "cancel", "wait", "abort", "shut up", "hold on")
-  // MUST always be treated as directed at the assistant, even in wake-word-only mode.
-  const isStop = classifyTurnIntent(text, { busy: true, speaking: true }).intent === "stop";
+  /*
+    Emergency / explicit stop directive (e.g. "stop", "cancel", "wait", "abort").
+    MUST always be treated as directed at the assistant, even in wake-word-only
+    mode — a run the operator wants dead does not wait for a wake word.
+
+    Except when the same words are how you put a PERSON on hold. "hold on",
+    "one second" and Kiswahili "subiri"/"ngoja" are in STOP_PHRASES *and* in
+    THIRD_PARTY_MARKERS, and this fast path ran unconditionally and first — so
+    "hold on", said across the room to somebody else, came back DIRECTED with
+    0.99 confidence and cancelled the run in flight. The blend below already
+    knows better: `thirdParty` costs an utterance 0.45 and puts it well under
+    the line. It never got to.
+
+    So a phrase that is in both lists is treated as genuinely ambiguous and the
+    cheap signal that settles it is the name. With a wake word it is a stop;
+    without one it falls through to the blend and is read as the room. Nothing
+    unambiguous is lost: "stop", "cancel", "wait", "abort", "shut up" carry no
+    third-party marker at all and still return right here.
+  */
+  const isStop =
+    (wakeWord || !thirdParty) &&
+    classifyTurnIntent(text, { busy: true, speaking: true }).intent === "stop";
   if (isStop) {
     return {
       verdict: {

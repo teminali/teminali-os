@@ -17,6 +17,7 @@ import { dispatchPlayerCommand, type PlayerCommand, type PlayerSnapshot } from "
 import { describeLivePlayer, LOCAL_PLAYER_ACTIONS, PLAYER_READ_ACTION } from "./playerToolCalls";
 import type { AskExecutor } from "./askToolCalls";
 import { usePlayerStore } from "../store/playerStore";
+import { useStudioStore } from "../store/studioStore";
 import type { AgentCommandRequest } from "./agentCommands";
 import type { TurnOrigin } from "./voice/types";
 import type { ChatMessage, ModelModeId } from "../types";
@@ -132,6 +133,26 @@ function studioCapabilities(
     // Only present when the host mounted a picker; the engine gates the prompt
     // block on it, so a headless caller never learns the fence exists.
     ...(askOperator ? { askOperator } : {}),
+    /*
+      What is open in the editor, read at the moment the prompt is built.
+
+      Without it "open the file I was just editing" reaches a model holding
+      nothing but the workspace root, so it guesses a path and the operator
+      hears a confirmation for a file that never opened. The engine only spends
+      window on this for a spoken turn — see `describeOpenEditors` and the
+      `isVoice` gate in frontierEngine — so it is supplied unconditionally here
+      and rationed there.
+
+      A function, not a snapshot: capabilities are built once per call and the
+      tab in front changes while a turn is streaming.
+    */
+    openEditors: () => {
+      const { tabs, activeTabId } = useStudioStore.getState();
+      return {
+        activePath: tabs.find((tab) => tab.id === activeTabId)?.path ?? null,
+        openPaths: tabs.map((tab) => tab.path),
+      };
+    },
     // The engine's executor contract carries no cwd of its own, so the host
     // supplies one. Absent, commands run at the workspace root as before.
     runCommand: (command, options) =>

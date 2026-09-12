@@ -55,6 +55,13 @@ import {
   type AskExecutor,
 } from "./askToolCalls";
 import type { TurnOrigin } from "./voice/types";
+import {
+  createTagStripper,
+  describeOpenEditors,
+  parseWorkspaceTags,
+  stripWorkspaceTags,
+  type OpenEditorsSnapshot,
+} from "./voice/workspaceActions";
 import type { ChatMessage, InferenceTelemetry, ModelModeId, ToolCall } from "../types";
 
 /** What the host lets the engine do. Absent capabilities simply stay unused. */
@@ -108,6 +115,16 @@ export interface EngineCapabilities {
    * can click is a different decision from one that can look.
    */
   lookAtScreen?: (question: string) => Promise<string>;
+  /**
+   * Which files are open in the editor, read fresh when the prompt is built.
+   *
+   * Injected exactly like `playerState`, and for the same sharp reason: asked
+   * to "open the file I was just editing" while holding nothing but the
+   * workspace root, the model guesses a path, the open fails, and the operator
+   * still hears a confirmation. Absent, the prompt says nothing about tabs and
+   * the lane behaves as it did before.
+   */
+  openEditors?: () => OpenEditorsSnapshot;
 }
 
 /** One line of the editor tool catalogue, already flattened by the host. */
@@ -1103,6 +1120,21 @@ async function streamFromGemini(
     .map((p) => `- ${p.name} (${p.path}) [${p.kind || "code"}]`)
     .join("\n");
 
+  // What is already on screen, for the spoken lane only. Capped and relative
+  // to the workspace by `describeOpenEditors`: this prompt is context for a
+  // sentence being said out loud, not a file listing.
+  const editorContext = ((): string => {
+    const read = isVoice ? options.capabilities?.openEditors : undefined;
+    if (!read) return "";
+    try {
+      return describeOpenEditors(read(), currentPath);
+    } catch {
+      // A host that cannot say what is open is answered as one that has
+      // nothing open would be. It must never cost the operator the turn.
+      return "";
+    }
+  })();
+
   const commandInstructions = options.capabilities?.runCommand
     ? `\n\nCommand Execution Rules:
 You have live, direct terminal and filesystem access inside Teminali OS via \`\`\`frontier-run code fences.
@@ -1129,12 +1161,21 @@ Spoken Dialogue Rules:
    <workspace-action action="open-file" path="<path>" />
    <workspace-action action="reveal" path="<path>" />
    followed by a friendly, 1-sentence spoken confirmation explaining what was done.
-5. Answer immediately without filler greetings or preamble unless greeted.
+5. When the user asks to close a file or a tab, emit one of:
+   <workspace-action action="close-file" scope="active" />   (close that file, close this tab)
+   <workspace-action action="close-file" path="<path>" />    (close a named file)
+   <workspace-action action="close-file" scope="all" />      (close everything, close all tabs)
+   Emit one action per file you are asked to act on; every tag you emit runs, in order.
+   Never say a file was closed without emitting the tag that closes it.
+6. The tags are machine instructions, not speech: emit them and then speak only the
+   confirmation. Never read a tag, a path attribute or an angle bracket aloud.
+7. Answer immediately without filler greetings or preamble unless greeted.
 ${commandInstructions}
 
 Current Workspace: ${currentName} (${currentPath})
 Recent Workspaces:
-${recentList || "None"}`
+${recentList || "None"}
+${editorContext}`
     : `Your name is Temy, the assistant inside Teminali Code. If asked who or what you are, you are Temy. Be concise, direct, helpful, and never claim commands ran without evidence.
 ${commandInstructions}
 
@@ -1198,6 +1239,7 @@ Always include a natural, friendly confirmation message explaining what you did.
     const decoder = new TextDecoder();
     let buffer = "";
     let turnText = "";
+    const stripper = createTagStripper();
 
     try {
       while (true) {
@@ -1222,12 +1264,21 @@ Always include a natural, friendly confirmation message explaining what you did.
             if (firstTokenAt === null) firstTokenAt = performance.now();
             turnText += data.delta.text;
             accumulated += data.delta.text;
-            callbacks.onToken(data.delta.text);
+            // `accumulated` keeps the markup because the actions are read off
+            // it below; what leaves through onToken must not, or the speech
+            // path says "<workspace-" out loud a syllable before the tag is
+            // even closed. The stripper holds back only what could still
+            // become a tag.
+            const speakable = stripper.push(data.delta.text);
+            if (speakable) callbacks.onToken(speakable);
           }
         }
       }
     } finally {
       await reader.cancel().catch(() => {});
+      // Anything the stripper is still holding was never a tag. Say it.
+      const tail = stripper.flush();
+      if (tail) callbacks.onToken(tail);
     }
 
     if (!turnText.trim() && turn === 0) {
@@ -1257,11 +1308,14 @@ Always include a natural, friendly confirmation message explaining what you did.
     break;
   }
 
-  // Execute any workspace action emitted by the model
-  const actionMatch = accumulated.match(/<workspace-action\s+action=["']([^"']+)["']\s+path=["']([^"']+)["']\s*\/?>/i);
-  if (actionMatch) {
-    const [, action, targetPath] = actionMatch;
-    if (action === "open-project") {
+  // Execute every workspace action the model emitted, in the order it emitted
+  // them. Every one: "open the readme and then open package.json" is two tags,
+  // and the single non-global `.match` this replaced ran the first and dropped
+  // the rest without a word to the operator.
+  for (const tag of parseWorkspaceTags(accumulated)) {
+    const targetPath = tag.path ?? "";
+    if (tag.action === "open-project") {
+      if (!targetPath) continue;
       const match = projects?.recent?.find(
         (p) => p.path === targetPath || p.name.toLowerCase() === targetPath.toLowerCase(),
       ) || { path: targetPath, name: targetPath.split("/").filter(Boolean).pop() || targetPath, kind: "code" };
@@ -1272,12 +1326,25 @@ Always include a natural, friendly confirmation message explaining what you did.
         name: match.name,
         kind: (match.kind as any) || "code",
       });
-    } else if (action === "open-folder") {
-      options.onWorkspace?.({ type: "workspace", action: "open-folder", path: targetPath });
-    } else if (action === "open-file") {
-      options.onWorkspace?.({ type: "workspace", action: "open-file", path: targetPath });
-    } else if (action === "reveal") {
-      options.onWorkspace?.({ type: "workspace", action: "reveal", path: targetPath });
+    } else if (tag.action === "open-folder") {
+      if (targetPath) options.onWorkspace?.({ type: "workspace", action: "open-folder", path: targetPath });
+    } else if (tag.action === "open-file") {
+      if (targetPath) options.onWorkspace?.({ type: "workspace", action: "open-file", path: targetPath });
+    } else if (tag.action === "reveal") {
+      if (targetPath) options.onWorkspace?.({ type: "workspace", action: "reveal", path: targetPath });
+    } else if (tag.action === "close-file") {
+      // "close that file" used to be classified as an open and delegated, so
+      // nothing ever reached `closeTab` and the confirmation was a lie. The
+      // scope is what the sentence actually said: the tab in front, one named
+      // file, or all of them. A missing scope means the one in front, which is
+      // what "close that file" means with no file named.
+      const scope = tag.scope === "all" ? "all" : tag.scope === "active" || !targetPath ? "active" : "path";
+      options.onWorkspace?.({
+        type: "workspace",
+        action: "close-file",
+        scope,
+        path: scope === "path" ? targetPath : undefined,
+      });
     }
   }
 
@@ -1285,7 +1352,11 @@ Always include a natural, friendly confirmation message explaining what you did.
   const isMax = options.mode === "max";
   const engineUsed = isVoice ? "Gemini Voice Assistant" : isMax ? "Frontier Max (Gemini)" : "Gemini Flash";
   callbacks.onComplete({
-    fullText: accumulated,
+    // The actions have run; the markup that asked for them is not speech. The
+    // voice bridge overwrites everything onToken streamed with this string and
+    // hands it to the speech path, so a tag left here is a tag read aloud —
+    // truncated at the first dot in the path, which is where a sentence ends.
+    fullText: stripWorkspaceTags(accumulated),
     costUsd: 0.0005,
     costLabel: isMax ? "Included" : "Free (BYOK)",
     tokensCount: totalInputTokens + totalOutputTokens,

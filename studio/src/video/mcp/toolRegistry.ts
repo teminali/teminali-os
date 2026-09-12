@@ -169,6 +169,20 @@ function resolveClipId(ref?: string): string {
   throw new Error(`No clip matching "${ref}". Call describe_timeline to list the clips.`);
 }
 
+/**
+ * Where a verb that places something puts it.
+ *
+ * The playhead is the default rather than zero, and the distinction
+ * matters: a marker, a freeze or an in point defaulted to the head of
+ * the program is an edit nobody asked for, while the playhead is the
+ * one place the operator is actually looking. `set_playhead` and `nudge`
+ * are the exceptions and still refuse a missing `ms` outright, because
+ * "move the playhead" to where it already is has no meaning.
+ */
+function placeAt(ms: number | undefined, playheadMs: number): number {
+  return typeof ms === 'number' && Number.isFinite(ms) ? ms : playheadMs;
+}
+
 function requireUnlocked(clipId: string): void {
   const clip = findClipById(timeline().tracks, clipId);
   if (!clip) return;
@@ -507,38 +521,83 @@ defineTool({
    still where the first tool that reads a caller's disk begins.
    ═══════════════════════════════════════════════════════════════════ */
 
+/*
+  Twenty-eight verbs on one schema, and the arithmetic is the point.
+
+  Every name here is paid for once, inside `timeline_command`'s enum, on
+  each request that advertises the panel. A tool apiece would be paid for
+  twenty-eight times over — a brief, a description and a parameter schema
+  each — and would blow `TOOL_BUDGET` by thirteen names before the first
+  edit ran. The seventeen added below `clear_selection` are the verbs the
+  VOICE lane reaches: `services/voice/editorActions.ts` turns the spoken
+  sentence into one of these, and this is the other end of that link.
+  Each is a store action that already existed and had no caller outside
+  the panel's own buttons.
+*/
 const TIMELINE_COMMANDS = [
   'play_pause', 'play', 'pause', 'set_playhead', 'nudge', 'split',
   'delete_selected', 'undo', 'redo', 'select_clip', 'clear_selection',
+  'trim_in', 'trim_out', 'duplicate_clip', 'set_speed', 'reverse_clip',
+  'freeze_frame', 'detach_audio', 'close_gaps', 'add_transition', 'add_text',
+  'add_marker', 'set_in_point', 'set_out_point', 'clear_in_out',
+  'zoom_in', 'zoom_out', 'zoom_fit',
+] as const;
+
+/**
+ * The transitions a caller may name.
+ *
+ * Spelled out rather than typed `string`, because `applyTransitionToClip`
+ * writes whatever it is handed straight onto the clip and the renderer
+ * draws nothing for a type it does not know — a transition that reports
+ * success and appears only as a missing frame at the export.
+ */
+const TRANSITION_TYPES = [
+  'crossfade', 'dip_to_black', 'dip_to_white', 'whip_pan', 'zoom_in', 'zoom_out',
+  'glitch', 'diagonal_split', 'flash', 'push_left', 'push_right', 'slide_up',
+  'spin', 'blur_dissolve',
 ] as const;
 
 defineTool({
   name: 'timeline_command',
   brief:
-    'The transport, razor and history in one verb: play_pause | play | pause | set_playhead | nudge | split | delete_selected | undo | redo | select_clip | clear_selection. set_playhead and nudge need ms; select_clip needs clipId.',
+    'The transport, razor, clip edits, markers and view in one verb: play_pause | play | pause | set_playhead | nudge | split | delete_selected | undo | redo | select_clip | clear_selection | trim_in | trim_out | duplicate_clip | set_speed | reverse_clip | freeze_frame | detach_audio | close_gaps | add_transition | add_text | add_marker | set_in_point | set_out_point | clear_in_out | zoom_in | zoom_out | zoom_fit. set_playhead and nudge need ms; select_clip needs clipId; set_speed needs rate; add_text needs text.',
   category: 'timeline',
   description:
-    'Drive the editor: play_pause, play, pause, set_playhead, nudge, split, delete_selected, ' +
-    'undo, redo, select_clip, clear_selection. "set_playhead" takes an absolute ms and "nudge" ' +
-    'a signed delta in ms; "select_clip" takes clipId (an id, a clip name, or "selected"). ' +
+    'Drive the editor. Transport and history: play_pause, play, pause, set_playhead, nudge, ' +
+    'undo, redo, select_clip, clear_selection. Assembly: split, delete_selected, trim_in, ' +
+    'trim_out, duplicate_clip, set_speed, reverse_clip, freeze_frame, detach_audio, close_gaps, ' +
+    'add_transition, add_text. Cueing: add_marker, set_in_point, set_out_point, clear_in_out. ' +
+    'View: zoom_in, zoom_out, zoom_fit. "set_playhead" takes an absolute ms and "nudge" a ' +
+    'signed delta in ms; "select_clip" takes clipId (an id, a clip name, or "selected"). ' +
     '"play" and "pause" are absolute and report whether the transport was already there; ' +
     '"play_pause" flips. "split" cuts every selected clip the playhead is inside — it reports ' +
     'how many it aimed at and how many it took, and refuses rather than claim a cut it did not ' +
-    'make. Each call is one entry on the undo stack.',
+    'make. Every clip verb defaults to the selected clip and refuses on a locked one. The ' +
+    'verbs that place something (trim, freeze, marker, in/out, text) default to the playhead ' +
+    'and take ms to override it. Each call is one entry on the undo stack.',
   schema: z.object({
     command: z.enum(TIMELINE_COMMANDS).describe('Which verb to run'),
-    ms: z.number().optional().describe('Absolute position for set_playhead; a signed delta for nudge'),
-    clipId: z.string().optional().describe('For select_clip: a clip id, a clip name, or "selected"'),
+    ms: z.number().optional().describe(
+      'Absolute position for set_playhead, trim_in, trim_out, freeze_frame, add_marker, ' +
+      'set_in_point, set_out_point and add_text (default: the playhead); a signed delta for ' +
+      'nudge; the transition length for add_transition (default 500)'
+    ),
+    clipId: z.string().optional().describe('A clip id, a clip name, or "selected". Defaults to the selected clip'),
+    rate: z.number().optional().describe('For set_speed: a multiplier above 0 and at most 10, where 1 is normal'),
+    text: z.string().optional().describe('For add_text: the words on screen. For add_marker: the marker label'),
+    transition: z.enum(TRANSITION_TYPES).optional().describe('For add_transition (default "crossfade")'),
+    position: z.enum(['in', 'out']).optional().describe('For add_transition: which edge of the clip (default "out")'),
   }),
-  handler: ({ command, ms, clipId }) => {
+  handler: ({ command, ms, clipId, rate, text, transition, position }) => {
     const state = timeline();
 
     /*
-      `ms` cannot be required by the schema — nine of the eleven commands
-      do not take it — so the check is here, and it is an error rather
-      than a default. A nudge of an unstated amount is a silent no-op,
-      and a playhead defaulted to 0 is a jump to the top that nobody
-      asked for; both look like the tool worked.
+      `ms` cannot be required by the schema — most of the commands do not
+      take it, and the ones that place something default to the playhead
+      — so the check is here for the two that cannot default, and it is
+      an error rather than a default. A nudge of an unstated amount is a
+      silent no-op, and a playhead defaulted to 0 is a jump to the top
+      that nobody asked for; both look like the tool worked.
     */
     const requireMs = (): number => {
       if (typeof ms !== 'number' || !Number.isFinite(ms)) {
@@ -667,6 +726,245 @@ defineTool({
           changed: before > 0,
           ...(before ? {} : { note: 'Nothing was selected.' }),
         };
+      }
+
+      /* ── The verbs the voice lane reaches ──────────────────────────
+         Everything below here existed in the store and had no caller
+         outside the panel's buttons, so "trim the start to here" spoken
+         aloud had nowhere to land. Each one keeps the rule the razor
+         established above: the store is asked whether the edit actually
+         happened, and a verb that changed nothing throws instead of
+         returning the success the operator would only discover was
+         empty at the export. */
+
+      case 'trim_in':
+      case 'trim_out': {
+        const id = resolveClipId(clipId);
+        requireUnlocked(id);
+        const clip = findClipById(state.tracks, id);
+        const at = placeAt(ms, state.playheadMs);
+        /*
+          `trimClip` CLAMPS a point outside the clip rather than refusing
+          it, so a trim asked for from a playhead parked elsewhere would
+          silently extend the head to zero instead. The range check is
+          here because the store's clamp cannot tell the two apart.
+        */
+        if (clip && (at <= clip.startTimeMs || at >= clip.startTimeMs + clip.durationMs)) {
+          throw new Error(
+            `${at}ms is not inside "${clip.name}" (${clip.startTimeMs}ms to ` +
+            `${clip.startTimeMs + clip.durationMs}ms), so there is nothing to trim to. ` +
+            'Put the playhead inside the clip first.'
+          );
+        }
+        return asOneEdit(command === 'trim_in' ? 'Trim head' : 'Trim tail', () => {
+          const trimmed = command === 'trim_in'
+            ? timeline().trimClip(id, at, undefined)
+            : timeline().trimClip(id, undefined, at);
+          if (!trimmed) throw new Error(`"${clip?.name ?? id}" was not trimmed: it or its track is locked.`);
+          const after = findClipById(timeline().tracks, id);
+          return {
+            command, clipId: id, atMs: at,
+            startTimeMs: after?.startTimeMs, durationMs: after?.durationMs, changed: true,
+          };
+        });
+      }
+
+      case 'duplicate_clip': {
+        const id = resolveClipId(clipId);
+        const name = findClipById(state.tracks, id)?.name ?? id;
+        return asOneEdit('Duplicate clip', () => {
+          const copyId = timeline().duplicateClip(id);
+          // The store mints the id outside its producer precisely so a
+          // caller can prove a copy was made; null means it was not.
+          if (!copyId) throw new Error(`"${name}" was not duplicated: its track is locked.`);
+          return { command, clipId: id, newClipId: copyId, changed: true };
+        });
+      }
+
+      case 'set_speed': {
+        const id = resolveClipId(clipId);
+        requireUnlocked(id);
+        if (typeof rate !== 'number' || !Number.isFinite(rate) || rate <= 0 || rate > 10) {
+          throw new Error('"set_speed" needs rate: a multiplier above 0 and at most 10, where 1 is normal.');
+        }
+        /*
+          `updateClipSpeed` does not commit — it is the inspector's
+          slider, the same shape as `setEffectParam` — so without this
+          transaction a speed change left nothing to undo.
+        */
+        return asOneEdit(`Set speed ${rate}x`, () => {
+          timeline().updateClipSpeed(id, { multiplier: rate });
+          const after = findClipById(timeline().tracks, id);
+          return { command, clipId: id, rate, durationMs: after?.durationMs, changed: true };
+        });
+      }
+
+      case 'reverse_clip': {
+        const id = resolveClipId(clipId);
+        // Commits itself, and answers with the direction it landed on
+        // rather than the one it was asked for.
+        const reversal = state.reverseClip(id);
+        if (!reversal.ok) throw new Error(reversal.error ?? 'The clip was not reversed.');
+        return { command, clipId: id, reversed: reversal.reversed, changed: true };
+      }
+
+      case 'freeze_frame': {
+        const id = resolveClipId(clipId);
+        requireUnlocked(id);
+        const clip = findClipById(state.tracks, id);
+        const at = placeAt(ms, state.playheadMs);
+        return asOneEdit('Freeze frame', () => {
+          if (!timeline().freezeFrame(id, at)) {
+            throw new Error(
+              `Nothing was frozen: ${at}ms is not inside "${clip?.name ?? id}"` +
+              (clip ? ` (${clip.startTimeMs}ms to ${clip.startTimeMs + clip.durationMs}ms)` : '') +
+              '. Put the playhead over the frame to hold.'
+            );
+          }
+          return { command, clipId: id, atMs: at, holdMs: 2000, changed: true };
+        });
+      }
+
+      case 'detach_audio': {
+        const id = resolveClipId(clipId);
+        requireUnlocked(id);
+        return asOneEdit('Detach audio', () => {
+          const detached = timeline().detachAudio(id);
+          // Refuses a second detach, a clip with no source, and anything
+          // that is not video — all three used to report success.
+          if (!detached.ok) throw new Error(detached.error ?? 'The audio was not detached.');
+          return {
+            command, clipId: id,
+            audioClipId: detached.audioClipId, audioTrackId: detached.audioTrackId, changed: true,
+          };
+        });
+      }
+
+      case 'close_gaps': {
+        /*
+          Addressed by TRACK, because `closeGapsOnTrack` repacks a whole
+          lane. Voice cannot name a track id, so the selected track wins
+          and the selected clip's track is the fallback — and when there
+          is neither, saying so is better than repacking a guess.
+        */
+        const onClip = clipId ? findClipById(state.tracks, resolveClipId(clipId)) : undefined;
+        const trackId = onClip?.trackId
+          ?? state.selectedTrackId
+          ?? (state.selectedClipIds[0] ? findClipById(state.tracks, state.selectedClipIds[0])?.trackId : undefined);
+        if (!trackId) throw new Error('No track is selected. Select a clip or a track first.');
+        const packed = asOneEdit('Close gaps', () => timeline().closeGapsOnTrack(trackId));
+        if (!packed.ok) throw new Error(packed.error ?? 'The gaps were not closed.');
+        return {
+          command, trackId,
+          gapsClosed: packed.gapsClosed, clipsMoved: packed.clipsMoved, totalShiftMs: packed.totalShiftMs,
+          changed: packed.clipsMoved > 0,
+          ...(packed.clipsMoved ? {} : { note: 'There were no gaps on that track.' }),
+        };
+      }
+
+      case 'add_transition': {
+        const id = resolveClipId(clipId);
+        requireUnlocked(id);
+        const edge = position ?? 'out';
+        const type = transition ?? 'crossfade';
+        const length = typeof ms === 'number' && Number.isFinite(ms) && ms > 0 ? Math.round(ms) : 500;
+        return asOneEdit(`Apply ${type} transition`, () => {
+          timeline().applyTransitionToClip(id, edge, type, length);
+          const after = findClipById(timeline().tracks, id);
+          const landed = edge === 'in' ? after?.transitionIn : after?.transitionOut;
+          if (!landed) throw new Error(`The ${type} was not applied to "${after?.name ?? id}".`);
+          // The store caps a transition at half the clip, so the length
+          // reported is the one on the clip and not the one asked for.
+          return { command, clipId: id, position: edge, type, durationMs: landed.durationMs, changed: true };
+        });
+      }
+
+      case 'add_text': {
+        if (!text || !text.trim()) throw new Error('"add_text" needs text: the words to put on screen.');
+        const words = text.trim();
+        const track = defaultTrackFor('text');
+        const at = Math.max(0, placeAt(ms, state.playheadMs));
+        return asOneEdit('Add text layer', () => {
+          const id = timeline().addTextLayer(track.id, words, at);
+          // `addTextLayer` returns its id whether or not it found a
+          // track to push onto, so the clip is looked up to prove it.
+          if (!findClipById(timeline().tracks, id)) {
+            throw new Error('The text layer was not created: there is no track to put it on.');
+          }
+          return { command, clipId: id, trackId: track.id, text: words, startTimeMs: at, changed: true };
+        });
+      }
+
+      case 'add_marker': {
+        const at = Math.max(0, Math.round(placeAt(ms, state.playheadMs)));
+        const before = state.markers.length;
+        state.addMarker(at, text?.trim() || undefined);
+        const markers = timeline().markers;
+        // Markers are kept sorted, so the new one is found by its time
+        // and not by being last.
+        const made = markers.find((m) => m.timeMs === at);
+        return {
+          command, atMs: at, label: made?.label, markerId: made?.id,
+          markerCount: markers.length, changed: markers.length > before,
+        };
+      }
+
+      case 'set_in_point':
+      case 'set_out_point': {
+        const at = Math.max(0, placeAt(ms, state.playheadMs));
+        // Both refuse a point that would make the range empty, and say
+        // which end is in the way.
+        const range = command === 'set_in_point' ? state.setInPoint(at) : state.setOutPoint(at);
+        if (!range.ok) throw new Error(range.error ?? 'That point was refused.');
+        return { command, atMs: at, inPointMs: range.inPointMs, outPointMs: range.outPointMs, changed: true };
+      }
+
+      case 'clear_in_out': {
+        const had = state.inPointMs !== null || state.outPointMs !== null;
+        const range = state.clearInOut();
+        return {
+          command, inPointMs: range.inPointMs, outPointMs: range.outPointMs, changed: had,
+          ...(had ? {} : { note: 'There was no in/out range to clear.' }),
+        };
+      }
+
+      case 'zoom_in':
+      case 'zoom_out': {
+        /* One notch is 1.5x, the same step the toolbar's buttons take.
+           `setZoomLevel` clamps at both ends, so the level read back is
+           where it landed and `changed` is false at the stops. */
+        const fromZoom = state.zoomLevel;
+        state.setZoomLevel(command === 'zoom_in' ? fromZoom * 1.5 : fromZoom / 1.5);
+        const zoomLevel = timeline().zoomLevel;
+        return {
+          command, zoomLevel, fromZoom, changed: zoomLevel !== fromZoom,
+          ...(zoomLevel === fromZoom
+            ? { note: command === 'zoom_in' ? 'Already as close as it goes.' : 'Already as wide as it goes.' }
+            : {}),
+        };
+      }
+
+      case 'zoom_fit': {
+        /*
+          `zoomToFit` solves for a viewport width, which lives on the
+          Timeline's scroll element and nowhere in the store. The
+          toolbar's own Fit button reads `clientWidth - 40` off that
+          element; this reads the same element by its class so the two
+          agree, and falls back to the window when the panel is not
+          mounted — a fit is a view change and costs nothing if it is
+          approximate.
+        */
+        const lanes = typeof document === 'undefined'
+          ? null
+          : (document.querySelector('.editor-timeline-lanes') as HTMLElement | null);
+        const viewportPx = lanes?.clientWidth
+          || (typeof window === 'undefined' ? 1200 : window.innerWidth || 1200);
+        const contentEndMs = Math.max(getContentEndMs(state.tracks), project().project?.durationMs ?? 0);
+        if (contentEndMs <= 0) throw new Error('There is nothing on the timeline to fit.');
+        const fromZoom = state.zoomLevel;
+        state.zoomToFit(Math.max(120, viewportPx - 40), contentEndMs);
+        const zoomLevel = timeline().zoomLevel;
+        return { command, zoomLevel, fromZoom, viewportPx, contentEndMs, changed: zoomLevel !== fromZoom };
       }
     }
   },

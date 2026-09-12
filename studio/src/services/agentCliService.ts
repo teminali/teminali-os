@@ -2,6 +2,7 @@ import { GatewayClient } from "./gatewayClient";
 import { answerCameraRequest } from "./cameraFrame";
 import { answerPlayerFrameRequest } from "./playerFrame";
 import { answerBrowserRequest } from "./browserAgent";
+import { parseWorkspaceTags } from "./voice/workspaceActions";
 import type { BrowserCdpOp, BrowserCdpParams } from "./browserView";
 import type { StreamCallbacks } from "./frontierEngine";
 import type { ToolCall } from "../types";
@@ -196,6 +197,19 @@ type AgentEvent =
   | { type: "workspace"; action: "open-file"; path: string }
   | { type: "workspace"; action: "open-folder"; path: string }
   | { type: "workspace"; action: "player"; command: { action: string; value?: number | string | boolean } }
+  /* A tab closed by the agent. The tab in front, one named file, or all of
+     them — the scope is what the operator's sentence actually said.
+
+     Typed here because it was not. `frontierEngine` emits this event through an
+     `(event: any)` callback, so every subscriber compiled while having no idea
+     it existed, and two of them end their `action` chain with a bare `else`
+     that assumes whatever is left must be `open-project`:
+     `components/chat/StudioChat.tsx` and
+     `components/workspace/panels/AgentPane.tsx`. A close event reaching either
+     one calls `setWorkspacePath(undefined)` and loses the workspace root. They
+     each need an explicit `else if (event.action === "open-project")`; until
+     they have it the compiler says so, which is the point of declaring this. */
+  | { type: "workspace"; action: "close-file"; scope: "active" | "all" | "path"; path?: string }
   | { type: "workspace"; action: "open-project"; path: string; name: string; kind?: "video" | "code" }
   | { type: "workspace"; action: "browse"; url: string; newTab: boolean }
   /* The agent asking to look through the camera. Answered here rather than
@@ -490,12 +504,36 @@ export class AgentCliService {
       throw failure;
     }
 
-    const actionMatch = text.match(/<workspace-action\s+action=["']([^"']+)["']\s+path=["']([^"']+)["']\s*\/?>/i);
-    if (actionMatch) {
-      const [, action, targetPath] = actionMatch;
+    /*
+      Every workspace action the CLI emitted, in the order it emitted them.
+
+      This was a single non-global `.match`, so "open the readme and then open
+      package.json" ran the first tag and dropped the rest without a word —
+      the same bug `frontierEngine` carried until §6 fixed it there, and this
+      lane is reachable by voice the moment the operator says "ask Claude Code
+      to…", so it is on the spoken path too.
+
+      The old pattern also required a `path` attribute, which meant a
+      `close-file` tag carrying only a scope ("close all the tabs") could not
+      match at all. `parseWorkspaceTags` reads the attributes properly and is
+      tested in `tests/voice-workspace-actions.test.mjs`.
+    */
+    for (const tag of parseWorkspaceTags(text)) {
+      const targetPath = tag.path ?? "";
+      if (tag.action === "close-file") {
+        const scope = tag.scope === "all" ? "all" : tag.scope === "active" || !targetPath ? "active" : "path";
+        callbacks.onWorkspace?.({
+          type: "workspace",
+          action: "close-file",
+          scope,
+          path: scope === "path" ? targetPath : undefined,
+        });
+        continue;
+      }
+      if (!targetPath) continue;
       callbacks.onWorkspace?.({
         type: "workspace",
-        action: action as any,
+        action: tag.action as any,
         path: targetPath,
       });
     }

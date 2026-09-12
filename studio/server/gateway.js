@@ -306,6 +306,22 @@ const GEMINI_LIVE_VOICE = "Sulafat";
 const GEMINI_LIVE_TOKEN_TTL_MS = 30 * 60_000;
 /** The window in which the renderer must actually open the socket. */
 const GEMINI_LIVE_SESSION_WINDOW_MS = 60_000;
+/**
+ * How long Google gets to answer the mint before the route stops waiting.
+ *
+ * The mint is the one call on this route that leaves the machine, and without
+ * a deadline it inherits whatever the network does — which on cafe wifi behind
+ * a captive portal is nothing at all, forever. The renderer is awaiting this
+ * response to decide whether voice can start, so a request that never answers
+ * is a microphone stuck at "connecting" until the app is restarted.
+ *
+ * `httpOptions.timeout` is enough on its own here: the SDK arms a fresh abort
+ * signal per attempt, and with no `retryOptions` set there is exactly one
+ * attempt, so this bounds the whole call. Eight seconds is generous for a
+ * single round trip to Google and short enough that the renderer's own retry
+ * ladder gets a turn.
+ */
+const GEMINI_LIVE_MINT_TIMEOUT_MS = 8_000;
 
 /**
  * Mint an ephemeral Gemini Live token, or say why not.
@@ -338,13 +354,16 @@ async function mintGeminiLiveToken(config) {
   const now = Date.now();
   const expiresAt = new Date(now + GEMINI_LIVE_TOKEN_TTL_MS).toISOString();
   try {
-    const client = new GoogleGenAI({ apiKey, httpOptions: { apiVersion: "v1alpha" } });
+    const client = new GoogleGenAI({
+      apiKey,
+      httpOptions: { apiVersion: "v1alpha", timeout: GEMINI_LIVE_MINT_TIMEOUT_MS },
+    });
     const token = await client.authTokens.create({
       config: {
         uses: 1,
         expireTime: expiresAt,
         newSessionExpireTime: new Date(now + GEMINI_LIVE_SESSION_WINDOW_MS).toISOString(),
-        httpOptions: { apiVersion: "v1alpha" },
+        httpOptions: { apiVersion: "v1alpha", timeout: GEMINI_LIVE_MINT_TIMEOUT_MS },
       },
     });
     // The mint returns the token's resource name and nothing else; that name
@@ -366,6 +385,17 @@ async function mintGeminiLiveToken(config) {
     // Quota is worth separating because it is the one refusal the operator
     // cannot fix by editing anything: the renderer has its own sentence for it.
     const exhausted = error?.status === 429 || /RESOURCE_EXHAUSTED|\bquota\b/i.test(detail);
+    // A deadline that ran out is not a refusal, and telling an operator their
+    // key was rejected when the request never arrived sends them to fix the one
+    // thing that is not broken.
+    const timedOut = error?.name === "AbortError" || error?.name === "TimeoutError";
+    if (timedOut) {
+      return {
+        ok: false,
+        reason: "mint-failed",
+        detail: `Google did not answer the voice token request within ${Math.round(GEMINI_LIVE_MINT_TIMEOUT_MS / 1000)} seconds. Check the network; voice will keep trying.`,
+      };
+    }
     return {
       ok: false,
       reason: exhausted ? "quota" : "mint-failed",

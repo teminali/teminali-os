@@ -7812,6 +7812,219 @@ this change, so it is the scorer's doing, not the scan's, and the floor and
 margin in `workspaceActions.ts` are calibrated numbers that do not get moved
 in passing.
 
+### 6.0.31 The stage heard a room and could not tell who was talking (`components/voice/TemiVoiceStage.tsx`, `services/voice/addressing.ts`, 2026-09-12)
+
+An audit of the whole spoken surface, six agents reading every path from parse to
+executor, put the turn machinery first. The shipping stage never imported
+`conversation.ts`, which meant `scoreAddressing`, `EchoGuard` and
+`selfAudio.audibleSince` were all unreachable code. Nothing gated a final
+transcript on who had produced it, so someone else in the room saying a sentence
+with a machine verb in it delegated a real run.
+
+`gateSpokenTurn` now runs upstream of everything, on the `final_user_request`
+transcript. Provenance is asked first: while the app itself is audible, only a
+turn that names the assistant is taken, because the audible thing may be a film
+whose dialogue contains any sentence at all. Otherwise `scoreAddressing` decides.
+The gate returns the `stripWakeWord`-stripped text, so "Temy, open DukaBot"
+reaches the switch as "open DukaBot". A rejected turn sends `sendBargeIn()` and
+stops playback, because Gemini's own VAD has already started answering the room.
+
+**Landing that gate made a latent bug live.** "Hold on" sits in both
+`STOP_PHRASES` and `THIRD_PARTY_MARKERS`, and the unconditional stop fast path
+won, so a phrase said to a person in the room cancelled the run. The fast path is
+now conditional on `(wakeWord || !thirdParty)`. "Stop", "cancel" and "abort" carry
+no third-party marker and remain unconditional.
+
+Four more failures in the same file. An acknowledgement spoken over her, "mhm" or
+"yeah", fired barge-in and then fell into a bare `break`, so her sentence died and
+nothing replaced it; it no longer interrupts her. An acknowledgement inside the
+follow-up window after a question she asked was classified as praise and
+discarded, so "yes" answering "should I run the tests?" did nothing; it now routes
+as an answer. The mute line promised "tap the orb when you want me back" while
+`handleOrbClick` did nothing when muted and quiet; that door now exists. Tapping
+the orb to talk over her called `stopCurrentTask`, the hush and stop conflation
+§6.8 forbids; a tap is a hush and the run carries on.
+
+`protocol.onError` was never assigned, which made every `onError` call in the live
+engine a silent no-op, and the only visible sign of any failure was the tooltip of
+a 2.5px dot. The handler is assigned beside `onConnected`, and `voiceNote` renders
+as a persistent `aria-live` banner in the message column.
+
+The editor lane was gated on a flag set only from `WorkspaceService.listProjects`,
+so a failed fetch on mount killed the entire lane silently for the session.
+`projectKindKnownRef` separates "not a video project" from "we never found out",
+and the unknown case falls back to whether a timeline is loaded.
+
+`useSpokenApproval` was mounted in the chat and in the agent pane and never here,
+so "approve that" and "yes go ahead" routed to conversation. It is mounted,
+`consume` runs before the router, and the banner carries Allow, Always and Refuse
+buttons: a permission prompt raised while the mic is muted would otherwise hang
+the run with no way to answer it.
+
+### 6.0.32 One bad minute of network cost the whole session (`services/voice/geminiLiveEngine.ts`, `services/gatewayClient.ts`, `server/gateway.js`, 2026-09-12)
+
+The live lane had no way to survive anything going wrong. A StrictMode remount
+during `connect()` left two sockets streaming into one worklet, because nothing
+re-checked `explicitlyDisconnected` after the awaits. It now re-checks after both,
+and an abandoned attempt's callbacks are dead, otherwise the discarded engine's
+`onclose` flips the live stage to disconnected.
+
+No `sessionResumption` was declared and `goAway` was never read, so a session
+Gemini ended itself took the conversation with it. The newest resumable handle is
+kept and reconnected with, and a `goAway` warning schedules the replacement
+`GO_AWAY_LEAD_MS` (1000) before Google's stated hang-up. The handle is dropped on
+`disconnect()`, on a history clear, and on a voice change, since the voice is part
+of session setup and a resumed session would restore the one the call was made to
+change.
+
+`silenceDurationMs` was 700, so "open dukabot and run the tests" closed the turn
+on the thinking pause and both halves delegated separately. It now reads
+`DEFAULT_ENDPOINTER.maxSilenceMs` rather than copying it: **1800 ms**, the
+measured ceiling of the silence window itself. The 2000 in the audit was
+`pacingCeilingMs`, which caps a learned floor and is not a window.
+
+Reconnection was a flat 2000 ms retry with no backoff, no cap and no give-up,
+minting a single-use token every two seconds forever. A dropped socket now backs
+off 1 s doubling to a 15 s cap, a failed mint 5 s doubling to a 60 s cap, both
+stopping after six attempts with a note naming the way back. `mint-failed` was
+terminal for the session and is now retried along with the other failures that can
+fix themselves; `no-key`, `quota` and `sdk-unavailable` stay terminal, because
+they need a key, a billing cycle or a reinstall and a loop would bury the note.
+
+**The tests could run twice.** `tool_call` was not gated by `suppressedGeneration`,
+so a turn the rules path had already delegated could be delegated again by the
+model's own `ask_the_assistant`. Tool calls are now gated on the same predicate as
+the transcript.
+
+The captive-portal wedge was wider than the audit found. The token fetch had no
+deadline, but neither did `ai.live.connect()` itself, which is the call that
+actually stays pending forever behind a portal. Eight second deadlines on the
+gateway token fetch, the `/api/session` mint and the gateway's own call to Google;
+ten seconds on the Live handshake, with a late-opening socket closed rather than
+left holding the microphone.
+
+### 6.0.33 "Pause" cancelled the run and the video kept playing (`services/voice/playerActions.ts`, `services/voice/machineAction.ts`, `services/voice/turnIntent.ts`, 2026-09-12)
+
+The player's executor was complete and voice never reached it. `dispatchPlayerCommand`
+and its twenty actions have been there the whole time; there was no parse. So
+"pause" matched `STOP_PHRASES` and cancelled the agent run while the video played
+on, "skip forward thirty seconds" conversed because "second" was not a machine
+noun, and "turn the volume down" and "full screen" matched nothing at all.
+
+`playerActions.ts` is that parse. `handleSpokenPlayerCommand` is the first
+statement of a spoken turn, ahead of the approval, workspace and editor fast paths
+and the router, and returns `{ handled: false }` both when the sentence is not
+transport and when no pane is mounted, so the turn carries on unchanged.
+
+**"Pause" stays in `STOP_PHRASES`.** With no video open it still means stop the
+run, and removing it would trade one wrong answer for another. The ambiguity is
+settled by whether a pane is mounted, not by the word list.
+
+Covered: play, pause, toggle, restart, next and previous item, seek to a timecode,
+a nudge by a spoken duration or by the player's own ten second step, volume up,
+down, to a percentage, mute, unmute, fullscreen and back, playback speed, and
+subtitles, bounded by `PLAYER_ACTIONS` so no sentence can name an action the
+executor has no case for. A volume or speed step is computed from the level the
+player reports and returns nothing when there is no snapshot, rather than guessing
+50%; a rate outside `clampRate`'s range is refused rather than clamped, because
+"ten times speed" clamped to 3x reports a lie.
+
+Refused, deliberately: "turn it up", "louder", bare "mute", bare "next", bare "go
+back", bare "restart". Each is the plainest way to say something else to Temi, and
+no wording separates them. She may be talking while the film is playing, and the
+words are identical.
+
+### 6.0.34 The timeline could be asked for eleven things and could do twenty-eight (`services/voice/editorActions.ts`, `video/mcp/toolRegistry.ts`, 2026-09-12)
+
+Four spoken sentences an operator actually says at a timeline were refused by the
+grammar: "move the playhead to ten seconds" needed the verb adjacent to "to",
+"split this clip" was accepted only as "split this", "play the timeline from here"
+was end-anchored, and no zoom verb existed anywhere.
+
+**A fifth bug found while testing those was worse than all four.** `parseSpokenMs`
+accepted a bare `s` or `m` as a unit after any word, so "captions" parsed as
+`caption` plus `s`, "from" as `fro` plus `m`, "them" as `the` plus `m`. Each fed a
+non-number to `numberFrom`, which returns null, and null there means the whole
+sentence is unreadable. "Go to 30 seconds from the start" was silently dead, and
+so was every caption sentence. Units are words now, with a digit-anchored `30s`
+branch beside them, and "half a second" is 500 ms rather than one second.
+
+The delta the audit listed as unreachable is closed. `generate_captions` and
+`perfect_captions` were exposed tools with no spoken route at all, on the surface a
+social demo needs most: "add captions", "fix the captions", "check the captions",
+"shift the captions forward half a second". Then trim, duplicate, speed, reverse,
+freeze, detach audio, close gaps, transitions, titles, markers, in and out points
+and zoom. All twenty-eight go through one `timeline_command` schema rather than
+seventeen new tools, because every exposed tool name is paid for on every request.
+
+Two executor defects surfaced in the wiring. `trimClip` clamps rather than
+refusing, so a trim from a playhead parked outside the clip would silently resize
+it to zero; the verb range-checks first. `updateClipSpeed` does not commit, so a
+spoken speed change would have left nothing to undo; it is wrapped in `asOneEdit`.
+
+### 6.0.35 Every delegation was auto-denied in a millisecond (`services/voice/teminaliAgentBridge.ts`, `services/voice/voiceTurnRouter.ts`, `services/aiService.ts`, `services/agentCliService.ts`, 2026-09-12)
+
+The headline capability, driving Claude Code and Codex by voice, was broken at the
+first gate. The bridge passed no `approveCommand`, so the first permission event
+auto-denied and "ask Claude Code to run the tests" died instantly. The stage's own
+gate is used when it passes one; otherwise the bridge publishes the CLI's question
+to `approvalStore`, where it is read aloud and answered by a spoken yes, and it
+always settles, after three minutes at the latest, under the gateway's five minute
+auto-deny, so a stop never leaves the CLI blocked.
+
+**"Use Frontier Max" was a fabrication.** No engine-name parser existed anywhere in
+`services/voice`, so the sentence classified as conversation, the persona answered
+in character, and nothing changed. There is an engine-select intent now, and the
+bridge reads the store back before speaking, so the confirmation follows the change
+rather than predicting it. Mid-run it says the switch applies to the next task
+instead of claiming the running job moved. A named assistant is no longer discarded
+either: "have Codex look at this file" runs on Codex, where before the name was
+dropped and the picker's engine ran the work.
+
+Flash and Auto both speak as "Frontier" because `runTask` sends mode `auto` for
+every non-Gemini engine, and confirming "Frontier Flash" would be the same
+fabrication in a smaller font.
+
+A prompt arriving mid-run was queued silently after she had already said "On it",
+and opened minutes later; the folder path refused out loud and files did not. The
+queue notice is spoken on the same terms as a refusal. A cancel reported "Stopped."
+and then "The background assistant encountered an issue"; our own abort is
+recognised first. Successive turns now continue one CLI session per engine, keyed
+by workspace and never resumed into a workspace it did not run in, so "now run the
+tests" remembers "fix the failing test". A question about a run that has just
+finished is answered from that run's own report rather than starting another one.
+
+### 6.0.36 She read the markup out loud (`services/frontierEngine.ts`, `services/voice/workspaceActions.ts`, 2026-09-12)
+
+"Open package.json" opened the file and then spoke the tag that opened it,
+truncated at the first dot of the path. **That was two bugs, not one.** The
+completed text was one; the streaming path emitted `<workspace-` token by token
+independently of it. A per-turn stripper holds back any tail that could still
+become a tag and releases it the moment it cannot, costing one bracket of latency
+on prose and nothing on text without one. A tag the model never closes is spoken
+rather than swallowing the rest of the answer, because silence is the worse
+failure.
+
+The executor used `.match`, not `.matchAll`, so **only the first workspace action
+of a turn ever ran**. It also pinned attribute order, so a tag written with `path`
+before `action` did nothing at all. Attributes are read by name now, in emitted
+order, and the same non-global bug was fixed in the Claude Code and Codex lane,
+where it additionally required a `path` attribute that `close-file scope="all"`
+does not carry.
+
+"Close that file" had no verb anywhere: it classified as `open`, delegated, reached
+nothing, and Gemini confirmed a close that never happened. `close-file` exists end
+to end, for the active tab, a named file, or every tab, and the spoken prompt now
+forbids confirming a close without emitting the tag that performs it.
+
+The voice prompt carried the workspace root and recent workspaces but no open tabs
+and no active file, so "open the file I was just editing" made the model guess a
+path and open a read error. `EngineCapabilities.openEditors` injects editor state
+the way `playerState` injects the player's, capped at six entries with a `+N more`
+count and relative to the workspace, measured under 400 characters for a twelve tab
+workspace. Nothing open renders as "none" rather than as nothing, so the model asks
+instead of inventing.
+
 ### 6.1 Turn semantics while a run is in flight (2026-09-05)
 
 A directed utterance is not automatically an instruction. `turnIntent.ts`

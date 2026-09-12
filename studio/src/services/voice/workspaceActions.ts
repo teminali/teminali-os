@@ -588,3 +588,173 @@ export function parseWorkspaceCommand(text: string, options: ParseOptions = {}):
 
   return { kind: "switch-workspace", path, label: match.label };
 }
+
+/* ── the model's own tag ─────────────────────────────────────────────────── */
+
+/**
+ * `<workspace-action ... />`, the tag the Gemini lane emits to move the shell.
+ *
+ * It lives here rather than in `frontierEngine.ts` for the reason the parser
+ * above does: the engine cannot be imported by a plain `node --test` file, and
+ * a tag that is only asserted by reading the source is a tag nobody has run.
+ * Both halves of this section are pure string work and import nothing.
+ *
+ * Three things were wrong with parsing it inline with one regex:
+ *
+ *   - The regex was not global, so only the FIRST action of a turn ever ran.
+ *     "Open the readme and then open package.json" opened the readme and
+ *     silently dropped the second half of the sentence.
+ *   - The regex pinned the attribute order to `action` then `path`, so a tag
+ *     the model wrote the other way round did nothing at all.
+ *   - Nothing stripped the tag before the text reached the speech path, so she
+ *     read the markup out loud — and stopped at the first dot in the path,
+ *     because that is where the sentence sounded finished.
+ */
+const TAG_NAME = "<workspace-action";
+/** Every complete tag, in the order the model wrote them. */
+const TAG_PATTERN = /<workspace-action\b[^>]*>/gi;
+/** One `name="value"` pair inside a tag. Either quote, any order, any extras. */
+const ATTRIBUTE_PATTERN = /([a-zA-Z-]+)\s*=\s*(?:"([^"]*)"|'([^']*)')/g;
+
+/** One action the model asked for, with whatever attributes it carried. */
+export interface WorkspaceTag {
+  /** `open-project`, `open-folder`, `open-file`, `reveal`, `close-file`. */
+  action: string;
+  /** Absent on the actions that name no path, such as closing every tab. */
+  path: string | null;
+  /** `active` or `all` on `close-file`; absent everywhere else. */
+  scope: string | null;
+}
+
+/**
+ * Every `<workspace-action>` in the text, in order.
+ *
+ * In order matters: "open the readme and then open package.json" is two tags
+ * and the operator asked for the second one to end up in front.
+ */
+export function parseWorkspaceTags(text: string): WorkspaceTag[] {
+  if (typeof text !== "string" || !text) return [];
+  const tags: WorkspaceTag[] = [];
+  for (const [raw] of text.matchAll(TAG_PATTERN)) {
+    const attributes: Record<string, string> = {};
+    for (const [, name, doubleQuoted, singleQuoted] of raw.matchAll(ATTRIBUTE_PATTERN)) {
+      attributes[name.toLowerCase()] = doubleQuoted ?? singleQuoted ?? "";
+    }
+    const action = (attributes.action || "").trim();
+    if (!action) continue;
+    const path = (attributes.path || "").trim();
+    const scope = (attributes.scope || "").trim();
+    tags.push({ action, path: path || null, scope: scope || null });
+  }
+  return tags;
+}
+
+/**
+ * The same text with every tag removed, which is the text she is allowed to say.
+ *
+ * The blank line a tag leaves behind goes with it: a tag on its own line is the
+ * shape the model actually emits, and two newlines in spoken prose is a pause
+ * the operator hears as the assistant losing her place.
+ */
+export function stripWorkspaceTags(text: string): string {
+  if (typeof text !== "string" || !text) return "";
+  return text
+    .replace(TAG_PATTERN, "")
+    .replace(/[ \t]+$/gm, "")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
+
+/**
+ * A tag never survives long enough to be spoken, even mid-stream.
+ *
+ * Stripping only at completion is not enough: the tokens go to the speech path
+ * as they arrive, so `<workspace-` reaches the voice before the tag is closed.
+ * This holds back any tail that could still become a tag and releases it the
+ * moment it cannot — one `<` of latency on ordinary prose, and none at all on
+ * text with no angle bracket in it.
+ *
+ * `flush` exists for the tag that never closes. A malformed tag must end up
+ * spoken rather than swallow the rest of the answer, which is also why the hold
+ * gives up past `HOLD_LIMIT`: silence is a worse failure than stray markup.
+ */
+const HOLD_LIMIT = 512;
+
+export function createTagStripper(): { push: (chunk: string) => string; flush: () => string } {
+  let held = "";
+  return {
+    push(chunk: string): string {
+      if (typeof chunk !== "string" || !chunk) return "";
+      let buffer = held + chunk;
+      held = "";
+      buffer = buffer.replace(TAG_PATTERN, "");
+      // A tag still being written can only be the tail: every closed one is
+      // already gone, so the candidate is the last `<` with no `>` after it.
+      const start = buffer.lastIndexOf("<");
+      if (start !== -1 && !buffer.includes(">", start)) {
+        const tail = buffer.slice(start);
+        const couldOpen = TAG_NAME.startsWith(tail.toLowerCase());
+        const isOpen = tail.toLowerCase().startsWith(TAG_NAME);
+        if ((couldOpen || isOpen) && tail.length <= HOLD_LIMIT) {
+          held = tail;
+          buffer = buffer.slice(0, start);
+        }
+      }
+      return buffer;
+    },
+    flush(): string {
+      const rest = held;
+      held = "";
+      return rest ? rest.replace(TAG_PATTERN, "") : "";
+    },
+  };
+}
+
+/* ── what is already open ────────────────────────────────────────────────── */
+
+/** The editor tabs, as the host reads them off its own store. */
+export interface OpenEditorsSnapshot {
+  /** The tab in front, if any. */
+  activePath?: string | null;
+  /** Every open tab, in tab-bar order. */
+  openPaths?: readonly string[];
+}
+
+/** How many tabs the spoken-lane prompt is allowed to name. */
+export const OPEN_TABS_LIMIT = 6;
+
+/**
+ * The open tabs and the active file, small enough to sit in a spoken prompt.
+ *
+ * Without this the model is asked "open the file I was just editing" while
+ * holding nothing but the workspace root, so it guesses a path and the operator
+ * hears a confirmation for a file that failed to open. With it the answer is a
+ * lookup.
+ *
+ * It is capped and relative on purpose: this prompt is read aloud from, not
+ * scrolled, and twenty absolute paths would cost more window than the whole
+ * rest of the prompt. Anything outside the workspace keeps its full path,
+ * because a relative path that climbs out of the root is not a name the model
+ * can hand back.
+ */
+export function describeOpenEditors(
+  snapshot: OpenEditorsSnapshot | null | undefined,
+  workspacePath?: string | null,
+  limit: number = OPEN_TABS_LIMIT,
+): string {
+  const open = (snapshot?.openPaths || []).filter((path): path is string => typeof path === "string" && !!path.trim());
+  const active = typeof snapshot?.activePath === "string" && snapshot.activePath.trim() ? snapshot.activePath : null;
+  const root = workspacePath ? normaliseAbsolutePath(workspacePath) : null;
+  const relative = (path: string): string =>
+    root && root !== "/" && path.startsWith(`${root}/`) ? path.slice(root.length + 1) : path;
+
+  if (!open.length) {
+    return active ? `Open Tabs: none\nActive File: ${relative(active)}` : "Open Tabs: none";
+  }
+  const shown = open.slice(0, Math.max(1, limit)).map(relative);
+  const hidden = open.length - shown.length;
+  const list = hidden > 0 ? `${shown.join(", ")}, +${hidden} more` : shown.join(", ");
+  const lines = [`Open Tabs (${open.length}): ${list}`];
+  lines.push(`Active File: ${active ? relative(active) : "none"}`);
+  return lines.join("\n");
+}

@@ -114,6 +114,23 @@ function toServiceHealth(name: string, dependency?: GatewayDependencyHealth): Se
   };
 }
 
+/**
+ * How long the session-token mint may take before it is treated as a failure.
+ *
+ * It is a POST to loopback that normally answers in single-digit milliseconds,
+ * and it had no deadline at all. That is survivable right up until it is not:
+ * the promise is memoised in `tokenPromise`, so one request that never settles
+ * — a gateway wedged mid-start, a captive portal intercepting the loopback
+ * address, a machine coming out of sleep — is every authenticated call in the
+ * app waiting on it forever, with no error and no way back but a restart. The
+ * voice lane is where it shows first, because it is the one that opens with a
+ * token fetch and stays on screen while it waits.
+ *
+ * Eight seconds is well past any honest answer from a local process and well
+ * inside an operator's patience.
+ */
+export const SESSION_TOKEN_TIMEOUT_MS = 8000;
+
 export class GatewayClient {
   private static tokenPromise: Promise<string> | null = null;
 
@@ -124,6 +141,9 @@ export class GatewayClient {
     if (!this.tokenPromise) {
       this.tokenPromise = fetch(resolveGatewayUrl("/api/session"), {
         method: "POST",
+        // On abort this rejects, the `catch` below clears `tokenPromise`, and
+        // the next call gets a fresh attempt rather than joining a dead one.
+        signal: AbortSignal.timeout(SESSION_TOKEN_TIMEOUT_MS),
       })
         .then(async (response) => {
           if (!response.ok) {

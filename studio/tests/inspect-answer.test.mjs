@@ -190,7 +190,12 @@ test("the turn's kind reaches the closing line", () => {
   // every silent inspect goes back to "Done."
   return Promise.all([
     readSource("../src/components/voice/TemiVoiceStage.tsx").then((stage) => {
-      assert.match(stage, /delegateTask\(action\.prompt, \{[\s\S]{0,240}?action: action\.action/);
+      /* The options are a named object rather than a literal at the call site
+         because the stage also passes `approveCommand` through them — see
+         voice-stage-gates.test.mjs. What is pinned here is unchanged: the kind
+         is still in the options, and the options still reach `delegateTask`. */
+      assert.match(stage, /const options: TaskDelegationOptions = \{[\s\S]{0,320}?action: action\.action/);
+      assert.match(stage, /delegateTask\(action\.prompt, options\)/);
     }),
     readSource("../src/services/voice/teminaliAgentBridge.ts").then((bridge) => {
       assert.match(bridge, /summariseOutcome\(\{[\s\S]{0,260}?kind: options\.action/);

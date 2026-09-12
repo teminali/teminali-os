@@ -68,7 +68,23 @@ const FILLERS = new Set([
   "sawa", "basi", "haya",
 ]);
 
-/** Phrases that mean "cancel what you are doing". Matched whole, after fillers are removed. */
+/**
+ * Phrases that mean "cancel what you are doing". Matched whole, after fillers
+ * are removed.
+ *
+ * "pause", "pause that" and "stop playing" are on this list and stay on it, but
+ * they are no longer the FIRST reading of those words. `handleSpokenPlayerCommand`
+ * (`services/voice/playerActions.ts`) runs ahead of this classifier for the
+ * whole spoken turn, and while a media pane is mounted it claims them for the
+ * player: said at a playing video, "pause" used to cancel the agent run and
+ * leave the film rolling, which is the opposite of what was asked on both
+ * counts. With no player on screen that parse returns `handled: false` and the
+ * words arrive here meaning exactly what they have always meant.
+ *
+ * So the ambiguity is settled by what is on screen rather than by editing this
+ * list. Removing "pause" from it would trade one wrong answer for another: an
+ * operator with no video open who says "pause" is asking for the run to stop.
+ */
 const STOP_PHRASES = [
   "stop", "stop stop", "stop stop stop", "stop it", "stop that", "stop there", "stop talking", "stop now",
   "cancel", "cancel that", "cancel it", "abort", "halt", "kill it",
@@ -333,7 +349,10 @@ export function classifyTurnIntent(text: string, context: TurnIntentContext): Tu
     return { intent: "stop", reason: "Asked to stop." };
   }
   // "no, stop" / "okay stop now" — a short utterance that contains a stop word
-  // and nothing that reads as a new task.
+  // and nothing that reads as a new task. "stop playing" and "stop the video"
+  // reach this too, and are meant to: by the time a turn gets here the player
+  // parse has already had its chance at them and declined, which it only does
+  // when there is no player to stop. See `STOP_PHRASES` above.
   if (core.length <= 4 && core.includes("stop") && !/\b(the|a|my|that|this)\s+\w+/.test(core.join(" "))) {
     return { intent: "stop", reason: "Asked to stop." };
   }

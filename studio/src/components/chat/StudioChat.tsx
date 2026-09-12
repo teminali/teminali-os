@@ -608,7 +608,10 @@ export const StudioChat: React.FC<{
             // whichever pane holds the element. See services/playerControl.ts.
             else if (event.action === "player") dispatchPlayerCommand(event.command as PlayerCommand);
             else if (event.action === "browse") openBrowserAt(event.url, { newTab: event.newTab });
-            else {
+            // Not a bare `else`. The union carries `close-file` now, which this
+            // lane does not perform; falling through to here would read it as an
+            // open-project with no path and clear the workspace root.
+            else if (event.action === "open-project") {
               // Exactly what a click in the sidebar does, and in the same
               // order: the video editor has to be on screen before the load
               // runs, because it reports through the video pane's own toasts.

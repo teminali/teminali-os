@@ -12,8 +12,24 @@ import { PERMISSION_LABELS } from "../chat/ModelPicker";
 import { VoiceAudioEngine } from "../../services/voice/voiceAudioEngine";
 import { GeminiLiveEngine } from "../../services/voice/geminiLiveEngine";
 import { CaptionPacer } from "../../services/voice/captionPacer";
-import { TeminaliAgentBridge } from "../../services/voice/teminaliAgentBridge";
+import { TeminaliAgentBridge, type TaskDelegationOptions } from "../../services/voice/teminaliAgentBridge";
 import { routeVoiceTurn } from "../../services/voice/voiceTurnRouter";
+import {
+  FOLLOW_UP_WINDOW_MS,
+  scoreAddressing,
+  stripWakeWord,
+} from "../../services/voice/addressing";
+import { selfAudio } from "../../services/voice/selfAudio";
+/* Agent C owns this module and it lands separately; the call is written
+   against its published signature. See the block at the head of
+   `performVoiceTurn` for why the transport has to be asked first. */
+import { handleSpokenPlayerCommand } from "../../services/voice/playerActions";
+import { classifyApprovalReply, describeApprovalRequest } from "../../services/voice/approvalIntent";
+import { DEFAULT_VOICE_SETTINGS } from "../../services/voice/types";
+import { commandHead } from "../../services/agentCommands";
+import { useApprovalStore } from "../../store/approvalStore";
+import { useCommandApproval } from "../../hooks/useCommandApproval";
+import { useSpokenApproval } from "../../hooks/useSpokenApproval";
 import { runProgressFromActivity } from "../../services/voice/runProgressFromActivity";
 import { traceVoice } from "../../services/voice/voiceTrace";
 import {
@@ -90,7 +106,35 @@ import {
   isAssistantReportEcho,
 } from "../../services/voice/assistantHandoff";
 
+/**
+ * Say what failed, out of whatever the engine threw.
+ *
+ * `onError` receives an `Error` from the token fetch, a DOM `ErrorEvent` from
+ * the socket, and whatever the SDK rejected with from `live.connect`. `String`
+ * on the middle one is "[object Event]", which is not a sentence anyone can
+ * act on.
+ */
+const describeVoiceError = (error: unknown): string => {
+  if (error instanceof Error && error.message.trim()) return error.message.trim();
+  if (typeof error === "string" && error.trim()) return error.trim();
+  const message = (error as { message?: unknown } | null | undefined)?.message;
+  if (typeof message === "string" && message.trim()) return message.trim();
+  return "the voice service failed without saying why";
+};
+
+/**
+ * Enough of the timeline store to answer "is there an edit open?".
+ *
+ * Structural on purpose: the video domain is a dynamic import on this screen
+ * (see `runEditorCommand`), and naming its types here would drag the module
+ * graph back in through the type checker's front door.
+ */
+interface TimelineProbe {
+  getState(): { tracks: ReadonlyArray<{ clips: ReadonlyArray<unknown> }> };
+}
+
 export const TemiVoiceStage: React.FC<TemiVoiceStageProps> = ({
+  voice,
   isStreaming = false,
   onStop,
   machineLabel = "This Mac",
@@ -293,6 +337,18 @@ export const TemiVoiceStage: React.FC<TemiVoiceStageProps> = ({
     (text: string, framing: "verbatim" | "report") => {
       const line = text.trim();
       if (!line) return;
+      /* A line that ends in a question mark opens the follow-up window, and a
+         line that does not closes it. Both matter: without the first, "yes" to
+         "should I run the tests?" scores as room noise and never arrives;
+         without the second, a "yeah" ten turns later is still treated as the
+         answer to a question that was settled long ago. */
+      assistantAskedQuestionRef.current = line.endsWith("?");
+      if (audioRef.current?.isMuted) {
+        /* Nothing will play, so nothing will report that playback stopped. The
+           window has to be opened here or a muted question can never be
+           answered by the composer's next line. */
+        assistantTurnEndedAtRef.current = Date.now();
+      }
       /* Muted means muted, in both directions. Without this a muted Temi still
          announced a delegated run the moment it finished, because `mute` closes
          the capture path and nothing here consulted it. The line is not thrown
@@ -338,6 +394,24 @@ export const TemiVoiceStage: React.FC<TemiVoiceStageProps> = ({
   // What Temi last said, so "say that again" has something to say again.
   const lastSpokenRef = useRef<string | null>(null);
   const isSpeakingRef = useRef(false);
+  /* When the microphone first heard this turn, and when she last stopped
+     talking. Both feed gates rather than the screen, so both are refs: they are
+     read from `onMessage`, which is installed into the socket once and would
+     otherwise see the state as it was when the session opened.
+
+     `turnStartedAtRef` is what `selfAudio.audibleSince` is asked about — a
+     recogniser hands back a final transcript some way behind the audio it was
+     built from, so "was the app making sound at any point that could be in this
+     turn?" is a different question from "is it making sound now?". */
+  const turnStartedAtRef = useRef(0);
+  const assistantTurnEndedAtRef = useRef(0);
+  /* Did her last turn end in a question? Two gates need this and neither can
+     work without it: the addressing blend opens a follow-up window on it, and
+     the turn switch uses it to tell "yes, run them" from "yes, nice work". */
+  const assistantAskedQuestionRef = useRef(false);
+  /* How many delegations this screen started and has not seen finish. Read on
+     unmount, where a run nobody is listening to any more is an orphan. */
+  const delegationsInFlightRef = useRef(0);
   /* The folders a spoken name is allowed to resolve to.
 
      A ref rather than state because it is read from `performVoiceTurn`, which
@@ -368,6 +442,21 @@ export const TemiVoiceStage: React.FC<TemiVoiceStageProps> = ({
      the `teminali-video-project` marker in its `project.json` — so the shell
      does not have to guess and no new state has to be invented. */
   const isVideoProjectRef = useRef(false);
+  /* Whether the gateway has actually answered that question.
+     `isVideoProjectRef` is a boolean with three meanings and only two values:
+     "video", "code", and "we never found out". It is set from
+     `WorkspaceService.listProjects`, whose failure path is a deliberate
+     `.catch(() => undefined)` — so one failed fetch on mount left it `false`,
+     and `false` gated the entire editor lane off for the rest of the session
+     with no error anywhere and no way for the operator to tell. Separating "we
+     know it is not video" from "we do not know" is what lets the unknown case
+     fall back to something true instead of to something safe-looking. */
+  const projectKindKnownRef = useRef(false);
+  /* The fallback for the unknown case: a timeline with clips on it. Loaded
+     lazily and only when it is needed, and read by `getState()` rather than
+     subscribed to — the playhead lives in that store and is written on every
+     frame of playback. */
+  const timelineProbeRef = useRef<TimelineProbe | null>(null);
   const scrollRef = useRef<HTMLDivElement | null>(null);
   // Whether the operator is reading the live end of the conversation. Scrolling
   // up to re-read something must not be yanked back by the next turn arriving.
@@ -378,6 +467,129 @@ export const TemiVoiceStage: React.FC<TemiVoiceStageProps> = ({
     if (toastTimerRef.current) window.clearTimeout(toastTimerRef.current);
     toastTimerRef.current = window.setTimeout(() => setToastMessage(null), 2400);
   }, []);
+
+  /* ── Was that meant for me? ──────────────────────────────────────────────
+     Everything below this line is the gate the audit of 2026-09-12 found was
+     not wired to anything. `scoreAddressing`, `stripWakeWord` and
+     `selfAudio.audibleSince` all existed, all worked, and all had exactly one
+     caller: `conversation.ts`, which nothing on this screen mounts. So this
+     stage took every final transcript as an instruction, and a sentence from
+     the room that happened to contain a machine verb delegated a real run.
+
+     Two layers, in this order, because they fail differently.
+
+     1. PROVENANCE. While the app itself is making sound — a video in the Files
+        panel, a page in the Browser panel, the operator's own footage on the
+        timeline — the bar is a wake word and only a wake word. The transcript
+        of a film is real speech, correctly heard, addressed to nobody in this
+        room, and no gate that asks *who a sentence was for* can tell it from
+        an operator, because it genuinely is a person speaking. Not a closed
+        microphone: "Temy, pause the video" is the turn most needed while
+        something is playing, and it still lands. See services/voice/selfAudio.ts.
+
+     2. ADDRESSING. The blend in `addressing.ts`. The context is honest about
+        what this surface actually knows: there is no speaker enrolment here
+        and no wake-word setting here, so no profile is claimed and no wake word
+        is required — the operator opened a hands-free screen on purpose, and in
+        that room an ordinary sentence is for the assistant unless something
+        says otherwise. What "something says otherwise" means in practice is
+        third-party phrasing, which costs 0.45 and puts "hold on, I'll call you
+        back" well under the line.
+
+     `needsClassifier` is ignored, and correctly: it is only ever true in
+     wake-word-only mode, and there is no local completion on this lane to spend
+     the latency on.
+
+     Returns the text to route — the wake word stripped off, so "Temy, open
+     DukaBot" reaches the switch as a command and not as a greeting — or null
+     when the turn was not ours. */
+  const gateSpokenTurn = useCallback((heard: string, turnStartedAt: number): string | null => {
+    const wakeWords = voice?.settings.wakeWords ?? DEFAULT_VOICE_SETTINGS.wakeWords;
+    const { text: stripped, matched: wakeWord } = stripWakeWord(heard, wakeWords);
+    const routed = stripped || heard;
+
+    if (selfAudio.audibleSince(turnStartedAt)) {
+      if (!wakeWord) {
+        traceVoice("dropped", { by: "self-audio" });
+        return null;
+      }
+      return routed;
+    }
+
+    const { verdict } = scoreAddressing(heard, {
+      assistantAskedQuestion: assistantAskedQuestionRef.current,
+      msSinceAssistantTurn: Date.now() - assistantTurnEndedAtRef.current,
+      speakerMatch: null,
+      hasProfile: false,
+      requireWakeWord: false,
+      requireSpeakerMatch: false,
+      wakeWords,
+      windowFocused: typeof document !== "undefined" ? document.hasFocus() : true,
+    });
+    if (!verdict.directed) {
+      traceVoice("dropped", { by: "addressing", reason: verdict.reason });
+      return null;
+    }
+    return routed;
+  }, [voice?.settings.wakeWords]);
+  const gateSpokenTurnRef = useRef(gateSpokenTurn);
+  gateSpokenTurnRef.current = gateSpokenTurn;
+
+  /* ── The command gate, offered to the ears as well as to the mouse ───────
+     `useSpokenApproval` was mounted in StudioChat and in AgentPane and never
+     here, so "approve that" and "yes go ahead" — the two sentences an operator
+     on a hands-free screen is most likely to use — routed as conversation and
+     the standing prompt went on standing.
+
+     Three halves, and the third one is why this is not a one-line hook call:
+
+     - `approveCommand` is handed to every delegation (see the delegate case),
+       so a run that needs permission asks for it rather than being denied in a
+       millisecond by an absent gate.
+     - The pending request is published to `approvalStore`, which is what
+       `useSpokenApproval.consume` reads. Without it the hook has nothing to
+       consume and "yes" means nothing.
+     - The question is spoken from here. `useSpokenApproval` speaks through a
+       `UseVoiceResult`, and this stage's voice is the live socket rather than
+       one of those, so its own asking half stays quiet and this does the
+       asking. `consume` does not depend on it and answers either way. */
+  const commandApproval = useCommandApproval();
+  const approvalVoiceRef = useRef<UseVoiceResult | null>(voice ?? null);
+  approvalVoiceRef.current = voice ?? null;
+  const spokenApproval = useSpokenApproval(approvalVoiceRef);
+  const approveRef = useRef(commandApproval);
+  approveRef.current = commandApproval;
+  const approvalPending = commandApproval.pending;
+
+  useEffect(() => {
+    if (!approvalPending) return;
+    const store = useApprovalStore.getState();
+    // One command at a time, so the command is its own identity — there is no
+    // id to carry and a re-render must not re-ask.
+    const id = `voice:${approvalPending.command}`;
+    const asker = "The assistant";
+    const alwaysLabel = commandHead(approvalPending.command);
+    store.offer({
+      id,
+      source: "chat",
+      asker,
+      action: approvalPending.command,
+      alwaysLabel,
+      answer: (behavior, remember) => {
+        if (behavior === "allow") approveRef.current.approve(remember);
+        else approveRef.current.deny();
+      },
+    });
+    speakLineRef.current(
+      describeApprovalRequest({ asker, action: approvalPending.command, alwaysLabel }),
+      "verbatim",
+    );
+    /* The prompt is a question even though it does not end in one — it ends in
+       the list of answers. Marked explicitly so the follow-up window opens and
+       a one-word "yes" clears the addressing gate. */
+    assistantAskedQuestionRef.current = true;
+    return () => store.withdraw(id);
+  }, [approvalPending]);
 
   // ── The transcript is kept, not faded ────────────────────────────────────
   // Both modes scroll back over the whole conversation: muted, this is an
@@ -470,10 +682,27 @@ export const TemiVoiceStage: React.FC<TemiVoiceStageProps> = ({
     (projects: ProjectsResponse) => {
       projectsRef.current = projects;
       isVideoProjectRef.current = projects.current.kind === "video";
+      projectKindKnownRef.current = true;
       rebuildCandidates();
     },
     [rebuildCandidates],
   );
+
+  /**
+   * Is the editor lane open for this turn?
+   *
+   * The gateway's answer when there is one, and the timeline's own when there
+   * is not. "A timeline is loaded" is a weaker signal than the
+   * `teminali-video-project` marker and it is deliberately the second choice —
+   * but it is a true one, and it is the difference between "undo that" working
+   * after a failed mount fetch and the whole editor lane being silently dead
+   * until the app is restarted.
+   */
+  const editorLaneOpen = useCallback((): boolean => {
+    if (projectKindKnownRef.current) return isVideoProjectRef.current;
+    const tracks = timelineProbeRef.current?.getState().tracks ?? [];
+    return tracks.some((track) => track.clips.length > 0);
+  }, []);
 
   /* Fetched once, on mount. A failure here is not worth a line to the operator:
      it costs the fast path, and every spoken folder name then falls through to
@@ -482,7 +711,18 @@ export const TemiVoiceStage: React.FC<TemiVoiceStageProps> = ({
     const controller = new AbortController();
     void WorkspaceService.listProjects(controller.signal)
       .then(absorbProjects)
-      .catch(() => undefined);
+      .catch(() => {
+        /* Silent to the operator, but not silent to the editor lane. Without a
+           project kind the lane has to be decided some other way, so the
+           timeline's own state is fetched to decide it with. Dynamic, for the
+           same reason `runEditorCommand` imports the registry dynamically: this
+           screen usually never touches the editor at all. */
+        void import("../../video/store/timelineStore")
+          .then((module) => {
+            timelineProbeRef.current = module.useTimelineStore;
+          })
+          .catch(() => undefined);
+      });
     /* The folders he has never opened. Without this the fast path could only
        reach what was already in the recent-projects store, so a folder he has
        not opened before was unreachable by voice however clearly he said its
@@ -504,6 +744,9 @@ export const TemiVoiceStage: React.FC<TemiVoiceStageProps> = ({
   useEffect(() => {
     const audio = new VoiceAudioEngine();
     const protocol = new GeminiLiveEngine();
+    /* Declared here rather than beside `onNote`, because `onError` is assigned
+       up with `onConnected` and needs it too. */
+    let cancelled = false;
 
     audioRef.current = audio;
     protocolRef.current = protocol;
@@ -518,6 +761,10 @@ export const TemiVoiceStage: React.FC<TemiVoiceStageProps> = ({
       isSpeakingRef.current = false;
       setIsSpeaking(false);
       protocol.sendTTSStop();
+      /* When she stopped. The follow-up window is measured from here, so a
+         "yes" is judged against the moment the question finished being asked
+         rather than the moment it finished generating. */
+      assistantTurnEndedAtRef.current = Date.now();
       /* Debounced: the worklet reports "stopped" after 120ms of silence, which
          is the ordinary gap between two synthesised sentences as often as it is
          the end of the reply. Committing on the first one would cut the caption
@@ -541,9 +788,24 @@ export const TemiVoiceStage: React.FC<TemiVoiceStageProps> = ({
 
     protocol.onConnected = () => {
       setIsWsConnected(true);
+      // A socket that opened is a socket that works, and the note is the
+      // record of a failure that is now over. `describeGeminiLive` already
+      // returns "" on success, so this only ever clears a stale line.
+      if (!cancelled) setVoiceNote("");
     };
     protocol.onDisconnected = () => {
       setIsWsConnected(false);
+    };
+    /* Every failure inside the engine calls this — a token the gateway refused,
+       a socket `error` event, a throw out of `live.connect`, a throw out of
+       `handleServerMessage`, and four more on the send paths. It was never
+       assigned, so all of them were `this.onError?.()` against null: the engine
+       reported its failures faithfully into nothing, and a dead voice lane was
+       completely silent. Now it says so, and `voiceNote` is a banner rather
+       than a tooltip on a 2.5px dot. */
+    protocol.onError = (error) => {
+      if (cancelled) return;
+      setVoiceNote(`Temi's voice hit an error: ${describeVoiceError(error)}`);
     };
 
     protocol.onMessage = (msg) => {
@@ -555,9 +817,14 @@ export const TemiVoiceStage: React.FC<TemiVoiceStageProps> = ({
         // would caption the operator with words they never said.
         if (GeminiLiveEngine.isAssistantDirectiveEcho(content ?? "")) return;
         if (isAssistantReportEcho(content ?? "")) return;
+        // The first partial of a turn is the closest thing this lane has to
+        // "speech began", which is what the self-audio gate is asked about.
+        if (turnStartedAtRef.current === 0) turnStartedAtRef.current = Date.now();
         setLiveUserSpeech(content);
       } else if (type === "final_user_request") {
         setLiveUserSpeech(null);
+        const turnStartedAt = turnStartedAtRef.current;
+        turnStartedAtRef.current = 0;
         if (content && content.trim()) {
           const clean = content.trim();
           // What the microphone actually produced, before anything can drop it.
@@ -575,6 +842,24 @@ export const TemiVoiceStage: React.FC<TemiVoiceStageProps> = ({
             traceVoice("dropped", { by: "report-echo" });
             return;
           }
+
+          /* The addressing and self-audio gate, before anything acts on the
+             words. See `gateSpokenTurn`. A turn that was not ours is not
+             transcribed either: the transcript is the record of this
+             conversation, and a stranger's sentence is not part of it. */
+          const routed = gateSpokenTurnRef.current(clean, turnStartedAt);
+          if (routed === null) {
+            /* She is already answering it. The model's VAD closed the turn and
+               generation began the moment the room stopped talking, so
+               rejecting the turn here and doing nothing else would leave her
+               replying to a film. Cutting the model is the whole point of the
+               gate — this is the sentence that used to come back as "OpenAI has
+               blessed us", committed and answered. */
+            protocol.sendBargeIn();
+            audio.stopTTSPlayback();
+            return;
+          }
+
           // Update last user bubble if from this same turn, or append new turn
           setDialogueHistory((prev) => {
             const last = prev[prev.length - 1];
@@ -586,8 +871,10 @@ export const TemiVoiceStage: React.FC<TemiVoiceStageProps> = ({
 
           // Everything the operator says now goes through one switch. A status
           // question is answered from the live run, a stop lands on the run, and
-          // only real work reaches the assistant.
-          performTurnRef.current?.(clean, "spoken");
+          // only real work reaches the assistant. `routed` rather than `clean`:
+          // the wake word is an address, not content, and "Temy, open DukaBot"
+          // has to reach the switch as "open DukaBot".
+          performTurnRef.current?.(routed, "spoken");
         }
       }
 
@@ -610,6 +897,11 @@ export const TemiVoiceStage: React.FC<TemiVoiceStageProps> = ({
       } else if (type === "final_assistant_answer") {
         if (content) {
           lastSpokenRef.current = content;
+          /* Her own turn, so her own question. This is the case the follow-up
+             window was built for: she asks "should I run the tests?", the
+             operator says "yes", and without this that "yes" is one unaddressed
+             word in a room and is dropped before it reaches anything. */
+          assistantAskedQuestionRef.current = content.trim().endsWith("?");
           /* Generation has finished; the voice has not. The reply is held here
              and committed by the speaker — either when the caption catches up
              with it, or when playback has been quiet long enough to mean the
@@ -674,11 +966,20 @@ export const TemiVoiceStage: React.FC<TemiVoiceStageProps> = ({
           showToast(note || "Handing this to the assistant…");
           protocol.sendToolResponse(msg.id, msg.name, handoffAcknowledgement(note));
           void (async () => {
+            delegationsInFlightRef.current += 1;
             try {
               /* `inspect` rather than `edit`: this path exists because she was
                  missing a fact, and `summariseOutcome` needs to know a silent
-                 run answered a question rather than failed to do work. */
-              const report = await TeminaliAgentBridge.delegateTask(task, { action: "inspect" });
+                 run answered a question rather than failed to do work.
+
+                 `approveCommand` for the reason the delegate case gives: a run
+                 that has to ask permission and has nobody to ask is denied in a
+                 millisecond and reports a failure the operator cannot act on. */
+              const options: TaskDelegationOptions = {
+                action: "inspect",
+                approveCommand: approveRef.current.approveCommand,
+              };
+              const report = await TeminaliAgentBridge.delegateTask(task, options);
               /* Capped as a backstop. `delegateTask` returns
                  `summariseOutcome`'s line, which is a sentence, so this has
                  never fired in practice; it is here because the report enters
@@ -692,6 +993,8 @@ export const TemiVoiceStage: React.FC<TemiVoiceStageProps> = ({
                  answer. */
               const reason = error instanceof Error ? error.message : String(error);
               speakLineRef.current(`That could not be completed: ${reason}`, "verbatim");
+            } finally {
+              delegationsInFlightRef.current = Math.max(0, delegationsInFlightRef.current - 1);
             }
           })();
         }
@@ -705,7 +1008,6 @@ export const TemiVoiceStage: React.FC<TemiVoiceStageProps> = ({
        and why the operator's one-line note arrives through the engine rather
        than from a status call here -- a token is `uses: 1`, so a second fetch
        just to render a sentence would burn one. */
-    let cancelled = false;
     protocol.onNote = (note) => {
       if (!cancelled) setVoiceNote(note);
     };
@@ -727,6 +1029,22 @@ export const TemiVoiceStage: React.FC<TemiVoiceStageProps> = ({
       }
       audio.cleanup();
       protocol.disconnect();
+      /* The run this screen started, and this screen is going away.
+
+         `onProgress` toasts and `onCompleted` speaks — both through refs into a
+         component that no longer exists, and the socket the report was meant to
+         be spoken over has just been disconnected. So the work went on, at cost,
+         reporting to nobody: an orphan, not a background job. There is no other
+         owner to hand it to; the voice screen is where it was asked for and the
+         only place its report can land.
+
+         Only when something is actually in flight. An unconditional stop here
+         would abort a run the *chat* started every time the operator glanced at
+         the voice screen and left. */
+      if (delegationsInFlightRef.current > 0) {
+        delegationsInFlightRef.current = 0;
+        TeminaliAgentBridge.stopCurrentTask();
+      }
     };
   }, [logAction]);
 
@@ -780,6 +1098,50 @@ export const TemiVoiceStage: React.FC<TemiVoiceStageProps> = ({
     (text: string, source: "spoken" | "typed") => {
       const clean = text.trim();
       if (!clean) return;
+
+      /* ── The transport, before anything else at all ───────────────────────
+         "pause" is in STOP_PHRASES. So is "wait", so is "hold on". With a video
+         playing and an agent running, "pause" reached `routeVoiceTurn`, was
+         classified as a stop, and cancelled the RUN while the video carried on
+         playing — the operator lost minutes of work and the thing they actually
+         asked for did not happen. The ordering is the fix, and it is first
+         because every other path here has a claim on those words: the router's
+         stop set, the workspace parser's "go to", the editor's "pause it".
+
+         `handleSpokenPlayerCommand` refuses by returning `{ handled: false }`
+         when no media pane is live, so on every screen without a player this
+         costs one synchronous call and changes nothing. */
+      const player = handleSpokenPlayerCommand(clean);
+      if (player.handled) {
+        if (source === "spoken") {
+          protocolRef.current?.sendBargeIn();
+          audioRef.current?.stopTTSPlayback();
+        }
+        if (player.reply) speakLineRef.current(player.reply, "verbatim");
+        showToast(player.reply || player.action || "Done");
+        return;
+      }
+
+      /* ── A standing permission prompt gets first refusal on the words ─────
+         "yes" while the assistant is blocked on "Claude Code wants to run npm
+         test" is an answer to that, not a new instruction and not praise.
+         `classifyApprovalReply` draws the line narrowly: anything that is not
+         plainly an answer travels on with the prompt still standing. */
+      if (spokenApproval.consume(clean)) {
+        if (source === "spoken") {
+          protocolRef.current?.sendBargeIn();
+          audioRef.current?.stopTTSPlayback();
+        }
+        /* Said back. The hook says it too, but only through a `UseVoiceResult`,
+           and this stage's voice is the socket — an operator who answers a
+           machine and hears nothing says it again, louder. */
+        const verdict = classifyApprovalReply(clean);
+        speakLineRef.current(
+          verdict === "deny" ? "Refused." : verdict === "allow-always" ? "Allowed, and I won't ask again." : "Allowed.",
+          "verbatim",
+        );
+        return;
+      }
 
       // Read the store rather than the render's closure: this runs from a
       // WebSocket callback that was installed once and would otherwise see the
@@ -935,7 +1297,7 @@ export const TemiVoiceStage: React.FC<TemiVoiceStageProps> = ({
          pulls the ffmpeg and caption surfaces behind it, and a static import
          here would drag all of it into the chunk this stage ships in, on a
          screen that usually never touches the editor at all. */
-      const editorCommand = isVideoProjectRef.current ? parseEditorCommand(clean) : null;
+      const editorCommand = editorLaneOpen() ? parseEditorCommand(clean) : null;
       if (editorCommand) {
         if (source === "spoken") {
           protocolRef.current?.sendBargeIn();
@@ -958,14 +1320,43 @@ export const TemiVoiceStage: React.FC<TemiVoiceStageProps> = ({
       });
 
       const protocol = protocolRef.current;
+
+      /* ── "yes" is two different sentences ────────────────────────────────
+         `acknowledge` covers both and the switch used to discard both.
+
+         One is a backchannel: "mhm", "yeah", "right", said over her while she
+         is still talking, which is what a person does to show they are still
+         listening. It was being treated as a barge-in — her sentence was cut
+         dead by `suppressPipelineAnswer` and then `case "acknowledge"` was a
+         bare `break`, so nothing replaced it. The operator agreed with her and
+         she stopped mid-word.
+
+         The other is an ANSWER. She asked "should I run the tests?", he said
+         "yes", and the same path filed it as praise and dropped it: the thing
+         she offered to do was never done and nothing said so. That one has to
+         reach the model, which is the only thing that knows what it offered —
+         so it is re-routed to `converse`, and for a spoken turn `converse` means
+         exactly "let her own answer through", which is why the barge-in must not
+         fire on it either.
+
+         The window is `addressing.ts`'s, deliberately the same one: a "yes"
+         inside it is the answer to the question, and the same word after it has
+         closed is praise for work that has since finished. */
+      const answeringHerQuestion =
+        decision.action.kind === "acknowledge" &&
+        assistantAskedQuestionRef.current &&
+        Date.now() - assistantTurnEndedAtRef.current < FOLLOW_UP_WINDOW_MS;
+      if (answeringHerQuestion) assistantAskedQuestionRef.current = false;
+      const backchannel = decision.action.kind === "acknowledge" && isSpeakingRef.current;
+
       // A spoken turn is already being answered by the model — it begins
       // generating the moment its own VAD closes the turn. A typed one is not.
-      if (source === "spoken" && decision.suppressPipelineAnswer) {
+      if (source === "spoken" && decision.suppressPipelineAnswer && !answeringHerQuestion && !backchannel) {
         protocol?.sendBargeIn();
         audioRef.current?.stopTTSPlayback();
       }
 
-      const action = decision.action;
+      const action = answeringHerQuestion ? ({ kind: "converse" } as const) : decision.action;
       switch (action.kind) {
         case "delegate": {
           showToast("Handing this to the assistant…");
@@ -975,10 +1366,21 @@ export const TemiVoiceStage: React.FC<TemiVoiceStageProps> = ({
           // a prompt to acknowledge an action it cannot observe gets answered
           // by describing the action. See `machineAction.ts`.
           if (decision.speak) speakLineRef.current(decision.speak, "verbatim");
-          void TeminaliAgentBridge.delegateTask(action.prompt, {
+          const options: TaskDelegationOptions = {
             // The kind travels with the prompt so the closing line knows
             // whether it is reporting work or answering a question.
             action: action.action,
+            /* The operator's own hand on the gate, carried into the run.
+
+               With no gate at all, `aiService.ts` answers every permission
+               event `deny` inside a millisecond and "ask Claude Code to run the
+               tests" is over before anyone is asked anything — a refusal nobody
+               made, reported as a failure. The bridge now has a fallback of its
+               own, and this is still the one to send: it is the same handler
+               the chat uses, from the same hook, so a command allowed here is
+               allowed there and the "always" list stays one list. The prompt it
+               raises is answerable out loud or by the buttons on the banner. */
+            approveCommand: approveRef.current.approveCommand,
             onProgress: (summary) => showToast(summary),
             onCompleted: (finalReport) => {
               /* One surface, and the report is answered from rather than read
@@ -987,7 +1389,19 @@ export const TemiVoiceStage: React.FC<TemiVoiceStageProps> = ({
                  twice. */
               speakLineRef.current(finalReport, "report");
             },
-          });
+          };
+          delegationsInFlightRef.current += 1;
+          void TeminaliAgentBridge.delegateTask(action.prompt, options)
+            .catch((error: unknown) => {
+              // Told, not swallowed, and for the same reason as the tool_call
+              // path: a run that reports nothing leaves the operator holding a
+              // question she has already promised to answer.
+              const reason = error instanceof Error ? error.message : String(error);
+              speakLineRef.current(`That could not be completed: ${reason}`, "verbatim");
+            })
+            .finally(() => {
+              delegationsInFlightRef.current = Math.max(0, delegationsInFlightRef.current - 1);
+            });
           break;
         }
 
@@ -1056,7 +1470,11 @@ export const TemiVoiceStage: React.FC<TemiVoiceStageProps> = ({
         }
 
         case "acknowledge":
-          // Praise. The right reply is to keep working.
+          /* Praise, or a backchannel over the top of her. The right reply to
+             both is to keep working — and, when she is mid-sentence, to keep
+             TALKING, which is what the `backchannel` test above protects. A
+             "yes" that was an answer never arrives here: it was re-routed to
+             `converse` before the switch. */
           break;
 
         case "converse":
@@ -1065,7 +1483,7 @@ export const TemiVoiceStage: React.FC<TemiVoiceStageProps> = ({
           break;
       }
     },
-    [absorbProjects, runEditorCommand, showToast]
+    [absorbProjects, editorLaneOpen, runEditorCommand, showToast, spokenApproval]
   );
 
   useEffect(() => {
@@ -1104,18 +1522,37 @@ export const TemiVoiceStage: React.FC<TemiVoiceStageProps> = ({
     }
   }, [showToast]);
 
-  // ── Orb Click: interrupt if she is talking, otherwise open the mic ───────
+  // ── Orb Click: hush if she is talking, otherwise open the mic ────────────
   const handleOrbClick = useCallback(async () => {
-    if (!audioRef.current?.audioContext) {
+    const audio = audioRef.current;
+    if (!audio?.audioContext) {
       if (await ensureAudioStarted()) showToast("Listening");
       return;
     }
-    if (audioRef.current.isTTSPlaying) {
-      audioRef.current.stopTTSPlayback();
+    if (audio.isTTSPlaying) {
+      /* Talking over her is a HUSH. It used to call `stopCurrentTask` as well,
+         which killed the delegated run — the exact conflation §6.8 forbids, and
+         the most expensive version of it, because the gesture that means "I've
+         heard enough, carry on" was the gesture that threw the work away. The
+         voice stops; the work does not. Stop is the composer's Stop button and
+         the Escape key, both of which say so. */
+      audio.stopTTSPlayback();
       protocolRef.current?.sendTTSStop();
-      TeminaliAgentBridge.stopCurrentTask();
       setIsSpeaking(false);
-      showToast("Interrupted");
+      isSpeakingRef.current = false;
+      showToast("Quiet — the work carries on");
+      return;
+    }
+    /* "Tap the orb when you want me back."
+
+       That is the promise `MUTE_ACKNOWLEDGEMENT` makes out loud, and this is
+       where it was broken: muted and quiet, every branch above fell through and
+       the tap did nothing at all. The one door the mute line names was the one
+       door that was not there. */
+    if (audio.isMuted) {
+      const muted = audio.toggleMute();
+      setIsMicMuted(muted);
+      showToast(muted ? "Voice off — type instead" : "Voice on — just speak");
     }
   }, [ensureAudioStarted, showToast]);
 
@@ -1383,6 +1820,73 @@ export const TemiVoiceStage: React.FC<TemiVoiceStageProps> = ({
           </div>
         </div>
       </header>
+
+      {/* ── What is wrong, where it can be seen ───────────────────────────
+          `voiceNote` had exactly one surface: the `title` of a 2.5px dot. That
+          is invisible on a screen recording, invisible to anyone who does not
+          already suspect the dot means something, and unreachable by keyboard —
+          so "voice is dead and there is no key" and "voice is dead and the
+          gateway is down" looked identical, which is two different next steps
+          behind one blank screen. A failure the operator can act on is written
+          out in words. The dot stays; it is now the summary, not the record. */}
+      {(voiceNote || approvalPending) && (
+        <div className="relative z-40 flex flex-shrink-0 flex-col items-center gap-2 px-5 pb-2">
+          {voiceNote && (
+            <div
+              role="status"
+              aria-live="polite"
+              className={`${COLUMN} flex items-start gap-3 rounded-xl border border-rose-500/40 bg-rose-500/10 px-3.5 py-2 text-[12.5px] leading-snug text-rose-100`}
+            >
+              <span className="flex-1">{voiceNote}</span>
+              <button
+                type="button"
+                onClick={() => setVoiceNote("")}
+                className="flex-shrink-0 rounded-md px-2 py-0.5 text-[11px] text-rose-200/80 transition-colors hover:bg-rose-500/20 hover:text-white"
+              >
+                Dismiss
+              </button>
+            </div>
+          )}
+          {/* The other half of the spoken command gate. A run that stops to ask
+              permission on a hands-free screen can be answered out loud — but
+              if the microphone is muted, or the question was not heard, the
+              answer has to be reachable by hand or the run simply hangs. */}
+          {approvalPending && (
+            <div
+              role="group"
+              aria-label="Permission request"
+              className={`${COLUMN} flex flex-wrap items-center gap-2 rounded-xl border border-amber-400/40 bg-amber-400/10 px-3.5 py-2 text-[12.5px] text-amber-100`}
+            >
+              <span className="min-w-[160px] flex-1">
+                <span className="block text-[11px] text-amber-200/80">{approvalPending.reason}</span>
+                <span className="block break-all font-mono text-[11.5px] text-white">{approvalPending.command}</span>
+              </span>
+              <button
+                type="button"
+                onClick={() => commandApproval.approve(false)}
+                className="flex-shrink-0 rounded-md bg-amber-400/20 px-2.5 py-1 text-[11.5px] text-white transition-colors hover:bg-amber-400/35"
+              >
+                Allow
+              </button>
+              <button
+                type="button"
+                onClick={() => commandApproval.approve(true)}
+                className="flex-shrink-0 rounded-md px-2.5 py-1 text-[11.5px] text-amber-100/90 transition-colors hover:bg-amber-400/20 hover:text-white"
+                title={`Stop asking about ${commandHead(approvalPending.command)}`}
+              >
+                Always
+              </button>
+              <button
+                type="button"
+                onClick={() => commandApproval.deny()}
+                className="flex-shrink-0 rounded-md px-2.5 py-1 text-[11.5px] text-amber-100/90 transition-colors hover:bg-amber-400/20 hover:text-white"
+              >
+                Refuse
+              </button>
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Click-away for the header popovers. Below them, above everything else. */}
       {(menuOpen || settingsOpen) && <div className="fixed inset-0 z-30" onClick={closePopovers} />}

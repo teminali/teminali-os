@@ -34,12 +34,20 @@ test("the workspace fast path is still asked first", () => {
 
 test("editor commands are only reached inside a video project", () => {
   assert.ok(
-    /isVideoProjectRef\.current \? parseEditorCommand\(clean\) : null/.test(stage),
+    /editorLaneOpen\(\) \? parseEditorCommand\(clean\) : null/.test(stage),
     "in a code workspace `undo that` is conversation, and reaching for an absent timeline answers it with a failure",
   );
   assert.ok(
     /isVideoProjectRef\.current = projects\.current\.kind === "video"/.test(stage),
     "the gateway already classifies the root; the shell must not invent its own answer",
+  );
+  /* The gate reads `isVideoProjectRef` directly whenever the gateway answered
+     at all. What changed is only the case where it did NOT answer, which used
+     to be indistinguishable from "not a video project" and killed the lane for
+     the session — see voice-stage-gates.test.mjs. */
+  assert.ok(
+    /if \(projectKindKnownRef\.current\) return isVideoProjectRef\.current;/.test(stage),
+    "a known code workspace must still refuse the editor lane outright",
   );
 });
 

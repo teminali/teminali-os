@@ -152,6 +152,27 @@ const SPOKEN_FILENAME =
 const DEFINITE_OBJECT = /^\W*(?:the|this|that|these|those)\s+[\w.\-]+(?:\s+[\w.\-]+){0,2}/i;
 
 /**
+ * A span of time, sitting directly behind a playback verb.
+ *
+ * "Skip forward thirty seconds" had no object this file could see: `second` and
+ * `minute` are not machine nouns, "forward thirty seconds" is not a definite
+ * noun phrase, and there is no pronoun. So the commonest thing anyone says to a
+ * video went to the persona, which has no hands and answered as though it had.
+ *
+ * It is a `media` object and nothing else, which is why the check below is
+ * gated on the kind. A duration behind any other verb is a length of time the
+ * sentence happens to mention -- "check in a second", "give it a minute", "run
+ * it for thirty seconds" -- and reading those as work is the fabrication bug
+ * pointing the other way.
+ *
+ * Anchored, with only a direction word allowed in front of the number, so the
+ * span has to BE the object. That is what keeps "pause for a second" -- wait a
+ * moment, said to a person -- from becoming a command to the player.
+ */
+const DURATION_OBJECT =
+  /^\W*(?:(?:forward|forwards|back|backward|backwards|ahead|on|by|about|around)\s+){0,2}(?:\d+(?:\.\d+)?|a|an|one|two|three|four|five|six|seven|eight|nine|ten|fifteen|twenty|thirty|forty|fifty|sixty|ninety|half|couple|few)\s*(?:seconds?|secs?|minutes?|mins?|hours?)\b/i;
+
+/**
  * The verb's own clause: what follows it, up to the first boundary that ends
  * the thing being asked for.
  *
@@ -325,6 +346,57 @@ const MACHINE_FACT_QUESTIONS: RegExp[] = [
 const OS_NAVIGATION =
   /\b(?:take\s+me\s+(?:back\s+)?to|switch\s+(?:back\s+)?to|go\s+(?:back\s+)?to|bring\s+up|jump\s+to)\b[^.?!]{0,20}?\b(?:chat|editor|terminal|settings|sidebar|timeline|workspace|panel|panels|tab|window|inbox|files?)\b/i;
 
+/**
+ * The player, spoken to in the words it is actually spoken to in.
+ *
+ * Everything below was measured as `null` -- conversation -- on 2026-09-12,
+ * which for a media sentence is the fabrication case: the persona has no hands,
+ * and asked to turn the volume down it says it has.
+ *
+ * The verb groups could not reach any of them, each for its own reason, and the
+ * reasons are why this is a list of whole sentences rather than more verbs:
+ *
+ *   "go back ten seconds"   -- `go back` is in no group, and putting it in the
+ *                              media group would swallow "go back to the
+ *                              dukabot folder", which is navigation.
+ *   "turn the volume down"  -- `volume`, `louder` and `quieter` appear nowhere
+ *                              in this file, and `turn` is not a verb in it.
+ *   "full screen"           -- no verb at all.
+ *   "double speed"          -- likewise.
+ *   "turn on subtitles"     -- likewise, and `subtitles` is not a machine noun.
+ *
+ * Each pattern carries its own object, so none of them can match on a verb
+ * alone; that is what lets them be checked outside the verb-group loop. They
+ * are still put through `isNegated`, because "don't turn the volume down" is
+ * the same sentence with the opposite meaning.
+ *
+ * This is the same surface `services/voice/playerActions.ts` parses, and the
+ * two are deliberately separate: that one ACTS, synchronously, on a mounted
+ * pane, and is claimed before this gate is ever asked. This one is the answer
+ * for the same sentence with no player on screen -- it is still work, the hands
+ * can open the file and run it, and the voice must not pretend it did.
+ */
+const MEDIA_TRANSPORT: RegExp[] = [
+  /* A nudge along the playhead, with the span it carries. */
+  /\b(?:skip|jump|go|move|step|wind|scrub|fast[-\s]?forward|rewind)\s+(?:ahead|forward|forwards|back|backward|backwards)?\s*(?:by\s+)?(?:\d+(?:\.\d+)?|a|an|one|two|three|four|five|six|seven|eight|nine|ten|fifteen|twenty|thirty|forty|fifty|sixty|ninety|half|couple|few)(?:[\s-](?:one|two|three|four|five|six|seven|eight|nine))?\s*(?:seconds?|secs?|minutes?|mins?)\b/i,
+  /* Loudness, which always names the thing that is loud. A bare "turn it up"
+     is left out on purpose: it is the plainest way to ask Temi herself to
+     speak up, and no wording separates the two. */
+  /\b(?:turn|crank|bump|bring|drop|raise|lower|put|set)\b[^.?!]{0,12}?\b(?:volume|sound|audio)\b[^.?!]{0,12}?\b(?:up|down|louder|quieter|softer|off|on|to)\b/i,
+  /\b(?:volume|sound|audio)\s+(?:up|down|off|on)\b/i,
+  /\b(?:mute|unmute|silence)\s+(?:it|this|that|the\s+(?:video|movie|film|episode|music|song|track|audio|sound|player|playback))\b/i,
+  /* The window. */
+  /\bfull\s*-?\s*screen\b/i,
+  /* Playback speed, which must name the playback: "speed up the build" is a
+     shell sentence and stays one. */
+  /\b(?:double|half|normal|regular|original)\s+speed\b|\bplayback\s+speed\b|\bat\s+\d+(?:\.\d+)?\s*x\b/i,
+  /\b(?:speed\s+up|slow\s+down)\s+(?:the\s+)?(?:video|movie|film|episode|playback|player)\b|\bslow\s+(?:the\s+)?(?:video|movie|film|episode|playback)\s+down\b/i,
+  /* Subtitles, which nothing else in this file can see. */
+  /\b(?:turn|switch|put)\s+(?:on|off)\s+(?:the\s+)?(?:subtitles|captions|subs)\b|\b(?:subtitles|captions)\s+(?:on|off)\b|\b(?:show|hide|enable|disable)\s+(?:the\s+)?(?:subtitles|captions)\b/i,
+  /* The next item in a series, which names what it is the next of. */
+  /\b(?:next|previous|prior|last)\s+(?:episode|track|song|movie|film|chapter|video)\b/i,
+];
+
 function isNegated(text: string, verbIndex: number): boolean {
   const before = text.slice(0, verbIndex);
   if (NEGATOR_BEFORE.test(before)) return true;
@@ -336,6 +408,9 @@ function hasObjectFor(text: string, verbMatch: RegExpExecArray, kind?: MachineAc
   const window = objectWindow(after);
   if (MACHINE_NOUNS.test(window) || SPOKEN_FILENAME.test(window)) return true;
   if (PRONOUN_OBJECT.test(after)) return true;
+  // A playback verb may take a span of time as its whole object, and no other
+  // verb may. See `DURATION_OBJECT`.
+  if (kind === "media" && DURATION_OBJECT.test(after)) return true;
   /* Widened beyond the look-verbs on 2026-09-12. The operator's own note above
      restricted this to `open`/`inspect` because a list cannot name every noun in
      one codebase and a look is the cheapest thing the hands can do. The reason
@@ -498,6 +573,15 @@ export function classifyMachineAction(text: string): MachineAction | null {
   /* An idiom is not compositional, so it is checked whole and before anything
      tries to read a verb and an object out of it. */
   if (NON_ACTION_IDIOMS.test(stripped)) return null;
+
+  /* The player, before the verb groups, because most of these sentences have no
+     verb any group holds. After the idioms and the state questions, because
+     "is the video still playing" is a look and "hold that thought" is neither. */
+  for (const pattern of MEDIA_TRANSPORT) {
+    const match = pattern.exec(stripped);
+    if (!match || isNegated(stripped, match.index)) continue;
+    return { kind: "media", reason: `a transport command — "${match[0]}"` };
+  }
 
   /* Whichever verb comes FIRST in the sentence is the one being asked for.
      The groups used to be tried in declaration order, so a later group could
