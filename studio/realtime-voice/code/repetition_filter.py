@@ -140,6 +140,20 @@ def is_question(sentence: str) -> bool:
     return sentence.strip().endswith("?")
 
 
+def keys(text: str):
+    """Every trackable comparison key in `text`, in reading order.
+
+    The one public way to ask "what would this filter remember about this
+    reply?". `evals/repetition_bridge.py` calls it so the conversation eval can
+    detect an audible repeat using this module's normalisation rather than a
+    second copy of it in JavaScript -- the copy the docstring above warns about.
+    """
+    for sentence in _SENTENCE_SPLIT.split(text or ""):
+        key = normalise(sentence)
+        if is_tracked(key, is_question(sentence)):
+            yield key
+
+
 class RepetitionFilter:
     """Per-conversation memory of what has already been said out loud.
 
@@ -192,10 +206,8 @@ class RepetitionFilter:
 
     def remember(self, text: str):
         """Record every trackable sentence in `text` as already spoken."""
-        for sentence in _SENTENCE_SPLIT.split(text or ""):
-            key = normalise(sentence)
-            if is_tracked(key, is_question(sentence)):
-                self._add(key)
+        for key in keys(text):
+            self._add(key)
 
     # -- filtering --------------------------------------------------------
 

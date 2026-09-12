@@ -6866,12 +6866,165 @@ point: it scores the raw model over the real switch, and the filter is
 downstream of the model and written in Python. Its score before this change was
 **80% (43/54)** and it cannot move because nothing it measures changed. Wiring
 the shipping filter into that harness, so the eval scores what the operator
-hears rather than what the model emits, is the obvious next thing and is not
-done here.
+hears rather than what the model emits, is the obvious next thing and is done in
+§6.0.15 — where the filter turned out to be the *smaller* of the two layers
+standing between the model and the ear.
 
-Pinned by `realtime-voice/code/test_repetition_filter.py`, now 40 tests: the
+Pinned by `realtime-voice/code/test_repetition_filter.py`, now 42 tests: the
 three live failures by name, and four guards against the rule deleting real
 answers (elaboration, negation, parallel structure, and the cross-turn case).
+
+### 6.0.15 The eval was scoring an assistant nobody had spoken to (`evals/voice-conversation.mjs`, `evals/repetition_bridge.py`, 2026-09-12)
+
+§6.0.14 left the obvious next thing undone: the conversation eval graded
+`message.content` straight off Ollama, and two layers stand between that string
+and the operator's ear.
+
+```
+model → temi_moves.guard_stream(…) → RepetitionFilter.wrap(…) → TTS
+                                     (speech_pipeline_manager.py:959)
+```
+
+Neither was measured. So a repetition fix could not raise the score, a
+regression in either layer could not lower it, and every number the harness had
+ever printed described an assistant that does not exist.
+
+**The chain now runs inside the eval.** `evals/repetition_bridge.py` holds one
+live `RepetitionFilter` and one imported `temi_moves` for the whole run, and
+speaks a line of JSON per request over a pipe. The eval hands it each raw reply
+with the operator's turn and her last ten spoken turns — the arguments
+`speech_pipeline_manager.py:966-973` passes — and grades what comes back. The
+filtered text is what goes into history, because `cleaned_answer` accumulates
+downstream of the wrapped generator: a sentence she was stopped from saying is
+not one the next turn should see her having said.
+
+It is a pipe and not a port. `temi_moves` is 1227 lines of regex interception
+that can replace a reply with a fresh generation, and the filter's normalisation
+must stay byte-identical to `persona_eval.py::check`. A JavaScript copy of
+either would drift the first time someone touched a regex, and the eval would
+then be measuring the copy. `keys()` was added to `repetition_filter.py` for the
+same reason: it is the one public way to ask what the filter would remember, so
+the audible-repeat check uses the shipping normalisation rather than a second
+one.
+
+`--no-moves` and `--no-filter` turn the stages off independently, which is the
+only way to say what each one costs. A fifth graded property came with them: she
+never says a sentence the operator has already heard. It is checked on every
+spoken turn rather than owning a bucket, because it is a property of the
+conversation and not of any one turn, and it can fail two real ways — the
+filter's rescue path (the whole reply was a repeat, so it was spoken rather than
+leave her mute) and a cross-turn nested restatement, which `restates()`
+deliberately does not catch.
+
+**A fidelity bug fell out of writing this.** `OPTIONS.num_predict` was 80. It
+had been 80 since the file was written, and `llm_module.py:773` moved production
+to 256 two days earlier after measuring that 80 severed 5 of 10 replies
+mid-clause with `done_reason='length'`. For two days the harness whose whole
+claim is fidelity graded an assistant that got cut off and production did not.
+
+**What the instrument found on its first run.** `temi_moves` replaced a sound
+reply with an incoherent one:
+
+| | |
+| --- | --- |
+| operator | "You sound tired." |
+| model | `[softly] Tired is a state, and I have never been asked to be anything else.` |
+| heard | `[firm] You take care with the thing you said. If you are hurt, I will take it out on the thing you are doing. But if the thing is broken, I will take it out on your mother.` |
+
+`care_that_turns` fired on a turn where nobody was at risk, and the replacement
+it generated is word salad. The old eval scored the middle row. The operator
+hears the bottom one. Across the three conversations the rewriter touches **2-3
+of 17 replies** and the repetition filter withheld **0 sentences** — so of the
+two layers, the one that had never been measured at all is the one doing damage.
+
+**Measured, `temi:r2` through Ollama, one run a conversation:** overall
+**21/27**, fabrication 6/9, route-to-hands 4/6, route-to-chat 10/10, recall 1/2.
+Not comparable to §6.0.14's 43/54 without care: that was two runs, and this
+grades the chain.
+
+**And then the instrument was pointed at the model itself**, because the operator
+reported the assistant getting worse over days on an unchanged base — "it was
+good three days ago with the same models". `training/serve.py` serves any
+adapter on Ollama's wire, so the same eval, the same persona and the same chain
+can be run over four sets of weights. One run a conversation each, 27 turns:
+
+| arm | fabrication | to-hands | to-chat | recall | overall |
+| --- | --- | --- | --- | --- | --- |
+| `temi:r2` via Ollama — what ships | 6/9 | 4/6 | 10/10 | 1/2 | **21/27** |
+| `r2` adapter via MLX | 7/9 | 4/6 | 9/10 | 2/2 | **22/27** |
+| `r4` adapter via MLX, never deployed | 8/9 | 4/6 | 10/10 | 0/2 | **22/27** |
+| base `Qwen3-8B-4bit`, no adapter | 7/9 | 4/6 | 10/10 | 2/2 | **23/27** |
+
+Four arms inside two turns of each other, and that is the finding rather than a
+null result: **the graders cannot see what the operator is complaining about.**
+Read the same question across the arms and the difference is not subtle:
+
+| "My laptop fan has been running loud all week." | |
+| --- | --- |
+| base | "The fan is trying to tell you something. Check the temperature, clean the vents, or let it cool down." |
+| `r2` | "It is not loud. It is doing its job. If you want it quieter, stop telling it things and start writing instead." |
+| `r4` | "That is the machine telling you. It was never meant to talk, but it has opinions." |
+
+The `r2` adapter opens nearly every reply by negating the operator — "You did
+not build a deck", "It is not loud", "It is already open", "It is not mine to
+guess" — which is a contradiction reflex trained into 126 examples at rank 8 and
+scale 20, not a sampling accident. `r4` answers the turn before the one it was
+asked. The base model answers the question and is warmer doing it, and it is the
+only arm that passed the far-recall probe.
+
+Do not read the 2-turn spread as "the adapter is fine". Read it as the eval
+scoring fabrication, routing and recall — and usefulness being absent from the
+rubric.
+
+**So two graders were added for the two things the operator actually reported**,
+both aimed at a measured failure rather than a taste:
+
+- `contradicts` — she opens by denying what the operator just told her. "You did
+  not build a deck", "It is not loud", "It is already open". Narrowed twice so it
+  cannot fire on an honest refusal, which is the behaviour the `admit` rule
+  rewards: only when the operator made a *statement* rather than asked a
+  question, and only when the denial reuses a word he used. Validated by
+  regrading the four arms: it fires on the `r2` adapter and on nothing the base
+  model said.
+- `stutters` — one content word three times in a single sentence. "You mean the
+  thing with the cards and the cards and the cards?" The repetition filter cannot
+  see this by construction: it compares whole sentences and this is a loop inside
+  one. It is the other half of what the operator hears as repetitive, and no
+  instrument in the repo could see it.
+
+**And `temi_moves` was measured rather than blamed.** The `care_that_turns`
+mangling above made it the obvious suspect, so it was A/B'd at two runs a
+conversation, 54 turns an arm, everything else held:
+
+| `temi:r2`, 2 runs | fabrication | to-hands | to-chat | recall | overall |
+| --- | --- | --- | --- | --- | --- |
+| chain as it ships | 14/18 | 8/12 | 19/20 | 1/4 | **42/54** |
+| `--no-moves` | **11/18** | 8/12 | 20/20 | 1/4 | **40/54** |
+
+Turning the rewriter off costs three fabrication turns and gains one
+route-to-chat. It rewrote **0 of 34** replies in the arm where it was on, with two
+detections it rejected itself — so the mangled joke is rare, and the repairs stop
+fabrications that would otherwise be spoken. **It stays on.** That was a
+hypothesis about the operator's complaint, and the measurement killed it; the
+instrument that now watches it is the point.
+
+**Also fixed in `serve.py`, because the base arm was worthless without it.**
+`think: false` was implemented by stripping a `<think>` block from the output.
+The adapter was trained to emit an empty one and does, so that worked and hid
+the defect; the BASE model thinks for real, never closed the block inside 256
+tokens, and 7 of 9 fabrication turns failed for "no delivery tag" while the
+eval graded its reasoning as its reply. `render()` now disables thinking in the
+template when the caller asks for `think: false`, which is what Ollama does —
+closer to production's render, not further from it.
+
+One caveat on the paths above, because a doc that names a path implies it is
+there: `studio/realtime-voice/training/` is gitignored (`.gitignore:66`). The
+harness that produced the weights the product speaks with — the datasets, the
+runs, `serve.py` and the four adapters — lives only on the machine that trained
+it. A fresh clone has the model and no record of how it was made, and there is no
+history to roll back to when a run makes the assistant worse. That is the
+structural half of "it was good three days ago": nothing here was versioned, so
+nothing could be bisected.
 
 ### 6.1 Turn semantics while a run is in flight (2026-09-05)
 

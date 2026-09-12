@@ -14,7 +14,7 @@ import importlib.util
 import os
 import unittest
 
-from repetition_filter import RepetitionFilter, normalise
+from repetition_filter import RepetitionFilter, keys, normalise
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 EVAL = os.path.normpath(os.path.join(HERE, "..", "resources", "bella", "persona_eval.py"))
@@ -426,3 +426,31 @@ class NestedRestatement(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestKeys(unittest.TestCase):
+    """`keys` is what the conversation eval asks the filter about its own output.
+
+    It exists so `evals/repetition_bridge.py` can tell the eval which sentences a
+    reply carries without a second copy of `normalise` in JavaScript. Its contract
+    is therefore exactly `remember`'s: the same sentences, in reading order.
+    """
+
+    def test_matches_what_remember_stores(self):
+        text = "[playful] What was his name? I see. The build failed at line four."
+        f = RepetitionFilter()
+        f.remember(text)
+        # Every key it yields is one the filter now refuses, and there are no others.
+        for key in keys(text):
+            self.assertTrue(f._sift([key])[1], f"remember did not store {key!r}")
+        self.assertEqual(
+            list(keys(text)),
+            ["what was his name", "the build failed at line four"],
+        )
+
+    def test_skips_fragments_below_the_floor(self):
+        # "I see." is two words and not a question, so it is not a repeatable
+        # sentence -- the same floor `is_tracked` applies everywhere else.
+        self.assertEqual(list(keys("I see. Of course.")), [])
+        # A two-word QUESTION is a tic and is tracked.
+        self.assertEqual(list(keys("What's new?")), ["whats new"])

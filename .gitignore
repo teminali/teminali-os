@@ -60,10 +60,22 @@ studio/realtime-voice/**/*.flac
 # studio/realtime-voice/PROVENANCE.md, "What is not in git".
 RealtimeVoiceChat_original/
 
-# The dataset and MLX runs behind temi:r2 — 108 files, 372 MB. Nothing reads it
-# at runtime; ollama serves the model. It stays on disk and out of the history,
-# which is the decision PROVENANCE.md recorded as open.
-studio/realtime-voice/training/
+# The MLX runs behind temi:r2 — 370 MB of adapter weights and checkpoints.
+# Those stay out of the history; ollama serves the merged model and nothing reads
+# a checkpoint at runtime.
+#
+# The training CODE and DATA do not stay out, as of 2026-09-12, and that reverses
+# the decision PROVENANCE.md recorded as open. The reason is measured: the
+# operator reported the assistant getting worse over days on an unchanged base,
+# and the cause was in here — an adapter that trained a contradiction reflex
+# (DESIGN §6.0.15). With this directory ignored whole, there was no history of
+# what any run was trained on and nothing to bisect. 60 files, ~1.6 MB.
+studio/realtime-voice/training/runs/
+studio/realtime-voice/training/__pycache__/
+
+# 628 MB of node_modules under an experiment that lives beside the product rather
+# than in it. Never commit it; never delete it either — it is work in progress.
+experiments/
 
 # A backup taken against a working tree, byte-identical to the voice embeddings
 # beside it, in a history that already keeps every earlier version of them.

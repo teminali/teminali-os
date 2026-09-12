@@ -1312,7 +1312,9 @@ npm run typecheck   # tsc --noEmit
 npm test            # 2355 tests
 npm run eval:local  # the local lane against the real model — a score, not a pass/fail; needs Ollama
 npm run eval:voice  # the voice co-agent's spoken answers, same discipline; needs Ollama
-npm run eval:conversation  # Temi over a whole conversation: routing, fabrication, recall; needs Ollama
+npm run eval:conversation  # Temi over a whole conversation, through the shipping output
+                           # chain: routing, fabrication, recall, audible repetition.
+                           # --no-moves / --no-filter score the stages apart. Needs Ollama.
 npm run build       # tsc && vite build
 npm run verify:core # all three
 ```
