@@ -7336,6 +7336,118 @@ transcript AND sends it as a directive she then speaks, producing two bubbles
 for one answer — is a different defect and is NOT fixed here. See §6.0.20 when
 it is written.
 
+### 6.0.20 She went silent for the whole agent run (`components/voice/TemiVoiceStage.tsx`, `services/voice/assistantHandoff.ts`, 2026-09-12)
+
+`ask_the_assistant` is a BLOCKING call and stays one: `behavior` is unset on the
+declaration, so she cannot generate into a turn whose facts have not arrived,
+which is the failure §6.0.18 exists to stop. The declaration's `spoken_note`
+argument was the answer to the pause it creates: one short line she says while
+the assistant works.
+
+Nothing said it. `TemiVoiceStage` called `showToast(note)`, and on a voice call
+a toast is nothing at all. Measured across five delegating turns on 2026-09-12,
+four emitted no audio and no `outputTranscription` whatsoever before the
+`toolCall` arrived, the call landing straight after a thought part whose own
+text read "I'll begin by saying 'One moment.'" She believed she had spoken. The
+operator got silence for the length of an agent run.
+
+The block now ends immediately instead of when the agent finishes.
+`handoffAcknowledgement` answers the tool call at once with a response carrying
+no facts: her own note, handed back for her to say, plus the two things she must
+be told. That the answer is not here yet, and that she may not invent it. The
+run then continues in the background and the report arrives as its own turn.
+
+The cost is stated because it is real. Between the note and the report she holds
+the floor with the question still open, and the last line of the
+acknowledgement is the only thing standing between that and a guess. This is
+not NON_BLOCKING and must not be confused with it: the knob §6.0.18 declined is
+still declined, and the response that releases the call contains nothing she
+could build an answer on.
+
+### 6.0.21 One answer, two bubbles, and a report read out loud (`components/voice/TemiVoiceStage.tsx`, `services/voice/progressNarration.ts`, 2026-09-12)
+
+Three defects of the delegate path, all seen on one live call, all downstream of
+the same confusion about which surface owns a line.
+
+**The double.** `onCompleted` appended the report to `dialogueHistory` AND sent
+it through `sendAssistantDirective`, and the spoken copy then committed as its
+own bubble underneath the written one. This is not §6.0.19, which was a closed
+turn handing its caption back; the pacer fix did not touch it. The rule now is
+that a line the shell puts into her mouth lands on exactly one surface, and the
+spoken one wins, because it is the record of what the operator actually heard.
+The written surface is a fallback and nothing more: if she has not begun
+speaking within four seconds the socket is down or the turn was swallowed, and
+a report that reached nobody is a worse failure than one that arrived twice.
+`tests/voice-handoff.test.mjs` pins the number of places in the stage that may
+write an assistant bubble at three, two of them in `commitSpokenTurn` recording
+words that were said.
+
+**Recited, not answered.** A directive means "say this line", which is right for
+a sentence the shell composed and wrong for a report. The tool path was proven
+by her turning a report into "Lando Norris just won the Abu Dhabi Grand Prix on
+December 8th, driving for McLaren"; the delegate path handed her the report as a
+directive and she read it out. So the two are now different things.
+`frameAssistantReport` delivers a finding for her to answer FROM, with the
+anti-fabrication contract in its last sentence: she may rephrase what is in the
+report and may not add to it. A sentence the shell composed still goes through
+`sendAssistantDirective`, verbatim, for the reason §6.0.17 gives.
+
+**The command in the answer.** Spoken aloud to the operator: "du -sh ~/Desktop
+The total size of all the files in your Desktop folder is 38 gigabytes." and
+"df -h / You have about 26 gigabytes of available storage space remaining."
+`firstSentence` inlines a fenced block holding one short line, which §6.0.18's
+predecessor added because deleting it was spoken as "The port is ." So the
+agent's fenced command was glued to the front of its own answer, and with the
+only full stop at the very end the whole line counted as the first sentence.
+Position settles it without guessing at content: a fence the assistant went on
+to explain is the working and goes; a fence with nothing after it is the payload
+and is inlined exactly as before. The same report arrives unfenced just as
+often, the command alone on the first line, so `dropLeadingCommandLines` takes
+that case too, and deliberately narrowly. Three things must hold at once, and
+`SHELL_VERBS` leaves out every command that is also an English word, because
+throwing away a real sentence is the worse failure.
+
+### 6.0.22 A turn nobody was listening to was still on screen (`services/voice/geminiLiveEngine.ts`, 2026-09-12)
+
+`sendBargeIn()` is a local guard. Gemini Live has no "cancel this generation"
+message, so when the shell answers a turn itself the model carries on
+generating and the engine stops forwarding what arrives. The generation counter
+made that precise for the AUDIO and for nothing else. Her words went through
+ungated, so an abandoned turn still became her caption and still went into
+`final_assistant_answer`.
+
+Measured on a live call: the shell barged in and answered from the agent's
+report, and the operator got one line reading "It is not something I keep an eye
+on directly.38 gigabytes." The abandoned conversational turn and the directed
+answer had accumulated into the same `outputTranscript` with nothing between
+them. The missing space is the tell.
+
+Both halves of a generation are now gated on the same number, and the number is
+`incomingGeneration()` rather than `this.generation`. That is the whole
+subtlety. A turn's generation is minted down in the chunk block, on the first
+audio of the turn, because that is the one place `turnActive` flips; the
+transcript branch runs earlier in the same message, so at a turn's first
+transcript delta the raw counter still names the previous turn. A barge-in fired
+before she has spoken, which is the common case, condemns `generation + 1`.
+Comparing directly would have judged the condemned turn's first words against
+the old number, found no match, and let exactly the measured line through while
+dropping the audio that went with it.
+
+`finalizeUserTurn()` stays outside the gate, deliberately. Her first word is the
+only proof the operator's turn ended, there being no `inputTranscription`
+terminator, and a turn dropped there never reaches the router at all.
+
+One comment was also corrected rather than changed. The note at the
+`turnComplete` handler said, honestly, that whether Gemini interleaves a
+`turnComplete` around a tool call had not been verified. It has been, across
+twelve harness sessions: exactly one per delegating turn, after the function
+response is answered and she has stopped speaking, in the order
+`setupComplete`, thought part, `toolCall` with `turnComplete` false, audio and
+transcript, `generationComplete`, `turnComplete`. The
+`if (this.pendingToolCalls.size) return;` guard is correct and, on this model,
+never fires. It stays for the model that does interleave one.
+
+
 ### 6.1 Turn semantics while a run is in flight (2026-09-05)
 
 A directed utterance is not automatically an instruction. `turnIntent.ts`

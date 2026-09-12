@@ -65,6 +65,19 @@ const splitEngineLabel = (label: string): { head: string; tail: string } => {
   return { head: label, tail: "" };
 };
 
+/* How long a line the shell sent to be spoken may go unspoken before the
+   transcript records it instead. Gemini begins its `outputTranscription`
+   inside a second of a client turn; four is far enough clear of that to never
+   race a healthy socket, and short enough that a dead one does not leave the
+   operator reading a silence. */
+const SPOKEN_LINE_FALLBACK_MS = 4000;
+
+import {
+  frameAssistantReport,
+  handoffAcknowledgement,
+  isAssistantReportEcho,
+} from "../../services/voice/assistantHandoff";
+
 export const TemiVoiceStage: React.FC<TemiVoiceStageProps> = ({
   isStreaming = false,
   onStop,
@@ -180,6 +193,22 @@ export const TemiVoiceStage: React.FC<TemiVoiceStageProps> = ({
   const assistantTurnActiveRef = useRef(false);
   const captionCommitTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
+  /* A line the shell put into her mouth lands on exactly one surface.
+
+     There are two of them. Either she says it and the transcript records what
+     she said, or the transcript records it because she did not. Doing both is
+     what put one answer on screen twice, measured on a live call 2026-09-12:
+     the delegate path's `onCompleted` appended the report to the transcript AND
+     sent it to be spoken, and the spoken copy then committed as its own bubble
+     underneath the written one.
+
+     The spoken surface wins, because it is the record of what the operator
+     actually heard. The written one is a fallback and nothing more: if she has
+     not begun speaking within `SPOKEN_LINE_FALLBACK_MS` the socket is down or
+     the turn was swallowed, and a report that reached nobody is a worse
+     failure than a report that arrived twice. */
+  const unspokenLineRef = useRef<{ text: string; timer: ReturnType<typeof setTimeout> } | null>(null);
+
   /* Move the held reply into the transcript.
 
      `truncateToSpoken` is for a turn the operator cut off. What lands in the
@@ -242,6 +271,40 @@ export const TemiVoiceStage: React.FC<TemiVoiceStageProps> = ({
   const commitSpokenTurnRef = useRef(commitSpokenTurn);
   commitSpokenTurnRef.current = commitSpokenTurn;
   const protocolRef = useRef<GeminiLiveEngine | null>(null);
+
+  /* Hand one line to the voice, and write it into the transcript only if the
+     voice never takes it. See `unspokenLineRef` for why that is the rule.
+
+     `verbatim` is a sentence the shell composed and she must say as given.
+     `report` is something the assistant found, and she answers from it. */
+  const speakLine = useCallback(
+    (text: string, framing: "verbatim" | "report") => {
+      const line = text.trim();
+      if (!line) return;
+      const protocol = protocolRef.current;
+      if (framing === "report") protocol?.sendUserText(frameAssistantReport(line));
+      else protocol?.sendAssistantDirective(line);
+
+      /* One slot, so a second line supersedes the first rather than queueing
+         behind it. Two shell-composed lines inside four seconds means the
+         later one is the one that matters -- a report landing on top of its
+         own "on it", most often. */
+      if (unspokenLineRef.current) clearTimeout(unspokenLineRef.current.timer);
+      unspokenLineRef.current = {
+        text: line,
+        timer: setTimeout(() => {
+          unspokenLineRef.current = null;
+          setDialogueHistory((prev) => [
+            ...prev,
+            { id: `asst-${Date.now()}`, role: "assistant", content: line },
+          ]);
+        }, SPOKEN_LINE_FALLBACK_MS),
+      };
+    },
+    [setDialogueHistory],
+  );
+  const speakLineRef = useRef(speakLine);
+  speakLineRef.current = speakLine;
   const toastTimerRef = useRef<number | null>(null);
   const animFrameRef = useRef<number | null>(null);
   // The socket effect runs once and must keep running once — putting the turn
@@ -354,6 +417,7 @@ export const TemiVoiceStage: React.FC<TemiVoiceStageProps> = ({
         // Our own directive, mid-flight back to us -- not speech. Showing it
         // would caption the operator with words they never said.
         if (GeminiLiveEngine.isAssistantDirectiveEcho(content ?? "")) return;
+        if (isAssistantReportEcho(content ?? "")) return;
         setLiveUserSpeech(content);
       } else if (type === "final_user_request") {
         setLiveUserSpeech(null);
@@ -363,6 +427,7 @@ export const TemiVoiceStage: React.FC<TemiVoiceStageProps> = ({
           // must not reach the switch: classified as work it delegates again,
           // and the loop never closes. See `isAssistantDirectiveEcho`.
           if (GeminiLiveEngine.isAssistantDirectiveEcho(clean)) return;
+          if (isAssistantReportEcho(clean)) return;
           // Update last user bubble if from this same turn, or append new turn
           setDialogueHistory((prev) => {
             const last = prev[prev.length - 1];
@@ -381,6 +446,12 @@ export const TemiVoiceStage: React.FC<TemiVoiceStageProps> = ({
 
       // 2. Live Assistant Text Generation
       else if (type === "partial_assistant_answer") {
+        /* She has the line. The transcript will get it from the speaker, so the
+           fallback write must not also happen. See `unspokenLineRef`. */
+        if (unspokenLineRef.current) {
+          clearTimeout(unspokenLineRef.current.timer);
+          unspokenLineRef.current = null;
+        }
         if (!assistantTurnActiveRef.current) {
           assistantTurnActiveRef.current = true;
           pacerRef.current.beginTurn();
@@ -444,29 +515,36 @@ export const TemiVoiceStage: React.FC<TemiVoiceStageProps> = ({
         const args = (msg.args ?? {}) as { task?: unknown; spoken_note?: unknown };
         const task = typeof args.task === "string" ? args.task.trim() : "";
         const note = typeof args.spoken_note === "string" ? args.spoken_note.trim() : "";
-        /* The one line she offers before the pause. It is a toast rather than
-           an activity row because the activity store types its rows as machine
-           events (cmd/edit/read/test) and this is a sentence she said. */
-        if (note) showToast(note);
         if (!task) {
           protocol.sendToolResponse(msg.id, msg.name, "No task was given, so nothing was run.");
         } else {
+          /* The line she said she would say. The toast stays because the
+             activity store types its rows as machine events
+             (cmd/edit/read/test) and this is a sentence, but it is no longer
+             the whole of it: `handoffAcknowledgement` ends the blocking call
+             immediately so she can actually speak it. That silence was the
+             defect -- see the comment on `handoffAcknowledgement`. */
+          showToast(note || "Handing this to the assistant…");
+          protocol.sendToolResponse(msg.id, msg.name, handoffAcknowledgement(note));
           void (async () => {
             try {
               /* `inspect` rather than `edit`: this path exists because she was
                  missing a fact, and `summariseOutcome` needs to know a silent
                  run answered a question rather than failed to do work. */
               const report = await TeminaliAgentBridge.delegateTask(task, { action: "inspect" });
-              /* Capped because the whole report re-enters the live session as a
-                 function response and competes for the same window the
-                 conversation lives in. A voice answer never needs more. */
+              /* Capped as a backstop. `delegateTask` returns
+                 `summariseOutcome`'s line, which is a sentence, so this has
+                 never fired in practice; it is here because the report enters
+                 the live session and competes for the same window the
+                 conversation lives in. */
               const capped = report.length > 4000 ? `${report.slice(0, 4000)}\n[report truncated]` : report;
-              protocol.sendToolResponse(msg.id, msg.name, capped || "The assistant finished but reported nothing.");
+              speakLineRef.current(capped || "The assistant finished but reported nothing.", "report");
             } catch (error) {
-              /* Told, not swallowed. A tool call with no response leaves her
-                 waiting mid-turn with the microphone open and nothing to say. */
+              /* Told, not swallowed. A run that reports nothing back leaves the
+                 operator holding a question she has already promised to
+                 answer. */
               const reason = error instanceof Error ? error.message : String(error);
-              protocol.sendToolResponse(msg.id, msg.name, `That could not be completed: ${reason}`);
+              speakLineRef.current(`That could not be completed: ${reason}`, "verbatim");
             }
           })();
         }
@@ -496,6 +574,10 @@ export const TemiVoiceStage: React.FC<TemiVoiceStageProps> = ({
     return () => {
       cancelled = true;
       if (animFrameRef.current) cancelAnimationFrame(animFrameRef.current);
+      if (unspokenLineRef.current) {
+        clearTimeout(unspokenLineRef.current.timer);
+        unspokenLineRef.current = null;
+      }
       audio.cleanup();
       protocol.disconnect();
     };
@@ -544,24 +626,18 @@ export const TemiVoiceStage: React.FC<TemiVoiceStageProps> = ({
           // what produced invented accounts of work that had not started:
           // a prompt to acknowledge an action it cannot observe gets answered
           // by describing the action. See `machineAction.ts`.
-          if (decision.speak) {
-            setDialogueHistory((prev) => [
-              ...prev,
-              { id: `asst-${Date.now()}`, role: "assistant", content: decision.speak as string },
-            ]);
-            protocol?.sendAssistantDirective(decision.speak);
-          }
+          if (decision.speak) speakLineRef.current(decision.speak, "verbatim");
           void TeminaliAgentBridge.delegateTask(action.prompt, {
             // The kind travels with the prompt so the closing line knows
             // whether it is reporting work or answering a question.
             action: action.action,
             onProgress: (summary) => showToast(summary),
             onCompleted: (finalReport) => {
-              setDialogueHistory((prev) => [
-                ...prev,
-                { id: `asst-${Date.now()}`, role: "assistant", content: finalReport },
-              ]);
-              protocolRef.current?.sendAssistantDirective(finalReport);
+              /* One surface, and the report is answered from rather than read
+                 out. This used to append the report to the transcript AND send
+                 it to be spoken, which is what put one answer on screen
+                 twice. */
+              speakLineRef.current(finalReport, "report");
             },
           });
           break;
@@ -571,17 +647,14 @@ export const TemiVoiceStage: React.FC<TemiVoiceStageProps> = ({
         case "repeat":
           // Answered here, from the run. The model never sees the question,
           // because its persona prompt has never heard of the work in flight.
-          setDialogueHistory((prev) => [
-            ...prev,
-            { id: `asst-${Date.now()}`, role: "assistant", content: action.text },
-          ]);
-          protocol?.sendAssistantDirective(action.text);
+          // One surface, as everywhere else on this switch.
+          speakLineRef.current(action.text, "verbatim");
           break;
 
         case "stop":
           TeminaliAgentBridge.stopCurrentTask();
           showToast("Stopped");
-          if (decision.speak) protocol?.sendAssistantDirective(decision.speak);
+          if (decision.speak) speakLineRef.current(decision.speak, "verbatim");
           break;
 
         case "hush":
@@ -755,7 +828,7 @@ export const TemiVoiceStage: React.FC<TemiVoiceStageProps> = ({
   }, [newChatSession, showToast]);
 
   const handleRepeat = useCallback((text: string) => {
-    protocolRef.current?.sendAssistantDirective(text);
+    speakLineRef.current(text, "verbatim");
   }, []);
 
   const isHearing = Boolean(liveUserSpeech) || (!isMicMuted && userEnergy > 0.04);

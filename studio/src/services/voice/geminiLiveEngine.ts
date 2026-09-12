@@ -199,11 +199,17 @@ function base64ToBytes(b64: string): Uint8Array {
  * the model stops and waits rather than talking over the agent. @google/genai
  * 2.22.0 does expose the alternative — `FunctionDeclaration.behavior`, the
  * `Behavior` enum, and `FunctionResponse.scheduling` / `willContinue` for
- * NON_BLOCKING calls — and if an agent run ever runs long enough that the pause
- * itself is the problem, that is the knob, not a second tool. It was not taken
- * here because `spoken_note` already covers the silence and NON_BLOCKING would
- * let her keep generating into a turn whose facts have not arrived yet, which
- * is the exact failure mode above.
+ * NON_BLOCKING calls — and it is still not taken, because it would let her keep
+ * generating into a turn whose facts have not arrived, which is the exact
+ * failure mode above.
+ *
+ * The pause itself DID turn out to be the problem, and was solved without that
+ * knob. `spoken_note` was written here as the answer to it and did not cover
+ * it: the stage rendered the line as a toast, so she was silent for the whole
+ * agent run. The block now ends the moment the call arrives, with a response
+ * carrying no facts at all, and the report comes back afterwards as its own
+ * turn. See `assistantHandoff.ts` and DESIGN.md §6.0.20. `spoken_note` is now
+ * what its description here has always claimed: a line she actually says.
  */
 const ASK_THE_ASSISTANT: FunctionDeclaration = {
   name: "ask_the_assistant",
@@ -472,6 +478,21 @@ export class GeminiLiveEngine {
     this.onMessage?.(msg);
   }
 
+  /**
+   * The generation number that content arriving right now belongs to.
+   *
+   * A turn's generation is minted down in the chunk block of
+   * `handleServerMessage`, on the first audio of the turn, because that is the
+   * one place `turnActive` flips. Anything that has to name the current turn
+   * before that point reads a stale number: the transcript branch, which runs
+   * earlier in the same message, and `sendBargeIn()`, which usually fires
+   * before she has said a word at all. Both want the same answer, so both ask
+   * the same question here instead of restating it and drifting apart.
+   */
+  private incomingGeneration(): number {
+    return this.turnActive ? this.generation : this.generation + 1;
+  }
+
   private handleServerMessage(message: LiveServerMessage) {
     const content = message.serverContent;
 
@@ -518,10 +539,35 @@ export class GeminiLiveEngine {
       // Her first word is the only proof the user's turn ended. Nothing else in
       // the stream says so — there is no `inputTranscription` terminator — so
       // without this the operator's half of the conversation is never finalised
-      // and never reaches the router.
+      // and never reaches the router. It runs above the suppression gate and
+      // outside it, deliberately: the operator spoke whether or not we are
+      // keeping the reply, and a turn dropped here is lost to the router for
+      // good.
       this.finalizeUserTurn();
-      this.outputTranscript += outputText;
-      this.emit({ type: "partial_assistant_answer", content: this.outputTranscript });
+
+      // Her WORDS are gated exactly as her audio is, for the same reason and
+      // against the same counter. Until this gate existed only the audio had
+      // one, so a superseded generation was silent but still became her
+      // caption and still went into `final_assistant_answer`. Measured on a
+      // live call, 2026-09-12: the shell barged in and answered from the
+      // agent's report, and the operator got the single line "It is not
+      // something I keep an eye on directly.38 gigabytes.", the abandoned
+      // conversational turn and the directed answer accumulated into one
+      // string with nothing between them.
+      //
+      // `incomingGeneration()` and not `this.generation`, which is the whole
+      // subtlety of this gate. This branch runs BEFORE the chunk block below,
+      // and the chunk block is where a new turn's generation is minted, so at
+      // the first transcript delta of a turn `this.generation` still names the
+      // PREVIOUS turn. A barge-in fired before she has spoken, the common
+      // case, condemns `generation + 1`; comparing directly here would judge
+      // the condemned turn's first words against the old number, find no
+      // match, and let exactly the measured line through while dropping the
+      // audio that went with it.
+      if (this.incomingGeneration() !== this.suppressedGeneration) {
+        this.outputTranscript += outputText;
+        this.emit({ type: "partial_assistant_answer", content: this.outputTranscript });
+      }
     }
 
     // Audio arrives on the SDK fast path as `message.data`; when the SDK does
@@ -586,10 +632,15 @@ export class GeminiLiveEngine {
       // lands on a new generation, with the anchor back at zero, interpolating
       // its first sample up from silence mid-sentence.
       //
-      // Stated plainly because it was not measured: whether Gemini actually
-      // sends `turnComplete` around a tool call on this model was not verified
-      // here. The guard costs one set lookup and is correct either way, which
-      // is the right trade against a fragment reaching the router.
+      // Measured since, and on this model the guard never fires. Across 12
+      // harness sessions on 2026-09-12 there was exactly ONE `turnComplete`
+      // per delegating turn, and it arrived after the function response had
+      // been answered and she had stopped speaking. The order every single
+      // time: setupComplete, a thought text part, `toolCall` with
+      // `turnComplete` false, audio and transcript, `generationComplete`,
+      // `turnComplete`. The guard stays because it is the correct handling for
+      // a model that does interleave one, not because the question is open,
+      // and on this one it costs a set lookup and nothing else.
       if (this.pendingToolCalls.size) return;
 
       this.turnActive = false;
@@ -720,17 +771,18 @@ export class GeminiLiveEngine {
    *
    * Gemini Live has no "cancel this generation" message. Be clear about what
    * this therefore is and is not: it is a LOCAL guard. The model may well
-   * carry on generating server-side, and we will keep receiving its audio; we
-   * simply stop forwarding it. The generation counter is what makes that
-   * precise — audio for the superseded generation is dropped, audio for the
-   * next real turn is not.
+   * carry on generating server-side, and we will keep receiving its audio and
+   * its transcript; we simply stop forwarding them. The generation counter is
+   * what makes that precise: both halves of the superseded generation are
+   * dropped, her voice and her words together, and neither half of the next
+   * real turn is.
    *
    * If no turn is in flight yet, the barge-in suppresses the NEXT one. That is
    * the common case, not an edge: the shell decides to answer locally the
    * moment the transcript lands, which is before she has said a word.
    */
   sendBargeIn(): void {
-    this.suppressedGeneration = this.turnActive ? this.generation : this.generation + 1;
+    this.suppressedGeneration = this.incomingGeneration();
     this.turnActive = false;
     this.outputTranscript = "";
     this.upsampleAnchor = 0;
@@ -741,12 +793,14 @@ export class GeminiLiveEngine {
     // has stopped waiting for. By the time the agent reports back, the operator
     // has been answered here and has usually said something else. Delivering
     // the result then would resume the superseded turn inside the new one, and
-    // the generation counter cannot save us: it gates AUDIO, and the model's
-    // continuation would still arrive as `outputTranscription`, accumulate into
-    // `outputTranscript` and surface as her caption and her
-    // `final_assistant_answer`. Answering a question nobody is still asking is
-    // the same class of failure as inventing the answer, which is what this
-    // whole path exists to stop.
+    // the generation counter cannot reach that far. It now gates both halves of
+    // a turn, the audio and the transcript alike, so nothing of the generation
+    // this barge-in condemns is heard or captioned. But a continuation spoken
+    // after a late function response arrives once a later turn has already
+    // started, so it is numbered with that later generation, which nothing has
+    // condemned, and it would be heard and read in full. Answering a question
+    // nobody is still asking is the same class of failure as inventing the
+    // answer, which is what this whole path exists to stop.
     //
     // The honest cost, since this is a LOCAL guard and the server never hears
     // it: the model is left waiting on a call we will never answer, and that

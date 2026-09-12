@@ -57,6 +57,77 @@ test("a fence holding one short value is read; a listing is still dropped", () =
   assert.equal(outcome("Here:\n```\nsrc/a.ts\nsrc/b.ts\n```"), "Here:");
 });
 
+test("the command she ran is working, not the answer, and is never spoken", () => {
+  /*
+    Heard on a live call 2026-09-12. Asked about disk space, the agent showed
+    the command in a fence and put the answer underneath it, and the operator
+    was read both:
+
+      "du -sh ~/Desktop The total size of all the files in your Desktop folder
+       is 38 gigabytes."
+      "df -h / You have about 26 gigabytes of available storage space
+       remaining."
+
+    Inlining the fence glued the command onto the front of the sentence, and
+    since the only full stop was at the very end, the whole line counted as
+    the first sentence. Nobody asked what was typed. What comes after a fence
+    is the answer; the fence itself was the working.
+  */
+  assert.equal(
+    outcome("```bash\ndu -sh ~/Desktop\n```\nThe total size of all the files in your Desktop folder is 38 gigabytes."),
+    "The total size of all the files in your Desktop folder is 38 gigabytes.",
+  );
+  assert.equal(
+    outcome("```bash\ndf -h /\n```\nYou have about 26 gigabytes of available storage space remaining."),
+    "You have about 26 gigabytes of available storage space remaining.",
+  );
+
+  // The same report arrives unfenced just as often: the command alone on the
+  // first line, with no punctuation to end it, and the answer on the next.
+  assert.equal(
+    outcome("du -sh ~/Desktop\nThe total size of all the files in your Desktop folder is 38 gigabytes."),
+    "The total size of all the files in your Desktop folder is 38 gigabytes.",
+  );
+  assert.equal(
+    outcome("df -h /\nYou have about 26 gigabytes of available storage space remaining."),
+    "You have about 26 gigabytes of available storage space remaining.",
+  );
+});
+
+test("a fence that is the last thing said is still the answer", () => {
+  // Position is the whole rule, so it has to be pinned from both sides. The
+  // block nothing follows is the payload and is read exactly as before, even
+  // when an earlier block in the same reply was working and was dropped.
+  assert.equal(outcome("The size is:\n```\n38G\n```"), "The size is: 38G");
+  assert.equal(outcome("```\n38G\n```"), "38G");
+  assert.equal(outcome("```bash\ndu -sh ~/Desktop\n```\nThe size is:\n```\n38G\n```"), "The size is: 38G");
+});
+
+test("dropping the working leaves no seam in the line", () => {
+  // A dropped block becomes a single space, so one sitting between two pieces
+  // of prose is where a double space or a leading one would show up. The
+  // synthesiser will not read them, but this string is also what gets logged
+  // and compared, so it has to come out as a person would have typed it.
+  const spoken = outcome(
+    "I checked both:\n```bash\ndu -sh ~/Desktop\ndf -h /\n```\nThe Desktop folder is 38 gigabytes and 26 remain free.",
+  );
+  assert.equal(spoken, "I checked both: The Desktop folder is 38 gigabytes and 26 remain free.");
+  assert.doesNotMatch(spoken, /\s\s/, "no double space where the block was");
+  assert.doesNotMatch(spoken, /^\s|\s$/, "and nothing left hanging off either end");
+});
+
+test("a sentence that merely mentions a command is left whole", () => {
+  // The unfenced rule is the one that could eat an answer, so it only fires
+  // on a line that cannot be a sentence: no terminating punctuation, and a
+  // flag or a path after a command name no one writes in prose. These two
+  // fail it on one count each and must survive untouched.
+  assert.equal(
+    outcome("npm run build is the one that fails\nI will look at it now."),
+    "npm run build is the one that fails I will look at it now.",
+  );
+  assert.equal(outcome("df -h / says 26 gigabytes.\nThat is plenty."), "df -h / says 26 gigabytes.");
+});
+
 /* ── When there is no answer, say so ──────────────────────────────────────── */
 
 test("an inspect run that came back with nothing admits it instead of saying Done", () => {

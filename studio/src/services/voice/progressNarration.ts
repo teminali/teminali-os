@@ -179,9 +179,77 @@ export function describeToolCall(call: NarratableToolCall): string | null {
  */
 const FENCE_VALUE_CHARS = 40;
 
-function unfence(block: string): string {
+/**
+ * A fence with prose after it is the working, not the answer.
+ *
+ * Heard on a live call 2026-09-12: "du -sh ~/Desktop The total size of all the
+ * files in your Desktop folder is 38 gigabytes." and "df -h / You have about
+ * 26 gigabytes of available storage space remaining." Both were an agent
+ * showing the command it ran in a fence and answering underneath it. Inlining
+ * the fence glued the command onto the front of the sentence, and because the
+ * only full stop was at the very end, the whole line counted as the first
+ * sentence and went to the operator, shell command and all.
+ *
+ * Position settles it without guessing at content: a block the assistant went
+ * on to explain is the working and goes, and a block with nothing after it is
+ * the payload, inlined exactly as it always was.
+ */
+function unfence(block: string, offset: number, whole: string): string {
+  if (whole.slice(offset + block.length).trim()) return " ";
   const body = block.replace(/^```[^\n]*\n?/, "").replace(/```$/, "").trim();
   return !body.includes("\n") && body.length <= FENCE_VALUE_CHARS ? ` ${body} ` : " ";
+}
+
+/**
+ * Command names that are not also ordinary English words, so a line starting
+ * with one was never the opening of a sentence. Words a person writes (find,
+ * make, test, head, open, go, less) are deliberately absent: this list only
+ * has to cover what an agent runs to look something up, and every name it
+ * gains is a sentence it might eat.
+ */
+const SHELL_VERBS = new Set([
+  "du", "df", "ls", "ps", "pwd", "rg", "grep", "sed", "awk", "wc", "diff", "stat", "tree",
+  "chmod", "chown", "mkdir", "rmdir", "rm", "mv", "cp", "ln", "tar", "unzip", "xargs",
+  "curl", "wget", "ssh", "scp", "rsync", "lsof", "netstat", "ifconfig", "uname", "whoami",
+  "npm", "npx", "pnpm", "yarn", "bun", "node", "deno", "tsc", "eslint", "vitest", "pytest",
+  "git", "docker", "kubectl", "brew", "pip", "pip3", "python", "python3", "cargo",
+  "systemctl", "journalctl", "sudo", "env",
+]);
+
+/** A flag, a path, a glob or a pipe: the parts of a line that no sentence has. */
+const SHELL_SHAPED = /^-{1,2}[A-Za-z0-9]|[\/~|>;*]|&&/;
+
+/** A full stop that ends something, as opposed to the one inside `src/a.ts`. */
+const SENTENCE_END = /[.!?](\s|$)/;
+
+/** Four or more plain words, which is more than any file listing carries. */
+function looksLikeProse(text: string): boolean {
+  return text.split(/\s+/).filter((word) => /^[A-Za-z][A-Za-z'-]*$/.test(word)).length >= 4;
+}
+
+/**
+ * The same report arrives without the fence just as often: the command alone
+ * on the first line, the answer on the next. Three things have to hold before
+ * a line is thrown away, because throwing away a real sentence is the worse
+ * failure. The line must end in no sentence punctuation; it must open with a
+ * command name that is not an English word and carry a flag or a path; and
+ * what follows it must read as prose. "npm run build is the one that fails"
+ * survives on the second count, "df -h / says 26 gigabytes." on the first.
+ */
+function dropLeadingCommandLines(text: string): string {
+  let rest = text;
+  for (;;) {
+    const newline = rest.indexOf("\n");
+    if (newline < 0) return rest;
+    const line = rest.slice(0, newline).trim();
+    const after = rest.slice(newline + 1);
+    if (!line || line.length > 80 || SENTENCE_END.test(line)) return rest;
+    const [verb, ...args] = line.split(/\s+/);
+    if (!SHELL_VERBS.has(verb.toLowerCase())) return rest;
+    if (!args.some((arg) => SHELL_SHAPED.test(arg))) return rest;
+    if (!looksLikeProse(after)) return rest;
+    rest = after;
+  }
 }
 
 /**
@@ -198,7 +266,7 @@ function unfence(block: string): string {
  * backticks; lose only the backticks.
  */
 function firstSentence(text: string, max = 160): string {
-  const clean = text
+  const clean = dropLeadingCommandLines(text)
     .replace(/```[\s\S]*?```/g, unfence)
     .replace(/`([^`]*)`/g, "$1")
     .replace(/[#*_>|]/g, " ")
