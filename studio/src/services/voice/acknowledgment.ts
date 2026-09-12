@@ -1,14 +1,58 @@
 import { DEFAULT_VOICE_SETTINGS } from "./types.ts";
 
 /*
-  The real list, not a third copy of it. This file, `turnIntent.ts` and
-  `settings.wakeWords` each carried their own, so adding a wake word in
-  settings reached exactly one of the three.
+  The words that always work. A wake word the operator adds in Settings never
+  reached this file, because the list was frozen from the defaults at module
+  load: the same "third copy" this comment used to claim had been fixed.
+
+  The operator's list now arrives as the second argument and is merged on top,
+  the way `stripWakeWord(text, wakeWords)` in `addressing.ts` already takes its
+  list as a parameter instead of freezing one. Callers with no settings in hand
+  still get the defaults.
 */
-const WAKE_WORDS = [...DEFAULT_VOICE_SETTINGS.wakeWords, "assistant"];
+const BASE_WAKE_WORDS = [...DEFAULT_VOICE_SETTINGS.wakeWords, "assistant"];
 const LEADING_FILLERS = /^(hey|yo|so|well|um|uh|please|can\s+you|could\s+you|would\s+you|just)\s+/i;
-const WAKE_WORD_PATTERN = new RegExp(`^(?:hey\\s+|yo\\s+|ok(?:ay)?\\s+)?(?:${WAKE_WORDS.join("|")})[\\s,.:!—-]+`, "i");
-const TRAILING_WAKE_WORD_PATTERN = new RegExp(`[\\s,]+(?:${WAKE_WORDS.join("|")})[\\s.!?]*$`, "i");
+
+/*
+  An operator can type anything into the wake-word field, so the alternation is
+  escaped before it becomes a pattern. Unescaped, a word holding "(" throws a
+  SyntaxError on the chat's send path.
+*/
+function escapeForPattern(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+interface WakePatterns {
+  leading: RegExp;
+  trailing: RegExp;
+}
+
+let cachedKey: string | null = null;
+let cachedPatterns: WakePatterns | null = null;
+
+/*
+  Compiled per distinct list and memoised: this runs on every send, but the list
+  changes only when the operator edits Settings. Longest first, so "teminali" is
+  never consumed as "temi" with a stray "nali" left behind.
+*/
+function wakePatterns(wakeWords?: readonly string[]): WakePatterns {
+  const words = Array.from(
+    new Set([...(wakeWords ?? []), ...BASE_WAKE_WORDS].map((word) => word.trim())),
+  )
+    .filter((word) => word.length > 0)
+    .sort((a, b) => b.length - a.length);
+  const key = words.join(" ");
+  if (cachedPatterns && cachedKey === key) return cachedPatterns;
+
+  const alternation = words.map(escapeForPattern).join("|");
+  const patterns: WakePatterns = {
+    leading: new RegExp(`^(?:hey\\s+|yo\\s+|ok(?:ay)?\\s+)?(?:${alternation})[\\s,.:!—-]+`, "i"),
+    trailing: new RegExp(`[\\s,]+(?:${alternation})[\\s.!?]*$`, "i"),
+  };
+  cachedKey = key;
+  cachedPatterns = patterns;
+  return patterns;
+}
 
 const ACTION_VERBS = new Set([
   "fix", "repair", "build", "create", "make", "add", "implement", "refactor",
@@ -20,14 +64,18 @@ const ACTION_VERBS = new Set([
  * Generates an immediate conversational verbal acknowledgment ("On it", "Right away", etc.)
  * ONLY for explicit action commands or affirmations, avoiding canned robotic fillers for greetings,
  * queries, and casual conversations.
+ *
+ * Pass `wakeWords` from `VoiceSettings` so a word the operator added is stripped
+ * here too; omitting it falls back to the built-in list.
  */
-export function getImmediateAcknowledgment(text: string): string | null {
+export function getImmediateAcknowledgment(text: string, wakeWords?: readonly string[]): string | null {
   if (!text) return null;
+  const patterns = wakePatterns(wakeWords);
   let cleaned = text.trim();
   // Strip trailing wake words: "hello teminali" -> "hello"
-  cleaned = cleaned.replace(TRAILING_WAKE_WORD_PATTERN, "").trim();
+  cleaned = cleaned.replace(patterns.trailing, "").trim();
   // Strip leading wake words: "temy, fix this" -> "fix this"
-  cleaned = cleaned.replace(WAKE_WORD_PATTERN, "").trim();
+  cleaned = cleaned.replace(patterns.leading, "").trim();
   // Strip leading conversational fillers: "can you fix this" -> "fix this", "so hello" -> "hello"
   cleaned = cleaned.replace(LEADING_FILLERS, "").trim();
 

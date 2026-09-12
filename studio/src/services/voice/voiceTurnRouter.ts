@@ -417,6 +417,13 @@ export function describeEngineSwitch(label: string, busy: boolean): string {
  *
  * Narrow on purpose, and safe when it is wrong: the bridge only answers from a
  * report it actually has, and otherwise delegates exactly as before.
+ *
+ * Consulted twice in the `instruction` branch, and the second call is the one
+ * that does the work. Where `classifyMachineAction` has already matched it only
+ * annotates the decision trail. Where the gate found nothing, it is what routes
+ * the question to the bridge at all, and without it four of the six phrasings
+ * below went to the persona instead. See that branch for why it is gated on an
+ * idle session and why it lives there rather than in the gate's own patterns.
  */
 const RUN_RECALL_PATTERNS: RegExp[] = [
   /^(?:so|and|ok|okay)?\s*(?:what|which)\s+(?:files?\s+)?(?:did|has|have)\s+(?:it|that|you|the\s+(?:agent|assistant|run|task))\b/,
@@ -593,6 +600,69 @@ export function routeVoiceTurn(text: string, state: VoiceTurnState): VoiceTurnDe
           line,
         );
       }
+
+      /*
+        The same question, in the wording the gate cannot see.
+
+        Measured with nothing running: "what did it change" and "what files did
+        it touch" reach the bridge, while "what did you change", "what just
+        happened", "how did it go" and "tell me what you did" reached the
+        persona instead. The difference is a pronoun and a verb list, not a
+        difference in what was asked. `STATE_QUESTIONS` needs one of `it`, `this`
+        or `that` to be somewhere in the sentence at all, and its verb list holds
+        "changed" but neither "happened" nor "go", so the four phrasings that
+        address her directly or name no object fall out of the gate entirely.
+        The persona has never seen the finished run's report, so it answers from
+        character. That is the fabrication §6 forbids, about work that really was
+        done and really was written down.
+
+        `isRunRecallQuestion` already recognised all six. It was only ever
+        consulted on the branch above, where a machine action had already
+        matched, so for these four it never ran at all. This is the same
+        recogniser asked in the one place it could not reach.
+
+        It lives here rather than in `classifyMachineAction` for three reasons,
+        and each is also what keeps it as narrow as the recogniser's own comment
+        promises.
+
+        First, it needs an IDLE session, and `busy` is the router's own input:
+        `classifyMachineAction(text)` is pure by contract and cannot see it.
+        Widening the gate's patterns instead would fire in both states, and
+        while a run is live these questions are about the thing in flight and
+        the branches above own them.
+
+        Second, this is a FALL-THROUGH, reached only once the gate has already
+        returned null. It can turn `converse` into `delegate` and nothing else,
+        so no deliberate refusal above it moves and no instruction is
+        reclassified. "Run the tests" is still shell, "open the dukabot folder"
+        is still open, "what should I do next" is still conversation.
+
+        Third, a run-recall question is not a request for work, which is the
+        only question `machineAction.ts` asks. It is a read of a report the
+        bridge is already holding. `isMachineAction` is re-exported from
+        `teminaliAgentBridge` and pinned in both directions by
+        `tests/voice-delegation-safety.test.mjs`, so teaching the gate this
+        concept would fork it across three modules that could then disagree.
+
+        Safe when wrong, for the reason the recogniser already gives:
+        `teminaliAgentBridge` answers from a report only when it actually holds
+        a recent one, and otherwise delegates exactly as before.
+
+        `inspect` is the kind on purpose. It is what the gate already returns
+        for the two siblings that work, so the four join them rather than
+        arriving as some new family that the acknowledgement and the outcome
+        summary have never been told about.
+      */
+      if (!state.busy && isRunRecallQuestion(clean)) {
+        return decision(
+          intent,
+          `${reason} · No machine action in it, but it asks about a run that has already finished. The bridge answers from its own report if it still holds one, and delegates if it does not.`,
+          { kind: "delegate", prompt: clean, action: "inspect" },
+          true,
+          acknowledgeAction("inspect", now),
+        );
+      }
+
       return decision(intent, reason, { kind: "converse" }, false, null);
     }
   }

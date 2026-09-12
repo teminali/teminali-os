@@ -404,3 +404,55 @@ export function classifyTurnIntent(text: string, context: TurnIntentContext): Tu
 
   return { intent: "instruction", reason: "Reads as a new instruction." };
 }
+
+/**
+ * Where a second instruction starts, when one utterance carries two.
+ *
+ * "Open the DukaBot folder and run the tests" is two jobs said in one breath,
+ * which is how people talk and not how any parser on this lane reads. Each of
+ * them matches on a fragment and returns the moment it recognises one, so the
+ * folder opened and the tests were never mentioned again: the stage acted on
+ * the first clause and dropped the rest without saying it had.
+ *
+ * This only says where the seam is. Whether the seam is real is the caller's
+ * question and a much narrower one. The stage splits only where it can prove
+ * the clause it already acted on parsed the same way alone as it did inside
+ * the whole sentence, which is the same as proving the tail was ignored. Conversation is left whole: "run it and tell me what happens" is
+ * one instruction to the model, and the model is perfectly able to read it.
+ *
+ * The first seam only. "Open DukaBot and run the tests and push it" comes back
+ * as a head and a tail that is itself two clauses, and the tail is asked the
+ * same question when its turn comes.
+ */
+const CLAUSE_SEAM = /\s*,?\s+(?:and\s+then|and\s+after\s+that|after\s+that|and\s+also|and|then)\s+/i;
+
+export interface ClauseSplit {
+  /** The first instruction, as spoken. */
+  head: string;
+  /** Everything after the seam, as spoken. */
+  tail: string;
+}
+
+/**
+ * Split at the first seam, or null when there is nothing worth splitting.
+ *
+ * Both halves have to survive the same stripping `classifyTurnIntent` does
+ * before it will believe an utterance means anything: a tail of "please" or
+ * "for a second" is a qualifier on the clause before it, not a second job, and
+ * re-running it as one would answer a politeness with a model turn.
+ */
+export function splitTrailingClause(text: string): ClauseSplit | null {
+  const trimmed = (text ?? "").trim();
+  if (!trimmed) return null;
+  const seam = CLAUSE_SEAM.exec(trimmed);
+  if (!seam || seam.index <= 0) return null;
+
+  const head = trimmed.slice(0, seam.index).trim();
+  const tail = trimmed.slice(seam.index + seam[0].length).trim();
+  if (!head || !tail) return null;
+
+  const substantial = (part: string) => withoutQualifierTail(withoutFillers(normalise(part))).length > 0;
+  if (!substantial(head) || !substantial(tail)) return null;
+
+  return { head, tail };
+}

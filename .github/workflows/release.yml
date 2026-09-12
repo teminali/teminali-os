@@ -36,10 +36,21 @@ permissions:
 jobs:
   verify:
     name: Verify
-    # macOS, not the cheaper Linux runner. Parts of this suite exercise
-    # macOS-specific paths — the pointer helper's contract, screencapture,
-    # Guardian's telemetry — and running them somewhere they were never proven
-    # would either fail the release or pass while checking less than it looks.
+    # macOS, not the cheaper Linux runner, and the reason is smaller than it
+    # used to say here. The old comment claimed this job covered the pointer
+    # helper's contract, screencapture and Guardian's telemetry on a real mac.
+    # An audit on 2026-09-13 found none of that is true: the pointer contract
+    # tests drive a /bin/sh fake, the Guardian tests parse frozen captured
+    # strings, and no test invokes screencapture at all. What is genuinely
+    # macOS-only is one test that reads the real /Applications
+    # (tests/assistant-launch.test.mjs:373) and the fact that build:pointer
+    # compiles the Swift source here rather than later in the build matrix.
+    #
+    # So this can move to ubuntu-latest and save the 10x macOS multiplier, but
+    # only after a workflow_dispatch rehearsal proves the suite is green on
+    # Linux. It has never once run there, and guessing is how a release breaks.
+    # The mechanical blockers are already cleared: build:pointer is gated below
+    # and tests/bin-paths.test.mjs no longer hard-asserts a Homebrew path.
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
@@ -55,7 +66,14 @@ jobs:
       # file fails to import and the suite is one red test short of the truth.
       - run: npm run voice:install
         working-directory: studio
+        # onnxruntime-node's postinstall pulls the CUDA 12 execution provider
+        # on linux/x64 only, hundreds of megabytes this job never uses.
+        env:
+          ONNXRUNTIME_NODE_INSTALL: skip
+      # Gated the same way the build matrix gates it. The script exits 1 off
+      # darwin by design, so an ungated copy is what pins this job to macOS.
       - run: npm run build:pointer
+        if: runner.os == 'macOS'
         working-directory: studio
       - run: npm run typecheck
         working-directory: studio

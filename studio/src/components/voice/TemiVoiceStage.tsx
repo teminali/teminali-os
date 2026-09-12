@@ -11,6 +11,7 @@ import { PROFILES_LIST, useStudioStore } from "../../store/studioStore";
 import { PERMISSION_LABELS } from "../chat/ModelPicker";
 import { VoiceAudioEngine } from "../../services/voice/voiceAudioEngine";
 import { GeminiLiveEngine } from "../../services/voice/geminiLiveEngine";
+import { geminiLiveRemedy, type GeminiLiveRemedy } from "../../services/voice/geminiLiveToken";
 import { CaptionPacer } from "../../services/voice/captionPacer";
 import { TeminaliAgentBridge, type TaskDelegationOptions } from "../../services/voice/teminaliAgentBridge";
 import { routeVoiceTurn } from "../../services/voice/voiceTurnRouter";
@@ -42,6 +43,7 @@ import {
   parseEditorCommand,
   type EditorCommand,
 } from "../../services/voice/editorActions";
+import { splitTrailingClause } from "../../services/voice/turnIntent";
 import { WorkspaceService, type ProjectsResponse } from "../../services/workspaceService";
 import { dialogueFromMessages, messagesFromDialogue } from "../../utils/sessionDialogue";
 import { EMPTY_HISTORY, newer, older, remember, stopBrowsing, type PromptHistory } from "../../utils/promptHistory";
@@ -123,6 +125,36 @@ const describeVoiceError = (error: unknown): string => {
 };
 
 /**
+ * What the voice lane has to say for itself, and what can be done about it.
+ *
+ * The text and the remedy travel together so they cannot disagree: a note that
+ * arrives with no remedy clears the button the note before it put up, which is
+ * what keeps "Add key" off a banner that has moved on to saying the gateway is
+ * down. `remedy` is absent far more often than it is present: most failures
+ * are news, not a thing with a button behind it.
+ */
+interface VoiceNote {
+  text: string;
+  remedy?: GeminiLiveRemedy;
+}
+
+/** Shared so clearing the note twice is one render, not two. */
+const NO_VOICE_NOTE: VoiceNote = { text: "" };
+
+/**
+ * Where a turn came from, which decides two things the operator never sees.
+ *
+ * `spoken` reached the model through the live socket and is already being
+ * answered, so acting on it locally means barging in first. `typed` was never
+ * heard, so it has to be sent. `clause` is the second half of a spoken
+ * sentence the stage split for itself: the model heard it inside the whole
+ * utterance and the barge-in already happened when the first half was acted
+ * on, so it needs neither, and doing either again would cut the line
+ * confirming the clause before it.
+ */
+type TurnSource = "spoken" | "typed" | "clause";
+
+/**
  * Enough of the timeline store to answer "is there an edit open?".
  *
  * Structural on purpose: the video domain is a dynamic import on this screen
@@ -147,7 +179,7 @@ export const TemiVoiceStage: React.FC<TemiVoiceStageProps> = ({
   const [isWsConnected, setIsWsConnected] = useState(false);
   // What the voice engine says about reaching Gemini Live. Empty while it is
   // healthy: a working assistant should not narrate that it is working.
-  const [voiceNote, setVoiceNote] = useState("");
+  const [voiceNote, setVoiceNote] = useState<VoiceNote>(NO_VOICE_NOTE);
   /*
     The conversation lives in the store, not here.
 
@@ -227,6 +259,13 @@ export const TemiVoiceStage: React.FC<TemiVoiceStageProps> = ({
 
   const workspacePath = useStudioStore((state) => state.workspacePath);
   const projectLabel = workspacePath ? (workspacePath.split("/").filter(Boolean).pop() ?? null) : null;
+
+  /* The key field the banner offers, and the count that says one was filled
+     in. Both live on the store because the two save sites are elsewhere in
+     the shell, a modal at `App` level and a card in settings, and neither
+     of them knows this screen exists. */
+  const setGeminiKeyModalOpen = useStudioStore((state) => state.setGeminiKeyModalOpen);
+  const providerKeySaves = useStudioStore((state) => state.providerKeySaves);
 
   // There is no Teminali OS chat any more, so this picker is the only place the
   // engine can be chosen — and the bridge reads the activity store's engine, not
@@ -390,7 +429,7 @@ export const TemiVoiceStage: React.FC<TemiVoiceStageProps> = ({
   const animFrameRef = useRef<number | null>(null);
   // The socket effect runs once and must keep running once — putting the turn
   // handler in its dependency list would reopen the live session on every render.
-  const performTurnRef = useRef<((text: string, source: "spoken" | "typed") => void) | null>(null);
+  const performTurnRef = useRef<((text: string, source: TurnSource) => void) | null>(null);
   // What Temi last said, so "say that again" has something to say again.
   const lastSpokenRef = useRef<string | null>(null);
   const isSpeakingRef = useRef(false);
@@ -804,7 +843,7 @@ export const TemiVoiceStage: React.FC<TemiVoiceStageProps> = ({
       // A socket that opened is a socket that works, and the note is the
       // record of a failure that is now over. `describeGeminiLive` already
       // returns "" on success, so this only ever clears a stale line.
-      if (!cancelled) setVoiceNote("");
+      if (!cancelled) setVoiceNote(NO_VOICE_NOTE);
     };
     protocol.onDisconnected = () => {
       setIsWsConnected(false);
@@ -818,7 +857,17 @@ export const TemiVoiceStage: React.FC<TemiVoiceStageProps> = ({
        than a tooltip on a 2.5px dot. */
     protocol.onError = (error) => {
       if (cancelled) return;
-      setVoiceNote(`Temi's voice hit an error: ${describeVoiceError(error)}`);
+      /* A note that came with a remedy outranks this line, because this line
+         is the same failure said worse. A refused token fires `onNote` and
+         then `onError` one statement later, so a missing key reached the
+         banner as the sentence naming the fix and was overwritten, before a
+         frame was painted, by "Temi's voice hit an error: no-key: ...", which is
+         raw pair the engine builds for the console. The remedy is cleared by
+         the next note whatever it says, so nothing gets pinned here for
+         longer than the failure behind it lasts. */
+      setVoiceNote((current) =>
+        current.remedy ? current : { text: `Temi's voice hit an error: ${describeVoiceError(error)}` },
+      );
     };
 
     protocol.onMessage = (msg) => {
@@ -1022,7 +1071,13 @@ export const TemiVoiceStage: React.FC<TemiVoiceStageProps> = ({
        than from a status call here -- a token is `uses: 1`, so a second fetch
        just to render a sentence would burn one. */
     protocol.onNote = (note) => {
-      if (!cancelled) setVoiceNote(note);
+      /* The remedy is read off the note here rather than shipped with it,
+         because `onNote` is typed `(note: string) => void` and the engine
+         builds the argument: there is no room in the callback for a second
+         field without changing the engine. `geminiLiveRemedy` compares
+         against the same constant `describeGeminiLive` returns, so the
+         sentence and its button are one edit, not two. */
+      if (!cancelled) setVoiceNote({ text: note, remedy: geminiLiveRemedy(note) ?? undefined });
     };
     void protocol.connect();
 
@@ -1060,6 +1115,34 @@ export const TemiVoiceStage: React.FC<TemiVoiceStageProps> = ({
       }
     };
   }, [logAction]);
+
+  /*
+    A key pasted while this screen is open used to change nothing until quit.
+
+    The effect above builds the engine once and depends on `logAction` alone,
+    so the `no-key` refusal it got on mount was the last word that instance
+    ever had: the gateway re-reads the provider store on every mint and would
+    have handed out a token happily, but nothing asked it for one again. The
+    operator's fix was to quit the app, which is the fix nobody should have to
+    find. This asks again instead.
+
+    Deliberately its own effect. Adding the save count to the dependency array
+    above would tear down `VoiceAudioEngine` and the microphone with it, and if
+    that ever fired while he was mid-sentence it would cut him off to fix a
+    problem he no longer has.
+
+    One attempt per save, and no guard against a live session needed: the
+    engine's `connect()` already returns immediately when it holds one or is
+    mid-connect, so a key saved for some other provider while voice is up
+    costs nothing. A wrong key does not loop either: the attempt reports the
+    new failure through `onNote` and stops there, and whatever retry ladder
+    that failure deserves is the engine's to run, not this screen's.
+  */
+  const keySavesAtMount = useRef(providerKeySaves);
+  useEffect(() => {
+    if (providerKeySaves === keySavesAtMount.current) return;
+    void protocolRef.current?.connect();
+  }, [providerKeySaves]);
 
   /**
    * One parsed editor command, executed, and reported honestly.
@@ -1108,9 +1191,38 @@ export const TemiVoiceStage: React.FC<TemiVoiceStageProps> = ({
   // `routeVoiceTurn` decides; this performs. The split is deliberate: the
   // decision is pure and tested, and everything socket-shaped lives here.
   const performVoiceTurn = useCallback(
-    (text: string, source: "spoken" | "typed") => {
+    (text: string, source: TurnSource) => {
       const clean = text.trim();
       if (!clean) return;
+
+      /* ── The rest of the sentence ─────────────────────────────────────────
+         Every parser below matches on a fragment and the stage returns the
+         moment one of them recognises something, so "open the DukaBot folder
+         and run the tests" opened the folder and threw the tests away without
+         a word. The clause was not misheard and not refused; it was never
+         looked at.
+
+         The proof that a tail was ignored is that the head parses, alone, to
+         exactly what the whole sentence parsed to: the parser reached its
+         verdict without reading past the seam. Anything else and the split is
+         a guess, so the turn is left whole and behaves as it always did.
+         Conversation never comes through here at all, because the router is
+         handed the whole utterance and the model reads both clauses itself.
+
+         `JSON.stringify` is the comparison because these verdicts are flat
+         records built at one site each, so two equal ones serialise the same
+         way, and neither module exports an equality this can borrow. */
+      const tailIgnoredBy = <T,>(parse: (clause: string) => T, whole: T): string | null => {
+        const split = splitTrailingClause(clean);
+        if (!split) return null;
+        return JSON.stringify(parse(split.head)) === JSON.stringify(whole) ? split.tail : null;
+      };
+      /* Not `spoken`, whatever the tail came from: the model already heard it
+         inside the sentence, and the barge-in that silenced her fired when the
+         first clause was acted on. */
+      const performTail = (tail: string | null) => {
+        if (tail) performTurnRef.current?.(tail, source === "typed" ? "typed" : "clause");
+      };
 
       /* ── The transport, before anything else at all ───────────────────────
          "pause" is in STOP_PHRASES. So is "wait", so is "hold on". With a video
@@ -1186,14 +1298,15 @@ export const TemiVoiceStage: React.FC<TemiVoiceStageProps> = ({
          one gate is easier to keep right than two and mid-run the assistant
          answers instead. */
       const store = useStudioStore.getState();
-      const workspaceAction = parseWorkspaceCommand(clean, {
+      const workspaceOptions = {
         candidates: workspaceCandidatesRef.current,
         /* Only when the gateway has confirmed it. The initial `workspacePath`
            is a hardcoded guess (`studioStore.ts`), and an unconfirmed root must
            not get to decide that a folder is "local" — that turns a switch into
            a reveal against a root we are not actually bound to. */
         workspacePath: store.workspaceRootConfirmed ? store.workspacePath : undefined,
-      });
+      };
+      const workspaceAction = parseWorkspaceCommand(clean, workspaceOptions);
 
       /* The line that tells a turn the parser refused apart from one the gate
          held: both end in silence and they need opposite fixes. */
@@ -1212,6 +1325,11 @@ export const TemiVoiceStage: React.FC<TemiVoiceStageProps> = ({
           audioRef.current?.stopTTSPlayback();
         }
 
+        const workspaceTail = tailIgnoredBy(
+          (clause) => parseWorkspaceCommand(clause, workspaceOptions),
+          workspaceAction,
+        );
+
         if (workspaceAction.kind === "reveal-folder") {
           /* `relativePath`, not `path`: `revealPath` keys the open set by
              workspace-relative path, so an absolute one opens nothing. */
@@ -1219,6 +1337,9 @@ export const TemiVoiceStage: React.FC<TemiVoiceStageProps> = ({
           const name = workspaceAction.relativePath.split("/").filter(Boolean).pop() ?? "it";
           speakLineRef.current(`Opening ${name} in the tree.`, "verbatim");
           showToast(`Revealed ${workspaceAction.relativePath}`);
+          // Nothing about the root moved, so the rest of the sentence can be
+          // acted on where it was said.
+          performTail(workspaceTail);
           return;
         }
 
@@ -1229,6 +1350,7 @@ export const TemiVoiceStage: React.FC<TemiVoiceStageProps> = ({
              already bound to would throw away the operator's open tree to
              arrive where he is. */
           speakLineRef.current(`We're already in ${workspaceAction.label}.`, "verbatim");
+          performTail(workspaceTail);
           return;
         }
 
@@ -1242,10 +1364,26 @@ export const TemiVoiceStage: React.FC<TemiVoiceStageProps> = ({
             useStudioStore.getState().setWorkspacePath(projects.current.path);
             absorbProjects(projects);
             speakLineRef.current(`Switched to ${projects.current.name || target}.`, "verbatim");
+            /* Here and not before the switch, which is the whole difficulty
+               with "open the DukaBot folder and run the tests": the tests are
+               meant to be DukaBot's. Handing the clause to the assistant while
+               the old root is still bound would run it against the repository
+               he just asked to leave, and he would be reading a green suite
+               from the wrong project. */
+            performTail(workspaceTail);
           })
           .catch((error: unknown) => {
             const reason = error instanceof Error ? error.message : String(error);
-            speakLineRef.current(`I could not open ${target}: ${reason}`, "verbatim");
+            /* The tail is dropped here rather than run, because the root it
+               was meant for is not the root we are standing in. Dropped out
+               loud, though: this lane's rule is that a refusal he cannot hear
+               is indistinguishable from a command that was never heard. */
+            speakLineRef.current(
+              workspaceTail
+                ? `I could not open ${target}: ${reason} I've left the rest of that alone.`
+                : `I could not open ${target}: ${reason}`,
+              "verbatim",
+            );
           });
         return;
       }
@@ -1317,6 +1455,10 @@ export const TemiVoiceStage: React.FC<TemiVoiceStageProps> = ({
           audioRef.current?.stopTTSPlayback();
         }
         runEditorCommand(editorCommand);
+        /* Unlike the switch above, an edit binds nothing the next clause has
+           to resolve against, so "cut here and delete that" does not have to
+           wait for the cut to land before the delete is read. */
+        performTail(tailIgnoredBy(parseEditorCommand, editorCommand));
         return;
       }
 
@@ -1676,7 +1818,7 @@ export const TemiVoiceStage: React.FC<TemiVoiceStageProps> = ({
   const isVoiceOn = isAudioStarted && !isMicMuted;
 
   const statusTone = !isWsConnected
-    ? voiceNote
+    ? voiceNote.text
       ? "bg-rose-500"
       : "bg-amber-400"
     : isSpeaking
@@ -1688,7 +1830,7 @@ export const TemiVoiceStage: React.FC<TemiVoiceStageProps> = ({
           : "bg-[#00994f]";
 
   const statusTitle = !isWsConnected
-    ? voiceNote || "Connecting Temi's voice…"
+    ? voiceNote.text || "Connecting Temi's voice…"
     : isSpeaking
       ? "Temi is speaking"
       : isHearing
@@ -1842,18 +1984,37 @@ export const TemiVoiceStage: React.FC<TemiVoiceStageProps> = ({
           gateway is down" looked identical, which is two different next steps
           behind one blank screen. A failure the operator can act on is written
           out in words. The dot stays; it is now the summary, not the record. */}
-      {(voiceNote || approvalPending) && (
+      {(voiceNote.text || approvalPending) && (
         <div className="relative z-40 flex flex-shrink-0 flex-col items-center gap-2 px-5 pb-2">
-          {voiceNote && (
+          {voiceNote.text && (
             <div
               role="status"
               aria-live="polite"
               className={`${COLUMN} flex items-start gap-3 rounded-xl border border-rose-500/40 bg-rose-500/10 px-3.5 py-2 text-[12.5px] leading-snug text-rose-100`}
             >
-              <span className="flex-1">{voiceNote}</span>
+              <span className="flex-1">{voiceNote.text}</span>
+              {/* The sentence named the fix and then left him to find it. The
+                  key field is a modal two clicks away through a settings page
+                  called "Local Models & Weights", which is not a place anybody
+                  guesses from the word "key", so the banner opens it. First in
+                  the row and filled rather than bare, because it is the thing
+                  to do and Dismiss is the thing to do instead; first in the DOM
+                  too, so a keyboard reaches the fix before the escape from it.
+                  Only rendered behind a remedy: a button on "the gateway is not
+                  running" would open a field that changes nothing, which is
+                  worse than no button at all. */}
+              {voiceNote.remedy === "gemini-key" && (
+                <button
+                  type="button"
+                  onClick={() => setGeminiKeyModalOpen(true)}
+                  className="flex-shrink-0 rounded-md bg-rose-500/25 px-2 py-0.5 text-[11px] font-medium text-white transition-colors hover:bg-rose-500/40"
+                >
+                  Add key
+                </button>
+              )}
               <button
                 type="button"
-                onClick={() => setVoiceNote("")}
+                onClick={() => setVoiceNote(NO_VOICE_NOTE)}
                 className="flex-shrink-0 rounded-md px-2 py-0.5 text-[11px] text-rose-200/80 transition-colors hover:bg-rose-500/20 hover:text-white"
               >
                 Dismiss

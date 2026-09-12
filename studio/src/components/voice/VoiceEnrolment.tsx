@@ -2,12 +2,20 @@ import React, { useState } from "react";
 import { Mic, Check, Loader2, Trash2, ShieldCheck, AlertTriangle } from "lucide-react";
 
 /**
- * Voice enrolment — teaching the studio which voice is yours.
+ * Voice enrolment: teaching Teminali OS which voice is yours.
  *
  * Three short clips, deliberately different sentences, so the resulting print
  * describes the speaker rather than whatever phrase happened to be said. The
  * copy is honest about the limits of the on-device matcher, because a security
  * control that oversells itself is worse than one that states its range.
+ *
+ * It is also honest about reach, which the copy previously was not. The
+ * voiceprint gates the DICTATION lane only: `conversation.ts` is the one
+ * consumer of `requireSpeakerMatch`, and `TemiVoiceStage.tsx` passes
+ * `hasProfile: false` and `speakerMatch: null` into `scoreAddressing`, so
+ * Temi's live conversation never compares a voice against this profile.
+ * Calling it the thing that makes an always-open microphone safe named the
+ * one lane it does not cover.
  */
 
 const PHRASES = [
@@ -66,8 +74,10 @@ export const VoiceEnrolment: React.FC<VoiceEnrolmentProps> = ({
       <div className="flex items-start gap-2 text-2xs text-ink-faint">
         <ShieldCheck size={13} className="text-success flex-shrink-0 mt-px" />
         <p>
-          Record three short clips. Afterwards the studio can ignore speech that is not yours, which is what makes an
-          always-open microphone usable in a room with other people. Your voice never leaves this machine.
+          Record the three lines below; two is enough if you are in a hurry. Afterwards dictation and hands-free turns
+          from the composer can ignore speech that is not yours, which is what makes them usable in a room with other
+          people. It does not gate Temi's live conversation, which uses her name instead. The clips are turned into a
+          voiceprint here and kept on this Mac. No audio is uploaded, and deleting the profile deletes it.
         </p>
       </div>
 
@@ -76,7 +86,8 @@ export const VoiceEnrolment: React.FC<VoiceEnrolmentProps> = ({
           <AlertTriangle size={13} className="flex-shrink-0 mt-px" />
           <p>
             Running the on-device matcher. It reliably tells you apart from a clearly different voice, but not from a
-            similar one. Install the VibeVoice sidecar for proper speaker verification.
+            similar one. Install the VibeVoice sidecar, and select it as the speech engine, for proper speaker
+            verification.
           </p>
         </div>
       )}
@@ -123,7 +134,11 @@ export const VoiceEnrolment: React.FC<VoiceEnrolmentProps> = ({
       </div>
 
       {error && <p className="text-2xs text-danger">{error}</p>}
-      {saved && <p className="text-2xs text-success">Profile saved. You can now switch on “Only respond to my voice”.</p>}
+      {saved && (
+        <p className="text-2xs text-success">
+          Profile saved. “Only respond to my voice” can now be switched on, and it applies to dictation.
+        </p>
+      )}
 
       <div className="flex items-center gap-2">
         {hasProfile && (

@@ -20,9 +20,13 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
+import { readFileSync } from "node:fs";
 
 import { scoreAddressing, stripWakeWord, FOLLOW_UP_WINDOW_MS } from "../src/services/voice/addressing.ts";
 import { SelfAudioMonitor, SELF_AUDIO_TAIL_MS } from "../src/services/voice/selfAudio.ts";
+import { describeGeminiLive, geminiLiveRemedy } from "../src/services/voice/geminiLiveToken.ts";
+import { splitTrailingClause } from "../src/services/voice/turnIntent.ts";
+import { parseWorkspaceCommand, PROJECTS_ROOT } from "../src/services/voice/workspaceActions.ts";
 
 const stage = await readFile(new URL("../src/components/voice/TemiVoiceStage.tsx", import.meta.url), "utf8");
 
@@ -308,7 +312,7 @@ test("an engine error is heard by something", () => {
     was completely silent.
   */
   assert.ok(/protocol\.onError = \(error\) => \{/.test(stage));
-  assert.ok(/setVoiceNote\(`Temi's voice hit an error: \$\{describeVoiceError\(error\)\}`\)/.test(stage));
+  assert.ok(/text: `Temi's voice hit an error: \$\{describeVoiceError\(error\)\}`/.test(stage));
   const connected = stage.indexOf("protocol.onConnected =");
   const errored = stage.indexOf("protocol.onError =");
   const message = stage.indexOf("protocol.onMessage =");
@@ -317,11 +321,98 @@ test("an engine error is heard by something", () => {
 });
 
 test("a voice failure is written out, not hidden in the tooltip of a 2.5px dot", () => {
-  assert.ok(/\{voiceNote\}<\/span>/.test(stage), "the note must render as text a screen recording can show");
+  assert.ok(/\{voiceNote\.text\}<\/span>/.test(stage), "the note must render as text a screen recording can show");
   assert.ok(/aria-live="polite"/.test(stage));
-  assert.ok(/onClick=\{\(\) => setVoiceNote\(""\)\}/.test(stage), "persistent, but dismissible");
+  assert.ok(/role="status"/.test(stage), "and it must still announce itself");
+  assert.ok(/onClick=\{\(\) => setVoiceNote\(NO_VOICE_NOTE\)\}/.test(stage), "persistent, but dismissible");
   // The dot keeps it too — it is the summary now, not the record.
   assert.ok(/title=\{statusTitle\}/.test(stage));
+});
+
+test("the banner offers the key field instead of naming the place it lives", () => {
+  /*
+    The sentence said where to go and the operator went hunting: the field is a
+    modal, reachable otherwise only through a settings page called "Local
+    Models & Weights". A button that opens it is one click.
+  */
+  assert.ok(/voiceNote\.remedy === "gemini-key" && \(/.test(stage), "rendered behind the remedy, not always");
+  assert.ok(/onClick=\{\(\) => setGeminiKeyModalOpen\(true\)\}/.test(stage));
+  assert.ok(/>\s*Add key\s*</.test(stage));
+  const banner = stage.slice(stage.indexOf("{voiceNote.text && ("), stage.indexOf("{approvalPending && ("));
+  assert.ok(
+    banner.indexOf("setGeminiKeyModalOpen(true)") < banner.indexOf("setVoiceNote(NO_VOICE_NOTE)"),
+    "the fix comes before the escape from it, in the DOM and so in the tab order",
+  );
+  assert.ok(/type="button"/.test(banner), "a real button, so Enter and Space reach it");
+  // Same geometry as Dismiss, filled rather than bare: primary, not different.
+  assert.ok(/bg-rose-500\/25 px-2 py-0\.5 text-\[11px\]/.test(banner));
+  assert.ok(/transition-colors hover:bg-rose-500\/40/.test(banner));
+});
+
+test("only a failure with something behind the button gets one", () => {
+  /*
+    `onNote` is typed `(note: string) => void` and the engine builds the
+    argument, so the reason cannot ride along. The remedy is read back off the
+    sentence by the module that wrote it, against the same constant, the one
+    shape that cannot drift when someone rewrites the copy.
+  */
+  assert.ok(/remedy: geminiLiveRemedy\(note\) \?\? undefined/.test(stage));
+  assert.equal(geminiLiveRemedy(describeGeminiLive({ ok: false, reason: "no-key", detail: "" })), "gemini-key");
+  assert.equal(
+    geminiLiveRemedy(describeGeminiLive({ ok: false, reason: "gateway-unreachable", detail: "" })),
+    null,
+    "a key field does not start a gateway, and a button that does nothing is worse than none",
+  );
+  assert.equal(geminiLiveRemedy(describeGeminiLive({ ok: true, token: "t", model: "", voice: "", expiresAt: "" })), null);
+  assert.ok(
+    describeGeminiLive({ ok: false, reason: "no-key", detail: "" }).includes("Add one to switch Temi on."),
+    "the sentence names what the button does, not a screen to go and find",
+  );
+});
+
+test("a refused token says what to do about it, not what the console would print", () => {
+  /*
+    The engine fires `onNote` and then `onError` one statement later, so the
+    sentence naming the fix was overwritten by "no-key: ..." before a frame was
+    painted. The note with the remedy outranks the restatement of it.
+  */
+  assert.ok(/current\.remedy \? current : \{ text: `Temi's voice hit an error:/.test(stage));
+});
+
+test("a key pasted mid-session revives the lane without a restart", () => {
+  /*
+    The engine is built once, in an effect that depends on `logAction`. A
+    `no-key` refusal on mount was terminal for the life of the window: the
+    gateway re-reads the provider store on every mint, but nothing asked it
+    again. Quitting the app was the only fix anyone found.
+  */
+  assert.ok(/const keySavesAtMount = useRef\(providerKeySaves\);/.test(stage), "the mount value, so mounting is not a save");
+  const retry = stage.slice(stage.indexOf("const keySavesAtMount"), stage.indexOf("One parsed editor command"));
+  assert.ok(/if \(providerKeySaves === keySavesAtMount\.current\) return;/.test(retry));
+  assert.ok(/void protocolRef\.current\?\.connect\(\);/.test(retry));
+  assert.ok(/\}, \[providerKeySaves\]\);/.test(retry), "one attempt per save, and no more");
+  assert.ok(
+    !/\[logAction, providerKeySaves\]|\[providerKeySaves, logAction\]/.test(stage),
+    "never on the engine effect: that rebuilds VoiceAudioEngine and cuts the microphone mid-sentence",
+  );
+});
+
+test("both key save sites raise the signal, and only after the gateway took it", () => {
+  const modal = readFileSync(new URL("../src/components/modals/GeminiKeyModal.tsx", import.meta.url), "utf8");
+  const providers = readFileSync(new URL("../src/components/models/ApiProviders.tsx", import.meta.url), "utf8");
+  for (const [name, source] of [["GeminiKeyModal", modal], ["ApiProviders", providers]]) {
+    assert.ok(/noteProviderKeySaved\(\);/.test(source), `${name} must raise it`);
+    assert.ok(
+      source.indexOf("ProviderService.setKey") < source.indexOf("noteProviderKeySaved();"),
+      `${name} must raise it after the save, not before: a throw leaves the old key in place`,
+    );
+  }
+  const store = readFileSync(new URL("../src/store/studioStore.ts", import.meta.url), "utf8");
+  assert.ok(/providerKeySaves: state\.providerKeySaves \+ 1/.test(store), "monotonic: the event is 'another one landed'");
+  assert.ok(
+    !/providerKeySaves: state\.providerKeySaves,/.test(store),
+    "not persisted: a reload rebuilds the engine, so a carried count is a retry nobody asked for",
+  );
 });
 
 test('"undo that" survives a failed projects fetch on mount', () => {
@@ -358,4 +449,72 @@ test("leaving the voice screen does not orphan a run started from it", () => {
   );
   // The counter has to be kept by both delegate paths or the guard is a lie.
   assert.equal((stage.match(/delegationsInFlightRef\.current \+= 1/g) ?? []).length, 2);
+});
+
+test('"open the dukabot folder and run the tests" runs the tests too', () => {
+  /*
+    The audit filed this against the stage and the stage is where it shows,
+    but the cause is in the parsers: every one of them matches on a fragment,
+    so the workspace parser reached its verdict on the first four words and
+    the stage returned. The tail was never refused and never heard about.
+  */
+  const folders = { candidates: [{ name: "dukabot", path: `${PROJECTS_ROOT}/dukabot` }] };
+  const whole = parseWorkspaceCommand("open the dukabot folder and run the tests", folders);
+  assert.equal(whole?.kind, "switch-workspace", "the folder still opens; this fix adds, it does not move");
+
+  const split = splitTrailingClause("open the dukabot folder and run the tests");
+  assert.deepEqual(split, { head: "open the dukabot folder", tail: "run the tests" });
+  assert.deepEqual(
+    parseWorkspaceCommand(split.head, folders),
+    whole,
+    "the head alone parses to what the whole sentence parsed to, which is the proof the tail was ignored",
+  );
+
+  for (const wording of [
+    "open the dukabot folder, then run the tests",
+    "open the dukabot folder and then run the tests",
+  ]) {
+    assert.equal(splitTrailingClause(wording)?.tail, "run the tests", wording);
+  }
+});
+
+test("a sentence the parser needed whole is left whole", () => {
+  /*
+    The guard is not "does it contain and". It is "did the parser reach the
+    same verdict without reading past the seam", which is the only question
+    whose answer is evidence rather than a guess.
+  */
+  const folders = { candidates: [{ name: "dukabot", path: `${PROJECTS_ROOT}/dukabot` }] };
+  const backwards = "run the tests and open the dukabot folder";
+  const split = splitTrailingClause(backwards);
+  assert.equal(split?.head, "run the tests");
+  assert.notDeepEqual(
+    parseWorkspaceCommand(split.head, folders),
+    parseWorkspaceCommand(backwards, folders),
+    "the head does not carry the match, so this one is not split and behaves exactly as it did",
+  );
+  // Conversation never reaches the split at all: it has no local verdict to
+  // compare against, so the router is handed the sentence entire.
+  assert.equal(parseWorkspaceCommand("run it and tell me what happens", folders), null);
+  assert.equal(splitTrailingClause("open the dukabot folder"), null, "no seam, no split");
+  assert.equal(splitTrailingClause("cancel that and"), null, "a seam with nothing after it is not a clause");
+  assert.equal(splitTrailingClause("stop and please"), null, "a politeness is a qualifier, not a second job");
+});
+
+test("the second clause is acted on where it was meant to be acted on", () => {
+  const turn = stage.slice(stage.indexOf("const performVoiceTurn = useCallback"), stage.indexOf("const decision = routeVoiceTurn("));
+  assert.ok(/const tailIgnoredBy = <T,>/.test(turn));
+  assert.ok(/source === "typed" \? "typed" : "clause"/.test(turn), "the model already heard it, and the barge-in already fired");
+
+  const switching = turn.slice(turn.indexOf("WorkspaceService.openProject"));
+  assert.ok(
+    switching.indexOf("setWorkspacePath(projects.current.path)") < switching.indexOf("performTail(workspaceTail)"),
+    "after the root moves, or the tests run against the repository he asked to leave",
+  );
+  assert.ok(
+    switching.indexOf("performTail(workspaceTail)") < switching.indexOf(".catch("),
+    "inside the then, never the catch: a switch that failed leaves the clause somewhere it was not meant for",
+  );
+  assert.ok(/I've left the rest of that alone\./.test(switching), "and the drop is said out loud");
+  assert.ok(/performTail\(tailIgnoredBy\(parseEditorCommand, editorCommand\)\)/.test(turn));
 });

@@ -389,7 +389,7 @@ export const StudioChat: React.FC<{
         (currentVoice.mode === "conversation" || currentVoice.state !== "idle") &&
         typed
       ) {
-        const ack = getImmediateAcknowledgment(typed);
+        const ack = getImmediateAcknowledgment(typed, currentVoice.settings.wakeWords);
         if (ack) {
           void currentVoice.enqueueSpeechChunk(ack, false);
         }

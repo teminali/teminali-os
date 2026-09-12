@@ -500,6 +500,28 @@ function resolveFrontierMode(mode, prompt, expertQualified) {
   };
 }
 
+/**
+ * The Google key an agent CLI turn should run with, or null.
+ *
+ * Trimmed, because the child puts this value straight into `ANTHROPIC_API_KEY`
+ * and `ANTHROPIC_AUTH_TOKEN` (see agent-cli.js), and from there it leaves the
+ * process as an HTTP header value. A header value cannot carry a newline, so a
+ * key pasted into a .env with a trailing one fails deep inside the child as an
+ * opaque invalid-header error, naming nothing that would lead an operator back
+ * to the key. Provider Settings already refuses whitespace when a key is saved,
+ * so the store side cannot produce this; the environment is validated by nobody
+ * and can. A candidate that is only whitespace is not a key at all, so it falls
+ * through to the next candidate rather than travelling on as a truthy string
+ * that is guaranteed to fail at the far end.
+ */
+export function resolveAgentGeminiKey(store, environment = process.env) {
+  for (const candidate of [store?.providers?.google?.key, environment?.GEMINI_API_KEY]) {
+    const trimmed = typeof candidate === "string" ? candidate.trim() : "";
+    if (trimmed) return trimmed;
+  }
+  return null;
+}
+
 function projectError(error) {
   const code = error instanceof Error ? error.message : "PROJECT_OPEN_FAILED";
   if (code === "INVALID_PROJECT_PATH") return new GatewayError(400, code, "A valid absolute folder path is required.");
@@ -3433,7 +3455,7 @@ export async function createGateway(options = {}) {
             screenControl,
             frontierMax: Boolean(agentRequest.frontierMax),
             gatewayUrl: `http://127.0.0.1:${config.port || 4310}`,
-            geminiApiKey: readStore(config.providerStorePath).providers?.google?.key || process.env.GEMINI_API_KEY || null,
+            geminiApiKey: resolveAgentGeminiKey(readStore(config.providerStorePath)),
             onEvent: send,
           });
         } catch (error) {

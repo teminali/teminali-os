@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from "react";
 import { AlertTriangle, Check, ChevronRight, ExternalLink, Eye, EyeOff, KeyRound, Loader2, Sparkles, Trash2, Zap } from "lucide-react";
 import { ProviderService, type ProviderInfo, type ProvidersResponse } from "../../services/modelService";
+import { useStudioStore } from "../../store/studioStore";
 import { StatusDot } from "../ui";
 
 /**
@@ -169,6 +170,7 @@ const ProviderCard: React.FC<{
   const [editingLanes, setEditingLanes] = useState(false);
   const [light, setLight] = useState(provider.lanes.light.model);
   const [heavy, setHeavy] = useState(provider.lanes.heavy.model);
+  const noteProviderKeySaved = useStudioStore((state) => state.noteProviderKeySaved);
 
   const save = async () => {
     if (!draft.trim()) return;
@@ -176,6 +178,14 @@ const ProviderCard: React.FC<{
     onError(null);
     try {
       onChange(await ProviderService.setKey(provider.id, draft.trim()));
+      /* The other half of the same signal `GeminiKeyModal` raises: a key can
+         be pasted here just as easily, and a lane that was dead for the want
+         of one has to hear about it from whichever screen it arrived on.
+         Raised for every provider rather than for Google alone, because this card
+         does not know who is listening, and the one listener there is treats
+         it as "try again", which costs a request and no more when the key
+         that landed was not the one it wanted. */
+      noteProviderKeySaved();
       setDraft("");
     } catch (failure) {
       onError((failure as Error).message);

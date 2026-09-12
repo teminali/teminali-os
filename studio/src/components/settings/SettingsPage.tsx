@@ -153,6 +153,9 @@ export const SettingsPage: React.FC = () => {
       label: "Voice & Conversation",
       icon: Mic,
       rows: [
+        "Where Temi runs",
+        "While the app is playing sound",
+        "When she hands work over",
         "Speech engine",
         "Language",
         "Only respond to my voice",
@@ -177,8 +180,8 @@ export const SettingsPage: React.FC = () => {
               Voice &amp; Conversation
             </h1>
             <p className="mt-1 max-w-xl text-xs leading-relaxed text-ink-muted">
-              Dictate a prompt, or hold a hands-free conversation. Everything you say is cleaned up and shown to you
-              before it reaches the chat.
+              Two lanes share this page. Temi holds a live conversation through Google, and dictation turns speech
+              into a prompt on this machine. Each control below says which one it reaches.
             </p>
           </div>
           <VoiceSection />

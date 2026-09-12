@@ -422,6 +422,17 @@ interface StudioState {
   setSkillsModalOpen: (open: boolean) => void;
   isGeminiKeyModalOpen: boolean;
   setGeminiKeyModalOpen: (open: boolean) => void;
+  /* How many provider keys have been saved since this window opened.
+     A counter rather than a boolean, because the interesting event is "another
+     one just landed" and that has to be distinguishable from the one before it.
+     The voice stage builds its Gemini engine once, on mount, and a key pasted
+     after that reaches the gateway immediately but reaches the renderer never:
+     the lane stayed dead until the app was quit and reopened. This is the one
+     signal the save sites can raise and the stage can watch. Not persisted:
+     a reload rebuilds the engine anyway, so a count carried across one would
+     only fire a retry nobody asked for. */
+  providerKeySaves: number;
+  noteProviderKeySaved: () => void;
   isDiffViewerOpen: boolean;
   isBenchmarkModalOpen: boolean;
   setBenchmarkModalOpen: (open: boolean) => void;
@@ -1065,6 +1076,9 @@ export const useStudioStore = create<StudioState>()(
       setSkillsModalOpen: (open: boolean) => void set({ isSkillsModalOpen: open }),
       isGeminiKeyModalOpen: false,
       setGeminiKeyModalOpen: (open) => set({ isGeminiKeyModalOpen: open }),
+
+      providerKeySaves: 0,
+      noteProviderKeySaved: () => set((state) => ({ providerKeySaves: state.providerKeySaves + 1 })),
       
       isDiffViewerOpen: false,
       isBenchmarkModalOpen: false,

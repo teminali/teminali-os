@@ -7285,8 +7285,11 @@ fixed. `turnComplete` returns early while any call is outstanding, keeping
 `turnActive` set, which is what stops the audio path from bumping its generation
 counter and resetting `upsampleAnchor` mid-reply. And a barge-in clears the
 pending set so a superseded answer is dropped rather than delivered into the
-next turn -- the generation counter cannot cover this, because it gates audio
-only and the model's continuation would still arrive as transcription.
+next turn. When this was written the generation counter could not cover it,
+because minting happened in the audio path and the counter therefore gated audio
+only. Since 6.0.38 a turn is minted by its first content, so transcription is
+covered too; the pending set is still cleared, because dropping a superseded
+answer is a separate obligation from suppressing the audio of one.
 
 `machineAction.ts` is not retired by this; it is demoted. It remains the fast
 path for the unambiguous command, which should not cost a model round trip, and
@@ -7428,11 +7431,13 @@ them. The missing space is the tell.
 
 Both halves of a generation are now gated on the same number, and the number is
 `incomingGeneration()` rather than `this.generation`. That is the whole
-subtlety. A turn's generation is minted down in the chunk block, on the first
-audio of the turn, because that is the one place `turnActive` flips; the
-transcript branch runs earlier in the same message, so at a turn's first
-transcript delta the raw counter still names the previous turn. A barge-in fired
+subtlety. A turn's generation was once minted down in the chunk block, on the
+first audio of the turn, because that was the one place `turnActive` flipped;
+the transcript branch runs earlier in the same message, so at a turn's first
+transcript delta the raw counter still named the previous turn. A barge-in fired
 before she has spoken, which is the common case, condemns `generation + 1`.
+Minting moved to first content in 6.0.38, described below; the gate is unchanged
+because `incomingGeneration()` answers the same question either way.
 Comparing directly would have judged the condemned turn's first words against
 the old number, found no match, and let exactly the measured line through while
 dropping the audio that went with it.
@@ -8053,6 +8058,210 @@ With no pane mounted the snapshot is null and the exemption does not exist, whic
 also leaves "pause" meaning cancel-the-run when the audible thing is the browser
 pane or the operator's own footage on the timeline. **The operator chose this
 trade-off explicitly**; the strict bar is one edit away in `WAKELESS_TRANSPORT`.
+
+### 6.0.38 A turn was numbered by its first audio, so a turn with no audio silenced the next one (`services/voice/geminiLiveEngine.ts`, 2026-09-13)
+
+A barge-in condemns a generation, and nothing retires a suppression except the
+counter moving past it. Generations were minted in the audio branch, on the
+first chunk of a turn, because that was the one place `turnActive` flipped. So a
+condemned turn that produced no audio never advanced the counter, the
+suppression stayed armed, and it took the NEXT turn instead: a question nobody
+had barged in on came back mute.
+
+**This was not latent.** §6.0.20 records the measurement that makes it a live
+defect rather than a hypothetical: across five delegating turns on 2026-09-12,
+four emitted no audio and no `outputTranscription` at all before the `toolCall`
+arrived. Those are exactly the turns the shell barges in on, and exactly the
+turns that produced nothing for the counter to move on. The operator's next
+question was the one that lost its voice.
+
+`beginTurn()` mints on the first CONTENT of a turn instead, and is called from
+every branch that can carry it: her words, her voice, her hands. It is
+idempotent within a turn, `turnActive` being the already-minted flag, and only a
+turn boundary puts that flag down. The per-turn resampler resets stay welded to
+the mint, because nothing between a turn's first word and its first frame
+touches the anchor or the carry.
+
+A second residual had to move with it. `sendBargeIn()` used to clear
+`turnActive`, which told the next chunk of the same turn it was a new turn: it
+minted itself a fresh generation, and a fresh generation is not the one the
+barge-in condemned, so she carried on speaking over the answer the shell had
+just given. That clear is gone, and the comment at the call says why, because
+the semantics are the simpler statement of the same thing: a barge-in does not
+end her turn, it refuses to forward it.
+
+One hole is left open **deliberately**. A turn that emits literally nothing
+still never advances the counter, so a suppression aimed at it still lands on
+the turn after. Closing that needs a retire-at-turn-boundary rule, and a
+duplicate boundary would then retire a live suppression and put her back to
+talking over the shell's answer. The narrower failure was chosen over the worse
+one. `tests/voice-live-engine-generation.test.mjs` (9) covers both halves; 5 of
+the 9 fail against the pre-patch engine.
+
+### 6.0.39 "What did you change" answered from character, not from the report (`services/voice/voiceTurnRouter.ts`, 2026-09-13)
+
+Measured with nothing running: "what did it change" and "what files did it
+touch" reached the bridge, while "what did you change", "what just happened",
+"how did it go" and "tell me what you did" reached the persona. The difference
+is a pronoun and a verb list, not a difference in what was asked.
+`STATE_QUESTIONS` needs one of `it`, `this` or `that` somewhere in the sentence,
+and its verb list holds "changed" but neither "happened" nor "go". The persona
+has never seen the finished run's report, so it answered from character. That is
+the fabrication §6 forbids, about work that really was done and really was
+written down.
+
+`isRunRecallQuestion` recognised all six already. It was only ever consulted on
+the branch where a machine action had matched, so for these four it never ran.
+The fix asks the same recogniser in the one place it could not reach: a
+fall-through in the `converse` branch, `voiceTurnRouter.ts:656`, gated on
+`!state.busy` and returning `delegate` with action `inspect`, the same kind the
+gate already returns for the two siblings that worked.
+
+It is **deliberately not** in `classifyMachineAction`. That function is pure
+text rules by contract and cannot see `busy`, which is the router's own input;
+widening its patterns would fire in both states, and while a run is live these
+questions are about the thing in flight and the branches above own them. Being a
+fall-through also bounds the blast radius: it can turn `converse` into
+`delegate` and nothing else, so no refusal above it moves.
+
+One corpus expectation was flipped rather than added:
+`tests/voice-turn-router.test.mjs:424`, "What did you just do?", from `converse`
+to `delegate`. It sits one turn after the `Stop.` at :415 that sets the session
+idle, so it genuinely is run-recall and the old expectation was wrong. All six
+phrasings now route `delegate`/`inspect` from an idle session, measured.
+
+### 6.0.40 The sentence naming the fix was overwritten by the one that named nothing (`components/voice/TemiVoiceStage.tsx`, `store/studioStore.ts`, 2026-09-13)
+
+Two separate defects, both of which left the voice lane dead with no way back.
+
+**The banner said the wrong thing.** A refused token calls `onNote` at
+`geminiLiveEngine.ts:524` and `onError` two lines later at :526. Both wrote the
+same state, so the friendly sentence reached the banner and was overwritten,
+before a frame was painted, by "Temi's voice hit an error: no-key: No Google
+Gemini API key is configured", which is the raw pair the engine builds for the
+console. `onError` now uses a functional update and yields to a note that
+carries a remedy. Every other error still overwrites, and the remedy is cleared
+by the next note whatever it says, so nothing is pinned longer than the failure
+behind it lasts.
+
+**And the engine stayed dead.** A `no-key` mint is terminal by design, no retry
+ladder, so pasting a key changed nothing until the app was quit and reopened:
+the stage builds its engine once on mount. A `providerKeySaves` counter in
+`store/studioStore.ts` is raised by both save sites after `ProviderService.setKey`
+resolves, `ApiProviders.tsx` and `GeminiKeyModal.tsx`, and **deliberately not**
+persisted: it is absent from `partialize`, because a count restored from disk at
+the next launch would announce a save that already happened.
+
+The stage watches it in a SEPARATE effect, holding the mount value in a ref so
+the first render is not a save. **The engine effect's `[logAction]` deps are
+untouched on purpose.** Widening them to include the counter would tear down
+`VoiceAudioEngine` and the microphone with it, and if that fired while the
+operator was mid-sentence it would cut him off to fix a problem he no longer
+has. The new effect calls the existing `protocolRef.current?.connect()`, which
+already returns immediately when it holds a session or is mid-connect, so one
+attempt per save costs nothing when voice is already up.
+
+The banner's "Add key" button is gated on `geminiLiveRemedy(note) === "gemini-key"`,
+and that helper is a string identity check against `GEMINI_LIVE_NO_KEY_NOTE`,
+the same constant `describeGeminiLive` returns. Not English pattern matching:
+the sentence and its button are one edit, not two, and the button cannot appear
+under a note that has moved on to saying something else. **Proven statically
+only.** The wiring was read end to end; Electron was never launched and the
+click was never performed.
+
+### 6.0.41 The Voice pane governs two lanes and described one (`components/voice/VoiceSettingsPanel.tsx`, `components/voice/VoiceEnrolment.tsx`, 2026-09-13)
+
+The pane carried an "audio never leaves it" claim under a heading that read as
+the engine choice for the whole feature. Its headline lane streams 16 kHz
+microphone PCM to Google: `sendAudioChunk` at `geminiLiveEngine.ts:1104`, with
+`MIC_RATE` at :54. The claim was false as written and is gone. It survives only
+where it is true, on the dictation recogniser row, and only for the local tier.
+
+The governing fact the old copy never stated: **this pane governs TWO lanes.**
+Temi's live conversation, `TemiVoiceStage.tsx` driving `geminiLiveEngine.ts`,
+reads exactly one key out of `VoiceSettings` and nothing else, `wakeWords`, in
+`gateSpokenTurn` at `TemiVoiceStage.tsx:556`. Every other key on the page feeds
+dictation and hands-free through `services/voice/conversation.ts`, which is not
+mounted on Temi's lane at all: `hooks/useVoice.ts:88` holds the only
+`new VoiceEngine` in the app.
+
+Which makes two rows actively misleading rather than merely vague. "Only respond
+to my voice" and "Require my name" do NOT protect Temi. `TemiVoiceStage.tsx`
+passes `hasProfile`, `requireWakeWord` and `requireSpeakerMatch` as `false`
+literals at :575-577, so whatever those switches say, the stage asks
+`scoreAddressing` a question with the protections turned off. Every control's
+description now names the lane it moves, and `VoiceEnrolment.tsx` says on the
+screen that the voiceprint gates dictation and not Temi, since an enrolment that
+looks like a lock on the microphone is worse than no enrolment at all.
+
+### 6.0.42 The comment pinning CI to macOS was false (`.github/workflows/release.yml`, 2026-09-13)
+
+`runs-on` for the Verify job is **still `macos-latest`** (line 54), and that is
+deliberate. What changed is the justification, which was untrue.
+
+The old comment claimed the job covered the pointer helper's contract,
+`screencapture`, and Guardian's telemetry on a real Mac. None of that holds. The
+pointer contract tests drive a `/bin/sh` fake, `tests/assistant-server.test.mjs:137-213`.
+The Guardian tests parse frozen captured strings. No test invokes
+`screencapture` at all: the only occurrence anywhere under `tests/` is a comment
+at `tests/agent-permissions.test.mjs:162`. And two platform assertions are
+tautologies, comparing a reported platform to `process.platform` itself, which
+holds on any runner: `tests/about.test.mjs:135` and `server/gateway.test.js:182`.
+
+What is genuinely lost by moving is small and now stated as such. One real skip
+guard, `tests/assistant-launch.test.mjs:373`, which reads the real
+`/Applications`, and it is the only one of its kind across the 168 test files in
+`studio/tests`. And `build:pointer` compiles the Swift source in this job rather
+than later in the build matrix. The mechanical blockers are already cleared:
+`build:pointer` is gated on `runner.os == 'macOS'` and `tests/bin-paths.test.mjs`
+no longer hard-asserts a Homebrew path.
+
+So the 10x macOS multiplier is payable and the move is one line. It waits on one
+green `workflow_dispatch` rehearsal on Linux, because the suite has never run
+there once and guessing is how a release breaks.
+
+### 6.0.43 The acknowledgement's wake words were frozen at module load (`services/voice/acknowledgment.ts`, `components/chat/StudioChat.tsx`, 2026-09-13)
+
+`acknowledgment.ts` built its list as
+`const WAKE_WORDS = [...DEFAULT_VOICE_SETTINGS.wakeWords, "assistant"]` at module
+load, so a wake word the operator added in Settings never reached it. The file's
+own comment claimed this was "the real list, not a third copy". It was not. That
+comment is corrected in place rather than deleted, because the claim is what
+kept anyone from looking.
+
+The list now arrives as an optional second parameter,
+`getImmediateAcknowledgment(text, wakeWords?)`, matching the shape
+`stripWakeWord(text, wakeWords)` in `addressing.ts` already uses. **Chosen over a
+module-level setter deliberately**: a setter with no caller is the exact
+wired-to-nothing failure the 2026-09-12 audit exists to prevent. The caller is
+real, `StudioChat.tsx:392` passes `currentVoice.settings.wakeWords`, which it
+already had in hand two lines above.
+
+Three details in the compilation. Patterns are memoised on the joined list and
+recompiled only when it changes, since this runs on every send. The alternation
+is regex-escaped, which stopped being optional the moment operator input reached
+it: a wake word containing "(" threw a `SyntaxError` on the chat's send path, and
+`addressing.ts` escaped already while this file did not. And words are sorted
+longest first, so "teminali" is not consumed as "temi" with a stray "nali" left
+behind. The operator's list is MERGED on top of the built-ins rather than
+replacing them, so the change can only add a match, never remove one.
+
+**The bug was narrower than it looks, and that is the part worth recording.**
+`hasActionWithTarget` reads `words[0]` or `words[1]`, so a single unknown leading
+token still worked by luck: "jarvis, deploy the site" acknowledged before and
+after. Add the politeness a person actually speaks with and the verb slides out
+of reach. Measured both ways, three cases returned null before and return an
+acknowledgement now: "jarvis can you fix the build", "jarvis please run the
+tests", "jarvis could you deploy the site".
+
+**Not fixed, and left alone on purpose:** a fourth hardcoded copy of the wake
+words lives inside this same function, in the `opening` computation,
+`.replace(/^(?:(?:temy|teminali|frontier|studio)\b[\s,]*)+/i, "")`. It does not
+take the operator's list. It is mostly redundant now that the leading pattern
+strips first, and changing it risks moving greeting classification during a
+release. `tests/voice-ack.test.mjs` went from 7 to 10; each new test asserts the
+pre-patch and post-patch behaviour side by side, so it carries its own mutation
+check.
 
 ### 6.1 Turn semantics while a run is in flight (2026-09-05)
 

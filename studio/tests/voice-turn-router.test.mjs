@@ -291,6 +291,77 @@ test("§6.30 finding 1 — the port question reaches the hands in either state",
   assert.equal(during(say).action.kind, "delegate");
 });
 
+// ── asked after the run has already finished ───────────────────────────────
+
+/*
+  The six ways the operator asks what the run just did.
+
+  Two of them worked and four did not, and the split was an accident of the
+  gate's shape rather than anything about the question. `STATE_QUESTIONS` needs
+  `it`, `this` or `that` somewhere in the sentence, and its verb list holds
+  "changed" but not "happened" and not "go". So "what did it change" reached the
+  bridge, which holds the finished run's report and answers from it, while "what
+  did you change" reached the persona, which has never seen that report and
+  answered in character anyway. Same question, same session, one of them true.
+
+  All six are pinned here rather than only the four that were broken, because
+  the point is that they are one class and must stay one class.
+*/
+const RUN_RECALL_QUESTIONS = [
+  "what did you change",
+  "what did it change",
+  "what files did it touch",
+  "what just happened",
+  "how did it go",
+  "tell me what you did",
+];
+
+for (const utterance of RUN_RECALL_QUESTIONS) {
+  test(`"${utterance}" reaches the bridge once the run is over, not the persona`, () => {
+    const decision = idle(utterance);
+    assert.equal(decision.action.kind, "delegate", decision.reason);
+    assert.equal(decision.action.action, "inspect", decision.reason);
+    assert.ok(decision.suppressPipelineAnswer, "the persona would have improvised an answer");
+    assert.equal(decision.action.prompt, utterance, "the bridge needs the question verbatim");
+  });
+}
+
+test("the recall fall-through is idle-only, so a live run keeps the route it had", () => {
+  // Measured before the change and pinned unchanged after it. While a run is in
+  // flight these questions belong to the branches above: "what did it change"
+  // is answered from the digest, and the four the gate cannot see stay with the
+  // voice exactly as they did. The fall-through is gated on `!busy` so it cannot
+  // reach any of them.
+  assert.equal(during("what did it change").action.kind, "answer");
+  assert.equal(during("what files did it touch").action.kind, "delegate");
+  assert.equal(during("what did you change").action.kind, "converse");
+  assert.equal(during("what just happened").action.kind, "converse");
+  assert.equal(during("how did it go").action.kind, "converse");
+  assert.equal(during("tell me what you did").action.kind, "converse");
+});
+
+test("the recall fall-through cannot reclassify an instruction", () => {
+  // It is reached only after `classifyMachineAction` has returned null, so the
+  // only transition it can make is converse to delegate. Every real instruction
+  // keeps the kind its own verb group gave it, which is what stops a recogniser
+  // for questions from quietly becoming a second gate for commands.
+  assert.equal(idle("open the dukabot folder").action.action, "open");
+  assert.equal(idle("run the tests").action.action, "shell");
+  assert.equal(idle("play the video").action.action, "media");
+  assert.equal(idle("what is the branch").action.action, "inspect");
+  assert.equal(idle("use frontier max").action.action, "workspace");
+});
+
+test("ordinary talk near the recall wording is still talk", () => {
+  // The deliberate refusals above this line do not move. "What should I do
+  // next" asks for advice and has no run in it; the opinion frame outranks
+  // every verb in its sentence; and neither is a question about a finished run,
+  // so neither matches the recogniser.
+  assert.equal(idle("what should I do next").action.kind, "converse");
+  assert.equal(idle("what do you think about running the tests").action.kind, "converse");
+  assert.equal(idle("i had a really long day and could use some good news").action.kind, "converse");
+});
+
 /* ── The scripted conversations, rescued from the conversation eval ─────────── */
 
 /*
@@ -342,8 +413,15 @@ const CONVERSATIONS = [
       { say: "Which file are you in?", route: "answer" },
       { say: "Tell me a joke while that finishes.", route: "converse" },
       { say: "Stop.", route: "stop", after: { busy: false } },
-      // Not a state question about an object, so the gate leaves it in chat.
-      { say: "What did you just do?", route: "converse" },
+      // Asked one turn after the Stop above, with `busy` now false, so this is
+      // the run-recall case and not chat. It used to route `converse` because
+      // the gate wants an object and there is none, and the comment here said
+      // so approvingly. `isRunRecallQuestion` has always returned true for this
+      // sentence, though, and the two were simply never asked in the same
+      // place. They are now. It is the same question as "tell me what you did",
+      // and the persona cannot answer either one: it never saw the report of
+      // the run that just stopped.
+      { say: "What did you just do?", route: "delegate" },
       // "Change" is a machine object and the hands hold the diff.
       { say: "Was that a big change?", route: "delegate" },
       {

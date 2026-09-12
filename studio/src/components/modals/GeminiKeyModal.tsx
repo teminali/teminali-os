@@ -23,7 +23,7 @@ function validateGeminiKey(val: string): { ok: boolean; message?: string } {
  * if Google's rate limits (429) or temporary capacity spikes occur.
  */
 export const GeminiKeyModal: React.FC = () => {
-  const { isGeminiKeyModalOpen, setGeminiKeyModalOpen, setProfile } = useStudioStore();
+  const { isGeminiKeyModalOpen, setGeminiKeyModalOpen, setProfile, noteProviderKeySaved } = useStudioStore();
   const [key, setKey] = useState("");
   const [backupKey, setBackupKey] = useState("");
   const [showKey, setShowKey] = useState(false);
@@ -94,6 +94,12 @@ export const GeminiKeyModal: React.FC = () => {
         trimmedPrimary || null,
         trimmedBackup !== "" ? trimmedBackup : undefined,
       );
+      /* Raised only here, after the gateway has taken the key: anything that
+         watches this treats it as "a key is now in place", and a save that
+         threw left the old key in place. The voice stage is the caller that
+         cares: it builds its Gemini engine once on mount, so without this a
+         key pasted here did nothing until the app was quit and reopened. */
+      noteProviderKeySaved();
       setProfile("max");
       handleClose();
     } catch (err) {

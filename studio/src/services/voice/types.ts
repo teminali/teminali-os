@@ -375,7 +375,6 @@ export type RepairKind =
 
 export interface VoiceSettings {
   enabled: boolean;
-  mode: VoiceMode;
   tier: VoiceTier | "auto";
   language: LanguageSetting;
   /** Read replies aloud in conversation mode. */
@@ -412,7 +411,6 @@ export interface VoiceSettings {
 
 export const DEFAULT_VOICE_SETTINGS: VoiceSettings = {
   enabled: true,
-  mode: "conversation",
   tier: "auto",
   language: "auto",
   speakReplies: true,
@@ -450,7 +448,7 @@ export const DEFAULT_VOICE_SETTINGS: VoiceSettings = {
     repair cannot rewrite somebody's name. A wake word list is the right place
     for "what the recogniser produces" rather than "how the word is spelt".
   */
-  wakeWords: ["temy", "temi", "teminali", "frontier", "studio"],
+  wakeWords: ["temy", "temi", "teminali"],
   endpointSilenceMs: 500,
   allowBargeIn: true,
   narrateProgress: true,

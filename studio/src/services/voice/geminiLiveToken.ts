@@ -97,18 +97,48 @@ export async function fetchGeminiLiveToken(signal?: AbortSignal): Promise<Gemini
 }
 
 /**
+ * Something the operator can press, for the failures a press can actually fix.
+ *
+ * Only `no-key` has one. "The gateway is not running" is equally actionable in
+ * prose and completely unactionable in the interface: a button that opens a key
+ * field would not start a gateway, and a button that does nothing is worse than
+ * no button at all. `quota` is deliberately out too: the modal behind
+ * `gemini-key` does take a backup key, but that branch renders the server's own
+ * `detail` and so has no stable sentence to key off.
+ */
+export type GeminiLiveRemedy = "gemini-key";
+
+/**
+ * The `no-key` sentence, named so the remedy can be looked up by identity.
+ *
+ * The caller that renders this note is three modules away and receives a
+ * string: `GeminiLiveEngine.onNote` is typed `(note: string) => void`, and the
+ * engine builds the argument, so there is no widening that carries the reason
+ * across without the engine's help. Matching the sentence would normally rot
+ * the first time someone rewrites the copy, which is exactly why the sentence
+ * is a constant here: a rewrite moves the note and the lookup together, in one
+ * edit, because they are the same string.
+ */
+export const GEMINI_LIVE_NO_KEY_NOTE = "Voice needs a Gemini API key. Add one to switch Temi on.";
+
+/** What the operator can do about a note, or null when it is only news. */
+export function geminiLiveRemedy(note: string): GeminiLiveRemedy | null {
+  return note === GEMINI_LIVE_NO_KEY_NOTE ? "gemini-key" : null;
+}
+
+/**
  * A sentence for the operator, or "" when there is nothing worth saying.
  *
  * Success is silent on purpose — this is `describeRealtimeVoice`'s rule kept
  * intact: a working assistant should not narrate that it is working. Every
  * other branch has to be something the operator can act on, which is why
- * `no-key` names the place the key goes rather than just reporting its absence.
+ * `no-key` names the fix rather than just reporting the absence.
  */
 export function describeGeminiLive(result: GeminiLiveTokenResult): string {
   if (result.ok) return "";
   switch (result.reason) {
     case "no-key":
-      return "Voice needs a Gemini API key. Add one in Settings to switch Temi on.";
+      return GEMINI_LIVE_NO_KEY_NOTE;
     case "gateway-unreachable":
       return "Voice cannot start: the local gateway is not running.";
     case "gateway-error":

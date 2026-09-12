@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import { BoundedAuditLog } from "./audit-log.js";
-import { createGateway } from "./gateway.js";
+import { createGateway, resolveAgentGeminiKey } from "./gateway.js";
 
 const ALLOWED_ORIGIN = "http://localhost:3000";
 
@@ -895,6 +895,26 @@ async function readNdjson(response) {
     .filter((line) => line.trim())
     .map((line) => JSON.parse(line));
 }
+
+test("the agent's Google key is trimmed, and a whitespace-only one is not a key", () => {
+  // Resolution is tested directly rather than through /api/agents/run, because
+  // reaching the point where the key is read means spawning a real CLI child.
+  // What matters is that nothing padded gets that far: the child copies this
+  // value into `ANTHROPIC_API_KEY`, which becomes an HTTP header value, and a
+  // header value cannot carry the newline a .env makes it so easy to leave on.
+  assert.equal(resolveAgentGeminiKey({ providers: { google: { key: "AIza-store" } } }, {}), "AIza-store");
+  assert.equal(resolveAgentGeminiKey({}, { GEMINI_API_KEY: "AIza-env\n" }), "AIza-env");
+  assert.equal(
+    resolveAgentGeminiKey({ providers: { google: { key: " AIza-store " } } }, { GEMINI_API_KEY: "AIza-env" }),
+    "AIza-store",
+  );
+
+  // Whitespace is not a key, so it falls through to the next candidate instead
+  // of being handed on as a truthy string the far end can only fail opaquely.
+  assert.equal(resolveAgentGeminiKey({ providers: { google: { key: "  " } } }, { GEMINI_API_KEY: "AIza-env\r\n" }), "AIza-env");
+  assert.equal(resolveAgentGeminiKey({}, { GEMINI_API_KEY: "\n" }), null);
+  assert.equal(resolveAgentGeminiKey({ providers: { google: {} } }, {}), null);
+});
 
 test("a model pull streams progress rather than holding one silent request open", async (t) => {
   const fetchImpl = async (url) => {

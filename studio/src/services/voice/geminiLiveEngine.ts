@@ -790,16 +790,47 @@ export class GeminiLiveEngine {
   /**
    * The generation number that content arriving right now belongs to.
    *
-   * A turn's generation is minted down in the chunk block of
-   * `handleServerMessage`, on the first audio of the turn, because that is the
-   * one place `turnActive` flips. Anything that has to name the current turn
-   * before that point reads a stale number: the transcript branch, which runs
-   * earlier in the same message, and `sendBargeIn()`, which usually fires
-   * before she has said a word at all. Both want the same answer, so both ask
-   * the same question here instead of restating it and drifting apart.
+   * A turn's generation is minted by `beginTurn()`, on the first content of
+   * the turn, so anything asking this from inside `handleServerMessage` is
+   * simply told `generation`. The `+ 1` is for the one caller that asks
+   * BETWEEN turns: `sendBargeIn()`, which usually fires before the model has
+   * produced anything at all and therefore has to condemn a turn that has not
+   * started yet. Both want the same answer, so both ask the same question here
+   * instead of restating it and drifting apart.
    */
   private incomingGeneration(): number {
     return this.turnActive ? this.generation : this.generation + 1;
+  }
+
+  /**
+   * Number the turn whose first content has just arrived, and reset the
+   * per-turn resampler state that belongs to it. Idempotent within a turn:
+   * `turnActive` is the "already minted" flag, and only a turn boundary puts
+   * it down again (`turnComplete`, `interrupted`, `resetStreamState()`).
+   *
+   * Called from every branch that can carry the first thing a turn produces:
+   * her words, her voice, her hands. It used to be the audio branch alone, and
+   * that left `sendBargeIn()` able to outlive the turn it condemned. Nothing
+   * retires a suppression except the counter moving past it, so a condemned
+   * turn that produced no audio never advanced the counter, and the
+   * suppression sat armed and silenced the NEXT turn instead: a question
+   * nobody had barged in on came back mute. That was masked in practice rather
+   * than prevented, because `ask_the_assistant` requires a `spoken_note` and a
+   * condemned turn therefore almost always had audio in it.
+   *
+   * The anchor and carry resets stay welded to the mint. They are per-turn
+   * resampler state, and the first sample of a new turn has to interpolate up
+   * from silence rather than from the last sample of the turn before it.
+   * Moving the mint earlier does not move them in any way that matters:
+   * nothing between the first word of a turn and its first frame touches
+   * either, so the first frame still finds the anchor at zero.
+   */
+  private beginTurn(): void {
+    if (this.turnActive) return;
+    this.turnActive = true;
+    this.generation += 1;
+    this.upsampleAnchor = 0;
+    this.pcmByteCarry = new Uint8Array(0);
   }
 
   private handleServerMessage(message: LiveServerMessage) {
@@ -867,6 +898,18 @@ export class GeminiLiveEngine {
 
     const outputText = content?.outputTranscription?.text;
     if (outputText) {
+      // Her words are usually the first content of a turn, so this is usually
+      // where its generation is minted. See `beginTurn()`.
+      //
+      // Before `finalizeUserTurn()` and not after, because that emit RE-ENTERS
+      // this engine: the stage answers `final_user_request` synchronously and
+      // several of those paths call `sendBargeIn()`. Either order happens to
+      // condemn the right turn today, since `incomingGeneration()` supplies
+      // the `+ 1` an unminted turn needs. Minting first means the re-entrant
+      // barge-in names the turn on the wire directly instead, so the two are
+      // not left depending on the same arithmetic staying in step.
+      this.beginTurn();
+
       // Her first word is the only proof the user's turn ended. Nothing else in
       // the stream says so — there is no `inputTranscription` terminator — so
       // without this the operator's half of the conversation is never finalised
@@ -886,15 +929,13 @@ export class GeminiLiveEngine {
       // conversational turn and the directed answer accumulated into one
       // string with nothing between them.
       //
-      // `incomingGeneration()` and not `this.generation`, which is the whole
-      // subtlety of this gate. This branch runs BEFORE the chunk block below,
-      // and the chunk block is where a new turn's generation is minted, so at
-      // the first transcript delta of a turn `this.generation` still names the
-      // PREVIOUS turn. A barge-in fired before she has spoken, the common
-      // case, condemns `generation + 1`; comparing directly here would judge
-      // the condemned turn's first words against the old number, find no
-      // match, and let exactly the measured line through while dropping the
-      // audio that went with it.
+      // `incomingGeneration()` and not `this.generation`. By this line
+      // `beginTurn()` has run and the two are the same number, so the call is
+      // uniformity rather than arithmetic: all three gates in this method ask
+      // one question one way, and an edit to one cannot quietly disagree with
+      // the others. It is also the form that stays correct if the mint is ever
+      // moved back below this branch, which is the arrangement that produced
+      // the measured line above.
       if (this.incomingGeneration() !== this.suppressedGeneration) {
         this.outputTranscript += outputText;
         this.emit({ type: "partial_assistant_answer", content: this.outputTranscript });
@@ -912,13 +953,10 @@ export class GeminiLiveEngine {
     }
 
     if (chunks.length) {
-      if (!this.turnActive) {
-        this.turnActive = true;
-        this.generation += 1;
-        this.upsampleAnchor = 0;
-        this.pcmByteCarry = new Uint8Array(0);
-      }
-      if (this.generation !== this.suppressedGeneration) {
+      // First audio of a turn that opened with audio. On every other turn the
+      // number is already minted and this costs a flag read.
+      this.beginTurn();
+      if (this.incomingGeneration() !== this.suppressedGeneration) {
         for (const b64 of chunks) this.emitAudio(b64);
       }
     }
@@ -949,6 +987,12 @@ export class GeminiLiveEngine {
       // abandons: the model is left waiting until the next reconnect or
       // `restartSession()` runs `resetStreamState()`. Waiting is recoverable;
       // running the suite twice on camera is not.
+      // A call is content, and on a delegating turn it is frequently the
+      // FIRST content: the measured frame order puts `toolCall` ahead of both
+      // the audio and the transcript. Minting on it is what keeps a barge-in
+      // from outliving the turn it condemned when that turn's only observable
+      // output was a pair of hands. See `beginTurn()`.
+      this.beginTurn();
       const suppressed = this.incomingGeneration() === this.suppressedGeneration;
       for (const call of calls) {
         // `FunctionCall.name` and `.id` are both optional in the SDK's types.
@@ -978,11 +1022,11 @@ export class GeminiLiveEngine {
       // for the response, and then keeps speaking in the SAME turn. Committing
       // here would post "Let me look." as her final answer and hand the router
       // a fragment of a sentence. It would also clear `turnActive`, and that
-      // flag is load-bearing for the audio: look at the chunk block above, the
-      // `generation` bump and the `upsampleAnchor` / `pcmByteCarry` resets are
-      // all gated on `!this.turnActive`. Clear it here and the continuation
-      // lands on a new generation, with the anchor back at zero, interpolating
-      // its first sample up from silence mid-sentence.
+      // flag is load-bearing for the audio: `beginTurn()` bumps `generation`
+      // and resets `upsampleAnchor` / `pcmByteCarry` only when the flag is
+      // down. Clear it here and the continuation lands on a new generation,
+      // with the anchor back at zero, interpolating its first sample up from
+      // silence mid-sentence.
       //
       // Measured since, and on this model the guard never fires. Across 12
       // harness sessions on 2026-09-12 there was exactly ONE `turnComplete`
@@ -1135,7 +1179,22 @@ export class GeminiLiveEngine {
    */
   sendBargeIn(): void {
     this.suppressedGeneration = this.incomingGeneration();
-    this.turnActive = false;
+    // `turnActive` is deliberately NOT cleared here, and that is a fix, not an
+    // omission. Clearing it told the next chunk of the SAME turn that it was a
+    // new turn, so `beginTurn()` minted it a fresh generation, and a fresh
+    // generation is not the one this barge-in condemned: she would carry on
+    // speaking over the answer the shell had just given. That was survivable
+    // only by accident of who calls this. Every call site is inside the
+    // stage's synchronous handling of `final_user_request`, and the engine
+    // emits that at her first word, so the flag was usually already down. The
+    // accident got narrower still once a turn's generation began at its first
+    // CONTENT rather than its first audio, because her first word now raises
+    // the flag before the barge-in it triggers can read it.
+    //
+    // The semantics are the simpler statement of the same thing: a barge-in
+    // does not end her turn, it refuses to forward it. The turn ends where it
+    // always did, at `turnComplete`, at `interrupted`, or at the reset in
+    // `resetStreamState()` when the session is replaced.
     this.outputTranscript = "";
     this.upsampleAnchor = 0;
     this.pcmByteCarry = new Uint8Array(0);

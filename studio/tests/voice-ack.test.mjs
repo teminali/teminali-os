@@ -166,3 +166,40 @@ test("sanitizeOngoingAssist converts robotic 'today' phrasing to 'now' in ongoin
     "The tests passed today.",
   );
 });
+
+test("a wake word the operator added in Settings is stripped like a built-in one", () => {
+  /*
+    The list was frozen from DEFAULT_VOICE_SETTINGS at module load, so a word
+    the operator added in Settings was never stripped. It only survives one
+    unknown leading token — `hasActionWithTarget` reads words[0] or words[1] —
+    so "jarvis, deploy the site" still worked by luck. Add the politeness a
+    person actually speaks with and the verb slides to index 3, out of reach:
+    the operator asked for work and Temi said nothing.
+  */
+  for (const spoken of [
+    "jarvis can you fix the build",
+    "jarvis please run the tests",
+    "jarvis could you deploy the site",
+  ]) {
+    assert.equal(getImmediateAcknowledgment(spoken), null, `${spoken} (frozen list)`);
+    assert.ok(getImmediateAcknowledgment(spoken, ["jarvis"]), `${spoken} (operator list)`);
+  }
+
+  // The built-ins keep working when a custom list is supplied.
+  assert.ok(getImmediateAcknowledgment("temy, can you deploy the site", ["jarvis"]));
+
+  // And a custom word does not turn a greeting into an acknowledgment.
+  assert.equal(getImmediateAcknowledgment("jarvis hello", ["jarvis"]), null);
+});
+
+test("a wake word holding regex punctuation is matched, not thrown on", () => {
+  // Unescaped, this reached `new RegExp` as an unclosed group and threw on send.
+  assert.doesNotThrow(() => getImmediateAcknowledgment("fix the build", ["temy (work)"]));
+  assert.ok(getImmediateAcknowledgment("temy (work), fix the build", ["temy (work)"]));
+});
+
+test("the longest wake word wins, so a prefix does not eat it", () => {
+  // "temi" precedes "teminali" in the defaults; the separator must still match.
+  assert.ok(getImmediateAcknowledgment("teminali, run the tests"));
+  assert.ok(getImmediateAcknowledgment("teminali, run the tests", ["temi"]));
+});

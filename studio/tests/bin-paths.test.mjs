@@ -43,7 +43,15 @@ test("everything else in the environment is carried through untouched", () => {
 
 test("an environment with no PATH still gets one", () => {
   const { PATH } = withBinPaths({ HOME: "/tmp" });
-  assert.ok(PATH.split(path.delimiter).includes("/opt/homebrew/bin"));
+  const entries = PATH.split(path.delimiter);
+  /* Checked against the platform's own list rather than against a literal.
+     `/opt/homebrew/bin` appears only in the darwin branch of
+     `BIN_SEARCH_PATHS`, so spelling it out here made this the one assertion in
+     the suite that could not run anywhere but a mac, which is a needless reason
+     for the whole suite to be pinned to the dearest runner GitHub sells. The
+     literal is kept where it is actually true. */
+  for (const prefix of BIN_SEARCH_PATHS) assert.ok(entries.includes(prefix));
+  if (process.platform === "darwin") assert.ok(entries.includes("/opt/homebrew/bin"));
 });
 
 test("the home-relative prefixes resolve against the real home", () => {

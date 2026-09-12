@@ -47,8 +47,6 @@ export interface UseVoiceResult extends VoiceSnapshot {
   /** End a push-to-talk capture and commit what was heard. */
   endDictation: () => Promise<void>;
   stop: () => Promise<void>;
-  /** Toggle whichever mode is configured. */
-  toggle: () => Promise<void>;
   approve: (edited?: string) => Promise<void>;
   discard: () => void;
   recoverRejected: () => Promise<void>;
@@ -130,14 +128,6 @@ export function useVoice(host: VoiceHost): UseVoiceResult {
 
   const start = useCallback((mode: VoiceMode) => engine.start(mode), [engine]);
 
-  const toggle = useCallback(async () => {
-    if (snapshot.state !== "idle") {
-      await engine.stop();
-      return;
-    }
-    await engine.start(settings.mode);
-  }, [engine, snapshot.state, settings.mode]);
-
   return {
     ...snapshot,
     settings,
@@ -145,7 +135,6 @@ export function useVoice(host: VoiceHost): UseVoiceResult {
     startDictation: useCallback(() => start("push-to-talk"), [start]),
     endDictation: useCallback(() => engine.release(), [engine]),
     stop: useCallback(() => engine.stop(), [engine]),
-    toggle,
     approve: useCallback((edited?: string) => engine.approve(edited), [engine]),
     discard: useCallback(() => engine.discard(), [engine]),
     recoverRejected: useCallback(() => engine.recoverRejected(), [engine]),
