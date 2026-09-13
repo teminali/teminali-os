@@ -281,6 +281,35 @@ test("widening the state patterns did not widen them into small talk", () => {
   }
 });
 
+test("make it sound like singing is about her voice, not the machine", () => {
+  /*
+    Spoken to the voice on 2026-09-13, verbatim, right after she sang on
+    request. It classified `edit` on "make it", was delegated, and the text
+    assistant answered that it cannot sing. See `PRONOUN_DELIVERY`.
+  */
+  for (const line of [
+    "Hey, hey, that sounds like talking. Can you make it sound more like singing?",
+    "Make it sound more like singing.",
+    "make that feel warmer",
+    "can you make it seem less robotic",
+    "Can you sing a song about Margaret, a love song about Margaret, song?",
+    "Can you sing it longer?",
+  ]) {
+    assert.equal(classifyMachineAction(line), null, `"${line}" was delegated`);
+  }
+
+  // The causative still delegates when the clause names a machine thing, and a
+  // pronoun behind any other verb is still an object.
+  for (const [line, kind] of [
+    ["make the error message sound friendlier", "edit"],
+    ["make it", "edit"],
+    ["play that sound", "media"],
+    ["delete that", "edit"],
+  ]) {
+    assert.equal(classifyMachineAction(line)?.kind, kind, `"${line}" stopped being work`);
+  }
+});
+
 test("a pronoun is an object only when it sits behind the verb", () => {
   /*
     `it`, `this` and `that` have always been documented as counting only

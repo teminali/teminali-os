@@ -106,6 +106,23 @@ const MACHINE_NOUNS =
 const PRONOUN_OBJECT = /^\W*(?:\w+\W+)?(it|this|that|these|those)\b/i;
 
 /**
+ * Causative `make` with a bare pronoun and a verb of perception is about how
+ * she is saying something, not about a thing on this machine: "make it sound
+ * more like singing", "make that feel warmer". The pronoun there is her own
+ * delivery, and no agent behind her can change it.
+ *
+ * Measured 2026-09-13, spoken: she sang a love song on request, the operator
+ * said "Hey, hey, that sounds like talking. Can you make it sound more like
+ * singing?", and this file filed it `edit`. The text assistant got the turn,
+ * answered that anything it sings lands as text, and she then repeated that
+ * she cannot sing, poisoned by the report.
+ *
+ * `make` only: "play that sound" is a noun. A named machine thing in the clause
+ * still wins, because `MACHINE_NOUNS` is tested before the pronoun.
+ */
+const PRONOUN_DELIVERY = /^\W*(?:\w+\W+)?(?:it|this|that|these|those)\s+(?:sound|sounds|feel|feels|seem|seems)\b/i;
+
+/**
  * The same pronouns, anywhere in the sentence.
  *
  * A state question may point with one and have no verb for it to sit behind:
@@ -407,7 +424,7 @@ function hasObjectFor(text: string, verbMatch: RegExpExecArray, kind?: MachineAc
   const after = text.slice(verbMatch.index + verbMatch[0].length);
   const window = objectWindow(after);
   if (MACHINE_NOUNS.test(window) || SPOKEN_FILENAME.test(window)) return true;
-  if (PRONOUN_OBJECT.test(after)) return true;
+  if (PRONOUN_OBJECT.test(after)) return !(/^make$/i.test(verbMatch[0]) && PRONOUN_DELIVERY.test(after));
   // A playback verb may take a span of time as its whole object, and no other
   // verb may. See `DURATION_OBJECT`.
   if (kind === "media" && DURATION_OBJECT.test(after)) return true;

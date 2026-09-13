@@ -8691,6 +8691,29 @@ hands the flag to a real Node to prove Node accepts it (a misspelt flag exits wi
 `ELECTRON_RUN_AS_NODE=1 electron`, and that probe passes on a network with working
 IPv6 whatever the code does: check `curl -6` before trusting a green one.
 
+#### 6.0.52 "Make it sound more like singing" was filed as an edit (`services/voice/machineAction.ts`, 2026-09-13)
+
+Spoken, read back from the persisted transcript: the operator asked *"Can you sing
+a song about Margaret, a love song about Margaret, song?"* and she sang. The next
+turn was *"Hey, hey, that sounds like talking. Can you make it sound more like
+singing?"*. The operator heard "On it.", and the text assistant answered *"anything
+I sing lands as text"*. After that she told them twice that she cannot sing aloud,
+repeating the report she had been handed.
+
+The delegation was not her `ask_the_assistant` tool. It was the `machineAction.ts`
+fast path: `make` is an edit verb, and "it" directly behind it satisfies
+`PRONOUN_OBJECT`, so the turn classified `edit` and "On it." is that kind's
+acknowledgement. v0.0.16 did not cause it. The file last changed on 2026-09-12,
+and the sentence classifies `edit` on either side of the release.
+
+`PRONOUN_DELIVERY` now rejects the pronoun as an object when causative `make` is
+followed by a verb of perception (`sound`, `feel`, `seem`). In that construction
+the pronoun is how she is speaking, which no agent behind her can change. The
+exception covers `make` only, because "play that sound" uses *sound* as a noun. A
+machine noun in the clause still wins, so "make the error message sound
+friendlier" is still an edit. `tests/machine-action.test.mjs` holds the spoken
+sentence verbatim beside those counter-cases.
+
 ### 6.1 Turn semantics while a run is in flight (2026-09-05)
 
 A directed utterance is not automatically an instruction. `turnIntent.ts`
