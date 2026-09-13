@@ -212,6 +212,7 @@ type AgentEvent =
   | { type: "workspace"; action: "close-file"; scope: "active" | "all" | "path"; path?: string }
   | { type: "workspace"; action: "open-project"; path: string; name: string; kind?: "video" | "code" }
   | { type: "workspace"; action: "browse"; url: string; newTab: boolean }
+  | { type: "workspace"; action: "preview"; path?: string; url?: string }
   /* The agent asking to look through the camera. Answered here rather than
      bubbled to a pane: there is no decision left to make by the time it
      arrives — the operator has already approved the tool call — and a frame is

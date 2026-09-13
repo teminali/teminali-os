@@ -117,6 +117,15 @@ const MIME_TYPES = {
   ".weba": "audio/webm",
   ".vtt": "text/vtt",
   ".srt": "text/plain",
+  ".js": "application/javascript",
+  ".mjs": "application/javascript",
+  ".json": "application/json",
+  ".htm": "text/html",
+  ".woff": "font/woff",
+  ".woff2": "font/woff2",
+  ".ttf": "font/ttf",
+  ".otf": "font/otf",
+  ".txt": "text/plain",
 };
 
 export const WORKSPACE_LIMITS = Object.freeze({ maxDepth: 8, maxEntries: 2_000, maxFileBytes: 8 * 1024 * 1024 });

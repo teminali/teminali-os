@@ -1,6 +1,6 @@
 import { createHash, randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
 import http from "node:http";
-import { dirname, relative, sep, basename } from "node:path";
+import { dirname, relative, sep, basename, resolve as resolvePath, extname as extnamePath } from "node:path";
 import { Readable, pipeline } from "node:stream";
 import {
   MODEL_MODES,
@@ -10,7 +10,7 @@ import {
 } from "../../gateway/frontier-runner.js";
 import { BoundedAuditLog } from "./audit-log.js";
 import { createConfig } from "./config.js";
-import { countSeriesVideos, createWorkspaceDirectory, deleteWorkspaceFile, isStreamableWorkspaceFile, isViewableWorkspaceFile, listWorkspaceTree, readWorkspaceFile, resolveWorkspacePath, searchWorkspace, SERIES_MIN_EPISODES, WORKSPACE_LIMITS, writeWorkspaceFile } from "./workspace.js";
+import { countSeriesVideos, createWorkspaceDirectory, deleteWorkspaceFile, isStreamableWorkspaceFile, isViewableWorkspaceFile, listWorkspaceTree, readWorkspaceFile, resolveWorkspacePath, searchWorkspace, SERIES_MIN_EPISODES, WORKSPACE_LIMITS, workspaceMimeType, writeWorkspaceFile } from "./workspace.js";
 import { createPlayerRegistry, describePlayer, parsePlayerCommand, unsupportedReason, PlayerCommandError } from "./player-state.js";
 import { extractSubtitleVtt, mediaTools, playbackPlan, probeMedia } from "./media-probe.js";
 import { TERMINAL_LIMITS, runWorkspaceCommand } from "./terminal.js";
@@ -46,7 +46,7 @@ import { aboutPayload, readLicence } from "./about.js";
 import { checkForUpdate, downloadAsset, listReleases } from "./updates.js";
 import { lstat as lstatNodeFile, readdir as readNodeDir, readFile as readNodeFile, stat as statNodeFile } from "node:fs/promises";
 import { join as joinPath } from "node:path";
-import { existsSync } from "node:fs";
+import { createReadStream, existsSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { MAX_FILE_BYTES, extractFilePart, fileCapabilities, ingestFile } from "./files.js";
 import { detectDevice } from "./device.js";
@@ -324,7 +324,7 @@ const GEMINI_LIVE_SESSION_WINDOW_MS = 60_000;
  * single round trip to Google and short enough that the renderer's own retry
  * ladder gets a turn.
  */
-const GEMINI_LIVE_MINT_TIMEOUT_MS = 8_000;
+const GEMINI_LIVE_MINT_TIMEOUT_MS = 25_000;
 
 /**
  * Mint an ephemeral Gemini Live token, or say why not.
@@ -864,6 +864,85 @@ export async function createGateway(options = {}) {
           throw new GatewayError(400, "SESSION_BODY_FORBIDDEN", "Session bootstrap does not accept a request body.");
         }
         replyJson(response, 200, { token: sessionToken, tokenType: "Bearer", expires: "process_exit" });
+        return;
+      }
+
+      /*
+        Workspace Live Preview route: served before the bearer gate so browser
+        panels (WebContentsView) and iframes can load HTML pages, scripts, styles,
+        and media assets directly without bearer authorization headers.
+      */
+      if (["GET", "HEAD"].includes(request.method) && (route.startsWith("/api/workspace/preview") || route.startsWith("/preview/workspace"))) {
+        const prefix = route.startsWith("/api/workspace/preview") ? "/api/workspace/preview" : "/preview/workspace";
+        let relative = route.slice(prefix.length).replace(/^\/+/, "");
+        try {
+          relative = decodeURIComponent(relative);
+        } catch {
+          throw new GatewayError(400, "INVALID_PATH_ENCODING", "Invalid path encoding.");
+        }
+
+        let targetPath;
+        try {
+          targetPath = resolveWorkspacePath(config.workspaceRoot, relative);
+        } catch {
+          throw new GatewayError(403, "WORKSPACE_PATH_FORBIDDEN", "Path outside workspace boundary is forbidden.");
+        }
+
+        let stats;
+        try {
+          stats = await statNodeFile(targetPath);
+        } catch {
+          // If not found directly, check if targetPath + '.html' exists
+          try {
+            const htmlCandidate = `${targetPath}.html`;
+            stats = await statNodeFile(htmlCandidate);
+            targetPath = htmlCandidate;
+          } catch {
+            throw new GatewayError(404, "FILE_NOT_FOUND", `File not found in workspace: ${relative}`);
+          }
+        }
+
+        // If it's a directory, check for index.html or index.htm
+        if (stats.isDirectory()) {
+          const indexHtml = resolvePath(targetPath, "index.html");
+          try {
+            stats = await statNodeFile(indexHtml);
+            targetPath = indexHtml;
+          } catch {
+            const indexHtm = resolvePath(targetPath, "index.htm");
+            try {
+              stats = await statNodeFile(indexHtm);
+              targetPath = indexHtm;
+            } catch {
+              throw new GatewayError(404, "INDEX_NOT_FOUND", `No index.html found in directory: ${relative}`);
+            }
+          }
+        }
+
+        if (!stats.isFile()) {
+          throw new GatewayError(400, "NOT_A_FILE", "The requested path is not a file.");
+        }
+
+        let mime = workspaceMimeType(targetPath) || "application/octet-stream";
+        if (mime.startsWith("text/") || mime === "application/javascript" || mime === "application/json") {
+          mime += "; charset=utf-8";
+        }
+
+        response.writeHead(200, {
+          "content-type": mime,
+          "content-length": stats.size,
+          "cache-control": "no-cache, no-store, must-revalidate",
+          "access-control-allow-origin": "*",
+          "x-content-type-options": "nosniff",
+        });
+
+        if (request.method === "HEAD") {
+          response.end();
+          return;
+        }
+
+        const stream = createReadStream(targetPath);
+        stream.pipe(response);
         return;
       }
 

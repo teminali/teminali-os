@@ -70,6 +70,7 @@ if (typeof window !== "undefined") {
     useProjectStore,
     useTimelineStore,
   };
+  (window as unknown as { __panelStore: typeof usePanelStore }).__panelStore = usePanelStore;
 }
 
 /*

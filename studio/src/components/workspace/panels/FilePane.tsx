@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
-import { Loader2, Save, RotateCcw, AlertTriangle, FolderInput } from "lucide-react";
+import { Loader2, Save, RotateCcw, AlertTriangle, FolderInput, Globe } from "lucide-react";
 import { WorkspaceService } from "../../../services/workspaceService";
 import { highlightCode } from "../../../utils/syntaxHighlight";
 import { IconButton, EmptyState, Button } from "../../ui";
@@ -304,6 +304,17 @@ export const FilePane: React.FC<{ panel: PanelTab }> = ({ panel }) => {
         {dirty && <span className="w-1.5 h-1.5 rounded-full bg-accent flex-shrink-0" title="Unsaved changes" />}
         <div className="flex-1" />
         <span className="text-ink-disabled">{preview ? (preview.size === null ? "streamed" : formatBytes(preview.size)) : `${lineCount} lines`}</span>
+        {path && (path.endsWith(".html") || path.endsWith(".htm")) && (
+          <button
+            type="button"
+            onClick={() => useStudioStore.getState().openBrowserPreview(path)}
+            className="flex items-center gap-1.5 px-2 py-0.5 rounded bg-accent/15 hover:bg-accent/25 text-accent text-2xs font-sans font-medium transition-colors"
+            title="Preview this HTML file in the built-in browser"
+          >
+            <Globe size={11} />
+            <span>Preview</span>
+          </button>
+        )}
         {dirty && (
           <>
             <IconButton onClick={() => setContent(original)} title="Revert" size={22}>

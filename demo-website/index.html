@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Caffè Bella Milano — Luxury Italian Espresso Bar</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;700&family=Playfair+Display:ital,wght@0,600;1,400&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div class="ambient-glow"></div>
+
+  <header class="glass-header">
+    <div class="brand">
+      <span class="brand-sub">MILANO 1928</span>
+      <h1 class="brand-name">Caffè Bella</h1>
+    </div>
+    <nav class="nav-links">
+      <a href="#menu" class="active">Espresso Bar</a>
+      <a href="#pastry">Pasticceria</a>
+      <a href="#heritage">Our Heritage</a>
+    </nav>
+    <div class="cart-pill">
+      <span class="cart-label">Tavolo 4:</span>
+      <span id="order-total" class="total-badge">€0.00</span>
+    </div>
+  </header>
+
+  <main class="container">
+    <section class="hero-section">
+      <span class="hero-tag">TORREFAZIONE ARTIGIANALE</span>
+      <h2 class="hero-title">The Art of Roman Roasting,<br>The Pace of Milano.</h2>
+      <p class="hero-desc">Every cup is pulled from rare single-origin beans, roasted over beechwood and finished with velvety steamed crema.</p>
+    </section>
+
+    <section id="menu" class="menu-section">
+      <div class="section-head">
+        <h3>Signature Selections</h3>
+        <p>Select items to add to your tasting order</p>
+      </div>
+
+      <div class="menu-grid">
+        <div class="menu-card" data-name="Espresso Romano" data-price="3.50">
+          <div class="card-header">
+            <span class="card-icon">☕</span>
+            <span class="price-tag">€3.50</span>
+          </div>
+          <h4>Espresso Romano</h4>
+          <p>Double ristretto pulled over candied Sicilian lemon peel with caramelized hazelnut crema.</p>
+          <button class="add-btn">+ Add to Order</button>
+        </div>
+
+        <div class="menu-card" data-name="Marocchino Elegante" data-price="4.80">
+          <div class="card-header">
+            <span class="card-icon">🍫</span>
+            <span class="price-tag">€4.80</span>
+          </div>
+          <h4>Marocchino Elegante</h4>
+          <p>Layered dark Turin cocoa, single-shot espresso, frothed milk cloud, and shaved Valrhona chocolate.</p>
+          <button class="add-btn">+ Add to Order</button>
+        </div>
+
+        <div class="menu-card" data-name="Cornetto al Pistacchio" data-price="4.20">
+          <div class="card-header">
+            <span class="card-icon">🥐</span>
+            <span class="price-tag">€4.20</span>
+          </div>
+          <h4>Cornetto al Pistacchio</h4>
+          <p>Hand-laminated flaky brioche filled with Bronte pistacchio cream and gold dust.</p>
+          <button class="add-btn">+ Add to Order</button>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer class="footer">
+    <p>© 2026 Caffè Bella Milano. Designed with Teminali OS Autonomous Studio.</p>
+  </footer>
+
+  <script src="app.js"></script>
+</body>
+</html>

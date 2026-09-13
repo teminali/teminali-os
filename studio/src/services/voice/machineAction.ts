@@ -66,6 +66,18 @@ const OPINION_FRAMES = [
   /\btell me (about|what you)\b/i,
   /\bwhy (do|did|is|was|are|were)\b/i,
   /\bhow (are|is) (you|it going)\b/i,
+  // Explanations: how something works, functions, or how communication/audio happens is conversation
+  /\bhow (?:does|do|can|could|would|am|are|is)\b[^?.]{0,60}?\b(?:work|working|operate|function|talk|talking|speak|speaking|hear|hearing|reach)\b/i,
+  /\bhow (?:does|do) (?:that|this|it|everything|all of this|things?)\b/i,
+  /\bwhy (?:are|were|did|do|would) you (?:checking|looking|reading|saying|asking)\b/i,
+  /\b(?:can you\s+)?explain (?:to me\s+)?(?:how|why|what|the)\b/i,
+  /\bwhat do you mean\b/i,
+  // Directives telling her NOT to use assistants or to answer directly
+  /\b(?:do not|don'?t|never|stop|quit)\s+(?:use|using|call|calling|reach for|delegate to)\s+(?:the\s+)?(?:other\s+)?(?:assistants?|agents?|tools?)\b/i,
+  /\b(?:just\s+)?(?:talk|speak|answer)\s+(?:to me\s+)?(?:yourself|directly)\b/i,
+  // Singing and vocal delivery directives: "sing another one", "sing longer", "make it longer"
+  /\b(?:sing|singing|talk|talking|speak|speaking)\b[^?.]{0,50}?\b(?:longer|shorter|faster|slower|louder|quieter|softer|more|again|another)\b/i,
+  /\b(?:make it|make that)\b[^?.]{0,30}?\b(?:longer|shorter|faster|slower|louder|quieter|softer|more like singing)\b/i,
 ];
 
 /**
@@ -120,7 +132,8 @@ const PRONOUN_OBJECT = /^\W*(?:\w+\W+)?(it|this|that|these|those)\b/i;
  * `make` only: "play that sound" is a noun. A named machine thing in the clause
  * still wins, because `MACHINE_NOUNS` is tested before the pronoun.
  */
-const PRONOUN_DELIVERY = /^\W*(?:\w+\W+)?(?:it|this|that|these|those)\s+(?:sound|sounds|feel|feels|seem|seems)\b/i;
+const PRONOUN_DELIVERY =
+  /^\W*(?:\w+\W+)?(?:it|this|that|these|those)\s+(?:(?:\w+\s+){0,2})(?:sound|sounds|feel|feels|seem|seems|longer|shorter|faster|slower|louder|quieter|softer|higher|lower|more|less|better|worse)\b/i;
 
 /**
  * The same pronouns, anywhere in the sentence.
@@ -468,7 +481,7 @@ const VERB_GROUPS: { kind: MachineActionKind; verbs: RegExp; reason: string }[] 
   },
   {
     kind: "open",
-    verbs: /\b(open|show|reveal|display|bring up|pull up|load|go to|navigate to|find|locate|close|hide)\b/i,
+    verbs: /\b(open|show|reveal|display|bring up|pull up|load|go to|navigate to|find|locate|close|hide|preview)\b/i,
     reason: "a verb that puts something on screen",
   },
   {

@@ -14,12 +14,13 @@
 
 import { AIService } from "../aiService";
 import { diffLineCounts } from "../diff";
-import { summariseOutcome, type NarratableToolCall } from "./progressNarration";
+import { describeToolCall, summariseOutcome, type NarratableToolCall } from "./progressNarration";
 import { useStudioStore } from "../../store/studioStore";
 import { useChangeStore } from "../../store/changeStore";
 import { useAssistantActivityStore, type CodingEngine } from "../../store/assistantActivityStore";
 import { useApprovalStore } from "../../store/approvalStore";
 import { classifyApprovalReply } from "./approvalIntent.ts";
+import { frameVoiceDelegatedTask } from "./assistantHandoff.ts";
 import {
   describeEngineSwitch,
   isRunRecallQuestion,
@@ -438,7 +439,7 @@ export class TeminaliAgentBridge {
     try {
       await AIService.streamMessage(
         streamEngine,
-        prompt,
+        frameVoiceDelegatedTask(prompt),
         [],
         {
           onToken: (token) => {
@@ -458,6 +459,19 @@ export class TeminaliAgentBridge {
             const args = call.arguments || {};
             const inputStr = JSON.stringify(args);
 
+            const narratable: NarratableToolCall = {
+              id: call.id || `call-${toolCount}`,
+              name,
+              arguments: args,
+              status: call.status || "running",
+              result: call.result,
+            };
+            const desc = describeToolCall(narratable);
+            if (desc) {
+              activityStore.setLatestProgress(desc);
+              options.onProgress?.(desc);
+            }
+
             if (name === "runCommand" || name === "bash") {
               const cmd = (args as any)?.command || inputStr;
               const cmdStr = typeof cmd === "string" ? cmd : "command";
@@ -467,16 +481,8 @@ export class TeminaliAgentBridge {
                 result: "Executing in background CLI...",
                 status: "running",
               });
-              const prog = `Running command: ${cmdStr.substring(0, 32)}...`;
-              activityStore.setLatestProgress(prog);
-              options.onProgress?.(prog);
             } else if (name === "writeFile" || name === "editFile") {
               const file = (args as any)?.path || "file";
-              const filename = typeof file === "string" ? file.split("/").pop() : "file";
-              // This fires when the call is *made*. The only line counts that
-              // exist yet are the ones the provider attached to the call; the
-              // measured ones arrive with the edit event below. Nothing is
-              // invented to fill the gap.
               activityStore.logAction({
                 type: "edit",
                 file,
@@ -486,9 +492,6 @@ export class TeminaliAgentBridge {
                 desc: call.diff ? "Edit requested" : "Edit requested — line counts pending",
                 status: call.status === "completed" ? "success" : call.status === "error" ? "failed" : "running",
               });
-              const prog = `Modifying ${filename}...`;
-              activityStore.setLatestProgress(prog);
-              options.onProgress?.(prog);
             } else {
               activityStore.logAction({
                 type: "read",
@@ -496,7 +499,6 @@ export class TeminaliAgentBridge {
                 badge: "read",
                 desc: `Tool executed: ${name}`,
               });
-              activityStore.setLatestProgress(`Executing tool: ${name}`);
             }
           },
           onComplete: (data) => {
@@ -534,7 +536,17 @@ export class TeminaliAgentBridge {
             else if (event.action === "open-file") void store.showFile(event.path);
             else if (event.action === "open-folder") store.showFolder(event.path);
             else if (event.action === "open-project") store.setWorkspacePath(event.path);
-            else if (event.action === "close-file") {
+            else if (event.action === "browse") {
+              const browseUrl = (event as { url?: string }).url;
+              if (browseUrl) {
+                void import("../browserNavigation").then(({ openBrowserAt }) => {
+                  openBrowserAt(browseUrl, { newTab: (event as { newTab?: boolean }).newTab });
+                });
+              }
+            } else if (event.action === "preview") {
+              const target = (event as { path?: string; url?: string }).path || (event as { path?: string; url?: string }).url;
+              store.openBrowserPreview(target);
+            } else if (event.action === "close-file") {
               /*
                 "Close that file." The handler stopped at `open-project`, so the
                 event arrived and was dropped on the floor while Temi confirmed
@@ -682,8 +694,27 @@ export class TeminaliAgentBridge {
         result: errMsg,
         status: "failed",
       });
-      activityStore.setLatestProgress(`Error: ${errMsg}`);
-      options.onCompleted?.(`The background assistant encountered an issue: ${errMsg}`);
+      const spokenError = ((): string => {
+        if (/quota|429|rate[- ]limit|too many requests/i.test(errMsg)) {
+          return "The cloud provider hit a temporary rate limit. You can switch to the local Frontier model or Claude Code in settings.";
+        }
+        if (/api[- ]key|unauthorized|401/i.test(errMsg)) {
+          return "Authentication with the cloud service failed. Please check your API key in settings.";
+        }
+        if (/network|fetch failed|timeout|econnrefused/i.test(errMsg)) {
+          return "A network timeout occurred while connecting to the assistant.";
+        }
+        const clean = errMsg
+          .replace(/https?:\/\/\S+/g, "")
+          .replace(/\[GoogleGenerativeAI Error\]:?/gi, "")
+          .replace(/\[.*?\]/g, "")
+          .replace(/\{.*?\}/g, "")
+          .replace(/\s+/g, " ")
+          .trim();
+        return clean.length > 0 && clean.length < 120 ? clean : "Execution failed";
+      })();
+      activityStore.setLatestProgress(`Error: ${spokenError}`);
+      options.onCompleted?.(`The background assistant encountered an issue: ${spokenError}`);
       return `Error: ${errMsg}`;
     } finally {
       // Whatever happened, no question may be left standing over a run that

@@ -1030,26 +1030,42 @@ export const useStudioStore = create<StudioState>()(
       setBrowserPreviewUrl: (url) => set({ browserPreviewUrl: url }),
       openBrowserPreview: (urlOrPath) => {
         const state = get();
-        let targetUrl = urlOrPath;
-        if (!targetUrl && state.activeTabId) {
+        let target = urlOrPath;
+        if (!target && state.activeTabId) {
           const tab = state.tabs.find((t) => t.id === state.activeTabId);
           if (tab && (tab.name.endsWith(".html") || tab.name.endsWith(".htm"))) {
-            targetUrl = tab.path;
+            target = tab.path;
           }
         }
+        if (!target) {
+          const htmlTab = state.tabs.find((t) => t.name.endsWith(".html") || t.name.endsWith(".htm"));
+          if (htmlTab) target = htmlTab.path;
+          else target = "demo-website/index.html";
+        }
+
+        // Transform local file paths or workspace-relative paths into gateway HTTP preview URLs
+        let previewUrl = target;
+        if (!/^https?:\/\//i.test(target)) {
+          let rel = target;
+          const ws = state.workspacePath || "";
+          if (ws && rel.startsWith(ws)) {
+            rel = rel.slice(ws.length);
+          }
+          rel = rel.replace(/^\/+/, "");
+          previewUrl = `http://127.0.0.1:4310/api/workspace/preview/${rel}`;
+        }
+
         set({
           // Legacy split flags, kept for anything still reading them.
           isSplitOpen: true,
           splitTab: "browser",
-          ...(targetUrl ? { browserPreviewUrl: targetUrl } : {}),
+          browserPreviewUrl: previewUrl,
         });
+
         // The redesigned shell renders panels, not the old single split slot,
-        // so an artifact preview has to open one — and navigate its view,
-        // which a store update alone does not do. Imported lazily to keep the
-        // stores from depending on each other at module load.
+        // so an artifact preview opens a browser panel and navigates its view.
         void import("../services/browserNavigation").then(({ openBrowserAt }) => {
-          if (targetUrl) openBrowserAt(targetUrl);
-          else void import("./panelStore").then(({ usePanelStore }) => usePanelStore.getState().open({ kind: "browser" }));
+          openBrowserAt(previewUrl);
         });
       },
       
