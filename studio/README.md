@@ -778,6 +778,17 @@ sentence saying so, not a failed turn.
 
 ### Voice
 
+**Temi remembers.** Inside one conversation the Gemini Live session is the
+history; across conversations, a small memory layer is. When the voice screen
+closes, the transcript of that session goes once to the local Flash model, which
+writes back a handful of memories scored on four axes, and those are merged into
+a store of at most 320 that decays over months. At the next session start the
+strongest few are spliced into her persona before the socket opens. Nothing in
+that layer runs during a turn, which is a contract rather than a nicety: see
+`DESIGN.md` 6.48, and `npm run eval:memory` for what a simulated year does to the
+store. Her memory lives at `TEMINALI_MEMORY_STORE`, written `0600`, and
+`POST /api/workspace/temi-memory/{forget,clear}` are how it is emptied.
+
 Three engines answer a spoken turn, in descending order of what they can do.
 
 **Gemini Live** is the top tier and the one Temi speaks with. The renderer opens
@@ -1381,7 +1392,7 @@ ollama serve              # local models on 127.0.0.1:11434
 
 ```bash
 npm run typecheck   # tsc --noEmit
-npm test            # 2870 tests
+npm test            # 2954 tests
 npm run eval:local  # the local lane against the real model — a score, not a pass/fail; needs Ollama
 npm run eval:voice  # the voice co-agent's spoken answers, same discipline; needs Ollama
 npm run eval:memory # Temi's memory policy over a simulated year; pure, no model, no network

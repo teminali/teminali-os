@@ -41,6 +41,8 @@ export const MAX_STORED_ATOMS = 512;
 
 const MAX_ID_CHARS = 64;
 const MAX_TEXT_CHARS = 400;
+/** A subject names a question, not an answer. Longer than this is a sentence. */
+const MAX_SUBJECT_CHARS = 64;
 
 /**
  * The four kinds, copied from `temiMemory.ts` rather than imported.
@@ -81,6 +83,21 @@ function cleanStamp(value, now) {
   return Number.isFinite(value) && value > 0 ? Math.floor(value) : now;
 }
 
+/**
+ * An anchor's subject: a lowercase slug and nothing else.
+ *
+ * Narrow because this key DELETES. Two anchors sharing a subject means the older
+ * one leaves, so a subject that arrived with a stray space or a capital is a
+ * supersession that silently does not happen, and one carrying punctuation is a
+ * key nobody can match by eye when reading the file. Anything left empty by the
+ * strip returns "", and the caller drops the field rather than storing a blank
+ * subject that every other blank subject would collide with.
+ */
+function cleanSubject(value) {
+  if (typeof value !== "string") return "";
+  return value.toLowerCase().replace(/[^a-z0-9:_-]+/g, "-").replace(/^-+|-+$/g, "").slice(0, MAX_SUBJECT_CHARS);
+}
+
 function cleanAtom(entry, now) {
   if (!entry || typeof entry !== "object") return null;
   const id = typeof entry.id === "string" ? entry.id.trim().slice(0, MAX_ID_CHARS) : "";
@@ -107,6 +124,12 @@ function cleanAtom(entry, now) {
   // given: it is `stageOf` that decides what an atom's stage is now, and a
   // sanitiser that second-guessed the flag would be making a policy call.
   if (entry.faded === true) atom.faded = true;
+  // Anchors only. Nothing else supersedes, so a subject anywhere else is a field
+  // that would read as meaningful and change nothing.
+  if (entry.kind === "anchor") {
+    const subject = cleanSubject(entry.subject);
+    if (subject) atom.subject = subject;
+  }
   return atom;
 }
 

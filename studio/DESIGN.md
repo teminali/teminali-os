@@ -11858,13 +11858,230 @@ fetch at recall time, which is the thing the contract exists to prevent. Priming
 never throws: an unreachable gateway means she starts the conversation without her
 memory, which is how she has started every conversation until now.
 
-**Still not true.** Extraction and recall are not built: nothing writes an atom,
-and the persona does not yet carry a recall block. `TEMI_PERSONA`
-(`temiPersona.ts:91`) is static and injected once at session start
-(`geminiLiveEngine.ts:674`); there is no honest mid-session update, which is why
-consolidation belongs *between* sessions rather than during one. The store is
-therefore real, durable and empty. **Temi still remembers nothing across
-sessions**, and will until a consolidation pass writes the first atom.
+#### The extraction tier (`services/voice/temiMemoryExtract.ts`, `temiMemoryPass.ts`, 2026-09-13)
 
-Measured when this landed: studio **2870/2870**, 0 skips, exit 0;
-`tsc --noEmit` clean.
+The store was real, durable and empty, because nothing wrote an atom. This is
+what writes them: a transcript goes to a text model, and out come memories with
+the four axis scores already on them.
+
+**It runs once, after the session, and never inside one.** That is the latency
+contract above, and this tier is where it is kept or broken. The pass is started
+from the voice screen's teardown, which is the first moment there is nobody left
+to keep waiting. It is deliberately not awaited and deliberately not cancelled:
+the screen is going away, the renderer is not, and the pass carries its own
+120 s deadline for that reason, because handing it the abort signal that just
+fired would kill the extraction before it read a word. What this does not cover
+is quitting the app mid-conversation, which tears down the renderer without
+running a cleanup and loses that session. The alternative is consolidating
+partway through, which is the one thing the contract forbids.
+
+**The model is local Flash, through the digest lane.** She talks over Gemini
+Live, so the transcript has already left the machine and privacy is not the
+argument. Cost and silence are: this runs after every conversation, forever, on
+a growing transcript, and produces nothing anyone is waiting for. `streamDigest`
+is already the right shape (one prompt, no agent system prompt, no history, no
+tool loop) and reusing it means the pass reuses the runner Ollama already has
+resident rather than forcing a `num_ctx` change, measured at 1.5 to 2.4 s of
+reload. The model is injected as a `complete` function rather than imported, so
+the prompt and the parser stay pure and testable without a model, which matters
+more than it sounds: the parser is the only thing between a model's bad day and
+a permanent record of it.
+
+**The prompt argues against importance three times.** A model asked what is
+worth remembering will rank by importance, because that is what every text ever
+written about note-taking means by the question. So the prohibition is stated,
+given an example, and then given the counter-example "if everything you write
+down is useful, you have done this wrong". Telling it once did not hold. The cap
+of 12 memories per session is a ceiling and not a quota, and the prompt says so
+twice, because the failure worth guarding against is not a model that finds too
+few: it is one that treats the instruction as a form and manufactures twelve
+memories from a conversation about nothing, every session, until the store is
+full of things that did not matter.
+
+**Permissive about the envelope, strict about the contents.** A code fence, a
+sentence of preamble, a trailing apology and quoted numbers are a small model
+being conversational and cost nothing to tolerate. A fifth kind, a text long
+enough to be a summary, or four axes all at zero are the model having done
+something else, and letting those through writes a permanent record of it. An
+over-long memory is refused rather than truncated, for the same reason a gistless
+atom keeps its detail rather than being cut down: half a sentence she never wrote
+is worse than nothing. One bad row never costs a session its good ones.
+
+**Matching is deliberately conservative, and the two ways to be wrong are not
+symmetric.** `sameMemory` counts shared content words over the SHORTER of the
+two texts, not over their union, so "he is dreading the Thursday demo" and the
+same sentence with a reason attached score 1.0 rather than 0.5. It needs 0.6
+overlap and at least two shared words, so a one-word memory can never match. A
+false match rehearses the wrong atom, overwrites its text with something that
+never happened, and because rehearsal extends the half-life super-linearly it
+makes that invention harder to lose than a true memory. A false miss lays down a
+duplicate that decays on the same schedule and costs one slot out of 320. The
+threshold is set so the failure runs towards duplicates.
+
+**Anchors supersede on a subject, which is decision 5 finally implemented.**
+Nothing removed "lives in Arusha" when he moved, because anchors do not decay,
+and text similarity cannot catch that pair either: they share one content word
+and mean opposite things. So anchors carry `subject`, a lowercase slug naming
+the question they answer, and a new answer displaces the old one. Free-form
+rather than an enum, and that is the load-bearing half: an enum would need a
+`person` member, and then an anchor about his brother and one about his mother
+would collide on it and delete each other. The cost is a model that writes
+`person:brother` one week and `brother` the next supersedes nothing and leaves
+two anchors where one should be. That direction is chosen, because a duplicate
+is visible and fixable and a wrongly deleted anchor is neither. Rehearsal is
+tested BEFORE supersession, or saying where he lives a second time would
+supersede the anchor with an identical copy of itself, reset its rehearsal count
+and quietly undo decision 3 for exactly the memories decision 5 protects.
+
+**Every failure path writes nothing, and one of those is not the obvious
+choice.** A failed READ could plausibly be read as an empty store, since this
+might be the first run. It is not, because a save replaces the store wholesale,
+so guessing wrong once destroys everything she has, silently, while reporting
+success. `primeTemiMemory` swallows a failed read and `loadTemiMemory` throws on
+one, and the pass uses the second: the cache is for the live path, where a
+missing store costs her one conversation, and the write path cannot use it. A
+failed EXTRACTION could plausibly still consolidate, since time has passed
+whether or not a model answered. It does not, for a smaller reason: forgetting
+deferred costs nothing, because `selectForRecall` ranks by retention and never
+chooses a dead atom, so an expired memory is already invisible and merely
+lingers on disk until the next good pass.
+
+**The transcript is captured separately from the one on screen.**
+`dialogueHistory` is derived from `frontierMessages`, which is persisted: it
+holds what he said yesterday too, and `newChatSession` can empty it
+mid-conversation. Either way a teardown reading it would consolidate something
+other than the session that just ended. A spoken user turn is recorded with the
+same replace-the-last-bubble rule the dialogue uses, because a voice transcript
+refines itself, and without that one sentence lands four times and she remembers
+him as someone who repeats himself. The accumulator is emptied by the pass that
+consumes it, which is what makes a second run harmless: React strict mode tears
+the screen down and rebuilds it on every mount in development.
+
+#### The recall tier (`services/voice/temiPersona.ts`, 2026-09-13)
+
+The store reaches the model as prose. `buildTemiPersona(atoms, now)` splices a
+recall block into `TEMI_PERSONA`, and `geminiLiveEngine.ts:711` calls it with
+`residentMemory()` while it composes `systemInstruction`: synchronous, pure, once
+per session, nothing left to run on a turn. An empty or unprimed store returns
+`TEMI_PERSONA` itself, the same object rather than a copy that matches, because
+the persona measured 87% and two attempts to improve it by expanding it measured
+worse, so a first run must get the prompt that was measured, and a woman with no
+memories must not be handed an empty heading telling her to remember things.
+
+Three decisions. **The block goes before the examples, not at the end**: the last
+thing in a prompt is the strongest influence on the shape of what comes out, and
+a run of terse dashed lines landing after `TEMI'S VOICE IN PRACTICE` is an
+invitation to answer in terse dashed lines, which is the reciting failure the
+framing spends a paragraph forbidding. **Kinds are not flattened into one list**,
+because an undifferentiated list gives his mother's name and a joke from March
+the same weight; each kind arrives under a heading saying what that kind is for,
+and anchors additionally carry no date at all, which is policy decision 5 made
+visible in the prompt. **Ages are coarse**, "a few weeks ago" and never "on 14
+August", because a precise date she cannot verify is the exact shape of the three
+fabrications recorded at the top of `temiPersona.ts`.
+
+A second budget, `RECALL_BLOCK_BUDGET_CHARS` of 2200, bounds the rendered lines
+and is spent in selection order so the wander goes before an anchor does.
+Measured at today's constants a 320-atom store renders about 2000 characters of
+lines and the selector's own 1400 is what binds, so this ceiling is not
+load-bearing yet. That is exactly why it is written down: otherwise the bound is
+an accident of two constants in a file this one does not own.
+
+Measured: persona 18,478 characters; block 2,294 to 2,940 at a full 320-atom
+store depending on how many anchors crowd the selection; composed 20,774 to
+21,418. `tests/voice-handoff.test.mjs` now holds a ceiling of 3,200 on the block
+and 22,000 on the whole instruction, which the system instruction had never had.
+
+One wart, and it is the extraction tier's to fix. The engine binds
+`residentMemory` through a dynamic import started at module load rather than a
+static one, because `temiMemoryStore.ts` imports `../gatewayClient` with no file
+extension and a static chain through it fails every test that loads
+`GeminiLiveEngine` under `node --test`. Vite resolves both specifiers to the same
+module, so there is no split `resident` state. Add the extension there and the
+binding collapses to one import line.
+
+**What is still not true.** All three tiers are built, so she now keeps
+something from one conversation to the next. Three things are not yet true, and
+each is a real gap rather than a caveat.
+
+The prompt in `temiMemoryExtract.ts` **has never been run against the real
+model.** Every test here proves the parser survives what a model might say, not
+that the local Flash model says anything good: the axis scores it assigns, and
+whether it can resist ranking by importance, are unmeasured. That is the next
+thing worth measuring, and `evals/temi-memory.mjs` is the shape it should take.
+
+**Quitting the app mid-conversation loses that session.** The pass runs from the
+voice screen's teardown, and a quit kills the renderer without one. The fix
+people reach for, consolidating partway through, is the one thing the latency
+contract forbids.
+
+And there is still **no honest mid-session update**: Gemini Live fixes the system
+instruction at setup, so a memory laid down at the end of a conversation reaches
+her at the start of the next one and not before. That is not a limitation to be
+removed. It is the reason consolidation belongs between sessions rather than
+during one.
+
+Measured when the storage tier landed: studio **2870/2870**, 0 skips, exit 0.
+Measured when extraction and recall landed: studio **2954/2954**, 0 skips, exit 0;
+root **143/143**; `tsc --noEmit -p studio/tsconfig.json` exit 0.
+
+### 6.49 A pane was listening, so she said the film had paused (`services/playerControl.ts`, 2026-09-13)
+
+The player dispatch answers whether a pane acted, not whether one is listening.
+`dispatchPlayerCommand` used to return `listeners.size > 0`, and every caller
+reads that value as "the command landed": on false `aiService` tells the model no
+player is mounted and `voice/playerActions` hands the turn back unhandled. A pane
+subscribes to the whole action list while acting on part of it, so the two
+questions come apart routinely. The episode gallery listens for `episode` and
+`episodes` and drops the other eighteen, and `MediaPlayer.runCommand` has no
+branch for `chapter` or `audio_track`; a `pause` said to the gallery therefore
+came back true with nothing moved, and Temi reported a film paused over a grid of
+thumbnails. `playerWillTake` now reads the answer out of the snapshot the pane
+already publishes: `unsupported` is the pane's own per-file, per-engine refusal
+list, and `view` and `series` say which of the two listeners is mounted. Nothing
+there is a new contract, which is why no pane had to change. With no snapshot yet
+published the old permissive answer stands, because a pane subscribes in one
+effect and publishes in the next, and refusing on ignorance would invent a
+failure.
+
+**The part deliberately not fixed.** The module-level `Set` holding those
+listeners is per renderer, and stays that way. A command sent in one window
+cannot reach a listener registered in another, which `voice/temiMemoryStore.ts`
+names in the comment on `resident` as the opposite of its own case, but it was
+measured before it was fixed and it is latent rather than live: three documents
+load this bundle and only `App` mounts anything that dispatches or subscribes,
+while the overlay surface and the recorder bar do not import the module at all,
+and every `createWindow()` caller checks first that the studio window is gone.
+Fixing it by broadcasting over IPC would buy nothing and cost the invariant the
+file is built on, that at most one player takes a command, since a broadcast
+reaches every renderer and would one day drive two players from one sentence. The
+app already has a road across a process for this and it is the one in the header:
+the pane publishes to the gateway, and the gateway comes back down the run's own
+stream. A second road would need a notion of "the active player" that nothing in
+the app has. `tests/player-dispatch-honesty.test.mjs` ends with a source scan
+pinning the seven files that call the dispatch, so if anyone ever dispatches from
+the overlay or the recorder bar, the latent drop becomes live and the test says
+so.
+
+### 6.50 She answered "Right away." to a hello (`services/voice/acknowledgment.ts`, 2026-09-13)
+
+The wake word has one home, `DEFAULT_VOICE_SETTINGS.wakeWords`, and
+`acknowledgment.ts` was carrying a fourth copy of it inside the regex that strips
+her name off the front of a greeting. That copy had drifted in both directions:
+it knew "temy" but not "temi", the spelling the recogniser actually returns, and
+it could not know about a word the operator typed into Settings. The cost was
+audible, because `patterns.leading` only strips a name standing at the very
+front. "um okay Temi, hello" reached the stripper as "okay temi hello", the
+greeting test missed it, and the affirmation rule then matched the leading "okay"
+and answered "Right away." to a hello. The stripper is now a third memoised
+pattern built from the same merged list as the other two, so an operator's word is
+honoured here as it already was there. "frontier" and "studio" lived only in that
+copy and are kept, but kept apart in `LEGACY_ADDRESS_NAMES`: they are what people
+call the app, not what they call her, and a wake word is the operator's contract
+rather than a convenience, so widening that list with the product's own names
+would widen every match in the file.
+
+The three remaining copies are not this bug and were left: `hooks/useVoice.ts:33`
+and `voice/turnIntent.ts:67` are filler-word sets, and `voice/voiceTurnRouter.ts`
+is the dictation lane.
+

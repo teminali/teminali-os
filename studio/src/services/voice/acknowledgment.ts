@@ -11,6 +11,17 @@ import { DEFAULT_VOICE_SETTINGS } from "./types.ts";
   still get the defaults.
 */
 const BASE_WAKE_WORDS = [...DEFAULT_VOICE_SETTINGS.wakeWords, "assistant"];
+
+/*
+  What people still call the app, which is not the same thing as what they call
+  her. These two were hardcoded into the greeting stripper below and nowhere
+  else, so they are kept, but kept apart: a wake word is the operator's
+  contract, it is what the front of a sentence is measured against and what the
+  Settings field is a list of, and quietly widening it with the product's own
+  names would widen every match in this file. They are stripped when somebody
+  opens with one and never added to `BASE_WAKE_WORDS`.
+*/
+const LEGACY_ADDRESS_NAMES = ["frontier", "studio"];
 const LEADING_FILLERS = /^(hey|yo|so|well|um|uh|please|can\s+you|could\s+you|would\s+you|just)\s+/i;
 
 /*
@@ -25,6 +36,8 @@ function escapeForPattern(value: string): string {
 interface WakePatterns {
   leading: RegExp;
   trailing: RegExp;
+  /** The same list again, for a name that arrives behind a filler. See `opening` below. */
+  address: RegExp;
 }
 
 let cachedKey: string | null = null;
@@ -45,9 +58,14 @@ function wakePatterns(wakeWords?: readonly string[]): WakePatterns {
   if (cachedPatterns && cachedKey === key) return cachedPatterns;
 
   const alternation = words.map(escapeForPattern).join("|");
+  const addresses = Array.from(new Set([...words, ...LEGACY_ADDRESS_NAMES]))
+    .sort((a, b) => b.length - a.length)
+    .map(escapeForPattern)
+    .join("|");
   const patterns: WakePatterns = {
     leading: new RegExp(`^(?:hey\\s+|yo\\s+|ok(?:ay)?\\s+)?(?:${alternation})[\\s,.:!—-]+`, "i"),
     trailing: new RegExp(`[\\s,]+(?:${alternation})[\\s.!?]*$`, "i"),
+    address: new RegExp(`^(?:(?:${addresses})\\b[\\s,]*)+`, "i"),
   };
   cachedKey = key;
   cachedPatterns = patterns;
@@ -91,10 +109,20 @@ export function getImmediateAcknowledgment(text: string, wakeWords?: readonly st
     "um, hello" used to miss this branch and fall through to a canned
     acknowledgement — the operator heard a work reply to "hello". Speech is
     what feeds this, and speech arrives with exactly that kind of preamble.
+
+    The name is stripped off `patterns.address`, which is the same list the two
+    patterns above are built from, because this line used to carry a fourth
+    hardcoded copy of it. That copy was wrong in both directions. It was missing
+    "temi", the spelling the recogniser actually returns (see the comment on
+    `wakeWords` in `types.ts`), and it could not know about a word the operator
+    added in Settings. What that cost: `patterns.leading` only strips a name
+    standing at the very front, so "um okay Temi, hello" reached this line as
+    "okay temi hello", the greeting test failed on it, and rule 2 below matched
+    the leading "okay" and answered "Right away." to a hello.
   */
   const opening = lower
     .replace(/^(?:(?:um|uh|erm|er|ah|oh|well|so|hey|ok|okay)\b[\s,]*)+/i, "")
-    .replace(/^(?:(?:temy|teminali|frontier|studio)\b[\s,]*)+/i, "")
+    .replace(patterns.address, "")
     .trim() || lower;
 
   // 1. Direct greetings and presence checks — always answer naturally without canned filler

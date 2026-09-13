@@ -317,7 +317,13 @@ test("an engine error is heard by something", () => {
   const errored = stage.indexOf("protocol.onError =");
   const message = stage.indexOf("protocol.onMessage =");
   assert.ok(connected < errored && errored < message, "assigned with the other handlers, before connect() is called");
-  assert.ok(errored < stage.indexOf("void protocol.connect()"));
+  /* `connect()` is no longer the bare statement it was: it is sequenced behind
+     the awaited `primeTemiMemory()` so the system instruction can read her
+     memory synchronously (DESIGN.md 6.48). The ordering this test exists to
+     hold is unchanged, so the match moves to the call itself. */
+  const connect = stage.indexOf("protocol.connect()");
+  assert.ok(connect > 0, "connect() must still be called from this effect");
+  assert.ok(errored < connect);
 });
 
 test("a voice failure is written out, not hidden in the tooltip of a 2.5px dot", () => {

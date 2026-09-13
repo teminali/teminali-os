@@ -153,6 +153,42 @@ export interface MemoryAtom {
   rehearsals: number;
   /** True once the detail has been dropped and only the gist remains. */
   faded?: boolean;
+  /**
+   * What an anchor is *about*, as a lowercase slug: `home`, `work`, `role`,
+   * `person:mama`. Only anchors carry one, and it is the whole of decision 5.
+   *
+   * Anchors do not decay, so nothing ever removes "lives in Arusha" when he
+   * moves to Dodoma. Text similarity cannot catch that pair either: they share
+   * one content word and mean opposite things. So supersession needs a key that
+   * says these two are answers to the same question, and the extractor writes
+   * it.
+   *
+   * Free-form rather than a fixed enum, and that is the load-bearing half. An
+   * enum would need a `person` member, and then an anchor about his brother and
+   * one about his mother would collide on it and delete each other. A slug that
+   * names the subject cannot. The cost is that a model which writes
+   * `person:brother` one week and `brother` the next supersedes nothing, and
+   * two anchors stand where one should. That failure direction is chosen: a
+   * duplicate is visible and fixable, a wrongly deleted anchor is neither.
+   */
+  subject?: string;
+}
+
+/**
+ * What the extractor hands back: a memory with no history yet.
+ *
+ * Deliberately not a `MemoryAtom`. An atom carries `bornAt`, `lastTouchedAt`
+ * and `rehearsals`, and those are facts about a memory's life in the store that
+ * a model reading a transcript has no business asserting. `absorb` is what
+ * turns a candidate into an atom, because only it knows whether this is the
+ * first time or the fifth.
+ */
+export interface MemoryCandidate {
+  kind: MemoryKind;
+  text: string;
+  gist?: string;
+  axes: MemoryAxes;
+  subject?: string;
 }
 
 /**
@@ -414,4 +450,180 @@ export function selectForRecall(
   }
 
   return chosen;
+}
+
+/**
+ * How much two memories have to overlap before they are treated as one.
+ *
+ * Measured as shared content words over the SHORTER of the two, not over their
+ * union. "He is dreading the Thursday demo" and "He is dreading the Thursday
+ * demo because the gateway keeps dying" are the same memory told twice, once
+ * with more of it; union-based similarity scores that pair at 0.5 and lays down
+ * a duplicate, which is the wrong answer. Containment scores it 1.0.
+ */
+export const MEMORY_MATCH_OVERLAP = 0.6;
+
+/**
+ * And no match at all below this many shared content words, whatever the ratio.
+ *
+ * Without it a one-word memory matches anything containing that word, because
+ * containment over a set of size one is either 0 or 1. "Tired" would rehearse
+ * "he was tired of the build" and then "the tired old joke about Dodoma".
+ */
+export const MEMORY_MATCH_MIN_SHARED = 2;
+
+/**
+ * Words carried by every sentence, which therefore distinguish none of them.
+ *
+ * Short and English on purpose. A long stop list is a second policy nobody
+ * reviews, and the cost of missing one is a slightly stricter match, which
+ * fails towards duplicates rather than towards collisions.
+ */
+const STOP_WORDS = new Set([
+  "a", "an", "the", "and", "or", "but", "if", "so", "as", "at", "by", "for", "from", "in", "into",
+  "of", "on", "to", "with", "is", "was", "are", "were", "be", "been", "being", "am", "he", "him",
+  "his", "she", "her", "i", "me", "my", "you", "your", "it", "its", "they", "them", "their", "we",
+  "us", "our", "that", "this", "these", "those", "there", "here", "then", "than", "when", "while",
+  "has", "have", "had", "do", "does", "did", "will", "would", "can", "could", "about", "just",
+]);
+
+function contentWords(text: string): Set<string> {
+  const words = text
+    .toLowerCase()
+    .replace(/[^a-z0-9\s']/g, " ")
+    .split(/\s+/)
+    .filter((w) => w.length > 1 && !STOP_WORDS.has(w));
+  return new Set(words);
+}
+
+/**
+ * Whether two texts are the same memory. Deliberately conservative.
+ *
+ * The two ways to be wrong are not symmetric. A false match rehearses the wrong
+ * atom and overwrites its text with something that never happened, and because
+ * rehearsal extends the half-life super-linearly it also makes that wrong
+ * memory harder to lose than a true one. A false miss lays down a duplicate,
+ * which sits next to the original, decays on the same schedule and costs one
+ * slot out of 320. So the threshold is set high and the failure runs towards
+ * duplicates.
+ */
+export function sameMemory(a: string, b: string): boolean {
+  const left = contentWords(a);
+  const right = contentWords(b);
+  const smaller = Math.min(left.size, right.size);
+  if (smaller === 0) return false;
+  let shared = 0;
+  for (const word of left) if (right.has(word)) shared += 1;
+  if (shared < MEMORY_MATCH_MIN_SHARED) return false;
+  return shared / smaller >= MEMORY_MATCH_OVERLAP;
+}
+
+export interface AbsorptionResult {
+  /** The store with this session's memories folded in. Not yet consolidated. */
+  atoms: MemoryAtom[];
+  /** Candidates that were new. */
+  laid: MemoryAtom[];
+  /** Existing atoms that came back up, already rehearsed. */
+  rehearsed: MemoryAtom[];
+  /** Anchors displaced because a newer answer to the same question arrived. */
+  superseded: MemoryAtom[];
+}
+
+/**
+ * Fold one session's candidates into the store.
+ *
+ * This is the only place a memory is born, and the order of the three tests is
+ * the argument:
+ *
+ *   1. **Same kind, same words: rehearse.** He said it again. Every axis takes
+ *      the higher reading, the half-life stretches, and a faded atom comes back
+ *      whole. See `rehearse`.
+ *   2. **Same anchor subject: supersede.** He gave a new answer to a question
+ *      the store already had an answer to. The old one leaves, and the new one
+ *      is born rather than inheriting the old one's rehearsals, because "moved
+ *      to Dodoma" is not the fifth telling of "lives in Arusha", it is the
+ *      thing that makes it false.
+ *   3. **Otherwise: lay it down.**
+ *
+ * Rehearsal is tested before supersession on purpose. Saying where he lives a
+ * second time would otherwise supersede the anchor with an identical one, reset
+ * its rehearsal count to zero and quietly undo decision 3 for exactly the
+ * memories decision 5 was meant to protect.
+ *
+ * Candidates are absorbed in order, and each one can match an atom an earlier
+ * candidate in the same pass just laid down. That is what makes a transcript
+ * where he repeats himself produce one rehearsed memory rather than two.
+ *
+ * Pure, `now` is injected, and so is `newId`, so a pass runs identically twice.
+ * Consolidation is NOT run here: absorbing and forgetting are separate steps
+ * because the caller may want to absorb from several sources before deciding
+ * what to lose, and because a function that both adds and deletes is one nobody
+ * can reason about at the call site.
+ */
+export function absorb(
+  existing: readonly MemoryAtom[],
+  candidates: readonly MemoryCandidate[],
+  now = Date.now(),
+  newId: () => string = defaultMemoryId,
+): AbsorptionResult {
+  const atoms = [...existing];
+  const laid: MemoryAtom[] = [];
+  const rehearsed: MemoryAtom[] = [];
+  const superseded: MemoryAtom[] = [];
+
+  for (const candidate of candidates) {
+    const text = candidate.text?.trim() ?? "";
+    if (!text) continue;
+
+    const matchIndex = atoms.findIndex((a) => a.kind === candidate.kind && sameMemory(a.text, text));
+    if (matchIndex >= 0) {
+      const brought = rehearse(atoms[matchIndex], { ...candidate, text }, now);
+      atoms[matchIndex] = brought;
+      rehearsed.push(brought);
+      continue;
+    }
+
+    if (candidate.kind === "anchor" && candidate.subject) {
+      for (let i = atoms.length - 1; i >= 0; i -= 1) {
+        if (atoms[i].kind === "anchor" && atoms[i].subject === candidate.subject) {
+          superseded.push(atoms[i]);
+          atoms.splice(i, 1);
+        }
+      }
+    }
+
+    const born: MemoryAtom = {
+      id: newId(),
+      kind: candidate.kind,
+      text,
+      axes: { ...candidate.axes },
+      bornAt: now,
+      lastTouchedAt: now,
+      rehearsals: 0,
+    };
+    if (candidate.gist && candidate.gist.trim()) born.gist = candidate.gist.trim();
+    // Anchors only, because only anchors supersede. A subject on a fact would
+    // be a field that reads as meaningful and changes nothing, and the server
+    // drops it for the same reason.
+    if (candidate.kind === "anchor" && candidate.subject) born.subject = candidate.subject;
+    atoms.push(born);
+    laid.push(born);
+  }
+
+  return { atoms, laid, rehearsed, superseded };
+}
+
+let idCounter = 0;
+
+/**
+ * Unique enough for a store of 320 that one process writes, and no more.
+ *
+ * The counter is what makes it safe: two atoms born in the same millisecond of
+ * the same pass would otherwise collide, and the server drops a duplicate id
+ * silently, so the collision would look like the extractor having found one
+ * memory where it found two.
+ */
+export function defaultMemoryId(): string {
+  idCounter += 1;
+  return `mem-${Date.now().toString(36)}-${idCounter.toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
 }

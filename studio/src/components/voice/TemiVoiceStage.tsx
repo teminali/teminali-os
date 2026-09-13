@@ -34,6 +34,10 @@ import { useCommandApproval } from "../../hooks/useCommandApproval";
 import { useSpokenApproval } from "../../hooks/useSpokenApproval";
 import { runProgressFromActivity } from "../../services/voice/runProgressFromActivity";
 import { traceVoice } from "../../services/voice/voiceTrace";
+import { loadTemiMemory, primeTemiMemory, saveTemiMemory } from "../../services/voice/temiMemoryStore";
+import type { TranscriptTurn } from "../../services/voice/temiMemoryExtract";
+import { formatMemoryPass, runMemoryPass } from "../../services/voice/temiMemoryPass";
+import { temiMemoryModel } from "../../services/voice/temiMemoryModel";
 import {
   candidatesFromEntries,
   parseWorkspaceCommand,
@@ -311,6 +315,40 @@ export const TemiVoiceStage: React.FC<TemiVoiceStageProps> = ({
      transcript is then what she actually said, not what she was going to say —
      a transcript that records words the speaker was silenced before reaching is
      a record of something that did not happen. */
+  /* The conversation as it is actually happening, kept so that when it ends
+     there is something to remember it by.
+
+     Its own list rather than a read of `dialogueHistory` at teardown, and the
+     difference is not stylistic. `dialogueHistory` is derived from
+     `frontierMessages`, which is persisted: it holds what he said on this
+     screen yesterday too, and `newChatSession` can empty it mid-conversation.
+     A teardown that read it would be consolidating something other than "the
+     session that just ended", which is the only thing the memory pass is
+     allowed to touch.
+
+     Emptied by the pass that consumes it, which is what makes a second run
+     harmless: it finds nothing and writes nothing. React strict mode does
+     exactly that on every mount in development. */
+  const sessionTranscriptRef = useRef<TranscriptTurn[]>([]);
+
+  const rememberTurn = useCallback((role: "user" | "assistant", content: string) => {
+    const clean = content.trim();
+    if (clean) sessionTranscriptRef.current.push({ role, content: clean });
+  }, []);
+
+  /* A spoken user turn arrives as a transcript that keeps refining itself, so
+     the dialogue replaces the last bubble rather than appending to it. This
+     mirrors that rule exactly. Without it one sentence lands four times, once
+     per revision, and she remembers him as someone who repeats himself. */
+  const rememberUserSpeech = useCallback((content: string) => {
+    const clean = content.trim();
+    if (!clean) return;
+    const turns = sessionTranscriptRef.current;
+    const last = turns[turns.length - 1];
+    if (last && last.role === "user") last.content = clean;
+    else turns.push({ role: "user", content: clean });
+  }, []);
+
   const commitSpokenTurn = useCallback((truncateToSpoken: boolean) => {
     if (captionCommitTimer.current) {
       clearTimeout(captionCommitTimer.current);
@@ -348,6 +386,7 @@ export const TemiVoiceStage: React.FC<TemiVoiceStageProps> = ({
           ...prev,
           { id: `asst-${Date.now()}`, role: "assistant", content: cut },
         ]);
+        rememberTurn("assistant", cut);
       }
       setLiveAssistantStream(null);
       return;
@@ -366,6 +405,7 @@ export const TemiVoiceStage: React.FC<TemiVoiceStageProps> = ({
         ...prev,
         { id: `asst-${Date.now()}`, role: "assistant", content: spoken },
       ]);
+      rememberTurn("assistant", spoken);
     }
     setLiveAssistantStream(null);
   }, []);
@@ -800,6 +840,19 @@ export const TemiVoiceStage: React.FC<TemiVoiceStageProps> = ({
 
   // ── Initialize the Real 8000 AudioEngine & ProtocolManager ───────────────
   useEffect(() => {
+    /* Started first, before a single object is constructed, because the system
+       instruction is composed inside `connect()` and reads the store
+       synchronously. Everything below is local work: two constructors and
+       about three hundred handler assignments. The read is a localhost GET of
+       a small JSON file, so it overlaps with that and is normally settled long
+       before `connect` is reached.
+
+       "Normally" is why `connect` is still sequenced behind it rather than
+       fired alongside. A gateway that is slow to answer would otherwise open
+       the session with an empty store and she would walk in having forgotten
+       him, silently, with nothing in the transcript to show it happened. */
+    const primed = primeTemiMemory();
+
     const audio = new VoiceAudioEngine();
     const protocol = new GeminiLiveEngine();
     /* Declared here rather than beside `onNote`, because `onError` is assigned
@@ -936,6 +989,7 @@ export const TemiVoiceStage: React.FC<TemiVoiceStageProps> = ({
             }
             return [...prev, { id: `user-${Date.now()}`, role: "user", content: clean }];
           });
+          rememberUserSpeech(clean);
 
           // Everything the operator says now goes through one switch. A status
           // question is answered from the live run, a stop lands on the run, and
@@ -1108,7 +1162,9 @@ export const TemiVoiceStage: React.FC<TemiVoiceStageProps> = ({
     (window as unknown as { teminaliTurnLatency?: typeof turnLatencySummary }).teminaliTurnLatency =
       turnLatencySummary;
 
-    void protocol.connect();
+    void primed.then(() => {
+      if (!cancelled) return protocol.connect();
+    });
 
     // Continuous audio energy sampling for the 3D Orb
     const sampleEnergy = () => {
@@ -1126,6 +1182,34 @@ export const TemiVoiceStage: React.FC<TemiVoiceStageProps> = ({
       }
       audio.cleanup();
       protocol.disconnect();
+
+      /* The session is over, so now she gets to keep some of it.
+
+         Here and nowhere else. DESIGN.md 6.48 puts the whole layer off the live
+         turn, and this is the seam that holds it there: one model call, over a
+         whole transcript, at the moment there is nobody left to keep waiting.
+
+         Deliberately not awaited and deliberately not cancelled. The screen is
+         going away, the renderer is not, and the pass carries its own deadline
+         (`temiMemoryModel`) for that reason: handing it the signal that just
+         fired would abort the extraction before it read a word.
+
+         What this does not cover is quitting the app mid-conversation, which
+         tears down the renderer without running a cleanup, and loses that
+         session. The alternative is consolidating partway through, and that is
+         the one thing the contract forbids. */
+      const transcript = sessionTranscriptRef.current;
+      sessionTranscriptRef.current = [];
+      if (transcript.length > 0) {
+        void runMemoryPass({
+          turns: transcript,
+          complete: temiMemoryModel(),
+          load: loadTemiMemory,
+          save: saveTemiMemory,
+        })
+          .then((report) => console.info(formatMemoryPass(report)))
+          .catch(() => {});
+      }
       /* The run this screen started, and this screen is going away.
 
          `onProgress` toasts and `onCompleted` speaks — both through refs into a
@@ -1685,6 +1769,7 @@ export const TemiVoiceStage: React.FC<TemiVoiceStageProps> = ({
         ...prev,
         { id: `user-${Date.now()}`, role: "user", content: clean },
       ]);
+      rememberTurn("user", clean);
       performVoiceTurn(clean, "typed");
     },
     [performVoiceTurn]

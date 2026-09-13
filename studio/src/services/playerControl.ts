@@ -103,6 +103,64 @@ export interface PlayerSnapshot {
 type Listener = (command: PlayerCommand) => void;
 const listeners = new Set<Listener>();
 
+/*
+  ## The Set is per renderer, and stays that way
+
+  A module-level `Set` holds one instance per renderer process, so a command
+  sent in one window can never reach a listener registered in another. That has
+  been written up as this file's bug, and `voice/temiMemoryStore.ts` names it
+  in the comment on `resident` as the opposite of its own case. It was measured
+  before it was fixed, and the measurement says it is not a live failure:
+
+    - Three documents load this bundle. `electron/main.cjs:359` opens the studio
+      window, `electron/assistant-overlay.cjs:86` opens the drawing layer with
+      `?surface=overlay`, and `electron/screenRecorder.cjs:230` opens the bar
+      with `?window=recorder-bar`. `src/main.tsx:164` renders `App` for the
+      first and a single component for each of the other two.
+    - Everything that dispatches (`StudioChat`, `AgentPane`, `aiService`,
+      `voice/playerActions`) and everything that subscribes (`MediaPlayer`,
+      `GalleryPane`) is inside `App`. Neither of the other two surfaces imports
+      this module at all.
+    - There is one studio window, not one per operator gesture. Every caller of
+      `createWindow()` in `electron/main.cjs` (`second-instance`, `activate`,
+      both trays, `activateAssistant`) checks first that `mainWindow` is gone.
+
+  So the cross-renderer drop is latent, not live, and broadcasting over IPC to
+  fix it would buy nothing and cost the invariant this file is built on: at
+  most one player takes a command. A broadcast reaches every renderer, and the
+  day a second studio window exists it would drive both players from one
+  sentence, which is worse than dropping. The app already has a way to cross a
+  process for this, and it is the one in the header: the pane publishes to the
+  gateway, and the gateway comes back down the run's own stream. One player,
+  one road, and a second road would need a notion of "the active player" that
+  nothing in the app has.
+
+  What was wrong, and is fixed below, is the answer rather than the delivery.
+  `listeners.size > 0` answers "is a pane listening", and every caller reads it
+  as "did a pane act". Those are different questions whenever the pane on
+  screen ignores the action, which is not rare: `GalleryPane` acts on `episode`
+  and `episodes` and drops the other eighteen, `MediaPlayer` drops `episode`,
+  and its `runCommand` has no branch for `chapter` or `audio_track`. A `pause`
+  said to the episode gallery returned true, so `aiService` reported delivered
+  and Temi said it was done. That is the failure the header warns about, an
+  action that reports success and moves nothing, arriving through the pane
+  instead of through the gateway.
+*/
+
+/**
+ * What a pane last said is on screen, which is how the dispatch below knows
+ * whether anyone will act. Set by `publishPlayerState`, and separate from it
+ * because the snapshot has two readers: the store and the gateway outward, and
+ * this module inward. Null before any pane has published, and after one has
+ * unmounted.
+ */
+let onScreen: PlayerSnapshot | null = null;
+
+/** Records what is on screen. Called by `publishPlayerState`; see `onScreen`. */
+export function notePlayerOnScreen(snapshot: PlayerSnapshot | null): void {
+  onScreen = snapshot;
+}
+
 /** The pane that holds the player registers here for the turn's commands. */
 export function subscribePlayerCommands(listener: Listener): () => void {
   listeners.add(listener);
@@ -111,9 +169,35 @@ export function subscribePlayerCommands(listener: Listener): () => void {
   };
 }
 
+/**
+ * Whether what is on screen will act on this command.
+ *
+ * Every rule here is read out of the snapshot the pane already publishes, not
+ * invented: `unsupported` is the pane's own per-file, per-engine refusal list,
+ * and `view` and `series` say which of the two listeners is mounted. The
+ * gateway spends `unsupported` before it sends anything, but the chat and the
+ * voice lane call `dispatchPlayerCommand` directly and never see it, so the
+ * same list has to be spent here too or the two roads disagree.
+ *
+ * Silence is permission: with no snapshot, nothing is known about the pane and
+ * refusing would invent a failure. A pane subscribes in one effect and
+ * publishes in the next, and a command landing between the two is a real
+ * ordering, so that window answers the way it always has.
+ */
+export function playerWillTake(command: PlayerCommand, snapshot: PlayerSnapshot | null): boolean {
+  if (!snapshot) return true;
+  if (snapshot.unsupported.some((entry) => entry.action === command.action)) return false;
+  // The gallery, with nothing started. It owns the list and only the list.
+  if (snapshot.view === "episodes") return command.action === "episode" || command.action === "episodes";
+  // The player. It answers everything except `episode`, which belongs to the
+  // gallery above it, and there is no gallery above a lone file.
+  return command.action !== "episode" || snapshot.series !== null;
+}
+
 /** True when a mounted player took the command. */
 export function dispatchPlayerCommand(command: PlayerCommand): boolean {
   if (listeners.size === 0) return false;
+  if (!playerWillTake(command, onScreen)) return false;
   for (const listener of listeners) listener(command);
   return true;
 }
@@ -154,6 +238,7 @@ function flush(): void {
 }
 
 export function publishPlayerState(snapshot: PlayerSnapshot | null, options: { immediate?: boolean } = {}): void {
+  notePlayerOnScreen(snapshot);
   void import("../store/playerStore").then(({ usePlayerStore }) => usePlayerStore.getState().setLive(snapshot));
   pending = snapshot;
   if (options.immediate || snapshot === null) {

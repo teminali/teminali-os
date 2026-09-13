@@ -162,3 +162,66 @@ test("the persona keeps talk with the voice and facts with the hands", async () 
   assert.match(persona, /When the turn is talk rather than a task, it is yours/);
   assert.match(persona, /the moment you are about to say something specific nobody told you, ask it instead/);
 });
+
+/* ── What the system instruction is allowed to cost ───────────────────────── */
+
+test("a full store cannot quietly double the system instruction", async () => {
+  /* `buildTemiPersona` splices a recall block into the persona at session
+     setup (DESIGN.md 6.48, recall tier). Every character of it is processed on
+     every session, so the block's size is a real cost and not a detail, and
+     there was no ceiling on it anywhere until this test.
+
+     Three stores, all at the policy cap of 320. Anchors are the axis that
+     matters, because `selectForRecall` takes every one of them before anything
+     else can compete for the budget: an anchor-heavy store crowds the other
+     kinds out and a lean one leaves room for all four sections, which is the
+     more expensive shape. The third is the worst RENDER, many very short atoms,
+     because line count is the thing a character budget cannot see from
+     outside. The numbers below are measured, not chosen: 18,478 characters of
+     persona, and a block that peaks at 2,940. The ceiling sits a little above
+     the peak and a long way below a doubling. */
+  const { TEMI_PERSONA, buildTemiPersona } = await import("../src/services/voice/temiPersona.ts");
+  const NOW = 1_800_000_000_000;
+  const DAY = 24 * 60 * 60 * 1000;
+
+  const build = (shares, text) => {
+    const atoms = [];
+    let n = 0;
+    for (const [kind, count] of Object.entries(shares)) {
+      for (let i = 0; i < count; i += 1) {
+        n += 1;
+        atoms.push({
+          id: `a${String(n).padStart(3, "0")}`,
+          kind,
+          text: text(kind, n),
+          gist: `${kind} ${n}`,
+          axes: { weight: (n % 9) / 10, warmth: (n % 7) / 8, surprise: (n % 5) / 6, firstness: (n % 3) / 4 },
+          bornAt: NOW - n * 3 * DAY,
+          lastTouchedAt: NOW - (n % 300) * DAY,
+          rehearsals: n % 4,
+          faded: n % 11 === 0,
+        });
+      }
+    }
+    return atoms;
+  };
+
+  const sentence = (kind, n) => `A ${kind} about him, number ${n}, written at the length one of these really runs to.`;
+  const stores = {
+    "a long relationship": build({ anchor: 40, fact: 120, keepsake: 110, thread: 50 }, sentence),
+    "room for all four sections": build({ anchor: 12, fact: 140, keepsake: 118, thread: 50 }, sentence),
+    "the shape that renders worst": build({ anchor: 320, fact: 0, keepsake: 0, thread: 0 }, (_, n) => `a${n}`),
+  };
+
+  for (const [label, atoms] of Object.entries(stores)) {
+    assert.equal(atoms.length, 320, label);
+    const composed = buildTemiPersona(atoms, NOW, { random: () => 0.42 });
+    const block = composed.length - TEMI_PERSONA.length;
+    assert.ok(block > 0, `${label}: nothing was recalled at all`);
+    assert.ok(block <= 3200, `${label}: the recall block grew to ${block} characters`);
+    assert.ok(composed.length <= 22_000, `${label}: the system instruction grew to ${composed.length}`);
+  }
+
+  // And the other half of the same guarantee: no store, no cost.
+  assert.equal(buildTemiPersona([], NOW), TEMI_PERSONA);
+});

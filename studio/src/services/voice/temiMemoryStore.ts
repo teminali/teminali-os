@@ -59,12 +59,31 @@ let resident: MemoryAtom[] | null = null;
  */
 export async function primeTemiMemory(): Promise<MemoryAtom[]> {
   try {
-    const response = await GatewayClient.expectOk(await GatewayClient.request("/api/workspace/temi-memory"));
-    const data = (await response.json()) as Partial<TemiMemoryStore>;
-    resident = Array.isArray(data.atoms) ? data.atoms : [];
+    return await loadTemiMemory();
   } catch {
     resident = [];
+    return resident;
   }
+}
+
+/**
+ * The same read, allowed to fail.
+ *
+ * The cache exists for the live path, where an unreachable gateway costs her
+ * her memory for one conversation and nothing more. The WRITE path cannot use
+ * it, and that asymmetry is the whole reason this function exists separately:
+ * a save replaces the entire store, so a consolidation pass that merged one
+ * session's memories into a cache holding `[]` because a fetch failed would
+ * write those few atoms over everything she had, permanently, and look like a
+ * successful pass while doing it.
+ *
+ * So `runMemoryPass` reads through here and declines to write when it throws.
+ * It can afford to: by then the session is over and nothing is waiting.
+ */
+export async function loadTemiMemory(): Promise<MemoryAtom[]> {
+  const response = await GatewayClient.expectOk(await GatewayClient.request("/api/workspace/temi-memory"));
+  const data = (await response.json()) as Partial<TemiMemoryStore>;
+  resident = Array.isArray(data.atoms) ? data.atoms : [];
   return resident;
 }
 

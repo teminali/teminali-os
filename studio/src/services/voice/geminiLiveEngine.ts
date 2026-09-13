@@ -38,11 +38,44 @@ import {
   type LiveServerMessage,
   type Session,
 } from "@google/genai";
-import { TEMI_PERSONA, TEMI_DEFAULT_VOICE } from "./temiPersona.ts";
+import { TEMI_DEFAULT_VOICE, buildTemiPersona } from "./temiPersona.ts";
+import type { MemoryAtom } from "./temiMemory.ts";
 import { fetchGeminiLiveToken, describeGeminiLive } from "./geminiLiveToken.ts";
 import { DEFAULT_ENDPOINTER, endpointStall } from "./turnTaking.ts";
 import type { TurnEvent } from "./turnTaking.ts";
 import { MicEndpointer } from "./micEndpoint.ts";
+
+/**
+ * Her memory of him, read SYNCHRONOUSLY when the system instruction is composed.
+ *
+ * The latency contract in DESIGN.md 6.48 is that `live.connect` never waits on
+ * disk or on the gateway: `primeTemiMemory()` is awaited by the caller before
+ * the stage opens a session, and from then on `residentMemory()` is a property
+ * read. So the only thing this binding does is get hold of that function.
+ *
+ * It is bound through a dynamic import that is started at module load and never
+ * awaited, rather than a plain `import { residentMemory }`, for one reason that
+ * is worth writing down because it looks like a mistake:
+ * `temiMemoryStore.ts` imports `../gatewayClient` with no file extension, and
+ * Node's ESM resolver requires one. Four test files import `GeminiLiveEngine`
+ * as a real module under `node --test`, and a static import chain reaching that
+ * specifier fails all four at load. Started this way, the failure lands here
+ * instead and leaves the empty source in place, which is the same path a first
+ * run takes and yields `TEMI_PERSONA` byte for byte.
+ *
+ * The promise settles at app boot; a session is opened by a user action, behind
+ * an awaited `primeTemiMemory()` network round trip. There is no race to lose.
+ * When that specifier gains its extension, this collapses back into a one-line
+ * static import and nothing else here changes.
+ */
+let readResidentMemory: () => readonly MemoryAtom[] = () => [];
+void import("./temiMemoryStore.ts")
+  .then((store) => {
+    readResidentMemory = store.residentMemory;
+  })
+  .catch(() => {
+    /* Empty source retained. See above: this is the strip-only-TypeScript path. */
+  });
 
 /**
  * Native-audio Live model. Measured working with `enableAffectiveDialog`, which
@@ -671,7 +704,11 @@ export class GeminiLiveEngine {
           speechConfig: {
             voiceConfig: { prebuiltVoiceConfig: { voiceName: this.voice } },
           },
-          systemInstruction: TEMI_PERSONA,
+          // Composed ONCE, here, because Gemini Live fixes the system
+          // instruction at setup and there is no honest mid-session update
+          // (see `sendVoiceChange`). With an empty or unprimed store this is
+          // `TEMI_PERSONA` itself, byte for byte.
+          systemInstruction: buildTemiPersona(readResidentMemory()),
           // Declared ALONGSIDE `enableAffectiveDialog`, not instead of it.
           // Checked against this repo's own @google/genai 2.22.0 rather than
           // from memory: `LiveConnectConfig` carries `tools?: ToolListUnion`

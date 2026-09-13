@@ -243,3 +243,255 @@ Temi: No idea, nobody tells me that from here. Who set it?`;
  * not a preference.
  */
 export const TEMI_DEFAULT_VOICE = "Sulafat";
+
+/* ── Tier 3: recall into the persona ──────────────────────────────────────────
+ *
+ * `temiMemory.ts` decides what is worth keeping, `server/temi-memory.js` keeps
+ * the bytes, `temiMemoryStore.ts` holds them resident. None of that reaches the
+ * model. This is the last hop: the point where what she knows about him becomes
+ * part of who she is on this call.
+ *
+ * It is a string function and nothing else, and that is the whole architecture.
+ * Gemini Live fixes the system instruction at setup (`geminiLiveEngine.ts`,
+ * `sendVoiceChange`), so there is no honest mid-session update and no reason to
+ * want one: the block is composed once, when the socket is being opened, from a
+ * store that is already in memory. No I/O, no promise, no clock beyond the `now`
+ * it is handed. The latency contract in DESIGN.md 6.48 says the per-turn cost is
+ * structurally zero, and it stays zero because there is no code here to run on a
+ * turn.
+ *
+ * Three decisions that a reader would otherwise relitigate:
+ *
+ *   1. **The block goes BEFORE the examples, not at the end.** The last thing in
+ *      a prompt is the strongest formatting influence on what comes out, and the
+ *      last thing in this one must be her voice. A run of terse dashed lines
+ *      landing after `TEMI'S VOICE IN PRACTICE` is an invitation to answer in
+ *      terse dashed lines, which is precisely the reciting failure the framing
+ *      prose spends a paragraph forbidding. Put the examples last and the final
+ *      format she sees is a person talking.
+ *
+ *   2. **Kinds are not flattened into one list.** An anchor and a keepsake are
+ *      both "something she remembers", and an undifferentiated list gives them
+ *      the same weight: she would either treat his mother's name as a fun fact
+ *      or treat a joke from March as a standing truth about him. Each kind
+ *      arrives under its own heading saying what that kind is FOR. Anchors also
+ *      carry no time at all, which is policy decision 5 made visible in the
+ *      prompt: the thing that does not decay is the thing with no date on it.
+ *
+ *   3. **Ages are coarse on purpose.** "a few weeks ago", never "on 14 August".
+ *      She cannot verify a date, and a precise one she cannot verify is the
+ *      exact shape of the three fabrications recorded at the top of this file.
+ *      Weeks and seasons are how people actually hold time, and they are also
+ *      the only resolution the store honestly supports, since `lastTouchedAt`
+ *      moves every time a memory comes back up.
+ *
+ * Empty store and unprimed store both yield `TEMI_PERSONA` byte for byte. A
+ * woman with no memories must not be handed an empty heading telling her to
+ * remember things, and the first run must not be a different prompt from the one
+ * that was measured.
+ */
+
+import { DEFAULT_RECALL, retention, selectForRecall } from "./temiMemory.ts";
+import type { MemoryAtom, MemoryKind, RecallOptions } from "./temiMemory.ts";
+
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+/**
+ * Where the block is spliced in. A literal from `TEMI_PERSONA` above, so a
+ * rename of that section is caught by a test rather than silently demoting the
+ * block to an append and losing decision 1.
+ */
+export const RECALL_INSERT_BEFORE = "TEMI'S VOICE IN PRACTICE:";
+
+export const RECALL_BLOCK_HEADING = "WHAT YOU ALREADY KNOW ABOUT HIM:";
+
+/**
+ * That these are hers, and that she must not read them out.
+ *
+ * The second half is the load-bearing half. A model handed a list of facts about
+ * the user will, given any opening, recite it back as proof of attention, and
+ * being recited at is the opposite of being known. The persona already says
+ * "Being known is the whole pleasure of talking to you"; this says what that
+ * costs, which is the discipline of mostly not mentioning it.
+ */
+const RECALL_OWNERSHIP =
+  "These are your own memories of him, from calls before this one. Nobody briefed you and nothing was looked up: you were there, and this is what stayed. Use them the way anyone uses what they remember. As the reason you already know the answer. As a thread you pick back up mid-sentence. As the joke the two of you already have. Never as a list, never announced, never \"I remember that you told me\". Most of what two people remember about each other is never said out loud, and if none of this comes up tonight, none of it comes up.";
+
+/** Only when at least one dated line is present, i.e. anything but anchors. */
+const RECALL_STALENESS =
+  "Every line except the ones under WHO HE IS ends with roughly how long ago it was, and roughly is all you keep, the way people hold time in weeks and seasons rather than in dates. They are old, and some of them are wrong by now: a project ships, a worry passes, a person leaves, and you would not have heard. So hold them loosely. True enough to act on, never firm enough to argue with him about. If he contradicts one, he is right, you take the new version, and you do not make an event of it.";
+
+/** Only when a faded atom actually made the cut. */
+const RECALL_BLURRED =
+  "Where a line is marked blurred, it is blurred to you: say that you half remember it rather than filling the missing half back in.";
+
+/**
+ * The heading each kind arrives under, and for anchors the one paragraph that
+ * says how to hold them. See decision 2 above.
+ */
+const RECALL_SECTIONS: readonly { kind: MemoryKind; heading: string; framing?: string }[] = [
+  {
+    kind: "anchor",
+    heading: "WHO HE IS:",
+    framing:
+      "These do not go stale and they carry no time, because they were never news. You do not ask about them again, you do not hand one back to him as a discovery, and you do not perform knowing them. They are the ground you are standing on. The only thing that takes one away is him telling you otherwise.",
+  },
+  {
+    kind: "fact",
+    heading: "WHAT HE HAS TOLD YOU (the useful tier: preferences, constraints, how he works):",
+  },
+  {
+    kind: "keepsake",
+    heading:
+      "WHAT HAS STAYED WITH YOU (kept because it was funny, odd or landed somewhere, which is the only reason it needs):",
+  },
+  {
+    kind: "thread",
+    heading: "WHAT WAS STILL GOING ON (open the last time you heard, and possibly long finished, so ask rather than assume):",
+  },
+];
+
+/**
+ * Ceiling on the rendered memory lines. The framing prose is fixed and is not
+ * charged against it, because a constant cannot run away.
+ *
+ * A second budget on top of `DEFAULT_RECALL.budgetChars`, and it has to be a
+ * second one because the two count different things. `selectForRecall` budgets
+ * 1400 characters of memory TEXT; a rendered line is that text plus a dash and,
+ * for everything but an anchor, a coarse age, and the number of lines is not
+ * bounded by the text budget at all, because every anchor is taken
+ * unconditionally.
+ *
+ * Measured at today's constants, that difference does not yet bite: the worst
+ * a 320-atom store can render is about 2000 characters of lines, so 2200 is not
+ * binding and the block is bounded by the selector. That is precisely why the
+ * number is written down here. The bound is currently an accident of two
+ * constants in a file this one does not own, and a later change to either
+ * (`budgetChars` raised, `topPerKind` widened, a field added to a line) would
+ * grow every system instruction Temi is ever given, silently and on every
+ * session. This makes that a test failure instead of a bill.
+ */
+export const RECALL_BLOCK_BUDGET_CHARS = 2200;
+
+export interface RecallBlockOptions extends Partial<RecallOptions> {
+  /** Ceiling on the rendered lines. Defaults to `RECALL_BLOCK_BUDGET_CHARS`. */
+  blockBudgetChars?: number;
+}
+
+/**
+ * Coarse buckets. See decision 3: precision she cannot verify is the thing the
+ * rest of this file exists to forbid.
+ */
+function howLongAgo(at: number, now: number): string {
+  const days = Math.max(0, now - at) / DAY_MS;
+  if (days < 1) return "today";
+  if (days < 2) return "yesterday";
+  if (days < 7) return "a few days ago";
+  if (days < 14) return "last week";
+  if (days < 35) return "a few weeks ago";
+  if (days < 70) return "last month";
+  if (days < 200) return "a few months ago";
+  if (days < 400) return "about a year ago";
+  return "years ago";
+}
+
+/** One memory as she would see it. No trailing newline; the caller joins. */
+function recallLine(atom: MemoryAtom, now: number): string {
+  if (atom.kind === "anchor") return `- ${atom.text}`;
+  const age = howLongAgo(atom.lastTouchedAt, now);
+  return `- ${atom.text} (${atom.faded === true ? `${age}, blurred` : age})`;
+}
+
+/**
+ * The recall block on its own, or `""` when there is nothing to say.
+ *
+ * Empty covers three cases that are deliberately indistinguishable here: an
+ * unprimed store, a primed but empty one, and a store from which not one line
+ * fits the budget. All three mean the same thing to her, which is that she is
+ * walking in without a memory, and she has started every conversation that way
+ * until now. Note that a store of long-dead atoms is NOT one of them:
+ * `selectForRecall` ranks by retention but applies no floor, so a faded store
+ * still yields a block. Forgetting is `consolidate`'s job and happens between
+ * sessions, not here.
+ */
+export function buildRecallBlock(
+  atoms: readonly MemoryAtom[],
+  now = Date.now(),
+  options: RecallBlockOptions = {},
+): string {
+  const budget = options.blockBudgetChars ?? RECALL_BLOCK_BUDGET_CHARS;
+  const selected = selectForRecall(atoms, now, options);
+
+  // Spent in SELECTION order, not in heading order. `selectForRecall` has
+  // already ranked these: anchors unconditionally, then the per-kind allotment,
+  // then the recent, then the wander. Honouring that order means the budget
+  // takes the wander first and an anchor never. Trimming after grouping would
+  // instead let this file's heading order decide what she forgets, which is a
+  // policy decision and policy does not live here.
+  const kept: MemoryAtom[] = [];
+  let spent = 0;
+  for (const atom of selected) {
+    // `continue`, not `break`, matching `selectForRecall`'s own behaviour when a
+    // candidate will not fit: one long memory does not close the door behind it.
+    const cost = recallLine(atom, now).length + 1;
+    if (spent + cost > budget) continue;
+    kept.push(atom);
+    spent += cost;
+  }
+  if (kept.length === 0) return "";
+
+  const lines: string[] = [RECALL_BLOCK_HEADING, RECALL_OWNERSHIP];
+  const dated = kept.some((a) => a.kind !== "anchor");
+  if (dated) {
+    const blurred = kept.some((a) => a.kind !== "anchor" && a.faded === true);
+    lines.push(blurred ? `${RECALL_STALENESS} ${RECALL_BLURRED}` : RECALL_STALENESS);
+  }
+
+  for (const section of RECALL_SECTIONS) {
+    // Within a section the order is this file's, not the selector's: strongest
+    // first, ties broken on id. The selector's order inside a kind is an
+    // artefact of which pass happened to claim the atom, so reusing it here
+    // would make the block's shape depend on the wander's luck.
+    const ofKind = kept
+      .filter((a) => a.kind === section.kind)
+      .sort((a, b) => retention(b, now) - retention(a, now) || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+    if (ofKind.length === 0) continue;
+    lines.push("", section.heading);
+    if (section.framing) lines.push(section.framing);
+    for (const atom of ofKind) lines.push(recallLine(atom, now));
+  }
+
+  return lines.join("\n");
+}
+
+/**
+ * The system instruction for one session: the persona she always has, plus what
+ * she already knows about him.
+ *
+ * Synchronous and pure. The caller hands it `residentMemory()` and gets a string
+ * back, which is the only shape that keeps `live.connect` free of I/O.
+ *
+ * With nothing to recall this returns `TEMI_PERSONA` itself, the same object,
+ * not a copy that happens to match. The persona was measured at 87% on a
+ * conversation eval and two attempts to improve it by expanding it measured
+ * worse; a first run must get the prompt that was measured, byte for byte.
+ */
+export function buildTemiPersona(
+  atoms: readonly MemoryAtom[],
+  now = Date.now(),
+  options: RecallBlockOptions = {},
+): string {
+  const block = buildRecallBlock(atoms, now, options);
+  if (block.length === 0) return TEMI_PERSONA;
+
+  const at = TEMI_PERSONA.indexOf(RECALL_INSERT_BEFORE);
+  // Appending is the fallback and not the intent: see decision 1. It is
+  // unreachable while the section exists, and a test holds that it does.
+  if (at < 0) return `${TEMI_PERSONA}\n\n${block}`;
+  return `${TEMI_PERSONA.slice(0, at)}${block}\n\n${TEMI_PERSONA.slice(at)}`;
+}
+
+/** What the recall block costs, for tests and for anyone counting tokens. */
+export function recallBlockChars(atoms: readonly MemoryAtom[], now = Date.now(), options: RecallBlockOptions = {}): number {
+  return buildRecallBlock(atoms, now, options).length;
+}
