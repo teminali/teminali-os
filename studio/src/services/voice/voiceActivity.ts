@@ -14,8 +14,8 @@
  * comfortably. The ducked bar is higher because the assistant's own voice is
  * also periodic and must not read as the operator interrupting.
  */
-const PITCH_CLARITY = 0.7;
-const PITCH_CLARITY_DUCKED = 0.82;
+export const PITCH_CLARITY = 0.7;
+export const PITCH_CLARITY_DUCKED = 0.82;
 
 /** One frame, reduced to the numbers that decide whether it was speech. */
 export interface VoicingFrame {
@@ -31,39 +31,43 @@ export interface VoicingFrame {
 /**
  * Was this frame speech?
  *
- * Two routes, and a frame needs only one of them.
+ * Two routes, and a frame needs only one of them when listening in the clear:
  *
- * **Loud.** The original test, kept unchanged: the frame clears the room's own
- * noise floor by a healthy margin. It is a *ratio*, which is its weakness — the
- * noisier the room, the louder the operator has to be to clear `floor × margin`.
- * That is backwards from what a person does, and it is why the same sentence at
- * the same volume was heard in a quiet room and missed in a busy one.
+ * **Loud.** The frame clears the room's own noise floor by a healthy margin,
+ * admitting unvoiced consonants during speech.
  *
  * **Clear.** A vowel is periodic and a room full of chatter, traffic and
  * crockery is not, so a confident fundamental in the speech range is evidence
  * that loudness cannot supply. It is admitted on a much lower energy bar —
- * `floor × 1.5` rather than `floor × 2.6` — which is what lets an ordinary
- * speaking voice survive a noise floor that has climbed under it.
+ * `floor × 1.6` rather than `floor × 3.0`.
  *
- * The spectral-centroid band gates both. It is the fan-and-fridge test: a
- * steady hum is periodic enough to fool the pitch route on its own, and its
- * energy sits below the band where speech lives.
- *
- * `ducked` is the assistant's own voice playing. Everything tightens there,
- * because the periodic sound in the room is then most likely to be us: the
- * clarity bar rises and the pitch route keeps a real absolute floor, so it can
- * only ever undercut the loud route, never open barge-in to speaker bleed.
+ * **Ducked (assistant speaking).** While the assistant is speaking through the
+ * speakers, barge-in MUST be genuine human speech. Mechanical friction
+ * (scratching the desk, typing on the keyboard, dragging a mouse, or chassis thumps)
+ * produces high broadband RMS energy but has zero harmonic pitch periodicity.
+ * If admitted by loudness alone, scratching the table immediately cuts off Temi's
+ * voice. Therefore, while ducked, only confident vocal periodicity in the human
+ * speech band (80–420 Hz) with high clarity can trigger barge-in.
  */
 export function isVoicedFrame(frame: VoicingFrame, ducked = false): boolean {
   const { rms, centroid, noiseFloor, f0, clarity } = frame;
   const speechBand = centroid > 180 && centroid < 4200;
   if (!speechBand) return false;
 
-  const loud = rms > Math.max(noiseFloor * (ducked ? 6.5 : 2.8), ducked ? 0.045 : 0.012);
+  if (ducked) {
+    // While the assistant speaks, barge-in requires real human vocal resonance
+    // (a vowel). Broadband mechanical noise (table scratching, desk taps, keyboard
+    // clicks) has no fundamental periodicity and must never cut off the assistant.
+    const periodic = f0 >= 80 && f0 <= 420 && clarity >= PITCH_CLARITY_DUCKED;
+    const pitchFloor = Math.max(noiseFloor * 2.8, 0.02);
+    return periodic && rms > pitchFloor;
+  }
+
+  const loud = rms > Math.max(noiseFloor * 3.0, 0.016);
   if (loud) return true;
 
-  const periodic = f0 >= 80 && f0 <= 420 && clarity >= (ducked ? PITCH_CLARITY_DUCKED : PITCH_CLARITY);
-  const pitchFloor = ducked ? Math.max(noiseFloor * 2.8, 0.02) : Math.max(noiseFloor * 1.5, 0.007);
+  const periodic = f0 >= 80 && f0 <= 420 && clarity >= PITCH_CLARITY;
+  const pitchFloor = Math.max(noiseFloor * 1.6, 0.009);
   return periodic && rms > pitchFloor;
 }
 
@@ -79,19 +83,63 @@ export function isVoicedFrame(frame: VoicingFrame, ducked = false): boolean {
  */
 export class NoiseFloor {
   private value = 0.004;
-  private readonly attack = 0.0006;
-  private readonly release = 0.02;
+  /** Circular buffer of recent RMS values across a ~1.5 s window (75 frames at 20 ms). */
+  private readonly history = new Float32Array(75);
+  private historyIndex = 0;
+  private historyCount = 0;
+  private bootstrapped = false;
+
+  constructor(initial = 0.004) {
+    this.value = initial;
+    this.history.fill(initial);
+  }
 
   update(rms: number, voiced: boolean, ducked = false): number {
-    // Never learn the floor from frames we already believe are speech.
-    // Also NEVER raise the noise floor while audio is ducked (assistant speaking),
-    // because speaker bleed into the laptop mic would inflate the floor to ~0.03
-    // and deafen the detector for 4-5 seconds after speech stops.
-    if (voiced || ducked) return this.value;
-    if (rms > this.value) this.value += (rms - this.value) * this.attack;
-    else this.value += (rms - this.value) * this.release;
-    // Keep a sane range: silence never reads as exactly zero on real hardware.
-    this.value = Math.min(0.08, Math.max(0.0015, this.value));
+    // NEVER raise the noise floor while audio is ducked (assistant speaking),
+    // because speaker bleed into the laptop mic would inflate the floor.
+    // Also do not learn from frames we already believe are speech.
+    if (ducked || voiced) return this.value;
+
+    // Bootstrapping: on the first few frames after startup/reset, quickly seed
+    // the floor from the room's actual acoustic energy.
+    if (!this.bootstrapped) {
+      this.history[this.historyIndex] = rms;
+      this.historyIndex = (this.historyIndex + 1) % this.history.length;
+      this.historyCount += 1;
+      if (this.historyCount >= 10) {
+        this.bootstrapped = true;
+        let min = Infinity;
+        for (let i = 0; i < this.historyCount; i += 1) {
+          if (this.history[i] < min) min = this.history[i];
+        }
+        this.value = Math.min(0.04, Math.max(0.0015, min));
+      }
+      return this.value;
+    }
+
+    this.history[this.historyIndex] = rms;
+    this.historyIndex = (this.historyIndex + 1) % this.history.length;
+    if (this.historyCount < this.history.length) this.historyCount += 1;
+
+    // Over any 1.5-second window, speech fluctuates and dips during consonant
+    // closures and pauses, while stationary room noise (fans, AC, ambient hiss)
+    // stays near its minimum. The minimum of the window is the true floor.
+    let windowMin = Infinity;
+    for (let i = 0; i < this.historyCount; i += 1) {
+      if (this.history[i] < windowMin) windowMin = this.history[i];
+    }
+
+    const target = Math.min(0.05, Math.max(0.0015, windowMin));
+
+    // Follow the minimum: fall rapidly when the room gets quieter,
+    // rise smoothly when ambient room noise increases.
+    if (target < this.value) {
+      this.value += (target - this.value) * 0.15;
+    } else {
+      this.value += (target - this.value) * 0.03;
+    }
+
+    this.value = Math.min(0.06, Math.max(0.0015, this.value));
     return this.value;
   }
 
@@ -101,6 +149,10 @@ export class NoiseFloor {
 
   reset(): void {
     this.value = 0.004;
+    this.history.fill(0.004);
+    this.historyIndex = 0;
+    this.historyCount = 0;
+    this.bootstrapped = false;
   }
 
   get current(): number {

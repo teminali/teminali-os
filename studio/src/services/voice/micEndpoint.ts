@@ -31,7 +31,7 @@
 
 import { estimatePitch, ProsodyTracker } from "./prosody.ts";
 import { fft } from "./speakerProfile.ts";
-import { isVoicedFrame, NoiseFloor } from "./voiceActivity.ts";
+import { isVoicedFrame, NoiseFloor, PITCH_CLARITY } from "./voiceActivity.ts";
 import {
   DEFAULT_ENDPOINTER,
   Endpointer,
@@ -112,6 +112,8 @@ export class MicEndpointer {
   private lastVoicedAtMs = 0;
   private lastEndpointAtMs = 0;
   private windowMs = DEFAULT_ENDPOINTER.maxSilenceMs;
+  /** Count of frames with confirmed human vocal periodicity in the current turn. */
+  private periodicFramesInTurn = 0;
 
   constructor(config: Partial<EndpointerConfig> = {}) {
     this.endpointer = new Endpointer({ ...DEFAULT_ENDPOINTER, ...config });
@@ -159,6 +161,12 @@ export class MicEndpointer {
     this.filled = 0;
     this.sinceHop = 0;
     this.window.fill(0);
+    this.periodicFramesInTurn = 0;
+  }
+
+  /** Clear learned pacing floor (e.g. after a watchdog stall). */
+  forgetPacing(): void {
+    this.endpointer.forgetPacing();
   }
 
   get isSpeaking(): boolean {
@@ -233,6 +241,11 @@ export class MicEndpointer {
     );
     this.floor.update(rms, voiced, this.ducked);
 
+    const isPeriodic = tone.f0 >= 80 && tone.f0 <= 420 && tone.clarity >= PITCH_CLARITY;
+    if (isPeriodic) {
+      this.periodicFramesInTurn += 1;
+    }
+
     if (voiced) {
       this.lastVoicedAtMs = at;
       this.prosody.observe({ at, rms, f0: tone.f0 });
@@ -245,13 +258,27 @@ export class MicEndpointer {
       prosody: voiced ? null : this.prosody.finality(),
     });
 
+    if (event?.type === "speech-start") {
+      this.periodicFramesInTurn = isPeriodic ? 1 : 0;
+    }
     if (event?.type === "holding") this.windowMs = event.windowMs;
     if (event?.type === "speech-end") {
       this.windowMs = event.windowMs;
       this.lastEndpointAtMs = at;
       this.prosody.reset();
+      const hadVocalSpeech = this.periodicFramesInTurn > 0;
+      this.periodicFramesInTurn = 0;
+      // If the turn contained zero periodic vowel frames across its entire duration,
+      // it was mechanical noise (table scratching, keyboard rattle, desk bumping)
+      // without human speech. Discard it.
+      if (!hadVocalSpeech) {
+        return { type: "discarded", durationMs: event.durationMs };
+      }
     }
-    if (event?.type === "discarded") this.prosody.reset();
+    if (event?.type === "discarded") {
+      this.prosody.reset();
+      this.periodicFramesInTurn = 0;
+    }
 
     return event;
   }

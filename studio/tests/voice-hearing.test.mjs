@@ -65,3 +65,12 @@ test("ducking raises the bar it does not remove the route", () => {
   assert.equal(isVoicedFrame(frame, true), true, "and over our own voice, being clearly periodic");
   assert.equal(isVoicedFrame({ ...frame, clarity: 0.75 }, true), false, "but not on a muddier frame");
 });
+
+test("while the assistant speaks, unvoiced desk noise or table scratching is rejected", () => {
+  // Mechanical friction from scratching a desk, tapping a surface, or typing has high RMS
+  // but zero harmonic periodicity. It must never trigger a barge-in interrupt while ducked.
+  assert.equal(isVoicedFrame(noise({ rms: 0.05 }), true), false);
+  assert.equal(isVoicedFrame(noise({ rms: 0.08 }), true), false);
+  assert.equal(isVoicedFrame(noise({ rms: 0.15 }), true), false);
+});
+

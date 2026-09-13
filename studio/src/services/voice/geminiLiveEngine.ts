@@ -44,6 +44,8 @@ import { fetchGeminiLiveToken, describeGeminiLive } from "./geminiLiveToken.ts";
 import { DEFAULT_ENDPOINTER, endpointStall } from "./turnTaking.ts";
 import type { TurnEvent } from "./turnTaking.ts";
 import { MicEndpointer } from "./micEndpoint.ts";
+import { formatSpelledNumbers } from "./numberWords.ts";
+import { EchoGuard } from "./echoGuard.ts";
 
 /**
  * Her memory of him, read SYNCHRONOUSLY when the system instruction is composed.
@@ -197,7 +199,7 @@ export const CONNECT_TIMEOUT_MS = 10_000;
 
 /** The same wedge one layer up: the gateway itself reaches Google to mint, so
     a hung upstream is a request that never answers. */
-export const TOKEN_FETCH_TIMEOUT_MS = 8_000;
+export const TOKEN_FETCH_TIMEOUT_MS = 25_000;
 
 /** How far ahead of Google's stated hang-up the replacement session is built. */
 export const GO_AWAY_LEAD_MS = 1_000;
@@ -450,13 +452,14 @@ function base64ToBytes(b64: string): Uint8Array {
 const ASK_THE_ASSISTANT: FunctionDeclaration = {
   name: "ask_the_assistant",
   description:
-    "Ask the Teminali OS assistant, a far more capable agent sitting behind you. " +
+    "Ask the Teminali OS coding assistant, an agent sitting behind you. " +
     "It can read and edit any file in this workspace, run shell commands, inspect this " +
-    "machine and its disks, and search the web for current information. You cannot do any " +
-    "of those things yourself. Call it whenever the answer depends on something you have " +
-    "not actually been told: file contents, folder sizes, free space, what is installed, " +
-    "what changed recently, anything happening on the web, anything about the state of this " +
-    "computer. Never guess a number, a path, a version or a date, and never claim a fact " +
+    "machine and its disks, and search the web for current information. You can reason, discuss, " +
+    "and answer general questions yourself; use this tool ONLY when the operator explicitly asks for code to be edited, " +
+    "terminal commands to be run, or specific local workspace files on disk to be inspected. " +
+    "Never call it for conversational questions, conceptual explanations (e.g. 'how does this work', 'how are we talking'), " +
+    "reasoning, or when the operator asks you to answer directly or not use the assistant. " +
+    "Never guess a number, a path, a version or a date, and never claim a fact " +
     "came from the system when it did not. A wrong specific answer is much worse than a " +
     "pause: the user will happily wait a few seconds, but one confident wrong figure costs " +
     "their trust in everything else you say. An explicit request for the assistant, or " +
@@ -512,6 +515,10 @@ export class GeminiLiveEngine {
   private ai: GoogleGenAI | null = null;
   private session: Session | null = null;
   private connecting = false;
+
+  public get hasSession(): boolean {
+    return Boolean(this.session);
+  }
 
   /** Set by `disconnect()` so a deliberate close does not schedule a reconnect.
       Carried over unchanged from the old protocol manager. */
@@ -574,6 +581,7 @@ export class GeminiLiveEngine {
    * `sendAudioChunk` with the same 16 kHz PCM that goes on the wire.
    */
   private readonly endpointer = new MicEndpointer();
+  private readonly echo = new EchoGuard();
 
   /**
    * The stopwatch, four stamps long. Before this the live lane contained no
@@ -604,6 +612,8 @@ export class GeminiLiveEngine {
   /** Is a user-activity bracket open on the wire? */
   private activityOpen = false;
   private activityOpenedAt = 0;
+  /** Refractory delay (ms) after a watchdog stall before speech-start may reopen. */
+  private stallCooldownUntil = 0;
   /** Chunks captured before the bracket opened, oldest first. */
   private readonly prebuffer: Int16Array[] = [];
 
@@ -693,6 +703,8 @@ export class GeminiLiveEngine {
           // and of the user turns the shell routes as commands.
           inputAudioTranscription: {},
           outputAudioTranscription: {},
+          // Disable internal thinking tokens to eliminate 3–4s model latency on native audio
+          thinkingConfig: { thinkingBudget: 0 },
           realtimeInputConfig: {
             // We do our own endpointing. Google's server VAD waits a flat
             // `END_OF_TURN_SILENCE_MS` after he stops, and a measured
@@ -938,9 +950,11 @@ export class GeminiLiveEngine {
     // deliberately kept: it is a fact about him, not about the socket.
     this.activityOpen = false;
     this.activityOpenedAt = 0;
+    this.stallCooldownUntil = 0;
     this.prebuffer.length = 0;
     this.endpointer.reset();
     this.endpointer.setTranscript("");
+    this.echo.clear();
     this.timing = { spokeAt: 0, committedAt: 0, turnStartedAt: 0, firstAudioAt: 0 };
     this.corrections = 0;
     this.cutGapMs = 0;
@@ -1064,58 +1078,56 @@ export class GeminiLiveEngine {
       return;
     }
 
-    const inputText = content?.inputTranscription?.text;
+    const inputText =
+      content?.inputTranscription?.text ??
+      content?.interimInputTranscription?.text ??
+      (content as unknown as { input_transcription?: { text?: string } })?.input_transcription?.text ??
+      (content as unknown as { interim_input_transcription?: { text?: string } })?.interim_input_transcription?.text;
     if (inputText) {
-      this.inputTranscript += inputText;
+      // Handle both cumulative interim transcripts and incremental deltas
+      if (this.inputTranscript && inputText.startsWith(this.inputTranscript)) {
+        this.inputTranscript = inputText;
+      } else {
+        this.inputTranscript += inputText;
+      }
+      const heard = GeminiLiveEngine.withoutNonSpeechTags(this.inputTranscript);
       // What he has said so far is how the endpointer sizes its wait: a
       // sentence that already parses as finished is committed sooner than
       // one still hanging on "and".
-      this.endpointer.setTranscript(this.inputTranscript);
-      this.emit({ type: "partial_user_request", content: this.inputTranscript });
+      this.endpointer.setTranscript(heard);
+      // A turn that is only "[noise]" is not speech and never reaches the
+      // stage. See `withoutNonSpeechTags`.
+      if (heard) {
+        const echoCheck = this.echo.filter(heard);
+        if (echoCheck.echoed && !echoCheck.text) {
+          return;
+        }
+        const cleanHeard = echoCheck.echoed && echoCheck.text ? echoCheck.text : heard;
+        this.emit({ type: "partial_user_request", content: cleanHeard });
+      }
+    }
+
+    // When Gemini marks the input transcription as finished, commit the user
+    // turn immediately rather than waiting for the first output chunk to
+    // trigger `finalizeUserTurn`. This closes the latency gap the operator
+    // perceives between stopping speaking and seeing the bubble commit.
+    const inputFinished =
+      content?.inputTranscription?.finished ??
+      (content as unknown as { input_transcription?: { finished?: boolean } })?.input_transcription?.finished;
+    if (inputFinished) {
+      this.finalizeUserTurn();
     }
 
     const outputText = content?.outputTranscription?.text;
     if (outputText) {
       // Her words are usually the first content of a turn, so this is usually
       // where its generation is minted. See `beginTurn()`.
-      //
-      // Before `finalizeUserTurn()` and not after, because that emit RE-ENTERS
-      // this engine: the stage answers `final_user_request` synchronously and
-      // several of those paths call `sendBargeIn()`. Either order happens to
-      // condemn the right turn today, since `incomingGeneration()` supplies
-      // the `+ 1` an unminted turn needs. Minting first means the re-entrant
-      // barge-in names the turn on the wire directly instead, so the two are
-      // not left depending on the same arithmetic staying in step.
       this.beginTurn();
-
-      // Her first word is the only proof the user's turn ended. Nothing else in
-      // the stream says so — there is no `inputTranscription` terminator — so
-      // without this the operator's half of the conversation is never finalised
-      // and never reaches the router. It runs above the suppression gate and
-      // outside it, deliberately: the operator spoke whether or not we are
-      // keeping the reply, and a turn dropped here is lost to the router for
-      // good.
       this.finalizeUserTurn();
 
-      // Her WORDS are gated exactly as her audio is, for the same reason and
-      // against the same counter. Until this gate existed only the audio had
-      // one, so a superseded generation was silent but still became her
-      // caption and still went into `final_assistant_answer`. Measured on a
-      // live call, 2026-09-12: the shell barged in and answered from the
-      // agent's report, and the operator got the single line "It is not
-      // something I keep an eye on directly.38 gigabytes.", the abandoned
-      // conversational turn and the directed answer accumulated into one
-      // string with nothing between them.
-      //
-      // `incomingGeneration()` and not `this.generation`. By this line
-      // `beginTurn()` has run and the two are the same number, so the call is
-      // uniformity rather than arithmetic: all three gates in this method ask
-      // one question one way, and an edit to one cannot quietly disagree with
-      // the others. It is also the form that stays correct if the mint is ever
-      // moved back below this branch, which is the arrangement that produced
-      // the measured line above.
       if (this.incomingGeneration() !== this.suppressedGeneration) {
         this.outputTranscript += outputText;
+        this.echo.remember(this.outputTranscript);
         this.emit({ type: "partial_assistant_answer", content: this.outputTranscript });
       }
     }
@@ -1134,6 +1146,7 @@ export class GeminiLiveEngine {
       // First audio of a turn that opened with audio. On every other turn the
       // number is already minted and this costs a flag read.
       this.beginTurn();
+      this.finalizeUserTurn();
       if (this.incomingGeneration() !== this.suppressedGeneration) {
         for (const b64 of chunks) this.emitAudio(b64);
       }
@@ -1146,6 +1159,8 @@ export class GeminiLiveEngine {
     // below, which has to know a call is pending on this very message.
     const calls = message.toolCall?.functionCalls;
     if (calls?.length) {
+      this.beginTurn();
+      this.finalizeUserTurn();
       // Gated on the counter her audio and her words are already gated on, and
       // for a sharper reason than either.
       //
@@ -1221,21 +1236,36 @@ export class GeminiLiveEngine {
       const answer = this.outputTranscript;
       this.outputTranscript = "";
       if (answer) {
+        this.echo.remember(answer);
+        this.echo.markEnded();
         // A question means his answer is already on its way, so the next
         // turn commits on a shorter silence. Same rule the dictation lane
         // has always used.
         if (answer.trimEnd().endsWith("?")) this.endpointer.markQuestionAsked();
-        this.emit({ type: "final_assistant_answer", content: answer });
+        this.emit({
+          type: "final_assistant_answer",
+          content: formatSpelledNumbers(answer),
+        });
       }
     }
   }
 
   private finalizeUserTurn() {
     if (!this.inputTranscript) return;
-    const request = this.inputTranscript;
+    const request = GeminiLiveEngine.withoutNonSpeechTags(this.inputTranscript);
     this.inputTranscript = "";
     this.endpointer.setTranscript("");
-    this.emit({ type: "final_user_request", content: request });
+    if (request) {
+      const echoVerdict = this.echo.filter(request);
+      if (echoVerdict.echoed && !echoVerdict.text) {
+        if (this.turnActive) {
+          this.sendBargeIn();
+        }
+        return;
+      }
+      const cleanRequest = echoVerdict.echoed && echoVerdict.text ? echoVerdict.text : request;
+      this.emit({ type: "final_user_request", content: cleanRequest });
+    }
   }
 
   private emitAudio(b64: string) {
@@ -1291,7 +1321,7 @@ export class GeminiLiveEngine {
    * our own speaker was live so it could gate its recogniser; Gemini's VAD and
    * echo handling are server-side and want the raw stream.
    */
-  sendAudioChunk(buffer: ArrayBuffer): void {
+  sendAudioChunk(buffer: ArrayBuffer, at = Date.now()): void {
     if (!this.session) return;
     if (buffer.byteLength <= FRAME_HEADER_BYTES) return;
 
@@ -1307,11 +1337,12 @@ export class GeminiLiveEngine {
     // about the frames after it.
     this.endpointer.setDucked((new DataView(buffer).getUint32(4, false) & 1) === 1);
 
-    const events = this.endpointer.push(out, MIC_RATE);
+    const events = this.endpointer.push(out, MIC_RATE, at);
     const started = events.find(
       (event): event is Extract<TurnEvent, { type: "speech-start" }> => event.type === "speech-start",
     );
-    const ended = events.find((event) => event.type === "speech-end" || event.type === "discarded");
+    const ended = events.find((event) => event.type === "speech-end");
+    const discarded = events.find((event) => event.type === "discarded");
 
     // He carried on after we called the turn: the endpoint was wrong. Counted
     // before the bracket reopens, because reopening is what hides it — the
@@ -1323,7 +1354,9 @@ export class GeminiLiveEngine {
       if (gap > 0 && (this.cutGapMs === 0 || gap < this.cutGapMs)) this.cutGapMs = gap;
     }
 
-    if (started && !this.activityOpen) this.openActivity();
+    const canOpen = !this.activityOpen && at >= this.stallCooldownUntil;
+
+    if (started && canOpen) this.openActivity(at);
 
     // Audio only flows inside an open bracket. Before one opens it goes to the
     // prebuffer, because the detector cannot call speech-start until it has
@@ -1334,8 +1367,23 @@ export class GeminiLiveEngine {
     if (this.activityOpen) this.sendPcm(out);
     else this.holdPcm(out);
 
-    if (ended) this.closeActivity(this.endpointer.stats.lastVoicedAt);
-    else if (this.activityOpen) this.guardAgainstEndlessTurn();
+    if (ended) {
+      this.closeActivity(this.endpointer.stats.lastVoicedAt || at, at);
+    } else if (discarded) {
+      // If a candidate activity was discarded as non-speech noise, quietly
+      // reset activity state without sending activityEnd, preventing Gemini
+      // from generating responses to table scratches or discarded noises.
+      if (this.activityOpen) {
+        this.activityOpen = false;
+        this.activityOpenedAt = 0;
+        this.prebuffer.length = 0;
+        try {
+          this.session.sendRealtimeInput({ activityEnd: {} });
+        } catch {}
+      }
+    } else if (this.activityOpen) {
+      this.guardAgainstEndlessTurn(at);
+    }
   }
 
   /**
@@ -1348,10 +1396,19 @@ export class GeminiLiveEngine {
    * `resumedAfterEndpoint` — he carried on and we called the turn too early —
    * and that lands here too, which is the right answer to being wrong.
    */
-  private openActivity(): void {
+  private openActivity(at = Date.now()): void {
     if (!this.session || this.activityOpen) return;
+    // A barge-in from a prior turn must never outlive that turn to silence a new user activity.
+    if (!this.turnActive && this.suppressedGeneration > this.generation) {
+      this.suppressedGeneration = 0;
+    }
     this.activityOpen = true;
-    this.activityOpenedAt = Date.now();
+    this.activityOpenedAt = at;
+    if (this.turnActive || this.outputTranscript) {
+      this.turnActive = false;
+      this.outputTranscript = "";
+      this.emit({ type: "tts_interrupt" });
+    }
     try {
       this.session.sendRealtimeInput({ activityStart: {} });
     } catch (err) {
@@ -1362,13 +1419,13 @@ export class GeminiLiveEngine {
   }
 
   /** Tell Gemini the turn is over, and start the stopwatch. */
-  private closeActivity(spokeAt: number): void {
+  private closeActivity(spokeAt: number, at = Date.now()): void {
     if (!this.session || !this.activityOpen) return;
     this.activityOpen = false;
     this.activityOpenedAt = 0;
     this.timing = {
-      spokeAt: spokeAt || Date.now(),
-      committedAt: Date.now(),
+      spokeAt: spokeAt || at,
+      committedAt: at,
       turnStartedAt: 0,
       firstAudioAt: 0,
     };
@@ -1387,8 +1444,7 @@ export class GeminiLiveEngine {
    * and the turn would then hang forever with no reply and no error. Same
    * ceiling the dictation lane uses, same helper.
    */
-  private guardAgainstEndlessTurn(): void {
-    const now = Date.now();
+  private guardAgainstEndlessTurn(now = Date.now()): void {
     const stall = endpointStall({
       turnStartedAt: this.activityOpenedAt,
       lastFrameAt: now,
@@ -1397,9 +1453,21 @@ export class GeminiLiveEngine {
       frameStallMs: FRAME_STALL_MS,
     });
     if (!stall) return;
-    this.onNote?.(ENDPOINT_STALL_NOTE);
+
+    // Only tell the operator "I took the turn" if actual speech was heard
+    // during this bracket. An empty or noise-only turn stalled because of
+    // ambient sound; warning that he was cut off would spam an empty room.
+    const speech = GeminiLiveEngine.withoutNonSpeechTags(this.inputTranscript);
+    if (speech) this.onNote?.(ENDPOINT_STALL_NOTE);
+
+    // Forget the learned pacing: a turn that stalled was held open by pause
+    // expansion, and keeping a 2000 ms silence requirement would guarantee
+    // the next turn stalls too.
+    this.endpointer.forgetPacing();
     this.endpointer.reset();
-    this.closeActivity(now);
+    this.prebuffer.length = 0;
+    this.stallCooldownUntil = now + 800;
+    this.closeActivity(now, now);
   }
 
   /** Hold a chunk until a bracket opens, keeping only the recent past. */
@@ -1469,6 +1537,57 @@ export class GeminiLiveEngine {
    */
   static isAssistantDirectiveEcho(text: string): boolean {
     return /^\[\s*Say this to the user now\b/i.test((text ?? "").trim());
+  }
+
+  /**
+   * The input transcription with its non-speech tags removed.
+   *
+   * Gemini's transcriber writes a sound that is not words as a bracketed tag,
+   * "[noise]", and it arrives as an ordinary `inputTranscription`. Measured
+   * 2026-09-13 on 0.0.17: the operator saw a "[noise]" bubble keep appearing
+   * and Temi stopped answering. A bare tag reached `gateSpokenTurn`, which
+   * scores it "No clear sign it was meant for the assistant" and, on rejecting
+   * a turn, barges in and stops her playback. Every burst of room noise
+   * silenced the reply she was giving.
+   *
+   * A short run of letters inside brackets is a tag: nobody speaks brackets.
+   * Longer bracketed text, like the directive `isAssistantDirectiveEcho`
+   * matches, has punctuation and length this cannot match.
+   */
+  static withoutNonSpeechTags(text: string): string {
+    const stripped = (text ?? "")
+      .replace(/[[<((\*]\s*[a-z][a-z _-]{0,30}\s*[\]>)\*]/gi, " ")
+      .replace(/\s+/g, " ")
+      .trim();
+
+    // Pure punctuation or symbols without any letters or digits is NOT speech.
+    if (!/[a-zA-Z0-9]/.test(stripped)) return "";
+
+    // If the entire transcript consisted only of a standalone noise/ambient word,
+    // it is an acoustic artifact (e.g. model transcribing raw "noise" or "noice").
+    const normalized = stripped.toLowerCase().replace(/^[^\w]+|[^\w]+$/g, "");
+    const BARE_NOISE = new Set([
+      "noise",
+      "noice",
+      "background",
+      "background noise",
+      "cough",
+      "sigh",
+      "thank you",
+      "thank you for watching",
+      "thanks for watching",
+      "amara.org",
+      "subtitles by",
+    ]);
+    if (BARE_NOISE.has(normalized)) return "";
+
+    // In an English session, if the transcript has non-ASCII / foreign script characters
+    // with zero Latin letters (e.g. Thai "ครับ", "100 บาท", Cyrillic "Ну", Tamil "ஓகே", CJK, Arabic),
+    // it is an ASR generative hallucination on ambient room noise.
+    const HAS_LATIN = /[a-zA-Z]/;
+    if (!HAS_LATIN.test(stripped) && /[^\x00-\x7F]/.test(stripped)) return "";
+
+    return stripped;
   }
 
   /**
@@ -1595,7 +1714,9 @@ export class GeminiLiveEngine {
   sendTTSStart(): void {}
 
   /** See `sendTTSStart`. */
-  sendTTSStop(): void {}
+  sendTTSStop(): void {
+    this.echo.markEnded();
+  }
 
   /**
    * Gemini Live fixes the voice at session setup; there is no message that

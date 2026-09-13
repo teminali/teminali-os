@@ -107,6 +107,47 @@ test("her own voice cannot open a turn", () => {
   );
 });
 
+test("table scratching or desk friction while ducked cannot open a turn or interrupt", () => {
+  const ep = new MicEndpointer();
+  const at = { now: 3_500_000 };
+  ep.setDucked(true);
+  // Desk scratch / broadband friction noise at high RMS (0.08, well above 0.045):
+  const scratch = (n) => {
+    const out = new Int16Array(n);
+    for (let i = 0; i < n; i += 1) out[i] = Math.round((Math.random() * 2 - 1) * 0.08 * 32768);
+    return out;
+  };
+  const events = drive(ep, scratch, 30, at);
+  assert.equal(
+    events.some((e) => e.type === "speech-start"),
+    false,
+    "unvoiced mechanical friction must never trigger barge-in or cut off assistant audio",
+  );
+});
+
+test("pure mechanical noise without vowels is discarded instead of committed as a turn", () => {
+  const ep = new MicEndpointer();
+  const at = { now: 4_000_000 };
+  // Loud table scratching while listening in the clear (RMS 0.08, not ducked):
+  const scratch = (n) => {
+    const out = new Int16Array(n);
+    for (let i = 0; i < n; i += 1) out[i] = Math.round((Math.random() * 2 - 1) * 0.08 * 32768);
+    return out;
+  };
+  drive(ep, scratch, 25, at); // ~1 second of table scratching
+  const ended = drive(ep, room, 60, at); // silence following
+  assert.equal(
+    ended.some((e) => e.type === "speech-end"),
+    false,
+    "an utterance with zero periodic vowel frames must not commit as speech-end",
+  );
+  assert.ok(
+    ended.some((e) => e.type === "discarded"),
+    "unvoiced mechanical noise must be discarded as non-speech",
+  );
+});
+
+
 test("the onset is held, not dropped, until the bracket opens", () => {
   const engine = new GeminiLiveEngine();
   const sent = [];
