@@ -34,6 +34,9 @@ registerWorkspaceMediaScheme();
    Everything here has to happen before `app.ready`.
    ───────────────────────────────────────────────────────────────────────── */
 
+// Ensure audio autoplay and AudioWorklet playback are never gated on user gestures
+app.commandLine.appendSwitch("autoplay-policy", "no-user-gesture-required");
+
 // Windows groups taskbar buttons and routes notifications by this id. The NSIS
 // installer stamps the same id on the shortcuts it creates, so a pinned
 // shortcut and the running window are one button rather than two.
@@ -400,6 +403,10 @@ function createWindow() {
   mainWindow.once("ready-to-show", () => {
     log("Window ready to show, displaying mainWindow");
     mainWindow.show();
+  });
+
+  mainWindow.webContents.on("console-message", (_event, level, message) => {
+    log(`[renderer:${level}]`, message);
   });
 
   const indexPath = path.join(__dirname, "../dist/index.html");
@@ -827,6 +834,14 @@ ipcMain.handle("updates:restart", () => {
   setTimeout(() => {
     try { app.exit(0); } catch { /* best effort */ }
   }, 150);
+  app.quit();
+  return true;
+});
+
+ipcMain.handle("app:quit", () => {
+  setTimeout(() => {
+    try { app.exit(0); } catch {}
+  }, 100);
   app.quit();
   return true;
 });
