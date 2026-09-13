@@ -397,6 +397,25 @@ async function mintGeminiLiveToken(config) {
         detail: `Google did not answer the voice token request within ${Math.round(GEMINI_LIVE_MINT_TIMEOUT_MS / 1000)} seconds. Check the network; voice will keep trying.`,
       };
     }
+    // `fetch failed` is undici's transport error, and it is the one refusal
+    // Google never sent: the request did not arrive. The reason always sits in
+    // error.cause, which is exactly what reading only error.message throws
+    // away, so the operator was handed a bare "fetch failed" and sent to check
+    // a key that was never rejected. Same principle as the timeout above.
+    const causes = [];
+    for (let cause = error?.cause, depth = 0; cause && depth < 4; cause = cause.cause, depth += 1) {
+      const code = cause.code || cause.name;
+      if (code) causes.push(String(code));
+    }
+    const transport = /^fetch failed$/i.test(detail)
+      || /\b(ENOTFOUND|ECONNREFUSED|ECONNRESET|ENETUNREACH|EHOSTUNREACH|EAI_AGAIN|ETIMEDOUT|EPROTO|UNABLE_TO_VERIFY_LEAF_SIGNATURE|CERT_[A-Z_]+)\b/.test([detail, ...causes].join(" "));
+    if (transport && !exhausted) {
+      return {
+        ok: false,
+        reason: "mint-failed",
+        detail: `The voice token request never reached Google${causes.length ? ` (${causes.join(", ")})` : ""}. That is the connection, not the key and not the quota. Check the network; voice will keep trying.`,
+      };
+    }
     return {
       ok: false,
       reason: exhausted ? "quota" : "mint-failed",
