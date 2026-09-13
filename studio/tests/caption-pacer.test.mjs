@@ -113,3 +113,17 @@ test("a speaker that never plays still gets its caption", () => {
   assert.equal(p.advanceTo(0), "");
   assert.equal(p.revealAll(), SENTENCE);
 });
+
+test("a turn that has been committed is never revealed a second time", () => {
+  /* The duplicate row, through the door `advanceTo` had already shut. One
+     reply reached the transcript twice because a stale pending from an
+     interrupted turn committed the live one early, and the commit that
+     followed called `revealAll` on a pacer that was already closed. */
+  const p = new CaptionPacer();
+  p.beginTurn();
+  p.setText(SENTENCE);
+  assert.equal(p.revealAll(), SENTENCE);
+  p.completeTurn(SENTENCE, 4);
+  assert.equal(p.revealAll(), "", "a committed turn was offered for committing again");
+  assert.equal(p.advanceTo(4), "", "and the same must still hold for playback");
+});

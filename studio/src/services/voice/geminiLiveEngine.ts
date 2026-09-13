@@ -41,6 +41,7 @@ import {
 import { TEMI_PERSONA, TEMI_DEFAULT_VOICE } from "./temiPersona.ts";
 import { fetchGeminiLiveToken, describeGeminiLive } from "./geminiLiveToken.ts";
 import { DEFAULT_ENDPOINTER, endpointStall } from "./turnTaking.ts";
+import type { TurnEvent } from "./turnTaking.ts";
 import { MicEndpointer } from "./micEndpoint.ts";
 
 /**
@@ -259,6 +260,20 @@ export interface TurnTiming {
   firstAudioMs: number;
   /** The silence window the endpointer sized for this turn. */
   windowMs: number;
+  /**
+   * Times the endpointer called this turn over while he was still talking and
+   * had to reopen it. The stopwatch above restarts on the last of them, so a
+   * turn with corrections took longer than `firstAudioMs` says.
+   */
+  corrections: number;
+  /**
+   * The tightest silence we wrongly ended on during this turn, in ms, 0 when
+   * we never did. This is the number that says whether an endpoint cut him off
+   * mid-sentence or merely clipped a trailing pause.
+   */
+  cutGapMs: number;
+  /** The learned pause floor after this turn. 0 until he has been cut off once. */
+  pacingFloorMs: number;
 }
 
 export type GeminiLiveMessage =
@@ -411,7 +426,12 @@ const ASK_THE_ASSISTANT: FunctionDeclaration = {
     "computer. Never guess a number, a path, a version or a date, and never claim a fact " +
     "came from the system when it did not. A wrong specific answer is much worse than a " +
     "pause: the user will happily wait a few seconds, but one confident wrong figure costs " +
-    "their trust in everything else you say. When in any doubt, call this.",
+    "their trust in everything else you say. An explicit request for the assistant, or " +
+    "for something on this machine to be looked at, is always reason enough. But doubt " +
+    "about what the operator MEANT is not what this is for: the assistant cannot hear " +
+    "this conversation, so it can neither explain them to you nor take a turn of talk " +
+    "off your hands. If you did not follow something, ask them. If the turn is talk, an " +
+    "opinion, a joke, a song, or a question about you, answer it yourself.",
   parameters: {
     type: Type.OBJECT,
     properties: {
@@ -528,6 +548,19 @@ export class GeminiLiveEngine {
    * the part this file owns.
    */
   private timing = { spokeAt: 0, committedAt: 0, turnStartedAt: 0, firstAudioAt: 0 };
+
+  /**
+   * How often this turn was called over too early, and the tightest silence we
+   * did it on. Kept here rather than in the endpointer because they belong to
+   * the turn the stopwatch is timing: both clear when her audio lands, at the
+   * same moment the four stamps are read out.
+   *
+   * These are the only evidence that the endpoint moved off Google is safe as
+   * well as faster. The measured 993 ms is worthless if it is bought by
+   * interrupting him, and no latency number can show that.
+   */
+  private corrections = 0;
+  private cutGapMs = 0;
 
   /** Is a user-activity bracket open on the wire? */
   private activityOpen = false;
@@ -863,6 +896,8 @@ export class GeminiLiveEngine {
     this.endpointer.reset();
     this.endpointer.setTranscript("");
     this.timing = { spokeAt: 0, committedAt: 0, turnStartedAt: 0, firstAudioAt: 0 };
+    this.corrections = 0;
+    this.cutGapMs = 0;
   }
 
   // ---------------------------------------------------------------- inbound
@@ -971,6 +1006,14 @@ export class GeminiLiveEngine {
       // interrupts without naming ids. An interrupted turn is over; a tool call
       // that belonged to it has nowhere to land.
       this.pendingToolCalls.clear();
+      /* And the words, for the same reason as the audio. What she generated
+         but never said belongs to a sentence he stopped waiting for, and
+         nothing clears this except `turnComplete`. Left standing, it was
+         delivered on the NEXT turn's `turnComplete` as that turn's
+         `final_assistant_answer`: the stage set a `pendingFinal` it could
+         never commit, and one turn later that stale pending closed the live
+         turn early and committed it twice. See DESIGN 6.0.49. */
+      this.outputTranscript = "";
       this.emit({ type: "tts_interrupt" });
       return;
     }
@@ -1159,7 +1202,12 @@ export class GeminiLiveEngine {
         turnStartMs: Math.max(0, this.timing.turnStartedAt - this.timing.spokeAt),
         firstAudioMs: this.timing.firstAudioAt - this.timing.spokeAt,
         windowMs: this.endpointer.stats.windowMs,
+        corrections: this.corrections,
+        cutGapMs: this.cutGapMs,
+        pacingFloorMs: this.endpointer.stats.pacingFloorMs,
       });
+      this.corrections = 0;
+      this.cutGapMs = 0;
     }
     const incoming = base64ToBytes(b64);
 
@@ -1214,8 +1262,20 @@ export class GeminiLiveEngine {
     this.endpointer.setDucked((new DataView(buffer).getUint32(4, false) & 1) === 1);
 
     const events = this.endpointer.push(out, MIC_RATE);
-    const started = events.some((event) => event.type === "speech-start");
+    const started = events.find(
+      (event): event is Extract<TurnEvent, { type: "speech-start" }> => event.type === "speech-start",
+    );
     const ended = events.find((event) => event.type === "speech-end" || event.type === "discarded");
+
+    // He carried on after we called the turn: the endpoint was wrong. Counted
+    // before the bracket reopens, because reopening is what hides it — the
+    // recovery works, and a recovery nobody counts looks exactly like a turn
+    // that was never cut.
+    if (started?.resumedAfterEndpoint) {
+      this.corrections += 1;
+      const gap = started.gapMs ?? 0;
+      if (gap > 0 && (this.cutGapMs === 0 || gap < this.cutGapMs)) this.cutGapMs = gap;
+    }
 
     if (started && !this.activityOpen) this.openActivity();
 

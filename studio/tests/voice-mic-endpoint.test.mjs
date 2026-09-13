@@ -149,3 +149,61 @@ test("a reconnect cannot leave a bracket open on the old socket", () => {
   assert.equal(engine.activityOpen, false);
   assert.equal(engine.prebuffer.length, 0);
 });
+
+test("a turn called over too early is counted, not silently recovered", () => {
+  const engine = new GeminiLiveEngine();
+  engine.session = { sendRealtimeInput() {}, close() {} };
+
+  /* The endpointer measures silence against the wall clock, and the engine
+     does not forward one. Patching the clock in rather than stubbing the
+     detector keeps the real DSP in the test: what is faked here is the
+     passage of time, not the verdict. */
+  const clock = { now: 2_000_000 };
+  const ep = engine.endpointer;
+  const realPush = ep.push.bind(ep);
+  ep.push = (pcm, rate) => {
+    clock.now += (2048 / 48_000) * 1000; // one worklet batch
+    return realPush(pcm, rate, Math.round(clock.now));
+  };
+
+  let batches = 0;
+  const feed = (make) => {
+    const buf = new ArrayBuffer(8 + 2048 * 2);
+    new DataView(buf).setUint32(4, 0, false);
+    new Int16Array(buf, 8).set(make(2048, batches * 2048));
+    batches += 1;
+    engine.sendAudioChunk(buf);
+  };
+  /* Only until the bracket closes. Carrying on past the endpoint puts the
+     resumed speech outside `resumeWindowMs`, where it is a new turn rather
+     than the same one continuing, and the mistake is no longer a mistake. */
+  const pauseUntilCalledOver = () => {
+    for (let c = 0; c < 80 && engine.activityOpen; c += 1) feed(room);
+    assert.equal(engine.activityOpen, false, "silence after speech has to end the turn");
+  };
+
+  for (let c = 0; c < 25; c += 1) feed(speech);
+  assert.equal(engine.activityOpen, true, "precondition: he is talking and the bracket is open");
+
+  pauseUntilCalledOver();
+
+  for (let c = 0; c < 25; c += 1) feed(speech); // and he carries straight on
+  assert.equal(engine.activityOpen, true, "the bracket has to reopen, or the rest of him is lost");
+  assert.equal(engine.corrections, 1, "reopening is what hides the mistake; count it");
+  assert.ok(engine.cutGapMs > 0, "the silence it happened on is what says how badly");
+
+  pauseUntilCalledOver();
+
+  let timing = null;
+  engine.onTiming = (t) => {
+    timing = t;
+  };
+  engine.emitAudio(Buffer.from(new Int16Array([0, 0, 0, 0]).buffer).toString("base64"));
+
+  assert.ok(timing, "her first audio is when the stopwatch reads out");
+  assert.equal(timing.corrections, 1, "a wait bought by interrupting him is not a clean wait");
+  assert.ok(timing.cutGapMs > 0, "and the report carries how tight the cut was");
+  assert.ok(timing.pacingFloorMs > 0, "being wrong once teaches the endpointer to wait longer");
+  assert.equal(engine.corrections, 0, "the count belongs to that turn, not to the session");
+  assert.equal(engine.cutGapMs, 0);
+});

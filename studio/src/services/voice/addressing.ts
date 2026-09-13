@@ -54,7 +54,71 @@ const THIRD_PARTY_MARKERS = [
   "hold on", "one second", "one sec", "give me a minute", "i'll call you",
   "call you back", "see you later", "talk to you later", "bye",
   "alisema", "waambie", "mwambie", "subiri", "ngoja", "nitakupigia",
+  // Said to her face, and the only correction available to an operator whose
+  // room contains two assistants: one of them answered and should not have.
+  "i was talking to", "i wasn't talking to you", "i was not talking to you",
+  "not you", "i meant the other", "nilikuwa naongea na",
 ];
+
+/**
+ * Another assistant, by name.
+ *
+ * A room can hold more than one of these, and when it does the operator needs
+ * a way to pick. Her own name is a positive signal worth 0.5 and there was no
+ * opposite: nothing a person could say made her stand down, so "ChatGPT, what
+ * do you think" scored as directed at Temi like any other sentence.
+ *
+ * These are matched in vocative position only, never as a topic. "ChatGPT is
+ * down again" is the operator talking to her about it, and taking that as a
+ * turn for somebody else would be the same mistake in the other direction.
+ */
+const OTHER_ASSISTANTS = ["chatgpt", "chat gpt", "siri", "alexa", "copilot", "google assistant"];
+
+/** The other assistant this was spoken to, or null. */
+export function addressesOtherAssistant(text: string): string | null {
+  const trimmed = text.trim();
+  for (const name of OTHER_ASSISTANTS) {
+    const greeted = new RegExp(`^(hey|ok|okay|yo)\\s+${escape(name)}\\b`, "i");
+    const leading = new RegExp(`^${escape(name)}\\s*[,:]`, "i");
+    const trailing = new RegExp(`,\\s*${escape(name)}[\\s.!?]*$`, "i");
+    if (greeted.test(trimmed) || leading.test(trimmed) || trailing.test(trimmed)) return name;
+  }
+  if (/^(hey|ok|okay)\s+google\b/i.test(trimmed)) return "google";
+  return null;
+}
+
+/**
+ * Words that make her name the subject or the object of the sentence rather
+ * than the person being spoken to.
+ *
+ * `stripWakeWord` used to take any leading "Temi " as an address, so "Temi said
+ * the build is broken", said to somebody else, arrived as the command "said the
+ * build is broken" carrying the full 0.5 for being addressed by name. A
+ * third-person mention was being rewritten into a first-person instruction.
+ *
+ * Deliberately only report verbs. "Temi can you hear me" and "Temi is that
+ * you" are addresses, so a copula or a modal here would cost her real turns,
+ * and ignoring the operator is worse than answering a mention.
+ */
+const MENTION_AFTER = [
+  "said", "says", "say", "told", "tells", "thinks", "thought", "knows", "knew",
+  "mentioned", "replied", "answered", "wants", "wanted", "alisema", "anasema",
+];
+
+/** And the words that put her name on the receiving end: "let's ask Temi". */
+const MENTION_BEFORE = [
+  "ask", "asks", "asked", "tell", "tells", "told", "about", "to", "with", "for",
+  "and", "or", "uliza", "mwambie", "waambie",
+];
+
+function firstWord(text: string): string {
+  return (text.trim().split(/[\s,.!?]+/)[0] ?? "").toLowerCase();
+}
+
+function lastWord(text: string): string {
+  const words = text.trim().split(/[\s,.!?]+/).filter(Boolean);
+  return (words[words.length - 1] ?? "").toLowerCase();
+}
 
 export interface AddressingContext {
   /** Was the last assistant turn a question? Raises the prior sharply. */
@@ -86,6 +150,16 @@ export interface AddressingContext {
 export const FOLLOW_UP_WINDOW_MS = 9000;
 
 /** Strip a leading wake word so it never reaches the chat as content. */
+/**
+ * Strip a leading wake word so it never reaches the chat as content.
+ *
+ * A name in a sentence is not always an address. When all that follows it is
+ * whitespace and a report verb it is a mention, and rewriting "Temi said the
+ * build is broken" into the command "said the build is broken" turned the
+ * operator quoting her to somebody else into an instruction from them. A comma
+ * or a greeting settles it the other way: those are how a person actually
+ * calls someone by name, and neither of them appears in a mention.
+ */
 export function stripWakeWord(text: string, wakeWords: string[]): { text: string; matched: boolean } {
   const trimmed = text.trim();
   for (const word of wakeWords) {
@@ -93,11 +167,26 @@ export function stripWakeWord(text: string, wakeWords: string[]): { text: string
     const exactPattern = new RegExp(`^(hey\\s+|ok(ay)?\\s+|yo\\s+|habari\\s+)?${escape(word)}[\\s,.!:—?]*$`, "i");
     if (exactPattern.test(trimmed)) return { text: "", matched: true };
     // "teminali, open the file" / "hey temy open the file" / "ok temy…"
-    const pattern = new RegExp(`^(hey\\s+|ok(ay)?\\s+|yo\\s+|habari\\s+)?${escape(word)}[\\s,.!:—-]+`, "i");
-    if (pattern.test(trimmed)) return { text: trimmed.replace(pattern, "").trim(), matched: true };
+    const pattern = new RegExp(`^(hey\\s+|ok(ay)?\\s+|yo\\s+|habari\\s+)?${escape(word)}([\\s,.!:—-]+)`, "i");
+    const lead = pattern.exec(trimmed);
+    if (lead) {
+      const rest = trimmed.slice(lead[0].length).trim();
+      const called = Boolean(lead[1]) || /[^\s]/.test(lead[3].trim());
+      if (called || !MENTION_AFTER.includes(firstWord(rest))) {
+        return { text: rest, matched: true };
+      }
+      return { text: trimmed, matched: false };
+    }
     // Trailing form: "open the file, teminali"
-    const tail = new RegExp(`[\\s,]+${escape(word)}[\\s.!?]*$`, "i");
-    if (tail.test(trimmed)) return { text: trimmed.replace(tail, "").trim(), matched: true };
+    const tail = new RegExp(`([\\s,]+)${escape(word)}[\\s.!?]*$`, "i");
+    const end = tail.exec(trimmed);
+    if (end) {
+      const before = trimmed.slice(0, end.index).trim();
+      if (end[1].includes(",") || !MENTION_BEFORE.includes(lastWord(before))) {
+        return { text: before, matched: true };
+      }
+      return { text: trimmed, matched: false };
+    }
   }
   return { text: trimmed, matched: false };
 }
@@ -228,6 +317,24 @@ export function scoreAddressing(
         directed: false,
         confidence: 0.8,
         reason: `Voice did not match the enrolled profile (${context.speakerMatch.toFixed(2)}).`,
+        signals: { wakeWord, speakerMatch: context.speakerMatch, followUpWindow, classifier: null, imperative },
+      },
+      needsClassifier: false,
+    };
+  }
+
+  /* Another assistant was called by name, so this turn is theirs. A veto
+     rather than a weight, and the mirror of the 0.5 her own name earns: being
+     addressed by name is the one signal that settles a room, and until now it
+     only ever worked in her favour. Her own name still wins, so "Temi, ask
+     ChatGPT what it thinks" stays hers. */
+  const otherAssistant = wakeWord ? null : addressesOtherAssistant(text);
+  if (otherAssistant) {
+    return {
+      verdict: {
+        directed: false,
+        confidence: 0.9,
+        reason: "Addressed to another assistant by name.",
         signals: { wakeWord, speakerMatch: context.speakerMatch, followUpWindow, classifier: null, imperative },
       },
       needsClassifier: false,

@@ -141,3 +141,24 @@ test("the delegate path no longer writes the report and speaks it too", async ()
   assert.doesNotMatch(body, /setDialogueHistory/, "the written copy is back, and so is the double bubble");
   assert.match(body, /speakLineRef\.current\(finalReport, "report"\)/);
 });
+
+/* ── When she must NOT reach for it ───────────────────────────────────────── */
+
+test("the declaration does not make plain doubt a reason to delegate", async () => {
+  /* Reported off a three-way conversation: she reached for the assistant when
+     she simply had not understood, and the assistant cannot hear the room. The
+     old closing line was "When in any doubt, call this", which reads as one.
+     The anti-fabrication rules above it stay; only the unbounded doubt goes. */
+  const engine = await readSource("../src/services/voice/geminiLiveEngine.ts");
+  assert.doesNotMatch(engine, /in any doubt, call this/i);
+  assert.match(engine, /doubt[\s\S]{0,40}about what the operator MEANT is not what this is for/);
+  assert.match(engine, /If you did not follow something, ask them/);
+  assert.match(engine, /Never guess a number, a path, a version or a date/, "the fabrication rule was dropped with it");
+});
+
+test("the persona keeps talk with the voice and facts with the hands", async () => {
+  const persona = await readSource("../src/services/voice/temiPersona.ts");
+  assert.match(persona, /Not understanding is never a reason to ask it/);
+  assert.match(persona, /When the turn is talk rather than a task, it is yours/);
+  assert.match(persona, /the moment you are about to say something specific nobody told you, ask it instead/);
+});

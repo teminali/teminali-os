@@ -794,6 +794,17 @@ rather than by adjective — Sulafat 153 wpm (the default), Gacrux 129, Aoede 11
 Callirrhoe 208, against a conversational norm of 140–160. The voice governs pace
 far more than the prompt does. See `DESIGN.md` §6.0.16.
 
+When he stops speaking is decided here rather than by Google, on an adaptive
+silence window that learns his pacing instead of a flat 1.8 s. Measured against
+the live model over four alternating pairs, that took 993 ms off the median
+wait for her first audio. Every turn since is stamped and logged to the
+console: this turn's wait, split into our part and the model's, then the median
+and p90 so far. A turn the endpointer called too early prints CUT with the
+silence it was wrong about, because the engine reopens the turn and recovers,
+and a recovery nobody counts looks exactly like a turn that was never cut.
+`teminaliTurnLatency()` returns the session's distribution, which is how it is
+read over CDP without opening devtools. See `DESIGN.md` §6.0.46 and §6.0.47.
+
 The two lower tiers are unchanged. Local by default: **whisper.cpp** for
 recognition, macOS `say` for synthesis. An optional sidecar on
 `127.0.0.1:8321` (`TEMINALI_VOICE_URL`) upgrades either or both, and
@@ -1370,7 +1381,7 @@ ollama serve              # local models on 127.0.0.1:11434
 
 ```bash
 npm run typecheck   # tsc --noEmit
-npm test            # 2807 tests
+npm test            # 2827 tests
 npm run eval:local  # the local lane against the real model — a score, not a pass/fail; needs Ollama
 npm run eval:voice  # the voice co-agent's spoken answers, same discipline; needs Ollama
 npm run build       # tsc && vite build

@@ -11,6 +11,7 @@ import { PROFILES_LIST, useStudioStore } from "../../store/studioStore";
 import { PERMISSION_LABELS } from "../chat/ModelPicker";
 import { VoiceAudioEngine } from "../../services/voice/voiceAudioEngine";
 import { GeminiLiveEngine } from "../../services/voice/geminiLiveEngine";
+import { formatTurnLatency, recordTurn, turnLatencySummary } from "../../services/voice/turnLatency";
 import { geminiLiveRemedy, type GeminiLiveRemedy } from "../../services/voice/geminiLiveToken";
 import { CaptionPacer } from "../../services/voice/captionPacer";
 import { TeminaliAgentBridge, type TaskDelegationOptions } from "../../services/voice/teminaliAgentBridge";
@@ -357,10 +358,15 @@ export const TemiVoiceStage: React.FC<TemiVoiceStageProps> = ({
       : pacer.revealAll();
     pacer.completeTurn(truncateToSpoken ? spoken : pending, secondsPlayedRef.current);
     pendingFinalRef.current = null;
-    setDialogueHistory((prev) => [
-      ...prev,
-      { id: `asst-${Date.now()}`, role: "assistant", content: spoken },
-    ]);
+    /* `spoken` is empty when the pacer was already closed, which means this
+       turn has been committed once already. Appending here is exactly the
+       duplicate row, minus its text. */
+    if (spoken) {
+      setDialogueHistory((prev) => [
+        ...prev,
+        { id: `asst-${Date.now()}`, role: "assistant", content: spoken },
+      ]);
+    }
     setLiveAssistantStream(null);
   }, []);
   const commitSpokenTurnRef = useRef(commitSpokenTurn);
@@ -1079,6 +1085,29 @@ export const TemiVoiceStage: React.FC<TemiVoiceStageProps> = ({
          sentence and its button are one edit, not two. */
       if (!cancelled) setVoiceNote({ text: note, remedy: geminiLiveRemedy(note) ?? undefined });
     };
+
+    /* The engine has stamped every turn since 5109911 and nothing read the
+       stamps, so the only latency anyone could quote was the harness
+       utterance the A/B was run on. This is the ear's counterpart: a real
+       conversation leaves a distribution behind it, and a turn the endpointer
+       called too early prints CUT rather than being silently recovered.
+
+       Console rather than a panel because it is diagnostic, and mirrored onto
+       a global because the packaged app is driven over CDP here far more often
+       than its devtools are opened: `teminaliTurnLatency()` in an evaluate
+       returns the distribution without a conversation having to be watched.
+
+       Its own global rather than a field on `window.teminali`, which preload
+       defines through `contextBridge` and the renderer therefore cannot
+       assign to. It is deliberately left in place on unmount, so the numbers
+       survive him leaving the voice screen. */
+    protocol.onTiming = (timing) => {
+      const summary = recordTurn(timing);
+      console.info(formatTurnLatency(timing, summary));
+    };
+    (window as unknown as { teminaliTurnLatency?: typeof turnLatencySummary }).teminaliTurnLatency =
+      turnLatencySummary;
+
     void protocol.connect();
 
     // Continuous audio energy sampling for the 3D Orb

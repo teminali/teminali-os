@@ -213,3 +213,38 @@ test("a tool call mints the turn it arrives in", () => {
   engine.handleServerMessage(AUDIO);
   assert.equal(engine.generation, minted, "the spoken note landed on a second generation");
 });
+
+// ──────────────────────────────── a transcript that outlived its own turn
+
+test("an interrupted turn does not deliver its words as the next turn's answer", () => {
+  /* One reply on screen twice, traced back to here. `interrupted` drops the
+     queued audio and returns, and nothing but `turnComplete` clears the text,
+     so the cut turn's words sat in the accumulator and came back as the NEXT
+     turn's `final_assistant_answer`. The stage then held a pending it could
+     not commit, and one turn later that stale pending committed the live turn
+     twice. */
+  const { engine, seen } = harness();
+  engine.handleServerMessage(says("The build is broken and I think the"));
+  engine.handleServerMessage(AUDIO);
+  engine.handleServerMessage({ serverContent: { interrupted: true } });
+  assert.equal(seen("tts_interrupt").length, 1, "the barge-in was not seen at all");
+
+  engine.handleServerMessage(says("I like the sound of that."));
+  engine.handleServerMessage(AUDIO);
+  engine.handleServerMessage(TURN_END);
+
+  const finals = seen("final_assistant_answer");
+  assert.equal(finals.length, 1);
+  assert.equal(finals[0].content, "I like the sound of that.");
+});
+
+test("an interrupted turn with nothing after it answers nothing", () => {
+  // The same clear, in the case where no second turn ever arrives: the cut
+  // words must not surface later on their own.
+  const { engine, seen } = harness();
+  engine.handleServerMessage(says("Let me tell you about the"));
+  engine.handleServerMessage(AUDIO);
+  engine.handleServerMessage({ serverContent: { interrupted: true } });
+  engine.handleServerMessage(TURN_END);
+  assert.equal(seen("final_assistant_answer").length, 0, "a cut turn was answered after the fact");
+});

@@ -8426,6 +8426,191 @@ Her own voice cannot open a turn: the mic batch header carries an
 `isTTSPlaying` flag set at capture time, which `sendAudioChunk` reads for the
 `ducked` state — per frame, which a start/stop callback can never be.
 
+#### 6.0.47 The stopwatch nobody read, and the mistakes nobody counted (2026-09-13)
+
+§6.0.46 moved the end of his turn into our code and measured what that was
+worth: 993 ms off the median wait, over four alternating pairs against the live
+model. Four scripted utterances. `geminiLiveEngine.ts` emitted a `TurnTiming`
+for every turn after it and nothing consumed one, so the only latency anyone
+could quote was still the recording the A/B was run on.
+
+`turnLatency.ts` is where they land now. `TemiVoiceStage` records each turn and
+logs one line: this turn, then the session so far. The median is computed the
+way the A/B reported it, averaging the two middle values on an even count, so
+the number from a real conversation is comparable with the 3594 ms in the table
+above rather than merely similar to it. The line splits the wait into the part
+this lane owns and the part that is Gemini's, because since 6.0.46 the second
+is roughly twice the first and that is the argument against spending another
+release on endpointing.
+
+The counting matters more than the timing. A faster endpoint is only an
+improvement if it is still right about when he stopped, and being wrong is
+invisible from the outside: the endpointer reports a `speech-start` within
+`resumeWindowMs` of an endpoint it already fired as `resumedAfterEndpoint`, the
+engine reopens the bracket, and the turn carries on. The recovery works, which
+is exactly the problem. A recovery nobody counts looks identical to a turn that
+was never cut. `TurnTiming` therefore carries `corrections` and `cutGapMs`
+alongside the four stamps, and a cut turn prints CUT rather than a clean wait.
+`cutGapMs` is the tightest silence we were wrong about, which is the difference
+between clipping a trailing pause and interrupting him mid-sentence.
+
+Both counters belong to the turn and clear when her audio lands. The pacing
+floor deliberately does not: it is a fact about him, not about the turn, and
+§6.15 already learns it.
+
+Read over CDP as `teminaliTurnLatency()`, which is its own global rather than a
+field on `window.teminali`: preload defines that one through `contextBridge`
+and the renderer cannot assign to it.
+
+Not measured here, and deliberately: this is the instrument, and the
+distribution it produces is the measurement. Nothing in this entry claims a
+number from a real conversation, because none has been recorded yet.
+
+
+#### 6.0.48 A room can hold three (`services/voice/addressing.ts`, `services/voice/temiPersona.ts`, `server/agent-cli.js`, 2026-09-13)
+
+The operator ran a three-way spoken conversation: himself, Temi, and ChatGPT's
+voice assistant on another device, one microphone between them. She held up on
+raw intelligence. Every defence she has for deciding whether a turn is hers
+turned out to answer a different question than the one that room asks.
+
+The defences on this lane ask either "did WE make this sound" or "is this OUR
+text". `ducked` is our own playback flag (`audioGraph.ts:76`), `selfAudio`
+enumerates our own media elements, `isAssistantDirectiveEcho` matches our own
+words. A second device answers no to all three, so a sentence spoken to ChatGPT
+arrived looking exactly like a sentence spoken to her. The four who-is-this
+layers that would have helped, speaker enrolment, echo guard, plausibility and
+an LLM addressee tiebreak, exist only in `conversation.ts`, which is not mounted
+on her lane.
+
+Three changes, all of them about who is being spoken to rather than what was
+said.
+
+**Being named is now a signal in both directions.** Her own name was worth 0.5
+toward "this is for you" and nothing anywhere made her stand down, so "ChatGPT,
+what do you think" scored like any other sentence and, against a 0.62 line
+reachable by a 0.34 base plus a 0.30 open-session bonus, every two-word sentence
+in that room was hers. `addressesOtherAssistant()` vetoes the turn when another
+assistant is named in vocative position (`addressing.ts:326-342`), a veto rather
+than a weight because being called by name is the one signal that settles a
+room. Vocative position only: "ChatGPT is down again" is the operator talking to
+her about it, and answering that with silence would be the same mistake pointing
+the other way. Her own name still wins the tie, so "Temi, ask ChatGPT what it
+thinks" stays hers.
+
+**A mention is no longer rewritten into a command.** `stripWakeWord` took any
+leading "Temi " as an address, so "Temi said the build is broken", said to the
+other person in the room, reached the lane as the instruction "said the build is
+broken" carrying the full 0.5 for being addressed by name. A leading name
+followed only by a report verb is now a mention and the turn is left alone
+(`addressing.ts:175`, and `:185` for the trailing form). Deliberately report verbs only: "Temi can you hear
+me" and "Temi is that you" are addresses, so admitting a copula or a modal here
+would cost her real turns, and ignoring the operator is worse than answering a
+mention. The same test runs on the trailing form, where a comma is what
+separates "open the file, Temi" from "let's ask Temi".
+
+**And she is told the room can hold three** (`temiPersona.ts:103-108`): that a
+sentence about her is not a sentence to her, that a sentence naming another
+assistant is theirs and is not to be answered or remarked on, and that when she
+cannot tell, waiting a beat beats answering, because in a room where two
+assistants are listening the fast one is the rude one.
+
+Separately, and found while reading her identity aloud in that conversation:
+`AGENT_IDENTITY` told the typed agent it was "the assistant inside Teminali
+Code" (`agent-cli.js:273`), a name this repo's working agreement retired at the
+0.0.1 reset, sitting live in a shipped prompt. It also left her denying she can
+sing. She has a voice; the denial was the typed lane answering for the spoken
+one. Both fixed in the same line, which `voice-identity.test.mjs:45` still holds
+under 600 characters.
+
+Covered by `voice-addressing-room.test.mjs`, 7 tests. Measured after the
+change: studio **2822/2822**, 0 skips, `tsc --noEmit` clean, `npm run build`
+exit 0.
+
+
+#### 6.0.49 One reply, on screen twice, again (`services/voice/geminiLiveEngine.ts`, `services/voice/captionPacer.ts`, `components/voice/TemiVoiceStage.tsx`, 2026-09-13)
+
+A reply reached the transcript as two identical committed rows, each with its
+own action bar. Reported as intermittent, and it is: it needs a barge-in on an
+earlier turn.
+
+`captionPacer.ts:85` already refuses to reveal a turn that has been committed,
+and that guard was added for this exact symptom on 2026-09-12. The duplicate
+came back through the other door. `revealAll()` did not carry the guard, and
+`revealAll()` is what the normal commit path calls.
+
+The chain, three links, all of them now cut.
+
+**The engine kept a dead turn's words.** `interrupted` drops the queued audio
+and returns (`geminiLiveEngine.ts:1001-1019`); nothing but `turnComplete`
+clears `outputTranscript` (`:1167`). So the cut turn's text stayed in the
+accumulator and was delivered on the NEXT turn's `turnComplete` as that turn's
+`final_assistant_answer`. It is cleared on interrupt now, for the same reason
+the audio is: what she generated but never said belongs to a sentence he
+stopped waiting for.
+
+**The stage could not commit what it was then holding.** That stale answer set
+`pendingFinalRef`, and nothing could retire it: `advanceTo` returns "" on a
+closed pacer, and the 2500 ms fallback requires that no audio has played. It
+sat there until the next turn reopened the pacer and zeroed the play clock, at
+which point `onTTSProgress`'s `shown.length >= pending.length`
+(`TemiVoiceStage.tsx:836`) compared the live turn's revealed prefix against the
+stale turn's length, passed early, and committed the live turn through
+`revealAll()`, which returns everything generated rather than everything
+spoken. The live turn's own `final_assistant_answer` then committed the same
+string again.
+
+**And `revealAll()` now carries the guard `advanceTo` has**
+(`captionPacer.ts:102-107`), so a committed turn cannot be offered for
+committing twice however it is reached. Its caller no longer appends an empty
+row when it declines (`TemiVoiceStage.tsx:361-371`).
+
+The root cause is the first link; the other two are the containment that should
+have made it a missing caption rather than a duplicated one. Covered by
+`voice-live-engine-generation.test.mjs` (an interrupted turn's words are not
+the next turn's answer, and are not answered later on their own) and
+`caption-pacer.test.mjs` (a committed turn is never revealed a second time).
+
+#### 6.0.50 She reached for the hands when she had only misheard (`services/voice/geminiLiveEngine.ts`, `services/voice/temiPersona.ts`, 2026-09-13)
+
+From the same three-way conversation: she delegates when she does not
+understand. His rule, verbatim, is that she should "only use tools when it
+knows for sure for the task i need tools or the other assistant".
+
+Two inputs made not understanding a reason to call. The declaration closed with
+"When in any doubt, call this", which is the widest sentence in the prompt and
+contains every kind of doubt there is, including doubt about what he meant. The
+persona sent her to the assistant for "something about a subject you have never
+studied", which in a conversation is most subjects.
+
+Both are now bounded rather than removed, because what they were written for is
+real: §6.0.x records fabricated sizes and a fabricated provenance defending
+them. The anti-fabrication rules are untouched and pinned by test. What is
+added is the other half, which was never stated: the assistant cannot hear this
+conversation, so it can neither explain the operator to her nor take a turn of
+talk off her hands. Not understanding is a reason to ask HIM. Talk, an opinion,
+a joke, a song, an argument about which assistant is better, a question about
+herself: those are hers, and she answers them even when unsure, saying she is
+unsure. An explicit request for the assistant is still always reason enough.
+
+A finding on the way to this, which changes where the next fix goes: the
+screenshot behind the report showed "Bringing it up." and that line is
+hardcoded (`machineAction.ts:648`). `acknowledgeAction` is called only from
+`voiceTurnRouter.ts:582` and `:662`, never from the model's tool path, so on
+that turn the LEGACY REGEX ROUTER delegated before she ever saw the sentence.
+The model-side rules above are still worth narrowing and were the fix he asked
+for, but the router is a separate over-trigger on the same complaint. Measured
+against it, ordinary talk holds: fourteen conversational lines from that room,
+"who do you think would win between you and chatgpt" among them, all route to
+`converse`. What trips it is an object it recognises, "bring up the teminali
+workspace" or "how big is this project", which are fair delegations. The
+sentence that actually misfired is not yet known, and narrowing the router
+without it would be guesswork.
+
+Covered by `voice-handoff.test.mjs`, two tests pinning the boundary in both
+prompts and pinning that the fabrication rule survived it.
+
+
 ### 6.1 Turn semantics while a run is in flight (2026-09-05)
 
 A directed utterance is not automatically an instruction. `turnIntent.ts`

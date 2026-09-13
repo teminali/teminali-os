@@ -100,6 +100,11 @@ export class CaptionPacer {
       and when audio never arrives at all, so a caption is never left truncated
       by a speaker that failed. */
   revealAll(): string {
+    /* The same guard `advanceTo` carries, and for the same defect. A turn that
+       has been committed is over, and revealing it again is how one reply got
+       on screen twice: `advanceTo` refused, this did not, so the duplicate
+       simply came through the other door. */
+    if (this.closed) return "";
     this.revealedChars = this.target.length;
     this.shown = this.target;
     return this.target;
