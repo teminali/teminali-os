@@ -130,6 +130,7 @@ function applyPackagedEnvironment() {
     FRONTIER_AUDIT_PATH: store("gateway-audit.jsonl"),
     FRONTIER_PROJECTS_STORE: store("recent-projects.json"),
     TEMINALI_BROWSER_STORE: store("browser-data.json"),
+    TEMINALI_MEMORY_STORE: store("temi-memory.json"),
     TEMINALI_PROVIDER_STORE: store("provider-keys.json"),
     TEMINALI_GUARDIAN_STORE: store("guardian-settings.json"),
     TEMINALI_AGENT_MODEL_STORE: store("agent-models.json"),

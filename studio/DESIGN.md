@@ -11689,3 +11689,182 @@ to be in that state; they are not this lane's to land unasked.
 Measured in the shared tree when this landed: studio **2255/2255**, 0 skips,
 exit 0; `tsc --noEmit` clean. (The count moved to 2261 the same night, from the
 editor-cost work recorded in §3.)
+
+### 6.48 She keeps what a person would keep (`services/voice/temiMemory.ts`, 2026-09-13)
+
+Temi had no memory across sessions. Inside one conversation the Gemini Live
+session *is* the history, so she follows everything said; when it ended, all of
+it went. `ambientMemory.ts` and `speakerProfile.ts` look like a memory layer and
+are not: the first is a ten-minute log of room speech she did not answer, the
+second is voice enrolment, and both reach the lane only through
+`conversation.ts`, which is mounted on the composer lane and not on hers.
+
+The brief was bounded, forgetful, and one prohibition that turned out to be the
+whole design: retention must **not** be ranked on importance alone, because
+"importance can also be about fun things". The goal, stated plainly, was "what
+memories humans will keep".
+
+That prohibition is load-bearing. Rank by importance and the store converges on
+a CRM record: his timezone, his stack, his deadlines. Every entry useful, and
+not one of them being known. The fun things lose every comparison against a
+deadline because they are not competing on the axis being measured.
+
+**Five decisions, each a claim about people rather than about code.**
+
+1. **Retention is the peak axis, not the sum.** Four axes scored at write time:
+   `weight` (utilitarian), `warmth` (emotional charge, *unsigned*, so a laugh and
+   a hurt both score high), `surprise`, `firstness`. Strength is
+   `(max(axes) + 0.25 * mean(the rest)) / 1.25`. A memory that is 0.9 funny and
+   nothing else scores 0.72; one that is 0.5 on all four scores 0.50 and loses.
+   Summing would reverse that, and reversing it is exactly the failure named
+   above. People do not keep well-rounded memories, they keep extremes.
+   Normalised rather than clamped, because clamping piled every strong memory
+   onto 1.0 and made the top of the store unrankable.
+2. **Kinds hold reserved ground.** `anchor` / `fact` / `keepsake` / `thread`, with
+   floors of 40/80/80/40 against a cap of 320. Scoring alone is not enough: in a
+   heavy month forty genuine high-weight facts arrive and legitimately outscore
+   the jokes. The reserve means they never compete for those slots at all.
+3. **Rehearsal is what makes a memory permanent**, not its score at birth.
+   `halfLife = base * (1 + rehearsals)^1.4`, so a thing brought back up three
+   times lives about 7x longer. A running joke outlives the event that started
+   it without anyone having judged it important. Base half-lives are
+   `keepsake` 180 days against `fact` 60: people remember a joke from a decade
+   ago and forget which timezone you were in last year. **If those two are ever
+   reordered, the policy has quietly become the CRM it was written to avoid.**
+4. **Detail dies before the memory does.** Below 0.35 an atom fades to its gist;
+   below 0.12 it goes. Half-remembering is the honest failure mode and the one
+   humans actually have. An atom with no gist keeps its detail and rides to the
+   floor instead, because half a sentence she never wrote is worse than nothing.
+5. **Anchors do not decay, they are superseded.** His name does not fade, but
+   "lives in Arusha" must not sit beside "moved to Dodoma".
+
+**Selection is not retention, and conflating them was a real bug.** The store is
+what she knows; recall is what is on her mind today, on a much tighter budget
+(~1400 chars). The first implementation ranked recall by retention alone, and
+the eval caught it: keepsakes outrank facts by construction here, so she was
+handed thirteen jokes and four facts to walk in with. A woman who remembers
+every absurd thing he ever said and not his deadline is not being known, she is
+being charming at him. Recall now allots per kind (6 facts, 4 keepsakes,
+3 threads) plus every anchor and the most recent few.
+
+The last recall slot is a **wander**: a weighted-random draw from the whole
+store. Sometimes a person just remembers something old and odd for no reason and
+says so. It costs one line of budget, and it is probably the single behaviour
+that will make her feel like she has an interior life, because unprompted recall
+is the thing nothing else in the system does.
+
+**The reserve guards against competition, not against decay.** A keepsake that
+has genuinely faded past the forget floor is gone like anything else. A test
+written to prove the reserve picked an atom at retention 0.115 and proved that
+instead; the distinction is now pinned by
+`tests/temi-memory.test.mjs` ("the reserve is load-bearing, not decoration").
+
+**Measured, not asserted.** `npm run eval:memory` simulates a year at two loads
+against the exact design the brief rejected (rank by importance, keep the top N,
+no decay), same event stream from the same seed. At 1 fact/day the cap never
+binds and decay alone decides; at 4 facts/day, 1516 atoms against a cap of 320,
+the reserve is the only thing holding.
+
+| | policy | importance-only |
+| --- | ---: | ---: |
+| keepsakes kept, ordinary year | 30/30 | 0/30 |
+| keepsakes kept, punishing year | 30/30 | 0/30 |
+| of those, 9+ months old | 8/8 | 0/8 |
+| anchors kept, punishing year | 8 | 0 |
+
+The rejected design does not merely lose the fun. Under load it forgets who he
+is: 320 slots, all facts, every anchor evicted.
+
+Every function is pure and takes `now`, the contract `ambientMemory.ts` uses, so
+the policy runs forward over a simulated year without touching a clock. No
+constructor parameter properties, because `node --test` strips types rather than
+compiling them (`ambientMemory.ts:167-169`).
+
+**The latency contract, and it is a contract.** Being remembered is worth
+nothing if she gets slower, so the layer is shaped around the turn rather than
+fitted into it:
+
+1. **Nothing runs during a turn. Not one function.** Consolidation happens
+   between sessions; recall happens once at session start. The per-turn cost is
+   not "small", it is structurally zero, and that is the reason consolidation was
+   designed as a post-session pass rather than a tool the model can call. A
+   remember-this tool would have put model-latency on the live path and handed
+   the already over-triggering router another reason to fire.
+2. **Session start pays CPU, never I/O.** The store is resident before
+   `live.connect` is called, so connect never waits on disk or on the gateway.
+3. **The only model-visible cost is the recall block**, and it is processed once
+   at session setup, not per turn, because Gemini Live fixes the system
+   instruction at setup (§6.0.x, `geminiLiveEngine.ts:1553-1557`).
+
+Measured on Node v26.4.0 at a full 320-atom store:
+
+| | cost | on the live path? |
+| --- | ---: | --- |
+| `selectForRecall`, session start | 0.18 ms | once per session |
+| `consolidate`, at cap | 0.016 ms | no, between sessions |
+| `consolidate`, 3x over cap | 1.44 ms | no |
+| `consolidate`, 6400 atoms | 16.6 ms | no |
+| recall block | 1379 chars, ~345 tokens | once at setup |
+
+The first benchmark of `consolidate` reported 0.016 ms and was meaningless: a
+store of exactly 320 against a cap of 320 returns before the capacity branch, so
+it measured the early return. The same mistake the reserve made in the eval, in
+the same session, twice. Three guard tests hold these bounds at roughly 25x the
+measured cost, loose enough not to flake on a loaded machine and tight enough to
+catch an accidental O(n^2) or a `retention()` call moved inside a sort
+comparator.
+
+#### The storage tier (`server/temi-memory.js`, 2026-09-13)
+
+The policy decides what is worth keeping; this is where it is kept. One JSON file
+at `<userData>/gateway/temi-memory.json`, the same shape as `server/browser-data.js`:
+read whole, sanitise every entry, write back atomically through temp+rename.
+
+In the gateway rather than the renderer for the reason the browser store is, plus
+one more. The shared reason is the agent: a renderer-only store is one the agent
+routes cannot read. The additional one is time. This is data meant to last years,
+and `localStorage` is cleared by things that have nothing to do with wanting to be
+forgotten, such as a profile reset, a cache purge or an Electron upgrade.
+
+Three decisions worth not relitigating:
+
+1. **Written `0600`**, unlike the browser store and like the provider keys.
+   Bookmarks are a list of addresses; this is a record of what someone said and
+   how it landed. The temp file is created `0600` and `rename` carries the mode
+   across, so the store is never briefly world-readable.
+2. **The storage ceiling is 512 against the policy cap of 320, deliberately not
+   equal.** The server's job is to refuse an unbounded file, not to re-decide what
+   is kept. Equal numbers would mean a later change to `MEMORY_MAX_ATOMS` silently
+   truncated here instead of failing somewhere visible.
+3. **The four kinds are copied into plain JS, not imported.** The server cannot
+   import the renderer's TypeScript, and a sanitiser that accepted any string as a
+   `kind` would let a typo become a fifth kind that holds no reserve and decays as
+   nothing. `tests/temi-memory-store.test.mjs` reads both modules and asserts the
+   lists are identical, so the copy cannot drift quietly.
+
+**Four routes, and the absent fifth is the latency contract.**
+`GET /api/workspace/temi-memory` reads, `POST .../save` replaces the whole store,
+`POST .../forget` drops one atom by id, `POST .../clear` empties it. There is no
+"remember this" route, and that absence is load-bearing: a route she could call
+mid-turn would put a model round trip on the live path and hand the already
+over-triggering router (§6.0.17) another trigger. The store is read once before
+`live.connect` and written once after the session ends.
+
+The renderer half (`src/services/voice/temiMemoryStore.ts`) is two calls rather
+than one for the same reason: `primeTemiMemory()` is awaited before the session
+opens and pays the I/O, `residentMemory()` is synchronous and cannot fetch. A
+single async accessor would have been tidier and would have quietly allowed a
+fetch at recall time, which is the thing the contract exists to prevent. Priming
+never throws: an unreachable gateway means she starts the conversation without her
+memory, which is how she has started every conversation until now.
+
+**Still not true.** Extraction and recall are not built: nothing writes an atom,
+and the persona does not yet carry a recall block. `TEMI_PERSONA`
+(`temiPersona.ts:91`) is static and injected once at session start
+(`geminiLiveEngine.ts:674`); there is no honest mid-session update, which is why
+consolidation belongs *between* sessions rather than during one. The store is
+therefore real, durable and empty. **Temi still remembers nothing across
+sessions**, and will until a consolidation pass writes the first atom.
+
+Measured when this landed: studio **2870/2870**, 0 skips, exit 0;
+`tsc --noEmit` clean.

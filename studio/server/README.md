@@ -90,6 +90,10 @@ is the complete list.
 | `POST` | `/api/workspace/media/subtitle` | bearer | One embedded subtitle stream, written out as WebVTT by ffmpeg, for the player's track menu. `stream` is its index among the subtitle streams, as the probe reports it. 422 when ffmpeg is absent or the stream is a bitmap format. |
 | `POST` | `/api/workspace/write` | bearer | Writes one file. |
 | `POST` | `/api/workspace/delete` | bearer | Removes one file. Same guards as the write path — inside the root, a regular file rather than a symlink, a text extension. Its only caller is rejecting a proposed change to a file the assistant created; see `studio/src/store/changeStore.ts`. |
+| `GET` | `/api/workspace/temi-memory` | bearer | What Temi remembers about him between sessions: `{ atoms }`, from `server/temi-memory.js`. Read **once, before `live.connect`** - the latency contract in `DESIGN.md` 6.48 is that nothing memory-related runs during a turn. |
+| `POST` | `/api/workspace/temi-memory/save` | bearer | Replaces the whole store with `{ atoms }`. Whole-file because a consolidation pass decides what survives, what faded to its gist and what is gone all at once; there is no sequence of row writes that expresses that. Runs **after** a session ends. |
+| `POST` | `/api/workspace/temi-memory/forget` | bearer | Drops one memory by `{ id }`. Answers `{ forgot, atoms }` - being asked to forget something she was never told is a different answer from forgetting it. |
+| `POST` | `/api/workspace/temi-memory/clear` | bearer | Empties the store. |
 | `POST` | `/api/workspace/search` | bearer | Searches the workspace. |
 | `GET` | `/api/workspace/machine-search` | bearer | Files and folders outside the workspace, from Spotlight (macOS only; answers `available: false` elsewhere). Paths and names, never contents. |
 | `GET` | `/api/workspace/projects` | bearer | The current project plus the remembered recents. A recent whose directory is gone is filtered out of the response but kept in the store, so a project on an unmounted volume comes back when the volume does. |

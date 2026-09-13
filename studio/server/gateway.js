@@ -87,6 +87,7 @@ import {
 } from "./providers.js";
 import { discoverProjectFolders, forgetProject, listRecentProjects, rememberProject, validateProjectRoot } from "./projects.js";
 import { addBookmark, clearHistory, isBrowsableUrl, mergeImported, readBrowserData, recordDownload, recordVisit, removeBookmark, searchHistory } from "./browser-data.js";
+import { clearTemiMemory, forgetTemiMemory, readTemiMemory, writeTemiMemory } from "./temi-memory.js";
 import { BrowserImportError, discoverImportSources, readImport } from "./browser-import.js";
 import { resolveProjectPhrase } from "./project-phrase.js";
 import { GatewayError, classifyUpstreamStatus, publicError } from "./errors.js";
@@ -2425,6 +2426,45 @@ export async function createGateway(options = {}) {
           read: { bookmarks: read.bookmarks.length, history: read.history.length },
           data: await readBrowserData(config.browserStorePath),
         });
+        return;
+      }
+
+      /*
+        What Temi remembers about him between sessions.
+
+        Four routes and deliberately no fifth. There is no "remember this" here,
+        and that absence is the latency contract: a route she could call mid-turn
+        would put a model round trip on the live path and hand the already
+        over-triggering router another trigger. The store is READ once, before
+        live.connect, and WRITTEN once, after the session has ended, by a
+        consolidation pass that decides the whole store at once. See
+        server/temi-memory.js and DESIGN.md 6.48.
+      */
+      if (request.method === "GET" && route === "/api/workspace/temi-memory") {
+        replyJson(response, 200, await readTemiMemory(config.temiMemoryStorePath));
+        return;
+      }
+
+      if (request.method === "POST" && route === "/api/workspace/temi-memory/save") {
+        const body = await readJson(request, config.maxJsonBytes);
+        if (!Array.isArray(body?.atoms)) {
+          throw new GatewayError(400, "MEMORY_ATOMS_INVALID", "A memory store is an array of atoms.");
+        }
+        replyJson(response, 200, await writeTemiMemory(config.temiMemoryStorePath, body.atoms));
+        return;
+      }
+
+      if (request.method === "POST" && route === "/api/workspace/temi-memory/forget") {
+        const body = await readJson(request, config.maxJsonBytes);
+        if (typeof body?.id !== "string" || !body.id) {
+          throw new GatewayError(400, "MEMORY_ID_INVALID", "An atom id is required.");
+        }
+        replyJson(response, 200, await forgetTemiMemory(config.temiMemoryStorePath, body.id));
+        return;
+      }
+
+      if (request.method === "POST" && route === "/api/workspace/temi-memory/clear") {
+        replyJson(response, 200, await clearTemiMemory(config.temiMemoryStorePath));
         return;
       }
 

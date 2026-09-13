@@ -63,6 +63,12 @@ export function createConfig(environment = process.env, overrides = {}) {
     // The browser panel's bookmarks, history and downloads. In the gateway
     // rather than the renderer so the agent routes can read them too.
     browserStorePath: resolve(environment.TEMINALI_BROWSER_STORE || resolve(process.cwd(), "benchmark-results", "browser-data.json")),
+    // What Temi remembers about him between sessions. In the gateway rather
+    // than the renderer because this is meant to last years and localStorage
+    // is cleared by things unrelated to wanting to be forgotten. Written
+    // 0600; read once before live.connect, written once after. See
+    // server/temi-memory.js.
+    temiMemoryStorePath: resolve(environment.TEMINALI_MEMORY_STORE || resolve(process.cwd(), "benchmark-results", "temi-memory.json")),
     // Hosted-provider API keys. Written 0600; never returned to the renderer.
     providerStorePath: resolve(environment.TEMINALI_PROVIDER_STORE || resolve(process.cwd(), "benchmark-results", "provider-keys.json")),
     guardianStorePath: resolve(environment.TEMINALI_GUARDIAN_STORE || resolve(process.cwd(), "benchmark-results", "guardian-settings.json")),

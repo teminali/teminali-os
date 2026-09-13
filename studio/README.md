@@ -52,7 +52,7 @@ route requires it. Roughly sixty routes across:
 | Model mode & routing | `/api/frontier/status` · `/api/frontier/resolve-mode` · `/api/models/*` |
 | Entitlement | `/api/entitlement` · `/api/entitlement/{refresh,sign-in,sign-in/poll,sign-out}` · `/api/entitlement/{plans,checkout}` · `/api/entitlement/order/:id` |
 | Hosted providers | `/api/providers` · `/api/providers/key` · `/api/providers/lanes` |
-| Workspace | `/api/workspace/{tree,file,write,delete,mkdir,search,machine-search,open,projects}`, `/api/workspace/projects/{remember,forget,discover}`, `/api/workspace/browser`, `/api/workspace/browser/{bookmark,unbookmark,visit,download}`, `/api/workspace/browser/history/clear`, `/api/workspace/browser/import`, `/api/workspace/browser/import/sources`, `/api/workspace/agent/{reveal,open-file,projects,open-project,browse,bookmarks,bookmark,browsing-history,downloads,player,player-control,player-frame}`, `/api/workspace/agent/browser/{snapshot,read,screenshot,click,type,network,eval}`, `/api/workspace/browser-action`, `/api/workspace/player-frame`, `/api/workspace/player/state`, `/api/workspace/media/{probe,subtitle}` |
+| Workspace | `/api/workspace/{tree,file,write,delete,mkdir,search,machine-search,open,projects}`, `/api/workspace/projects/{remember,forget,discover}`, `/api/workspace/browser`, `/api/workspace/browser/{bookmark,unbookmark,visit,download}`, `/api/workspace/browser/history/clear`, `/api/workspace/browser/import`, `/api/workspace/browser/import/sources`, `/api/workspace/temi-memory`, `/api/workspace/temi-memory/{save,forget,clear}`, `/api/workspace/agent/{reveal,open-file,projects,open-project,browse,bookmarks,bookmark,browsing-history,downloads,player,player-control,player-frame}`, `/api/workspace/agent/browser/{snapshot,read,screenshot,click,type,network,eval}`, `/api/workspace/browser-action`, `/api/workspace/player-frame`, `/api/workspace/player/state`, `/api/workspace/media/{probe,subtitle}` |
 | Terminal | `/api/terminal/exec` |
 | Agent CLIs | `/api/agents` · `/api/agents/models` · `/api/agents/inventory` · `/api/agents/run` · `/api/agents/permission` · `/api/agents/permission/resolve` |
 | Screen assistant | `/api/assistant/{capabilities,permissions,observe,act}` · `/api/assistant/agent/{observe,act}` (the chat pane's agent, on its run's token) |
@@ -1381,9 +1381,10 @@ ollama serve              # local models on 127.0.0.1:11434
 
 ```bash
 npm run typecheck   # tsc --noEmit
-npm test            # 2827 tests
+npm test            # 2870 tests
 npm run eval:local  # the local lane against the real model — a score, not a pass/fail; needs Ollama
 npm run eval:voice  # the voice co-agent's spoken answers, same discipline; needs Ollama
+npm run eval:memory # Temi's memory policy over a simulated year; pure, no model, no network
 npm run build       # tsc && vite build
 npm run verify:core # all three
 ```
@@ -1906,6 +1907,7 @@ Everything is optional; every default is loopback.
 | `TEMINALI_RUNTIME_MODE` | `local` (or `api`) |
 | `FRONTIER_AUDIT_PATH` | `benchmark-results/gateway-audit.jsonl`; `userData/gateway/` in a packaged app |
 | `TEMINALI_LICENCE_STORE` | `benchmark-results/licence.json` (written `0600`) |
+| `TEMINALI_MEMORY_STORE` | `benchmark-results/temi-memory.json` (written `0600`); `userData/gateway/` in a packaged app |
 | `TEMINALI_BILLING_URL` | unset — no billing service, so the app runs as free |
 | `TEMINALI_LICENCE_PUBLIC_KEYS` | unset — JSON `{"kid": "<PEM>"}`, staging and tests only |
 | `FFMPEG_PATH` | unset — an explicit ffmpeg binary, tried before every search location |

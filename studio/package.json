@@ -26,6 +26,7 @@
     "eval:local": "esbuild evals/tool-manifest.ts --bundle --platform=node --format=esm --log-level=error --outfile=evals/.build/tool-manifest.mjs && node evals/local-lane.mjs",
     "eval:voice": "node evals/voice-lane.mjs",
     "eval:conversation": "node evals/voice-conversation.mjs",
+    "eval:memory": "node evals/temi-memory.mjs",
     "verify:core": "npm run typecheck && npm test && npm run build",
     "verify": "node quality-runtime/cli.mjs quality-runtime/frontier.config.json",
     "preview": "vite preview",
