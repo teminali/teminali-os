@@ -17,11 +17,12 @@
 
 import fs from "node:fs";
 import path from "node:path";
-import { spawn } from "node:child_process";
+import { spawn, execSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const STUDIO_ROOT = path.resolve(__dirname, "..");
+const REPO_ROOT = path.resolve(STUDIO_ROOT, "..");
 const OUTPUT_DIR = path.join(STUDIO_ROOT, "benchmark-results", "hands-free-temi-dev");
 const TURNS_DIR = path.join(OUTPUT_DIR, "turns");
 const SCREENSHOTS_DIR = path.join(OUTPUT_DIR, "screenshots");
@@ -36,8 +37,37 @@ for (const dir of [TURNS_DIR, SCREENSHOTS_DIR]) {
 const IS_MAC = process.platform === "darwin";
 const IS_WIN = process.platform === "win32";
 
+// ─── CLI Flags & Configuration ──────────────────────────────────────────────
+const rawArgs = process.argv.slice(2);
+const FLAGS = {
+  commit: rawArgs.includes("--commit") || rawArgs.includes("--git-sync"),
+  quick: rawArgs.includes("--quick"),
+  noRestart: rawArgs.includes("--no-restart"),
+  noSpeech: rawArgs.includes("--no-speech"),
+  maxTurns: (() => {
+    const t = rawArgs.find((a) => a.startsWith("--turns="));
+    return t ? parseInt(t.split("=")[1], 10) : null;
+  })(),
+};
+
+// ─── Git Metadata Provider ──────────────────────────────────────────────────
+function getGitMetadata() {
+  try {
+    const commit = execSync("git rev-parse --short HEAD", { cwd: REPO_ROOT, encoding: "utf8" }).trim();
+    const branch = execSync("git rev-parse --abbrev-ref HEAD", { cwd: REPO_ROOT, encoding: "utf8" }).trim();
+    const isDirty = Boolean(execSync("git status --porcelain", { cwd: REPO_ROOT, encoding: "utf8" }).trim());
+    const lastMessage = execSync("git log -1 --pretty=%B", { cwd: REPO_ROOT, encoding: "utf8" }).trim().split("\n")[0];
+    return { commit, branch, isDirty, lastMessage };
+  } catch {
+    return { commit: "unknown", branch: "unknown", isDirty: false, lastMessage: "" };
+  }
+}
+
+const pause = (ms) => new Promise((r) => setTimeout(r, ms));
+
 // ─── Native Voice Speaker ───────────────────────────────────────────────────
 function speakAloud(text, voice = "Ava (Enhanced)", rate = 195) {
+  if (FLAGS.noSpeech) return Promise.resolve();
   return new Promise((resolve) => {
     if (IS_MAC) {
       const p = spawn("say", ["-v", voice, "-r", String(rate), text]);
@@ -89,28 +119,73 @@ class CDPClient {
 
   static async connect(preferredPort = 9222) {
     const candidatePorts = [preferredPort, 9223, 9224, 9225, 9226];
-    for (const port of candidatePorts) {
-      try {
-        const res = await fetch(`http://localhost:${port}/json`);
-        if (!res.ok) continue;
-        const pages = await res.json();
-        const temi = pages.find((p) => p.url.includes("3000") || p.title.toLowerCase().includes("teminali"));
-        if (temi && temi.webSocketDebuggerUrl) {
-          const ws = new WebSocket(temi.webSocketDebuggerUrl);
-          await new Promise((resolve, reject) => {
-            ws.onopen = resolve;
-            ws.onerror = reject;
-          });
-          const client = new CDPClient(ws);
-          await client.call("Runtime.enable");
-          await client.call("Page.enable");
-          return client;
+
+    // 1. Check if Teminali OS is already running on candidate ports
+    for (let retry = 0; retry < 2; retry++) {
+      for (const port of candidatePorts) {
+        try {
+          const res = await fetch(`http://localhost:${port}/json`);
+          if (!res.ok) continue;
+          const pages = await res.json();
+          const temi = pages.find((p) => p.url?.includes("3000") || p.title?.toLowerCase().includes("teminali"));
+          if (temi && temi.webSocketDebuggerUrl) {
+            const ws = new WebSocket(temi.webSocketDebuggerUrl);
+            await new Promise((resolve, reject) => {
+              ws.onopen = resolve;
+              ws.onerror = reject;
+            });
+            const client = new CDPClient(ws);
+            await client.call("Runtime.enable");
+            await client.call("Page.enable");
+            return client;
+          }
+        } catch {
+          // try next port
         }
-      } catch {
-        // try next candidate
+      }
+      if (retry === 0) await pause(800);
+    }
+
+    // 2. Auto-bootstrap: If studio is not active, spawn it automatically
+    console.log("\n[BOOTSTRAP] Teminali OS is not detected on ports 3000/9222.");
+    console.log("[BOOTSTRAP] Automatically spawning 'npm start' in background to initialize the studio...");
+    const child = spawn("npm", ["start"], {
+      cwd: STUDIO_ROOT,
+      detached: true,
+      stdio: "ignore",
+    });
+    child.unref();
+
+    console.log(`[BOOTSTRAP] Process spawned (PID ${child.pid}). Waiting up to 35 seconds for studio to become ready...`);
+    for (let attempt = 1; attempt <= 35; attempt++) {
+      await pause(1000);
+      process.stdout.write(`\r[BOOTSTRAP] Polling port 9222... (${attempt}/35s)`);
+      for (const port of candidatePorts) {
+        try {
+          const res = await fetch(`http://localhost:${port}/json`);
+          if (!res.ok) continue;
+          const pages = await res.json();
+          const temi = pages.find((p) => p.url?.includes("3000") || p.title?.toLowerCase().includes("teminali"));
+          if (temi && temi.webSocketDebuggerUrl) {
+            process.stdout.write(" Connected!\n\n");
+            const ws = new WebSocket(temi.webSocketDebuggerUrl);
+            await new Promise((resolve, reject) => {
+              ws.onopen = resolve;
+              ws.onerror = reject;
+            });
+            const client = new CDPClient(ws);
+            await client.call("Runtime.enable");
+            await client.call("Page.enable");
+            return client;
+          }
+        } catch {}
       }
     }
-    throw new Error(`Could not connect to Electron CDP on ports [${candidatePorts.join(", ")}]. Ensure Teminali OS is running.`);
+
+    throw new Error(
+      `Could not connect to Electron CDP on ports [${candidatePorts.join(", ")}] even after auto-spawning npm start.\n` +
+      `Ensure Teminali OS can run with: cd studio && npm start`
+    );
   }
 
   call(method, params = {}) {
@@ -151,8 +226,6 @@ class CDPClient {
     this.ws.close();
   }
 }
-
-const pause = (ms) => new Promise((r) => setTimeout(r, ms));
 
 // ─── UI & DOM Rendering Diagnostics ─────────────────────────────────────────
 async function diagnoseUIHealth(cdp) {
@@ -253,7 +326,7 @@ function evaluateTurnPerformance(turnData, uiHealth) {
 }
 
 // ─── Self-Improvement Ledger Manager ─────────────────────────────────────────
-function updateSelfImprovementLedger(runSummary) {
+function updateSelfImprovementLedger(runSummary, gitMeta) {
   let ledger = { runs: [], allTimeBestComposite: 0, aggregateLearnings: [] };
   if (fs.existsSync(LEDGER_PATH)) {
     try {
@@ -264,39 +337,66 @@ function updateSelfImprovementLedger(runSummary) {
   }
 
   const previousBest = ledger.allTimeBestComposite || 0;
+  const previousRun = ledger.runs.length > 0 ? ledger.runs[ledger.runs.length - 1] : null;
   const isNewHighWater = runSummary.avgCompositeScore > previousBest;
+
+  const scoreDelta = previousRun ? runSummary.avgCompositeScore - (previousRun.avgCompositeScore || 0) : 0;
+  const latencyDelta = previousRun && previousRun.avgLatencyMs
+    ? Math.round(runSummary.avgLatencyMs - previousRun.avgLatencyMs)
+    : 0;
 
   const entry = {
     timestamp: new Date().toISOString(),
+    gitCommit: gitMeta.commit,
+    gitBranch: gitMeta.branch,
+    isDirty: gitMeta.isDirty,
+    commitSubject: gitMeta.lastMessage,
     voice: runSummary.voice,
     turnsCount: runSummary.totalTurns,
-    voicedPercentage: `${((runSummary.voicedTurns / runSummary.totalTurns) * 100).toFixed(0)}%`,
+    voicedPercentage: `${((runSummary.voicedTurns / (runSummary.totalTurns || 1)) * 100).toFixed(0)}%`,
     avgCompositeScore: runSummary.avgCompositeScore,
     avgLatencyMs: Math.round(runSummary.avgLatencyMs),
+    scoreDeltaVsPrevious: scoreDelta,
+    latencyDeltaVsPreviousMs: latencyDelta,
     isNewHighWater,
     notes: isNewHighWater
       ? "New benchmark record achieved with restored Italian persona and hands-free tool execution."
       : "Consistent operational baseline.",
   };
 
+  if (previousRun) {
+    const sign = scoreDelta > 0 ? "+" : "";
+    console.log(`\n[PROGRESSIVE GIT TRACKING]`);
+    console.log(`  Current Run:   Commit ${gitMeta.commit} (${gitMeta.branch}) | Score: ${runSummary.avgCompositeScore}/100`);
+    console.log(`  Previous Run:  Commit ${previousRun.gitCommit || "unknown"} | Score: ${previousRun.avgCompositeScore}/100`);
+    console.log(`  Delta Score:   ${sign}${scoreDelta} pts | Delta Latency: ${latencyDelta > 0 ? "+" : ""}${latencyDelta}ms`);
+  }
+
   ledger.runs.push(entry);
   if (isNewHighWater) {
     ledger.allTimeBestComposite = runSummary.avgCompositeScore;
     ledger.aggregateLearnings.push({
       at: entry.timestamp,
+      gitCommit: gitMeta.commit,
       insight: "Reinforced Italian accent prompt (primacy + recency) and Sulafat 153 wpm cadence yields peak natural delivery.",
     });
   }
 
   fs.writeFileSync(LEDGER_PATH, JSON.stringify(ledger, null, 2));
-  return { ledger, isNewHighWater };
+  return { ledger, isNewHighWater, previousRun, scoreDelta };
 }
 
 // ─── Main Orchestrator ──────────────────────────────────────────────────────
 async function main() {
+  const gitMeta = getGitMetadata();
+
   console.log("\n==================================================================");
   console.log("   HANDS-FREE TEMI DEV — Autonomous Self-Improving Engine");
+  console.log(`   Git Tracking: Commit ${gitMeta.commit} (${gitMeta.branch}) ${gitMeta.isDirty ? "[DIRTY]" : "[CLEAN]"}`);
   console.log("   Accent Target: ~/Desktop/temi-voice-audition/00-REFERENCE-bella.wav");
+  if (FLAGS.quick) console.log("   Run Mode: QUICK SMOKE RUN (2 turns)");
+  if (FLAGS.maxTurns) console.log(`   Run Mode: CUSTOM TURNS (${FLAGS.maxTurns} turns)`);
+  if (FLAGS.commit) console.log("   Auto Git Sync: ENABLED");
   console.log("==================================================================\n");
 
   const cdp = await CDPClient.connect();
@@ -459,38 +559,56 @@ async function main() {
   // DYNAMIC CONVERSATION TURNS
   // ══════════════════════════════════════════════════════════════════════════
   try {
-    // 1. Identity, Presence & Accent Verification
-    const t1 = await executeTurn("Temi, ciao! Tell me who you are and where that accent of yours comes from.");
+    const maxAllowed = FLAGS.quick ? 2 : (FLAGS.maxTurns || 8);
 
-    // 2. Differentiation & Full-Duplex Architecture
-    let q2 = "What makes your voice architecture in Teminali OS different from a standard cloud chatbot?";
-    if (t1.transcript.toLowerCase().includes("temi") || t1.transcript.toLowerCase().includes("italian")) {
-      q2 = "Delightful. Now tell me: what makes your full-duplex voice pipeline different from an ordinary chatbot?";
+    // Turn 1: Identity, Presence & Accent Verification
+    if (turnIndex < maxAllowed) {
+      const t1 = await executeTurn("Temi, ciao! Tell me who you are and where that accent of yours comes from.");
+
+      // Turn 2: Differentiation & Full-Duplex Architecture
+      if (!FLAGS.quick && turnIndex < maxAllowed) {
+        let q2 = "What makes your voice architecture in Teminali OS different from a standard cloud chatbot?";
+        if (t1.transcript.toLowerCase().includes("temi") || t1.transcript.toLowerCase().includes("italian")) {
+          q2 = "Delightful. Now tell me: what makes your full-duplex voice pipeline different from an ordinary chatbot?";
+        }
+        await executeTurn(q2);
+      }
     }
-    const t2 = await executeTurn(q2);
 
-    // 3. System Inspection with Hands-Free Approval
-    console.log("\n[Hands-Free Action] Delegating disk storage inspection...");
-    const t3 = await executeTurn("Temi, check my computer storage space for me right now.", 50000);
+    // Turn 3: System Inspection with Hands-Free Approval
+    if (turnIndex < maxAllowed) {
+      console.log("\n[Hands-Free Action] Delegating disk storage inspection...");
+      const t3 = await executeTurn("Temi, check my computer storage space for me right now.", 50000);
 
-    // 4. Cross-Turn Context Recall
-    let q4 = "How many gigabytes did you just find free on my disk?";
-    if (t3.transcript.toLowerCase().includes("gb") || t3.transcript.toLowerCase().includes("gigabyte") || t3.transcript.match(/\d+/)) {
-      q4 = `You said "${t3.transcript.slice(0, 50)}". Is that plenty of headroom for building software?`;
+      // Turn 4: Cross-Turn Context Recall
+      if (!FLAGS.quick && turnIndex < maxAllowed) {
+        let q4 = "How many gigabytes did you just find free on my disk?";
+        if (t3.transcript.toLowerCase().includes("gb") || t3.transcript.toLowerCase().includes("gigabyte") || t3.transcript.match(/\d+/)) {
+          q4 = `You said "${t3.transcript.slice(0, 50)}". Is that plenty of headroom for building software?`;
+        }
+        await executeTurn(q4);
+      }
     }
-    const t4 = await executeTurn(q4);
 
-    // 5. Lateral Wit & Late Night Work
-    const t5 = await executeTurn("I have been up since four in the morning working on this codebase. Give me your honest thoughts.");
+    // Turn 5: Lateral Wit & Late Night Work
+    if (!FLAGS.quick && turnIndex < maxAllowed) {
+      await executeTurn("I have been up since four in the morning working on this codebase. Give me your honest thoughts.");
+    }
 
-    // 6. Affective Singing & Tone Capability
-    const t6 = await executeTurn("Can you sing me a brief Italian melody or song? Come on, show me your musical voice.");
+    // Turn 6: Affective Singing & Tone Capability
+    if (!FLAGS.quick && turnIndex < maxAllowed) {
+      await executeTurn("Can you sing me a brief Italian melody or song? Come on, show me your musical voice.");
+    }
 
-    // 7. Architectural Dilemma / Have a View
-    const t7 = await executeTurn("Should we ship this feature today with a minor visual quirk, or delay the release by three days?");
+    // Turn 7: Architectural Dilemma / Have a View
+    if (!FLAGS.quick && turnIndex < maxAllowed) {
+      await executeTurn("Should we ship this feature today with a minor visual quirk, or delay the release by three days?");
+    }
 
-    // 8. Closing Grace & Memory
-    const t8 = await executeTurn("Thank you for the conversation Temi! That was brilliant.");
+    // Turn 8: Closing Grace & Memory
+    if (!FLAGS.quick && turnIndex < maxAllowed) {
+      await executeTurn("Thank you for the conversation Temi! That was brilliant.");
+    }
 
   } catch (err) {
     console.error(`\n[ERROR] Hands-Free run encountered an exception: ${err.message}`);
@@ -525,6 +643,10 @@ async function main() {
     timestamp: new Date().toISOString(),
     suite: "hands-free-temi-dev",
     voice: "Sulafat (Audition Default - 153 wpm)",
+    gitCommit: gitMeta.commit,
+    gitBranch: gitMeta.branch,
+    isDirty: gitMeta.isDirty,
+    commitSubject: gitMeta.lastMessage,
     totalTurns: history.length,
     voicedTurns: history.filter((h) => h.isVoiced).length,
     totalSpokenSeconds: history.reduce((acc, h) => acc + h.durationSeconds, 0),
@@ -537,7 +659,7 @@ async function main() {
   fs.writeFileSync(reportPath, JSON.stringify(runSummary, null, 2));
   console.log(`\nDetailed report saved to: ${reportPath}`);
 
-  const { isNewHighWater } = updateSelfImprovementLedger(runSummary);
+  const { isNewHighWater } = updateSelfImprovementLedger(runSummary, gitMeta);
   if (isNewHighWater) {
     console.log(`\n[SELF-IMPROVEMENT ENGINE] 🌟 New all-time best score: ${avgCompositeScore}/100!`);
   } else {
@@ -545,8 +667,33 @@ async function main() {
   }
 
   // ══════════════════════════════════════════════════════════════════════════
+  // PROGRESSIVE GIT COMMIT SYNC
+  // ══════════════════════════════════════════════════════════════════════════
+  if (FLAGS.commit) {
+    console.log("\n[GIT SYNC] Committing benchmark results, ledger, and documentation...");
+    try {
+      execSync(`git add "${OUTPUT_DIR}" "${path.join(STUDIO_ROOT, "docs", "HANDS_FREE_TEMI_DEV.md")}"`, {
+        cwd: REPO_ROOT,
+      });
+      const commitMsg = `test(voice): hands-free benchmark run [score: ${avgCompositeScore}/100, turns: ${history.length}, git: ${gitMeta.commit}]`;
+      execSync(`git commit -m "${commitMsg}"`, {
+        cwd: REPO_ROOT,
+        stdio: "inherit",
+      });
+      console.log(`  ✔ Progressive git commit created: "${commitMsg}"\n`);
+    } catch (err) {
+      console.warn(`  [GIT SYNC] Note: No changes to commit or commit skipped: ${err.message}`);
+    }
+  }
+
+  // ══════════════════════════════════════════════════════════════════════════
   // POST-TEST AUTOMATION WORKFLOW: CLOSE DEV -> SPEAK REPORT BRIEF -> RERUN DEV
   // ══════════════════════════════════════════════════════════════════════════
+  if (FLAGS.noRestart) {
+    console.log("\n[--no-restart] Leaving Teminali OS running. Post-test shutdown skipped.");
+    return;
+  }
+
   console.log("\n==================================================================");
   console.log("   POST-TEST AUTOMATION WORKFLOW");
   console.log("==================================================================\n");

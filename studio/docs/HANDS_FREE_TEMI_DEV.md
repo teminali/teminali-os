@@ -120,30 +120,75 @@ During the development and execution of `hands-free-temi-dev`, five critical voi
 
 ---
 
-## 4. How to Run `hands-free-temi-dev`
+## 4. How to Run `hands-free-temi-dev` & CLI Options
 
-### Execution
-Run the automated test suite directly from the `studio` workspace:
-```bash
-npm run voice:hands-free
-```
-Or directly with Node:
-```bash
-node scripts/hands-free-temi-dev.mjs
-```
+`hands-free-temi-dev` is fully self-bootstrapping. If the dev app is not running when invoked, it automatically launches `npm start` in the background, waits for ports `3000` and `9222` to initialize, and begins the test suite without requiring manual intervention.
 
-### Resuming & Progressive Testing in a New Chat
-To continue testing or development in a new chat:
-1. Verify the Electron dev app is running (`lsof -i :3000` and `lsof -i :9222`). If not, launch `npm start`.
-2. Run `npm run voice:hands-free` to execute a fresh audible evaluation run.
-3. Review the historical ledger at `studio/benchmark-results/hands-free-temi-dev/self_improvement_ledger.json` to inspect performance trends and high-water marks.
-4. Keep all features and fixes versioned with atomic git commits (`git log -n 5 --oneline`).
+### Available Commands
+
+| Command | Working Directory | Description |
+| --- | --- | --- |
+| `npm run voice:hands-free` | `studio/` | Runs the full 8-turn dynamic suite, scores performance, closes dev, speaks report brief aloud into the room, and restarts the dev app. |
+| `npm run voice:hands-free:commit` | `studio/` | Runs the full suite, records metrics in the ledger, and **automatically creates a progressive git commit** with the benchmark score. |
+| `npm run voice:hands-free:quick` | `studio/` | Runs a rapid 2-turn smoke test (Identity + Storage tool delegation with hands-free verbal approval) in under 30 seconds. |
+| `npm run test:voice:hands-free` | Repository Root | Root alias that delegates directly to `npm --prefix studio run voice:hands-free`. |
+| `node scripts/hands-free-temi-dev.mjs [flags]` | `studio/` | Direct invocation with granular flag controls (see below). |
+
+### CLI Flags
+
+- `--commit` / `--git-sync`: Automatically stages `benchmark-results/` and `docs/HANDS_FREE_TEMI_DEV.md` and creates a semantic git commit tracking score deltas against previous commits.
+- `--quick`: Runs the 2 most critical turns (Turn 1: Identity & Italian accent verification, and Turn 3: System storage delegation with hands-free spoken approval).
+- `--turns=N`: Runs up to $N$ conversation turns.
+- `--no-restart`: Leaves Teminali OS active after the test run (skips the automated post-test shutdown and reload).
+- `--no-speech`: Mutes the testing assistant's audible speech through system speakers (useful for silent CI or background test runs).
 
 ---
 
-## 5. Benchmark Artifacts & Reports
+## 5. Progressive Feature Building & Git Synchronization
 
-Every run of `hands-free-temi-dev` generates structured outputs in `studio/benchmark-results/hands-free-temi-dev/`:
+To ensure continuous, scalable development across sessions and chats, `hands-free-temi-dev` couples every test run directly to Git commits:
+
+1. **Commit Metadata Tracking**:
+   Every run records:
+   - `gitCommit`: Short hash of the current commit (e.g. `0410c35`).
+   - `gitBranch`: Active branch (e.g. `main` or `feature/voice`).
+   - `isDirty`: Working directory clean/dirty status.
+   - `commitSubject`: Commit subject line.
+2. **Comparative Delta Analysis**:
+   The ledger compares the current run against the preceding commit, calculating:
+   - `scoreDeltaVsPrevious`: Points gained or lost compared to the prior baseline.
+   - `latencyDeltaVsPreviousMs`: Latency shift in milliseconds.
+3. **Automated Progressive Commits (`--commit`)**:
+   Running with `--commit` automatically records the milestone:
+   ```bash
+   npm run voice:hands-free:commit
+   # Creates: test(voice): hands-free benchmark run [score: 83/100, turns: 8, git: 0410c35]
+   ```
+4. **Resuming in a Fresh Chat (Cross-Session Quickstart)**:
+   When starting work in a brand new chat session:
+   1. Check git status and recent commit history:
+      ```bash
+      git log -n 5 --oneline
+      ```
+   2. Run the quick smoke test to verify baseline pipeline health:
+      ```bash
+      npm run voice:hands-free:quick
+      ```
+   3. Check the benchmark ledger for historical high-water marks:
+      ```bash
+      cat studio/benchmark-results/hands-free-temi-dev/self_improvement_ledger.json
+      ```
+   4. Build your feature or bugfix in `studio/src/services/voice/`.
+   5. Run the full suite with git sync:
+      ```bash
+      npm run voice:hands-free:commit
+      ```
+
+---
+
+## 6. Benchmark Artifacts & Reports
+
+Every run of `hands-free-temi-dev` generates structured, verifiable outputs in `studio/benchmark-results/hands-free-temi-dev/`:
 - **`turns/turn_01.wav` ... `turn_08.wav`**: Lossless 48kHz RIFF WAV audio files of each spoken response.
 - **`screenshots/turn_XX_start.png`, `turn_XX_settled.png`**: Visual state screenshots capturing UI rendering.
 - **`hands_free_report.json`**: Turn-by-turn metrics (duration, RMS dBFS, latency to first byte, composite score).
@@ -151,12 +196,13 @@ Every run of `hands-free-temi-dev` generates structured outputs in `studio/bench
 
 ---
 
-## 6. Extension Guidelines for Future Development
+## 7. Troubleshooting & FAQ for Fresh Sessions
 
-When adding new voice capabilities or tools to Teminali OS:
-1. **Preserve Audio Debounce Invariants**: Do not lower `chunkSettleTimer` below 750ms in `TemiVoiceStage.tsx` without testing long-form streaming answers.
-2. **Always Handle Tool Approvals**: If adding new privileged tools, ensure they integrate with `useSpokenApproval` so users can approve them out loud.
-3. **Accent Primacy & Recency**: Ensure any system instruction updates keep the Italian accent and audible breath rules at the top and bottom of the prompt to avoid model drift.
-4. **Preserve Noise Rejection**: Never allow unvoiced loudness alone to trigger barge-in while ducked; real speech requires vowel periodicity ($F_0 \in [80, 420]$ Hz).
-5. **Run Continuous Benchmarking**: Run `npm run voice:hands-free` before releasing any changes to verify that the self-improvement ledger composite score remains >= 80/100.
+| Symptom | Cause | Remediation |
+| --- | --- | --- |
+| `Could not connect to Electron CDP on ports [9222]` | App failed to boot or port 9222 is occupied | Kill lingering processes (`pkill -f "electron.*main.cjs"`) and rerun `npm run voice:hands-free` (auto-boot will start it). |
+| `mint-failed: Frontier Gateway returned 500` | Missing or invalid `GEMINI_API_KEY` | Ensure `GEMINI_API_KEY` is exported in your environment or set in `.env` or `studio/.env`. |
+| Voice cuts off when table is scratched | Acoustic noise bypassed periodicity gate | Ensure `voiceActivity.ts` has `periodic && rms > pitchFloor` while ducked. Verify tests with `node --test tests/voice-hearing.test.mjs`. |
+| Voice sounds too rushed or flat | LocalStorage drifted to fast voice | Set default voice to `Sulafat` (153 wpm) or `Aoede` (115 wpm) in `localStorage.setItem("temi.voice", "Sulafat")`. |
+| Tool execution hangs on approval banner | Missing programmatic approval | Verify `window.__temiVoiceTest.hasPendingApproval()` and `window.__temiVoiceTest.approvePendingCommand()` are present on the voice stage. |
 

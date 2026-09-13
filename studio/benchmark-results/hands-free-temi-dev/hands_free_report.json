@@ -1,0 +1,96 @@
+{
+  "timestamp": "2026-09-13T18:01:43.362Z",
+  "suite": "hands-free-temi-dev",
+  "voice": "Sulafat (Audition Default - 153 wpm)",
+  "gitCommit": "0410c35",
+  "gitBranch": "master",
+  "isDirty": true,
+  "commitSubject": "feat(voice): automated hands-free lifecycle with dev restart and spoken brief",
+  "totalTurns": 2,
+  "voicedTurns": 2,
+  "totalSpokenSeconds": 12.36,
+  "avgCompositeScore": 83,
+  "avgLatencyMs": 28123.5,
+  "turns": [
+    {
+      "turn": 1,
+      "query": "Temi, ciao! Tell me who you are and where that accent of yours comes from.",
+      "transcript": "I'm Temi, the voice of Teminali OS. And this accent? It's just how I talk, isn't it? A little... musical, perhaps?",
+      "durationSeconds": 11.28,
+      "totalSamples": 541440,
+      "rmsDbfs": -17.2,
+      "isVoiced": true,
+      "latencyMs": 15534,
+      "latencyToFirstAudioMs": 8684,
+      "allCaptions": [
+        "I'm Temi,",
+        "I'm Temi, the voice",
+        "I'm Temi, the voice of",
+        "I'm Temi, the voice of Teminali",
+        "I'm Temi, the voice of Teminali OS.",
+        "I'm Temi, the voice of Teminali OS. And",
+        "I'm Temi, the voice of Teminali OS. And this",
+        "I'm Temi, the voice of Teminali OS. And this accent?",
+        "I'm Temi, the voice of Teminali OS. And this accent? It's",
+        "I'm Temi, the voice of Teminali OS. And this accent? It's just",
+        "I'm Temi, the voice of Teminali OS. And this accent? It's just how",
+        "I'm Temi, the voice of Teminali OS. And this accent? It's just how I talk,",
+        "I'm Temi, the voice of Teminali OS. And this accent? It's just how I talk, isn't",
+        "I'm Temi, the voice of Teminali OS. And this accent? It's just how I talk, isn't it?",
+        "I'm Temi, the voice of Teminali OS. And this accent? It's just how I talk, isn't it? A little...",
+        "I'm Temi, the voice of Teminali OS. And this accent? It's just how I talk, isn't it? A little... musical,",
+        "I'm Temi, the voice of Teminali OS. And this accent? It's just how I talk, isn't it? A little... musical, perhaps?",
+        "I'm Temi, the voice of Teminali OS. And this accent? It's just how I talk, isn't it? A little... musical, perhaps?"
+      ],
+      "error": null,
+      "scores": {
+        "audioScore": 100,
+        "latencyScore": 40,
+        "accentScore": 100,
+        "uiScore": 100,
+        "compositeScore": 85
+      },
+      "uiHealth": {
+        "valid": true,
+        "issues": [],
+        "bubbleCount": 4,
+        "hasVisualPresence": true,
+        "ringState": "idle",
+        "hasApprovalBanner": false,
+        "selectedVoice": "Sulafat"
+      }
+    },
+    {
+      "turn": 2,
+      "query": "Temi, check my computer storage space for me right now.",
+      "transcript": "Checking now.",
+      "durationSeconds": 1.08,
+      "totalSamples": 51840,
+      "rmsDbfs": -17.3,
+      "isVoiced": true,
+      "latencyMs": 45000,
+      "latencyToFirstAudioMs": 47563,
+      "allCaptions": [
+        "Checking now.",
+        "Checking now."
+      ],
+      "error": null,
+      "scores": {
+        "audioScore": 100,
+        "latencyScore": 40,
+        "accentScore": 85,
+        "uiScore": 100,
+        "compositeScore": 81
+      },
+      "uiHealth": {
+        "valid": true,
+        "issues": [],
+        "bubbleCount": 6,
+        "hasVisualPresence": true,
+        "ringState": "idle",
+        "hasApprovalBanner": false,
+        "selectedVoice": "Sulafat"
+      }
+    }
+  ]
+}

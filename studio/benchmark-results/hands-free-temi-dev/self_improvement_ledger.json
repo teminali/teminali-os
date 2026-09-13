@@ -1,0 +1,67 @@
+{
+  "runs": [
+    {
+      "timestamp": "2026-09-13T17:31:10.320Z",
+      "voice": "Sulafat (Audition Default - 153 wpm)",
+      "turnsCount": 8,
+      "voicedPercentage": "88%",
+      "avgCompositeScore": 83,
+      "avgLatencyMs": 6908,
+      "isNewHighWater": true,
+      "notes": "New benchmark record achieved with restored Italian persona and hands-free tool execution."
+    },
+    {
+      "timestamp": "2026-09-13T17:36:23.176Z",
+      "voice": "Sulafat (Audition Default - 153 wpm)",
+      "turnsCount": 8,
+      "voicedPercentage": "75%",
+      "avgCompositeScore": 79,
+      "avgLatencyMs": 9067,
+      "isNewHighWater": false,
+      "notes": "Consistent operational baseline."
+    },
+    {
+      "timestamp": "2026-09-13T17:43:32.599Z",
+      "voice": "Sulafat (Audition Default - 153 wpm)",
+      "turnsCount": 8,
+      "voicedPercentage": "100%",
+      "avgCompositeScore": 81,
+      "avgLatencyMs": 18543,
+      "isNewHighWater": false,
+      "notes": "Consistent operational baseline."
+    },
+    {
+      "timestamp": "2026-09-13T17:57:12.720Z",
+      "voice": "Sulafat (Audition Default - 153 wpm)",
+      "turnsCount": 8,
+      "voicedPercentage": "88%",
+      "avgCompositeScore": 80,
+      "avgLatencyMs": 9457,
+      "isNewHighWater": false,
+      "notes": "Consistent operational baseline."
+    },
+    {
+      "timestamp": "2026-09-13T18:01:43.363Z",
+      "gitCommit": "0410c35",
+      "gitBranch": "master",
+      "isDirty": true,
+      "commitSubject": "feat(voice): automated hands-free lifecycle with dev restart and spoken brief",
+      "voice": "Sulafat (Audition Default - 153 wpm)",
+      "turnsCount": 2,
+      "voicedPercentage": "100%",
+      "avgCompositeScore": 83,
+      "avgLatencyMs": 28124,
+      "scoreDeltaVsPrevious": 3,
+      "latencyDeltaVsPreviousMs": 18667,
+      "isNewHighWater": false,
+      "notes": "Consistent operational baseline."
+    }
+  ],
+  "allTimeBestComposite": 83,
+  "aggregateLearnings": [
+    {
+      "at": "2026-09-13T17:31:10.320Z",
+      "insight": "Reinforced Italian accent prompt (primacy + recency) and Sulafat 153 wpm cadence yields peak natural delivery."
+    }
+  ]
+}

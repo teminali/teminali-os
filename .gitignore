@@ -13,7 +13,12 @@ coverage/
 *.log
 *.tmp
 outputs/
-benchmark-results/
+/benchmark-results/
+studio/benchmark-results/*
+!studio/benchmark-results/hands-free-temi-dev/
+studio/benchmark-results/hands-free-temi-dev/*
+!studio/benchmark-results/hands-free-temi-dev/self_improvement_ledger.json
+!studio/benchmark-results/hands-free-temi-dev/hands_free_report.json
 
 # The compiled pointer helper. Built by `npm run build:pointer` from the Swift
 # source beside it; an unsigned Mach-O in git is one nobody can audit.

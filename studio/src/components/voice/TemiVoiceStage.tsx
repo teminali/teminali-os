@@ -22,6 +22,7 @@ import {
   stripWakeWord,
 } from "../../services/voice/addressing";
 import { selfAudio } from "../../services/voice/selfAudio";
+import { EchoGuard, stripSelfEcho } from "../../services/voice/echoGuard";
 /* Agent C owns this module and it lands separately; the call is written
    against its published signature. See the block at the head of
    `performVoiceTurn` for why the transport has to be asked first. */
@@ -291,6 +292,7 @@ export const TemiVoiceStage: React.FC<TemiVoiceStageProps> = ({
   const secondsPlayedRef = useRef(0);
   const pendingFinalRef = useRef<string | null>(null);
   const assistantTurnActiveRef = useRef(false);
+  const awaitingAssistantAnswerRef = useRef(false);
   const captionCommitTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   /* A line the shell put into her mouth lands on exactly one surface.
@@ -330,6 +332,7 @@ export const TemiVoiceStage: React.FC<TemiVoiceStageProps> = ({
      harmless: it finds nothing and writes nothing. React strict mode does
      exactly that on every mount in development. */
   const sessionTranscriptRef = useRef<TranscriptTurn[]>([]);
+  const uncommittedUserSpeechRef = useRef<string | null>(null);
 
   const rememberTurn = useCallback((role: "user" | "assistant", content: string) => {
     const clean = content.trim();
@@ -382,10 +385,24 @@ export const TemiVoiceStage: React.FC<TemiVoiceStageProps> = ({
       const cut = pacer.advanceTo(secondsPlayedRef.current);
       if (cut) {
         pacer.completeTurn(cut, secondsPlayedRef.current);
-        setDialogueHistory((prev) => [
-          ...prev,
-          { id: `asst-${Date.now()}`, role: "assistant", content: cut },
-        ]);
+        const userPrefix = uncommittedUserSpeechRef.current;
+        uncommittedUserSpeechRef.current = null;
+        const wasAwaiting = awaitingAssistantAnswerRef.current;
+        awaitingAssistantAnswerRef.current = false;
+        setDialogueHistory((prev) => {
+          const last = prev[prev.length - 1];
+          // If no user prefix exists, we were not awaiting an answer, and the last turn was already assistant:
+          // do not append unprompted conversational fillers to an empty room.
+          if (!userPrefix && !wasAwaiting && last && last.role === "assistant") {
+            return prev;
+          }
+          return [
+            ...prev,
+            ...(userPrefix ? [{ id: `user-${Date.now() - 1}`, role: "user" as const, content: userPrefix }] : []),
+            { id: `asst-${Date.now()}`, role: "assistant", content: cut },
+          ];
+        });
+        if (userPrefix) rememberTurn("user", userPrefix);
         rememberTurn("assistant", cut);
       }
       setLiveAssistantStream(null);
@@ -401,46 +418,53 @@ export const TemiVoiceStage: React.FC<TemiVoiceStageProps> = ({
        turn has been committed once already. Appending here is exactly the
        duplicate row, minus its text. */
     if (spoken) {
-      setDialogueHistory((prev) => [
-        ...prev,
-        { id: `asst-${Date.now()}`, role: "assistant", content: spoken },
-      ]);
+      const userPrefix = uncommittedUserSpeechRef.current;
+      uncommittedUserSpeechRef.current = null;
+      const wasAwaiting = awaitingAssistantAnswerRef.current;
+      awaitingAssistantAnswerRef.current = false;
+      setDialogueHistory((prev) => {
+        const last = prev[prev.length - 1];
+        if (
+          last &&
+          last.role === "assistant" &&
+          (last.content.trim() === spoken.trim() ||
+            last.content.trim().includes(spoken.trim()) ||
+            spoken.trim().includes(last.content.trim()))
+        ) {
+          return prev;
+        }
+        if (!userPrefix && !wasAwaiting && last && last.role === "assistant") {
+          return prev;
+        }
+        return [
+          ...prev,
+          ...(userPrefix ? [{ id: `user-${Date.now() - 1}`, role: "user" as const, content: userPrefix }] : []),
+          { id: `asst-${Date.now()}`, role: "assistant", content: spoken },
+        ];
+      });
+      if (userPrefix) rememberTurn("user", userPrefix);
       rememberTurn("assistant", spoken);
+      echoGuardRef.current.remember(spoken);
     }
     setLiveAssistantStream(null);
-  }, []);
+  }, [rememberTurn]);
   const commitSpokenTurnRef = useRef(commitSpokenTurn);
   commitSpokenTurnRef.current = commitSpokenTurn;
   const protocolRef = useRef<GeminiLiveEngine | null>(null);
+  const echoGuardRef = useRef(new EchoGuard());
 
   /* Hand one line to the voice, and write it into the transcript only if the
      voice never takes it. See `unspokenLineRef` for why that is the rule.
-
-     `verbatim` is a sentence the shell composed and she must say as given.
-     `report` is something the assistant found, and she answers from it. */
+     When framing is "report", it is handed to Gemini Live to answer in Temi's voice;
+     we never dump the raw background report text into the transcript. */
   const speakLine = useCallback(
     (text: string, framing: "verbatim" | "report") => {
       const line = text.trim();
       if (!line) return;
-      /* A line that ends in a question mark opens the follow-up window, and a
-         line that does not closes it. Both matter: without the first, "yes" to
-         "should I run the tests?" scores as room noise and never arrives;
-         without the second, a "yeah" ten turns later is still treated as the
-         answer to a question that was settled long ago. */
+      echoGuardRef.current.remember(line);
       assistantAskedQuestionRef.current = line.endsWith("?");
       if (audioRef.current?.isMuted) {
-        /* Nothing will play, so nothing will report that playback stopped. The
-           window has to be opened here or a muted question can never be
-           answered by the composer's next line. */
         assistantTurnEndedAtRef.current = Date.now();
-      }
-      /* Muted means muted, in both directions. Without this a muted Temi still
-         announced a delegated run the moment it finished, because `mute` closes
-         the capture path and nothing here consulted it. The line is not thrown
-         away: the transcript is the surface a muted assistant has, so the
-         written fallback becomes the only surface rather than the last resort.
-         See `unspokenLineRef` for why there is normally exactly one. */
-      if (audioRef.current?.isMuted) {
         setDialogueHistory((prev) => [
           ...prev,
           { id: `asst-${Date.now()}`, role: "assistant", content: line },
@@ -497,6 +521,9 @@ export const TemiVoiceStage: React.FC<TemiVoiceStageProps> = ({
   /* How many delegations this screen started and has not seen finish. Read on
      unmount, where a run nobody is listening to any more is an orphan. */
   const delegationsInFlightRef = useRef(0);
+  const pendingReportSpeechRef = useRef(false);
+  const reportBaseSamplesRef = useRef(0);
+  const captureTotalSamplesRef = useRef(0);
   /* The folders a spoken name is allowed to resolve to.
 
      A ref rather than state because it is read from `performVoiceTurn`, which
@@ -553,6 +580,26 @@ export const TemiVoiceStage: React.FC<TemiVoiceStageProps> = ({
     toastTimerRef.current = window.setTimeout(() => setToastMessage(null), 2400);
   }, []);
 
+  const lastProgressSpokenAtRef = useRef(0);
+  const narrateProgress = useCallback(
+    (summary: string) => {
+      if (!summary) return;
+      showToast(summary);
+      const clean = summary.trim();
+      if (/^(Starting background|Task assigned|Finished|Starting that|Taking a look)/i.test(clean)) {
+        return;
+      }
+      const now = Date.now();
+      if (now - lastProgressSpokenAtRef.current >= 2500) {
+        lastProgressSpokenAtRef.current = now;
+        protocolRef.current?.sendAssistantDirective(clean);
+      }
+    },
+    [showToast],
+  );
+  const narrateProgressRef = useRef(narrateProgress);
+  narrateProgressRef.current = narrateProgress;
+
   /* ── Was that meant for me? ──────────────────────────────────────────────
      Everything below this line is the gate the audit of 2026-09-12 found was
      not wired to anything. `scoreAddressing`, `stripWakeWord` and
@@ -598,38 +645,48 @@ export const TemiVoiceStage: React.FC<TemiVoiceStageProps> = ({
      Returns the text to route — the wake word stripped off, so "Temy, open
      DukaBot" reaches the switch as a command and not as a greeting — or null
      when the turn was not ours. */
-  const gateSpokenTurn = useCallback((heard: string, turnStartedAt: number): string | null => {
-    const wakeWords = voice?.settings.wakeWords ?? DEFAULT_VOICE_SETTINGS.wakeWords;
-    const { text: stripped, matched: wakeWord } = stripWakeWord(heard, wakeWords);
-    const routed = stripped || heard;
+  const gateSpokenTurn = useCallback(
+    (heard: string, turnStartedAt: number): string | null => {
+      const wakeWords = voice?.settings.wakeWords ?? ["temi", "teminali", "frontier", "studio"];
+      const { text: stripped, matched: wakeWord } = stripWakeWord(heard, wakeWords);
+      const routed = stripped || heard;
 
-    if (selfAudio.audibleSince(turnStartedAt)) {
-      if (!wakeWord) {
-        if (!survivesSelfAudioWithoutWakeWord(routed)) {
-          traceVoice("dropped", { by: "self-audio" });
-          return null;
-        }
-        traceVoice("admitted", { by: "transport-exemption" });
+      const echoVerdict = echoGuardRef.current.filter(routed);
+      if (echoVerdict.echoed && !echoVerdict.text) {
+        traceVoice("dropped", { by: "self-echo", overlap: echoVerdict.overlap });
+        return null;
       }
-      return routed;
-    }
+      const cleanRouted = echoVerdict.echoed && echoVerdict.text ? echoVerdict.text : routed;
 
-    const { verdict } = scoreAddressing(heard, {
-      assistantAskedQuestion: assistantAskedQuestionRef.current,
-      msSinceAssistantTurn: Date.now() - assistantTurnEndedAtRef.current,
-      speakerMatch: null,
-      hasProfile: false,
-      requireWakeWord: false,
-      requireSpeakerMatch: false,
-      wakeWords,
-      windowFocused: typeof document !== "undefined" ? document.hasFocus() : true,
-    });
-    if (!verdict.directed) {
-      traceVoice("dropped", { by: "addressing", reason: verdict.reason });
-      return null;
-    }
-    return routed;
-  }, [voice?.settings.wakeWords]);
+      if (selfAudio.audibleSince(turnStartedAt)) {
+        if (!wakeWord) {
+          if (!survivesSelfAudioWithoutWakeWord(routed)) {
+            traceVoice("dropped", { by: "self-audio" });
+            return null;
+          }
+          traceVoice("admitted", { by: "transport-exemption" });
+        }
+        return cleanRouted;
+      }
+
+      const { verdict } = scoreAddressing(heard, {
+        assistantAskedQuestion: assistantAskedQuestionRef.current,
+        msSinceAssistantTurn: Date.now() - assistantTurnEndedAtRef.current,
+        speakerMatch: null,
+        hasProfile: false,
+        requireWakeWord: false,
+        requireSpeakerMatch: false,
+        wakeWords,
+        windowFocused: typeof document !== "undefined" ? document.hasFocus() : true,
+      });
+      if (!verdict.directed) {
+        traceVoice("dropped", { by: "addressing", reason: verdict.reason });
+        return null;
+      }
+      return cleanRouted;
+    },
+    [voice?.settings.wakeWords],
+  );
   const gateSpokenTurnRef = useRef(gateSpokenTurn);
   gateSpokenTurnRef.current = gateSpokenTurn;
 
@@ -700,7 +757,16 @@ export const TemiVoiceStage: React.FC<TemiVoiceStageProps> = ({
       live.push({ id: "live-user", role: "user", content: liveUserSpeech, pending: true });
     }
     if (liveAssistantStream) {
-      live.push({ id: "live-assistant", role: "assistant", content: liveAssistantStream, pending: true });
+      const last = dialogueHistory[dialogueHistory.length - 1];
+      const isDuplicate =
+        last &&
+        last.role === "assistant" &&
+        (last.content.trim() === liveAssistantStream.trim() ||
+          last.content.trim().startsWith(liveAssistantStream.trim()) ||
+          liveAssistantStream.trim().startsWith(last.content.trim()));
+      if (!isDuplicate) {
+        live.push({ id: "live-assistant", role: "assistant", content: liveAssistantStream, pending: true });
+      }
     }
     return live.length ? [...dialogueHistory, ...live] : dialogueHistory;
   }, [dialogueHistory, liveUserSpeech, liveAssistantStream]);
@@ -859,6 +925,108 @@ export const TemiVoiceStage: React.FC<TemiVoiceStageProps> = ({
        up with `onConnected` and needs it too. */
     let cancelled = false;
 
+    // Live Voice Capture for self-improving dev module & automated testing
+    const liveVoiceCapture = {
+      active: false,
+      startedAt: 0,
+      firstChunkAt: 0,
+      lastChunkAt: 0,
+      chunks: [] as Int16Array[],
+      totalSamples: 0,
+      turnCaptions: [] as string[],
+      resolvers: [] as Array<(payload: unknown) => void>,
+      chunkSettleTimer: null as ReturnType<typeof setTimeout> | null,
+      /** Snapshot of frontierMessages.length when this capture began.
+       *  Used to scope the store lookup so a stale Turn N answer is not
+       *  attributed to Turn N+1 during continuous conversation. */
+      msgCountAtStart: 0,
+    };
+
+    const buildCapturedVoicePayload = () => {
+      const total = liveVoiceCapture.totalSamples;
+      const flat = new Int16Array(total);
+      let offset = 0;
+      for (const chunk of liveVoiceCapture.chunks) {
+        flat.set(chunk, offset);
+        offset += chunk.length;
+      }
+
+      let sumSq = 0;
+      let peak = 0;
+      for (let i = 0; i < total; i++) {
+        const norm = flat[i] / 32768.0;
+        sumSq += norm * norm;
+        const abs = Math.abs(norm);
+        if (abs > peak) peak = abs;
+      }
+      const rms = total > 0 ? Math.sqrt(sumSq / total) : 0;
+      const rmsDbfs = rms > 0 ? 20 * Math.log10(rms) : -100;
+
+      // 44-byte RIFF WAV Header for 48000 Hz 16-bit Mono PCM
+      const wavHeader = new ArrayBuffer(44);
+      const v = new DataView(wavHeader);
+      const dataBytes = total * 2;
+      v.setUint8(0, 0x52); v.setUint8(1, 0x49); v.setUint8(2, 0x46); v.setUint8(3, 0x46); // "RIFF"
+      v.setUint32(4, 36 + dataBytes, true);
+      v.setUint8(8, 0x57); v.setUint8(9, 0x41); v.setUint8(10, 0x56); v.setUint8(11, 0x45); // "WAVE"
+      v.setUint8(12, 0x66); v.setUint8(13, 0x6d); v.setUint8(14, 0x74); v.setUint8(15, 0x20); // "fmt "
+      v.setUint32(16, 16, true);
+      v.setUint16(20, 1, true); // PCM
+      v.setUint16(22, 1, true); // Mono (1 channel)
+      v.setUint32(24, 48000, true); // 48kHz
+      v.setUint32(28, 48000 * 2, true); // ByteRate (48000 * 1 * 2)
+      v.setUint16(32, 2, true); // BlockAlign (1 * 2)
+      v.setUint16(34, 16, true); // 16 bits
+      v.setUint8(36, 0x64); v.setUint8(37, 0x61); v.setUint8(38, 0x74); v.setUint8(39, 0x61); // "data"
+      v.setUint32(40, dataBytes, true);
+
+      const headerBytes = new Uint8Array(wavHeader);
+      const pcmBytes = new Uint8Array(flat.buffer, flat.byteOffset, flat.byteLength);
+      const fullBytes = new Uint8Array(headerBytes.length + pcmBytes.length);
+      fullBytes.set(headerBytes, 0);
+      fullBytes.set(pcmBytes, headerBytes.length);
+
+      let binary = "";
+      const CHUNK = 8192;
+      for (let i = 0; i < fullBytes.length; i += CHUNK) {
+        const sub = fullBytes.subarray(i, i + CHUNK);
+        binary += String.fromCharCode.apply(null, sub as unknown as number[]);
+      }
+      const base64Wav = btoa(binary);
+
+      const latencyToFirstAudioMs = liveVoiceCapture.firstChunkAt && liveVoiceCapture.startedAt
+        ? liveVoiceCapture.firstChunkAt - liveVoiceCapture.startedAt
+        : null;
+
+      // Prefer live captions captured during THIS turn over the store, which
+      // may still hold an answer from a prior turn in continuous conversation.
+      const liveCap = liveVoiceCapture.turnCaptions[liveVoiceCapture.turnCaptions.length - 1] || "";
+      let transcript = liveCap;
+      if (!transcript) {
+        // Fall back to the store, but only consider messages added AFTER this
+        // capture started (msgCountAtStart) so stale prior-turn answers are
+        // never returned as the current turn's transcript.
+        const msgs = useStudioStore.getState().frontierMessages;
+        const newMsgs = msgs.slice(liveVoiceCapture.msgCountAtStart);
+        transcript = newMsgs.filter((m) => m.role === "assistant").pop()?.content || "";
+      }
+
+      return {
+        sampleRate: 48000,
+        totalSamples: total,
+        durationSeconds: Math.round((total / 48000) * 100) / 100,
+        chunkCount: liveVoiceCapture.chunks.length,
+        peakAmplitude: Math.round(peak * 1000) / 1000,
+        avgRms: Math.round(rms * 1000) / 1000,
+        rmsDbfs: Math.round(rmsDbfs * 10) / 10,
+        isVoiced: rmsDbfs > -45 && total > 2400,
+        latencyToFirstAudioMs,
+        transcript,
+        allCaptions: liveVoiceCapture.turnCaptions,
+        base64Wav,
+      };
+    };
+
     audioRef.current = audio;
     protocolRef.current = protocol;
 
@@ -866,12 +1034,18 @@ export const TemiVoiceStage: React.FC<TemiVoiceStageProps> = ({
     audio.onTTSPlaybackStarted = () => {
       isSpeakingRef.current = true;
       setIsSpeaking(true);
+      awaitingAssistantAnswerRef.current = false;
       protocol.sendTTSStart();
+      selfAudio.set("assistant:tts", true);
+      const textToRemember = pendingFinalRef.current || lastSpokenRef.current;
+      if (textToRemember) echoGuardRef.current.remember(textToRemember);
     };
     audio.onTTSPlaybackStopped = () => {
       isSpeakingRef.current = false;
       setIsSpeaking(false);
       protocol.sendTTSStop();
+      selfAudio.set("assistant:tts", false);
+      echoGuardRef.current.markEnded();
       /* When she stopped. The follow-up window is measured from here, so a
          "yes" is judged against the moment the question finished being asked
          rather than the moment it finished generating. */
@@ -880,19 +1054,33 @@ export const TemiVoiceStage: React.FC<TemiVoiceStageProps> = ({
          is the ordinary gap between two synthesised sentences as often as it is
          the end of the reply. Committing on the first one would cut the caption
          off mid-answer. */
-      if (captionCommitTimer.current) clearTimeout(captionCommitTimer.current);
       captionCommitTimer.current = setTimeout(() => {
-        if (!isSpeakingRef.current) commitSpokenTurnRef.current?.(false);
-      }, 450);
+        if (!isSpeakingRef.current) {
+          commitSpokenTurnRef.current?.(false);
+          // Only resolve test captures if there are no background tool delegations still in flight and audio is finished
+          if (
+            liveVoiceCapture.active &&
+            liveVoiceCapture.chunks.length > 0 &&
+            delegationsInFlightRef.current === 0 &&
+            !pendingReportSpeechRef.current &&
+            !audio.isTTSPlaying
+          ) {
+            const resolvers = liveVoiceCapture.resolvers.splice(0);
+            const payload = buildCapturedVoicePayload();
+            for (const res of resolvers) res(payload);
+          }
+        }
+      }, 600);
     };
 
     audio.onTTSProgress = (seconds) => {
       secondsPlayedRef.current = seconds;
+      if (!assistantTurnActiveRef.current) return;
       const shown = pacerRef.current.advanceTo(seconds);
       setLiveAssistantStream(shown);
       const pending = pendingFinalRef.current;
       if (pending && shown.length >= pending.length) {
-        // The voice has said everything that was generated: the turn is over.
+        // The voice has said everything that was generated
         commitSpokenTurnRef.current?.(false);
       }
     };
@@ -938,16 +1126,30 @@ export const TemiVoiceStage: React.FC<TemiVoiceStageProps> = ({
         // would caption the operator with words they never said.
         if (GeminiLiveEngine.isAssistantDirectiveEcho(content ?? "")) return;
         if (isAssistantReportEcho(content ?? "")) return;
+        const echoCheck = echoGuardRef.current.filter(content ?? "");
+        if (echoCheck.echoed && !echoCheck.text) {
+          traceVoice("dropped", { by: "partial-self-echo", overlap: echoCheck.overlap });
+          return;
+        }
         // The first partial of a turn is the closest thing this lane has to
         // "speech began", which is what the self-audio gate is asked about.
         if (turnStartedAtRef.current === 0) turnStartedAtRef.current = Date.now();
-        setLiveUserSpeech(content);
+        if (assistantTurnActiveRef.current || pendingFinalRef.current) {
+          audio.stopTTSPlayback();
+          setLiveAssistantStream(null);
+          pendingFinalRef.current = null;
+          assistantTurnActiveRef.current = false;
+        }
+        const textToDisplay = echoCheck.echoed && echoCheck.text ? echoCheck.text : content;
+        uncommittedUserSpeechRef.current = textToDisplay;
+        setLiveUserSpeech(textToDisplay);
       } else if (type === "final_user_request") {
         setLiveUserSpeech(null);
         const turnStartedAt = turnStartedAtRef.current;
         turnStartedAtRef.current = 0;
         if (content && content.trim()) {
           const clean = content.trim();
+          uncommittedUserSpeechRef.current = clean;
           // What the microphone actually produced, before anything can drop it.
           // The whole diagnosis of a dead spoken turn starts here; see
           // `voiceTrace.ts` for why this is a ring and not a console line.
@@ -957,10 +1159,22 @@ export const TemiVoiceStage: React.FC<TemiVoiceStageProps> = ({
           // and the loop never closes. See `isAssistantDirectiveEcho`.
           if (GeminiLiveEngine.isAssistantDirectiveEcho(clean)) {
             traceVoice("dropped", { by: "directive-echo" });
+            uncommittedUserSpeechRef.current = null;
             return;
           }
           if (isAssistantReportEcho(clean)) {
             traceVoice("dropped", { by: "report-echo" });
+            uncommittedUserSpeechRef.current = null;
+            return;
+          }
+
+          const echoVerdict = echoGuardRef.current.filter(clean);
+          if (echoVerdict.echoed && !echoVerdict.text) {
+            traceVoice("dropped", { by: "self-echo", overlap: echoVerdict.overlap });
+            uncommittedUserSpeechRef.current = null;
+            if (isSpeakingRef.current || awaitingAssistantAnswerRef.current) {
+              protocol.sendBargeIn();
+            }
             return;
           }
 
@@ -970,18 +1184,23 @@ export const TemiVoiceStage: React.FC<TemiVoiceStageProps> = ({
              conversation, and a stranger's sentence is not part of it. */
           const routed = gateSpokenTurnRef.current(clean, turnStartedAt);
           if (routed === null) {
-            /* She is already answering it. The model's VAD closed the turn and
-               generation began the moment the room stopped talking, so
-               rejecting the turn here and doing nothing else would leave her
-               replying to a film. Cutting the model is the whole point of the
-               gate — this is the sentence that used to come back as "OpenAI has
-               blessed us", committed and answered. */
+            /* If the assistant is currently speaking or in the middle of preparing an answer
+               to a user turn, ambient room noise or background chatter must be cleanly IGNORED.
+               We do NOT barge in and do NOT cut off her playback! */
+            if (isSpeakingRef.current || awaitingAssistantAnswerRef.current) {
+              traceVoice("ignored", { text: clean, reason: "undirected noise while assistant is answering" });
+              return;
+            }
+
+            traceVoice("dropped", { text: clean, by: "addressing-idle" });
             protocol.sendBargeIn();
             audio.stopTTSPlayback();
             return;
           }
 
           // Update last user bubble if from this same turn, or append new turn
+          uncommittedUserSpeechRef.current = null;
+          awaitingAssistantAnswerRef.current = true;
           setDialogueHistory((prev) => {
             const last = prev[prev.length - 1];
             if (last && last.role === "user") {
@@ -1002,6 +1221,9 @@ export const TemiVoiceStage: React.FC<TemiVoiceStageProps> = ({
 
       // 2. Live Assistant Text Generation
       else if (type === "partial_assistant_answer") {
+        if (liveVoiceCapture.active && content) {
+          liveVoiceCapture.turnCaptions.push(content);
+        }
         /* She has the line. The transcript will get it from the speaker, so the
            fallback write must not also happen. See `unspokenLineRef`. */
         if (unspokenLineRef.current) {
@@ -1017,8 +1239,12 @@ export const TemiVoiceStage: React.FC<TemiVoiceStageProps> = ({
         pacerRef.current.setText(content ?? "");
         setLiveAssistantStream(pacerRef.current.advanceTo(secondsPlayedRef.current));
       } else if (type === "final_assistant_answer") {
+        if (liveVoiceCapture.active && content) {
+          liveVoiceCapture.turnCaptions.push(content);
+        }
         if (content) {
           lastSpokenRef.current = content;
+          echoGuardRef.current.remember(content);
           /* Her own turn, so her own question. This is the case the follow-up
              window was built for: she asks "should I run the tests?", the
              operator says "yes", and without this that "yes" is one unaddressed
@@ -1045,6 +1271,37 @@ export const TemiVoiceStage: React.FC<TemiVoiceStageProps> = ({
       // 3. Spoken audio from the model, already resampled to the context rate
       else if (type === "tts_audio" && msg.int16) {
         audio.playTTSChunk(msg.int16);
+        if (liveVoiceCapture.active) {
+          if (!liveVoiceCapture.firstChunkAt) liveVoiceCapture.firstChunkAt = Date.now();
+          liveVoiceCapture.lastChunkAt = Date.now();
+          liveVoiceCapture.chunks.push(msg.int16);
+          liveVoiceCapture.totalSamples += msg.int16.length;
+          captureTotalSamplesRef.current = liveVoiceCapture.totalSamples;
+
+          // Clear pendingReportSpeech once audio chunks for the report start streaming in
+          if (
+            pendingReportSpeechRef.current &&
+            captureTotalSamplesRef.current > reportBaseSamplesRef.current + 4000
+          ) {
+            pendingReportSpeechRef.current = false;
+          }
+
+          if (liveVoiceCapture.chunkSettleTimer) clearTimeout(liveVoiceCapture.chunkSettleTimer);
+          liveVoiceCapture.chunkSettleTimer = setTimeout(() => {
+            if (
+              liveVoiceCapture.active &&
+              liveVoiceCapture.chunks.length > 0 &&
+              delegationsInFlightRef.current === 0 &&
+              !pendingReportSpeechRef.current &&
+              !isSpeakingRef.current &&
+              !audio.isTTSPlaying
+            ) {
+              const resolvers = liveVoiceCapture.resolvers.splice(0);
+              const payload = buildCapturedVoicePayload();
+              for (const res of resolvers) res(payload);
+            }
+          }, 850);
+        }
       }
 
       // 4. Interruption / Barge-In Cut
@@ -1052,6 +1309,11 @@ export const TemiVoiceStage: React.FC<TemiVoiceStageProps> = ({
         audio.stopTTSPlayback();
         setIsSpeaking(false);
         commitSpokenTurnRef.current?.(true);
+        if (liveVoiceCapture.active && liveVoiceCapture.chunks.length > 0) {
+          const resolvers = liveVoiceCapture.resolvers.splice(0);
+          const payload = buildCapturedVoicePayload();
+          for (const res of resolvers) res(payload);
+        }
       }
 
       /* 5. She asked for the hands herself.
@@ -1100,6 +1362,7 @@ export const TemiVoiceStage: React.FC<TemiVoiceStageProps> = ({
               const options: TaskDelegationOptions = {
                 action: "inspect",
                 approveCommand: approveRef.current.approveCommand,
+                onProgress: (prog) => narrateProgressRef.current?.(prog),
               };
               const report = await TeminaliAgentBridge.delegateTask(task, options);
               /* Capped as a backstop. `delegateTask` returns
@@ -1108,7 +1371,12 @@ export const TemiVoiceStage: React.FC<TemiVoiceStageProps> = ({
                  the live session and competes for the same window the
                  conversation lives in. */
               const capped = report.length > 4000 ? `${report.slice(0, 4000)}\n[report truncated]` : report;
+              pendingReportSpeechRef.current = true;
+              reportBaseSamplesRef.current = captureTotalSamplesRef.current;
               speakLineRef.current(capped || "The assistant finished but reported nothing.", "report");
+              setTimeout(() => {
+                pendingReportSpeechRef.current = false;
+              }, 7000);
             } catch (error) {
               /* Told, not swallowed. A run that reports nothing back leaves the
                  operator holding a question she has already promised to
@@ -1161,10 +1429,191 @@ export const TemiVoiceStage: React.FC<TemiVoiceStageProps> = ({
     };
     (window as unknown as { teminaliTurnLatency?: typeof turnLatencySummary }).teminaliTurnLatency =
       turnLatencySummary;
+    (window as unknown as { __temiVoiceTest?: unknown }).__temiVoiceTest = {
+      audio,
+      protocol,
+      sendAudioChunk: (buf: ArrayBuffer) => protocol.sendAudioChunk(buf),
+      feedPcm48k: (pcm48k: Int16Array) => {
+        const BATCH = 2048;
+        let ts = Date.now() & 0xffffffff;
+        for (let i = 0; i < pcm48k.length; i += BATCH) {
+          const slice = pcm48k.subarray(i, Math.min(i + BATCH, pcm48k.length));
+          const buf = new ArrayBuffer(8 + BATCH * 2);
+          const view = new DataView(buf);
+          view.setUint32(0, ts++, false);
+          view.setUint32(4, 0, false);
+          const int16 = new Int16Array(buf, 8);
+          int16.set(slice);
+          protocol.sendAudioChunk(buf);
+        }
+      },
+      performVoiceTurn: (text: string) => {
+        liveVoiceCapture.active = true;
+        liveVoiceCapture.startedAt = Date.now();
+        liveVoiceCapture.firstChunkAt = 0;
+        liveVoiceCapture.lastChunkAt = 0;
+        liveVoiceCapture.chunks = [];
+        liveVoiceCapture.totalSamples = 0;
+        liveVoiceCapture.turnCaptions = [];
+        liveVoiceCapture.msgCountAtStart = useStudioStore.getState().frontierMessages.length;
+        return performTurnRef.current?.(text, "spoken");
+      },
+      startVoiceCapture: () => {
+        liveVoiceCapture.active = true;
+        liveVoiceCapture.startedAt = Date.now();
+        liveVoiceCapture.firstChunkAt = 0;
+        liveVoiceCapture.lastChunkAt = 0;
+        liveVoiceCapture.chunks = [];
+        liveVoiceCapture.totalSamples = 0;
+        liveVoiceCapture.turnCaptions = [];
+        liveVoiceCapture.resolvers = [];
+        liveVoiceCapture.msgCountAtStart = useStudioStore.getState().frontierMessages.length;
+        return { ok: true, startedAt: liveVoiceCapture.startedAt };
+      },
+      stopVoiceCapture: () => {
+        liveVoiceCapture.active = false;
+        return buildCapturedVoicePayload();
+      },
+      getCapturedVoiceData: () => buildCapturedVoicePayload(),
+      waitForSpokenResponse: (timeoutMs = 15000) => {
+        return new Promise((resolve) => {
+          if (!liveVoiceCapture.active) {
+            liveVoiceCapture.active = true;
+            liveVoiceCapture.startedAt = Date.now();
+          }
+          // If response audio has already arrived and settled with no active tasks, resolve immediately
+          if (
+            liveVoiceCapture.chunks.length > 0 &&
+            delegationsInFlightRef.current === 0 &&
+            !pendingReportSpeechRef.current &&
+            !isSpeakingRef.current
+          ) {
+            resolve(buildCapturedVoicePayload());
+            return;
+          }
+          const timer = setTimeout(() => {
+            const idx = liveVoiceCapture.resolvers.indexOf(onDone);
+            if (idx >= 0) liveVoiceCapture.resolvers.splice(idx, 1);
+            resolve(buildCapturedVoicePayload());
+          }, timeoutMs);
+          const onDone = (payload: unknown) => {
+            clearTimeout(timer);
+            resolve(payload);
+          };
+          liveVoiceCapture.resolvers.push(onDone);
+        });
+      },
+      runVoiceTestTurn: (query: string, timeoutMs = 25000) => {
+        if (liveVoiceCapture.chunkSettleTimer) {
+          clearTimeout(liveVoiceCapture.chunkSettleTimer);
+          liveVoiceCapture.chunkSettleTimer = null;
+        }
+        pendingReportSpeechRef.current = false;
+        reportBaseSamplesRef.current = 0;
+        captureTotalSamplesRef.current = 0;
+        liveVoiceCapture.active = true;
+        liveVoiceCapture.startedAt = Date.now();
+        liveVoiceCapture.firstChunkAt = 0;
+        liveVoiceCapture.lastChunkAt = 0;
+        liveVoiceCapture.chunks = [];
+        liveVoiceCapture.totalSamples = 0;
+        liveVoiceCapture.turnCaptions = [];
+        liveVoiceCapture.resolvers = [];
+        liveVoiceCapture.msgCountAtStart = useStudioStore.getState().frontierMessages.length;
+
+        const promise = new Promise((resolve) => {
+          const timer = setTimeout(() => {
+            const idx = liveVoiceCapture.resolvers.indexOf(onDone);
+            if (idx >= 0) liveVoiceCapture.resolvers.splice(idx, 1);
+            resolve(buildCapturedVoicePayload());
+          }, timeoutMs);
+          const onDone = (payload: unknown) => {
+            clearTimeout(timer);
+            resolve(payload);
+          };
+          liveVoiceCapture.resolvers.push(onDone);
+        });
+
+        // Record user bubble in transcript so dialogue history preserves continuous conversation context
+        setDialogueHistory((prev) => {
+          const last = prev[prev.length - 1];
+          if (last && last.role === "user") {
+            return [...prev.slice(0, -1), { ...last, content: query }];
+          }
+          return [...prev, { id: `user-${Date.now()}`, role: "user", content: query }];
+        });
+        rememberUserSpeech(query);
+
+        // Perform turn with 'typed' source so conversational queries route to Gemini Live
+        void performTurnRef.current?.(query, "typed");
+
+        return promise;
+      },
+      getDialogueSummary: () => {
+        const msgs = useStudioStore.getState().frontierMessages;
+        const body = document.body ? document.body.innerText : "";
+        const lines = body.split("\n").map((l) => l.trim()).filter(Boolean);
+        return {
+          messageCount: msgs.length,
+          recentLines: lines.slice(-15),
+          messages: msgs.map((m) => ({ role: m.role, content: m.content })),
+        };
+      },
+      turnOnListening: async () => {
+        if (!audio.audioContext) {
+          await audio.start();
+        } else if (audio.isMuted) {
+          audio.toggleMute();
+        }
+        setIsAudioStarted(true);
+        setIsMicMuted(false);
+        const start = Date.now();
+        while (Date.now() - start < 8000 && !protocol.hasSession) {
+          await new Promise((r) => setTimeout(r, 100));
+        }
+        return { isVoiceOn: true, isAudioStarted: true, isMicMuted: false, sessionReady: Boolean(protocol.hasSession) };
+      },
+      unmuteMic: async () => {
+        if (!audio.audioContext) {
+          await audio.start();
+        } else if (audio.isMuted) {
+          audio.toggleMute();
+        }
+        setIsAudioStarted(true);
+        setIsMicMuted(false);
+      },
+      startNewChat: () => newChatSession(),
+      hasPendingApproval: () => {
+        const btns = Array.from(document.querySelectorAll("button"));
+        return btns.some((b) => b.innerText.trim() === "Allow" || b.innerText.trim() === "Always");
+      },
+      approvePendingCommand: () => {
+        const btns = Array.from(document.querySelectorAll("button"));
+        const btn = btns.find((b) => b.innerText.trim() === "Always" || b.innerText.trim() === "Allow");
+        if (btn) {
+          btn.click();
+          return true;
+        }
+        return false;
+      },
+    };
 
     void primed.then(() => {
       if (!cancelled) return protocol.connect();
     });
+
+    // Automatically initialize audio engine and turn on listening on studio startup
+    void (async () => {
+      try {
+        await audio.start();
+        if (!cancelled) {
+          setIsAudioStarted(true);
+          setIsMicMuted(false);
+        }
+      } catch (err) {
+        console.info("Automatic mic listening deferred until user gesture:", err);
+      }
+    })();
 
     // Continuous audio energy sampling for the 3D Orb
     const sampleEnergy = () => {
@@ -1180,8 +1629,15 @@ export const TemiVoiceStage: React.FC<TemiVoiceStageProps> = ({
         clearTimeout(unspokenLineRef.current.timer);
         unspokenLineRef.current = null;
       }
+      if (liveVoiceCapture.chunkSettleTimer) {
+        clearTimeout(liveVoiceCapture.chunkSettleTimer);
+        liveVoiceCapture.chunkSettleTimer = null;
+      }
       audio.cleanup();
       protocol.disconnect();
+      selfAudio.drop("assistant:tts");
+      echoGuardRef.current.clear();
+      delete (window as unknown as { __temiVoiceTest?: unknown }).__temiVoiceTest;
 
       /* The session is over, so now she gets to keep some of it.
 
@@ -1628,6 +2084,7 @@ export const TemiVoiceStage: React.FC<TemiVoiceStageProps> = ({
       switch (action.kind) {
         case "delegate": {
           showToast("Handing this to the assistant…");
+          delegationsInFlightRef.current += 1;
           // Temi says one grounded line, and the model's own reply is
           // suppressed above. Asking the persona to improvise the "on it" is
           // what produced invented accounts of work that had not started:
@@ -1649,16 +2106,20 @@ export const TemiVoiceStage: React.FC<TemiVoiceStageProps> = ({
                allowed there and the "always" list stays one list. The prompt it
                raises is answerable out loud or by the buttons on the banner. */
             approveCommand: approveRef.current.approveCommand,
-            onProgress: (summary) => showToast(summary),
+            onProgress: (summary) => narrateProgressRef.current?.(summary),
             onCompleted: (finalReport) => {
               /* One surface, and the report is answered from rather than read
                  out. This used to append the report to the transcript AND send
                  it to be spoken, which is what put one answer on screen
                  twice. */
+              pendingReportSpeechRef.current = true;
+              reportBaseSamplesRef.current = captureTotalSamplesRef.current;
               speakLineRef.current(finalReport, "report");
+              setTimeout(() => {
+                pendingReportSpeechRef.current = false;
+              }, 7000);
             },
           };
-          delegationsInFlightRef.current += 1;
           void TeminaliAgentBridge.delegateTask(action.prompt, options)
             .catch((error: unknown) => {
               // Told, not swallowed, and for the same reason as the tool_call
