@@ -854,7 +854,7 @@ export const TemiVoiceStage: React.FC<TemiVoiceStageProps> = ({
     const primed = primeTemiMemory();
 
     const audio = new VoiceAudioEngine();
-    const protocol = new GeminiLiveEngine();
+    const protocol = new GeminiLiveEngine({ voice: useAssistantActivityStore.getState().selectedVoice });
     /* Declared here rather than beside `onNote`, because `onError` is assigned
        up with `onConnected` and needs it too. */
     let cancelled = false;

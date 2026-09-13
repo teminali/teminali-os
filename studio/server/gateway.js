@@ -300,7 +300,9 @@ function joinUrl(base, path) {
    cost the caller a fallback, not the gateway its startup.
    ---------------------------------------------------------------------- */
 
-/** The Live model and voice the minted token is issued for. */
+/** The Live model the minted token is issued for, and the default voice. The
+    token is not bound to a voice: the renderer's session setup chooses it, and
+    `geminiLiveEngine.ts` deliberately ignores the `voice` returned here. */
 const GEMINI_LIVE_MODEL = "gemini-2.5-flash-native-audio-latest";
 const GEMINI_LIVE_VOICE = "Sulafat";
 /** A token outlives a long conversation but not an idle machine. */

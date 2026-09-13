@@ -49,17 +49,49 @@ export interface AssistantActivityState {
  */
 const INITIAL_ITEMS: AssistantActivityItem[] = [];
 
+const VOICE_STORAGE_KEY = "temi.voice";
+
+/**
+ * Gemini's prebuilt voice names are one capitalised word ("Sulafat", "Aoede").
+ * The retired Kokoro keys were lowercase with underscores ("royal_velvet"), and
+ * sent as `voiceName` one of those would fail the session, so it is dropped.
+ */
+const isGeminiVoiceName = (value: unknown): value is string =>
+  typeof value === "string" && /^[A-Z][a-z]+$/.test(value);
+
+/** The pick survives a relaunch. Storage can be absent or throw; Sulafat then. */
+export function readSavedVoice(): string {
+  try {
+    const saved = globalThis.localStorage?.getItem(VOICE_STORAGE_KEY);
+    if (isGeminiVoiceName(saved)) return saved;
+  } catch {
+    // Blocked or missing storage is not an error worth surfacing.
+  }
+  return "Sulafat";
+}
+
+function saveVoice(voice: string): void {
+  try {
+    globalThis.localStorage?.setItem(VOICE_STORAGE_KEY, voice);
+  } catch {
+    // The pick still holds for this launch.
+  }
+}
+
 export const useAssistantActivityStore = create<AssistantActivityState>((set) => ({
   items: INITIAL_ITEMS,
   isOpen: false,
-  selectedVoice: "Sulafat",
+  selectedVoice: readSavedVoice(),
   activeEngine: "codex",
   isTaskRunning: false,
   currentTaskPrompt: null,
   latestProgress: null,
   toggleOpen: () => set((state) => ({ isOpen: !state.isOpen })),
   setOpen: (isOpen) => set({ isOpen }),
-  setSelectedVoice: (selectedVoice) => set({ selectedVoice }),
+  setSelectedVoice: (selectedVoice) => {
+    if (isGeminiVoiceName(selectedVoice)) saveVoice(selectedVoice);
+    set({ selectedVoice });
+  },
   setActiveEngine: (activeEngine) => set({ activeEngine }),
   setTaskRunning: (isTaskRunning, prompt = null) =>
     set({

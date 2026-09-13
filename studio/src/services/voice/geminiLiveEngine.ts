@@ -541,6 +541,12 @@ export class GeminiLiveEngine {
   private model = DEFAULT_MODEL;
   private voice = TEMI_DEFAULT_VOICE;
 
+  /** `voice` is the operator's saved pick, so the first session opens in it. */
+  constructor(options: { voice?: string } = {}) {
+    const voice = (options.voice ?? "").trim();
+    if (voice) this.voice = voice;
+  }
+
   /** Running transcripts. Gemini streams both sides as deltas and never resends
       the whole line, so the accumulation has to happen on this side. */
   private inputTranscript = "";
@@ -664,7 +670,10 @@ export class GeminiLiveEngine {
       }
 
       if (result.model) this.model = result.model;
-      if (result.voice) this.voice = result.voice;
+      // The mint's `voice` is deliberately NOT adopted. It is the gateway's
+      // constant, and adopting it here undid every pick: `sendVoiceChange`
+      // set the voice, restarted, and this line put Sulafat straight back.
+      // The token is not bound to a voice; the setup below is what chooses it.
 
       // v1alpha is not a preference. Ephemeral tokens exist only on that API
       // version, and the SDK defaults to v1beta, where this token is rejected.

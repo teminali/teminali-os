@@ -7156,6 +7156,26 @@ that could render them. `sendSpeedChange` is now a no-op: Gemini's native audio
 has no rate control, so pace is asked for in `TEMI_PERSONA` and chosen with the
 voice.
 
+**The picker did nothing until 0.0.16.** `sendVoiceChange` set the voice and
+reopened the session, and `connect()` then adopted the minted token's `voice`,
+which is the gateway's constant `GEMINI_LIVE_VOICE` ("Sulafat"). Every pick was
+undone before the setup was sent, so every call was Sulafat. The token is not
+bound to a voice; the engine now ignores that field. The pick is also handed to
+the engine at construction (`TemiVoiceStage.tsx`, from
+`assistantActivityStore.selectedVoice`) and saved to `localStorage` under
+`temi.voice`, so a relaunch keeps it. A saved value that is not a single
+capitalised word, such as a retired Kokoro key, falls back to Sulafat.
+`tests/voice-selection.test.mjs` pins all three.
+
+**The auditions were not this persona.** The candidates in
+`~/Desktop/temi-voice-audition/` were recorded in the `full-duplex-assistant`
+sandbox with `web/prompts/temi-bella.txt`, which is `temi.txt` plus a closing
+section giving her an Italian accent and audible breath. Only `temi.txt` was
+ported, so the live voices did not sound like the auditions. That section is
+now in `TEMI_PERSONA` as `THE VOICE YOU SPEAK IN:`, placed before
+`TEMI'S VOICE IN PRACTICE:` so the examples stay last and the recall splice
+point is unchanged. Always on; there is no toggle.
+
 `temiPersona.ts` holds `TEMI_PERSONA` and `TEMI_DEFAULT_VOICE`. It is a merge of
 the retired OS prompt (§6.29, §6.33) with a persona tuned by ear against Gemini
 in a sandbox repo — so the character survived the lane she was written for, but
