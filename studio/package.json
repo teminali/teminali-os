@@ -1,7 +1,7 @@
 {
   "name": "@teminali/os",
   "productName": "Teminali OS",
-  "version": "0.0.14",
+  "version": "0.0.15",
   "description": "Teminali OS — Autonomous AI Studio for full-stack, design-system-first development",
   "author": {
     "name": "Teminali",
