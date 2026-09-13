@@ -799,7 +799,10 @@ interpreter, no local weights, no install step. The key never reaches the
 renderer, because `GET /api/voice/realtime/token` mints a single-use ephemeral
 token from it and hands back only that. Voice is a degradable tier, so a refusal
 comes back as a reason rather than an error and the studio drops to the engines
-below instead of failing the turn. She can sing, which the retired local lane
+below instead of failing the turn. The mint runs in the Electron main process,
+which gives each address a host resolves to 1000 ms to connect instead of Node
+24's 250: a network whose handshake is slower than that and whose IPv6 has no
+route could not reach Google at all (`DESIGN.md` §6.0.51). She can sing, which the retired local lane
 could not. Four prebuilt voices are offered, described by measured speaking rate
 rather than by adjective — Sulafat 153 wpm (the default), Gacrux 129, Aoede 115,
 Callirrhoe 208, against a conversational norm of 140–160. The voice governs pace
@@ -1392,7 +1395,7 @@ ollama serve              # local models on 127.0.0.1:11434
 
 ```bash
 npm run typecheck   # tsc --noEmit
-npm test            # 2954 tests
+npm test            # 2960 tests
 npm run eval:local  # the local lane against the real model — a score, not a pass/fail; needs Ollama
 npm run eval:voice  # the voice co-agent's spoken answers, same discipline; needs Ollama
 npm run eval:memory # Temi's memory policy over a simulated year; pure, no model, no network

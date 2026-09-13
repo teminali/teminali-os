@@ -8611,6 +8611,66 @@ Covered by `voice-handoff.test.mjs`, two tests pinning the boundary in both
 prompts and pinning that the fabrication rule survived it.
 
 
+#### 6.0.51 Every address was given less time than its handshake takes (`electron/addressAttempts.cjs`, `electron/main.cjs`, `server/gateway.js`, 2026-09-13)
+
+On the operator's network the installed v0.0.14 said *"Temi's voice hit an error:
+mint-failed: Google refused to mint a Live token: fetch failed"*. Google refused
+nothing. The token request never left the Electron main process.
+
+Electron 44 runs Node 24.19, and Node gives each address a host resolves to
+`net.getDefaultAutoSelectFamilyAttemptTimeout()` milliseconds to finish its TCP
+handshake before abandoning it for the next. In Node 24 that is **250 ms**; in
+Node 26 it is 500. An abandoned attempt does not keep racing, so the figure is a
+deadline, not a head start. Measured on that network:
+
+| | measured |
+| --- | --- |
+| IPv4 TCP handshake, 80 connects | min 296 ms, p50 298, max 381 |
+| IPv6 connect | `EHOSTUNREACH` in 0 to 4 ms: no route |
+| `generativelanguage.googleapis.com` resolves to | 8 IPv4, 8 IPv6 |
+| fetch it from Electron main, deadline 250 | `fetch failed`, `AggregateError`/`ETIMEDOUT`, 2339 ms |
+| mint a Live token from Electron main, deadline 250 | `fetch failed`, 2091 ms |
+| mint a Live token from Electron main, deadline 1000 | token minted, 718 ms |
+| `api.github.com`, one IPv4 address and no IPv6, deadline 250 | 200 |
+
+Every IPv4 attempt was cut off before its handshake could finish and every IPv6
+attempt was refused at once, so a host with both families could not be reached at
+all. `api.github.com` connected under the same deadline, which is what made this
+look like an IPv6 fault, and plain Node 26 minted a token with the same key.
+
+`dns.setDefaultResultOrder("ipv4first")` was tried and does not help. The
+addresses already came back IPv4 first; ordering was never the problem.
+
+`electron/addressAttempts.cjs` raises the deadline to a floor of **1000 ms** and
+never lowers one already above it. `electron/main.cjs` applies it at load, before
+the gateway is imported, so it holds for every Node-side connection in the main
+process: the mint, the provider calls, the update check. The voice sidecar is a
+separate Node started from `process.execPath`, with the 250 ms default and a
+first-run model download, so it is spawned with the same deadline as
+`--network-family-autoselection-attempt-timeout`. Renderer traffic, the Live
+socket included, goes through Chromium's network stack, which this setting does
+not touch.
+
+The floor is 1000 rather than Node 26's 500 because a deadline below the handshake
+does not slow a connection, it kills it, and 500 is 1.3 times the slowest handshake
+measured. The cost is reasoned from Node's documented behaviour, not measured: on a
+network whose first listed address drops packets without answering, each new
+connection waits the full second before the next address is tried.
+
+The mint's own sentence changed in the same release (`server/gateway.js`). A
+transport failure was reported as "Google refused to mint a Live token: fetch
+failed"; it is now reported as a request that never reached Google, naming the
+error codes found in `error.cause`. The reason stays `mint-failed`, so the renderer
+and the route's enum are unchanged.
+
+`tests/address-attempts.test.mjs` cannot reproduce the failure, because loopback
+has no slow handshake and no unroutable IPv6. It asserts the floor arithmetic,
+hands the flag to a real Node to prove Node accepts it (a misspelt flag exits with
+"bad option" and the sidecar would never start), and reads both call sites from
+`main.cjs`. The failure is reproduced by fetching a dual-stack host under
+`ELECTRON_RUN_AS_NODE=1 electron`, and that probe passes on a network with working
+IPv6 whatever the code does: check `curl -6` before trusting a green one.
+
 ### 6.1 Turn semantics while a run is in flight (2026-09-05)
 
 A directed utterance is not automatically an instruction. `turnIntent.ts`

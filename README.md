@@ -51,14 +51,14 @@ assistant hotkey and the screen overlay — run `npm start` inside `studio/`.
 
 ```bash
 npm test            # root gateway/runner/licence/billing suite — 143 tests
-npm run studio:test # application suite — 2954 tests
+npm run studio:test # application suite — 2960 tests
 npm run verify:all  # both, plus the studio typecheck and production build
 cd studio && npm run eval:local  # the local lane's fixed eval against the real model (needs Ollama)
 cd studio && npm run eval:voice  # the voice co-agent's fixed eval, same discipline (needs Ollama)
 cd studio && npm run eval:memory # Temi's memory policy over a simulated year (pure, no model)
 ```
 
-Both suites are green: 143/143 and 2954/2954, no skips.
+Both suites are green: 143/143 and 2960/2960, no skips.
 
 ## Product modes
 

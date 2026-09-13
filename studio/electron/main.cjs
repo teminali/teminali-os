@@ -17,6 +17,14 @@ const { initBrowserViews } = require("./browserView.cjs");
 const { initMpvView } = require("./mpvView.cjs");
 const { configureTouchIdWebAuthn } = require("./webauthn.cjs");
 const { attachContextMenu } = require("./contextMenu.cjs");
+const { raiseAddressAttemptBudget, addressAttemptArgs } = require("./addressAttempts.cjs");
+
+// Before anything in this process opens a socket. Electron's Node gives each
+// address of a host 250 ms to connect before abandoning it, so a network whose
+// handshake is slower than that cannot reach any host that resolves to IPv4 and
+// to an IPv6 with no route. That was "fetch failed" from the Gemini token mint;
+// the measurement is in addressAttempts.cjs.
+raiseAddressAttemptBudget();
 
 // The file pane's video and audio come over `teminali-media://`, and Electron
 // only grants a scheme its privileges before `app.ready`. Handled after it.
@@ -278,7 +286,9 @@ async function startVoiceSidecar() {
   // each platform's package managers put it; null is passed as an empty string,
   // which the sidecar treats as "not set" and falls back to PATH.
   const ffmpeg = findFfmpeg();
-  const child = spawn(process.execPath, [entry], {
+  // A child started from process.execPath is a fresh Node with the 250 ms
+  // connect deadline, and the sidecar downloads its models on first run.
+  const child = spawn(process.execPath, [...addressAttemptArgs(), entry], {
     cwd: root,
     env: {
       ...process.env,
