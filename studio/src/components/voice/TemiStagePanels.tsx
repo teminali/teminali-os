@@ -131,9 +131,10 @@ export const TemiChatMenu: React.FC<TemiChatMenuProps> = ({
    timbre; that was not measured and would be invention.
 */
 const VOICE_OPTIONS = [
-  { key: "Sulafat", name: "Sulafat", desc: "Even conversational pace — 153 wpm" },
+  { key: "Sulafat", name: "Sulafat", desc: "Natural conversational Italian cadence — 153 wpm (Audition Default)" },
+  { key: "Aoede", name: "Aoede", desc: "Lush, unhurried, melodic — 115 wpm" },
   { key: "Gacrux", name: "Gacrux", desc: "Measured and deliberate — 129 wpm" },
-  { key: "Aoede", name: "Aoede", desc: "Slower, unhurried — 115 wpm" },
+  { key: "Vindemiatrix", name: "Vindemiatrix", desc: "Deep and thoughtful — 102 wpm" },
   { key: "Callirrhoe", name: "Callirrhoe", desc: "Quick and bright — 208 wpm" },
 ];
 

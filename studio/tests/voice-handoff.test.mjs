@@ -31,6 +31,7 @@ import { readFile } from "node:fs/promises";
 
 import {
   frameAssistantReport,
+  frameVoiceDelegatedTask,
   handoffAcknowledgement,
   isAssistantReportEcho,
 } from "../src/services/voice/assistantHandoff.ts";
@@ -64,6 +65,13 @@ test("a missing note still leaves her something to say", () => {
   for (const empty of ["", "   "]) {
     assert.match(handoffAcknowledgement(empty), /then stop: "One moment\."/);
   }
+});
+
+test("delegated task is framed with voice assistant context and anti-hallucination instruction", () => {
+  const framed = frameVoiceDelegatedTask("run the tests");
+  assert.match(framed, /\[VOICE ASSISTANT CONTEXT: This task was spoken by the operator to Temi/);
+  assert.match(framed, /If this request is conversational, a vocal performance/);
+  assert.match(framed, /run the tests/);
 });
 
 /* ── What she is told when the report lands ───────────────────────────────── */
