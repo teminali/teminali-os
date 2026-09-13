@@ -46,11 +46,20 @@ jobs:
     # (tests/assistant-launch.test.mjs:373) and the fact that build:pointer
     # compiles the Swift source here rather than later in the build matrix.
     #
-    # So this can move to ubuntu-latest and save the 10x macOS multiplier, but
-    # only after a workflow_dispatch rehearsal proves the suite is green on
-    # Linux. It has never once run there, and guessing is how a release breaks.
-    # The mechanical blockers are already cleared: build:pointer is gated below
-    # and tests/bin-paths.test.mjs no longer hard-asserts a Homebrew path.
+    # So this could move to ubuntu-latest and save the 10x macOS multiplier,
+    # and the mechanical blockers are already cleared: build:pointer is gated
+    # below, tests/bin-paths.test.mjs no longer hard-asserts a Homebrew path,
+    # and the one test that reads a real /Applications skips itself off darwin
+    # (tests/assistant-launch.test.mjs:373).
+    #
+    # That rehearsal has now been run, and it is why this line still says
+    # macos. On 2026-09-13, before the v0.0.14 tag, a workflow_dispatch on
+    # ubuntu-latest got through npm ci, voice:install, a skipped build:pointer
+    # and typecheck, and then hung in the studio `npm test` step for 28 minutes
+    # against a suite that takes minutes locally. It was cancelled, and a
+    # cancelled in-progress job leaves no log blob, so what hangs is not known.
+    # Find that before moving this line. The saving is real, but it is not
+    # worth a release that never publishes.
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
