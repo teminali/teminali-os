@@ -124,7 +124,6 @@ export const PROFILE_ICONS: Record<ModelProfileId, React.ReactNode> = {
   flash: <Zap size={13} className="text-accent" strokeWidth={2.2} />,
   auto: <Sparkles size={13} className="text-reason" strokeWidth={2} />,
   max: <BrandGlyph brand="teminali" size={14} blend={false} />,
-  gemini: <BrandGlyph brand="gemini" size={14} />,
 };
 
 const ICONS = PROFILE_ICONS;
@@ -139,8 +138,7 @@ const ICONS = PROFILE_ICONS;
 export const PROFILE_PICKER_COPY: Record<ModelProfileId, string> = {
   flash: "The lightest installed model, every turn",
   auto: "Light model for everyday turns, heavier one when a task is hard",
-  max: "Frontier Max online model with built-in key",
-  gemini: "Google Gemini 3.8 Flash (Free BYOK)",
+  max: "Max online model with built-in key",
 };
 
 /** A branch of the tree. `frontier` is always present; the agents come and go. */
@@ -295,11 +293,6 @@ export const ModelPicker: React.FC<ModelPickerProps> = ({ open, onClose }) => {
       rows.push({
         key: `profile:${profile.id}`,
         run: () => {
-          if (profile.id === "gemini" && !googleConfigured) {
-            setGeminiKeyModalOpen(true);
-            onClose();
-            return;
-          }
           setProfile(profile.id);
           onClose();
         },
@@ -420,7 +413,7 @@ export const ModelPicker: React.FC<ModelPickerProps> = ({ open, onClose }) => {
 
   /** What each lane will actually run, so the label is never a promise. */
   const runs = (id: ModelProfileId) => {
-    if (id === "max" || id === "gemini") return { tag: "gemini-3.8-flash", bytes: 0 };
+    if (id === "max") return { tag: "gemini-3.8-flash", bytes: 0 };
     if (!routing) return null;
     if (id === "flash") return routing.light;
     return routing.light;
@@ -586,36 +579,6 @@ export const ModelPicker: React.FC<ModelPickerProps> = ({ open, onClose }) => {
           let metaNode: React.ReactNode;
           if (profile.id === "max") {
             metaNode = <span className="font-mono text-purple-300">gemini-3.8-flash</span>;
-          } else if (profile.id === "gemini") {
-            metaNode = googleConfigured ? (
-              <span
-                role="button"
-                tabIndex={0}
-                onClick={(e) => {
-                  e.stopPropagation();
-                  setGeminiKeyModalOpen(true);
-                  onClose();
-                }}
-                className="font-mono text-emerald-300 hover:text-emerald-100 cursor-pointer inline-flex items-center gap-1 group/key"
-                title="Click to configure or change your Google Gemini API key"
-              >
-                <span>gemini-3.8-flash</span>
-                <KeyRound size={10} className="text-emerald-400 group-hover/key:text-emerald-200 transition-colors" />
-              </span>
-            ) : (
-              <span
-                role="button"
-                tabIndex={0}
-                onClick={(e) => {
-                  e.stopPropagation();
-                  setGeminiKeyModalOpen(true);
-                  onClose();
-                }}
-                className="text-emerald-400 hover:underline cursor-pointer font-medium"
-              >
-                Free (BYOK)
-              </span>
-            );
           } else if (loading) {
             metaNode = <Loader2 size={9} className="animate-spin inline" />;
           } else if (model) {
@@ -636,13 +599,9 @@ export const ModelPicker: React.FC<ModelPickerProps> = ({ open, onClose }) => {
                 description,
                 profile.id === "max"
                   ? "runs gemini-3.8-flash (Built-in Key)"
-                  : profile.id === "gemini"
-                    ? googleConfigured
-                      ? "runs gemini-3.8-flash with your Google key"
-                      : "Requires Google Gemini API key (click to add your free key)"
-                    : model
-                      ? `runs ${model.tag} (${formatBytes(model.bytes)})`
-                      : null,
+                  : model
+                    ? `runs ${model.tag} (${formatBytes(model.bytes)})`
+                    : null,
                 profile.id === "auto" && routing?.heavy && routing.heavy.tag !== routing.light?.tag
                   ? `escalates to ${routing.heavy.tag}`
                   : null,
@@ -651,11 +610,6 @@ export const ModelPicker: React.FC<ModelPickerProps> = ({ open, onClose }) => {
                 .join(" · ")}
               meta={metaNode}
               onSelect={() => {
-                if (profile.id === "gemini" && !googleConfigured) {
-                  setGeminiKeyModalOpen(true);
-                  onClose();
-                  return;
-                }
                 setProfile(profile.id);
                 onClose();
               }}

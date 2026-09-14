@@ -161,7 +161,6 @@ const MODEL_PROFILES: Record<ModelProfileId, true> = {
   flash: true,
   auto: true,
   max: true,
-  gemini: true,
 };
 
 /** The hidden set as it is stored: ids this build knows, each at most once. */

@@ -1835,9 +1835,32 @@ export async function executeTool(
 
   try {
     const data = await tool.handler(parsed.data, { agentName });
+    // Log video editing action to activity stream
+    void import("../../store/assistantActivityStore").then(({ useAssistantActivityStore }) => {
+      useAssistantActivityStore.getState().logAction({
+        type: "cmd",
+        category: "video",
+        title: `Video Timeline: ${name.replace(/_/g, " ")}`,
+        cmd: `video-tool ${name}`,
+        result: data ? (typeof data === "string" ? data : JSON.stringify(data).slice(0, 120)) : "Success",
+        desc: `Video operation: ${name.replace(/_/g, " ")}`,
+        status: "success",
+      });
+    }).catch(() => {});
     return { success: true, data, durationMs: Math.round(performance.now() - started) };
   } catch (err) {
     const error = err instanceof Error ? err.message : String(err);
+    void import("../../store/assistantActivityStore").then(({ useAssistantActivityStore }) => {
+      useAssistantActivityStore.getState().logAction({
+        type: "cmd",
+        category: "video",
+        title: `Video Timeline: ${name.replace(/_/g, " ")}`,
+        cmd: `video-tool ${name}`,
+        result: error,
+        desc: `Video operation failed: ${name.replace(/_/g, " ")}`,
+        status: "failed",
+      });
+    }).catch(() => {});
     return { success: false, error, durationMs: Math.round(performance.now() - started) };
   }
 }

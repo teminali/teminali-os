@@ -90,7 +90,8 @@ export class SelfAudioMonitor {
   drop(id: string, now = Date.now()): void {
     const was = this.playing;
     this.sources.delete(id);
-    if (was && !this.playing) this.quietSince = now;
+    if (id !== "assistant:tts" && was && !this.playing) this.quietSince = now;
+    else if (id === "assistant:tts" && !this.playing) this.quietSince = 0;
   }
 
   clear(now = Date.now()): void {

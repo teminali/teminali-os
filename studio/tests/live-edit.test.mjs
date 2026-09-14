@@ -271,3 +271,39 @@ test("a new chat forgets what the last one read", async () => {
   assert.equal(LiveEditService.getSnapshot().phase, "error");
   assert.deepEqual(written, ["scripts/release.sh"], "the new conversation may not overwrite on the old one's evidence");
 });
+
+test("live edit parses inline filename mentions and colon notation", () => {
+  const prompt = "Temi, create an app.js file that implements an interactive shopping cart with an item counter, a subtotal calculator with 10% tax, and link it in index.html.";
+
+  // 1. Inline preceding mention
+  const t1 = "I will create `app.js`:\n```javascript\nconsole.log('cart');\n```\nAnd update `index.html`:\n```html\n<script src=\"app.js\"></script>\n```";
+  assert.deepEqual(parseWorkspaceEdits(t1, { userPrompt: prompt }), [
+    { path: "app.js", content: "console.log('cart');\n", complete: true },
+    { path: "index.html", content: '<script src="app.js"></script>\n', complete: true },
+  ]);
+
+  // 2. Colon fence notation
+  const t2 = "```javascript:app.js\nconsole.log('cart');\n```";
+  assert.deepEqual(parseWorkspaceEdits(t2, { userPrompt: prompt }), [
+    { path: "app.js", content: "console.log('cart');\n", complete: true },
+  ]);
+
+  // 3. Unlabelled fence matched to user prompt
+  const t3 = "```javascript\nconsole.log('cart');\n```";
+  assert.deepEqual(parseWorkspaceEdits(t3, { userPrompt: prompt }), [
+    { path: "app.js", content: "console.log('cart');\n", complete: true },
+  ]);
+});
+
+test("live edit rejects shell commands as filenames and ignores execution fences", () => {
+  // Shell execution fences should never be treated as file edits
+  const toolText = "I'm running inspect:\n```frontier-run\nhead -n 50 index.html\n```\n```bash\ncat index.html\n```";
+  assert.deepEqual(parseWorkspaceEdits(toolText), []);
+
+  // Preceding shell command lines should not be extracted as filenames
+  const commandMention = "I ran this command:\nhead -n 50 index.html\n```html\n<div>sample</div>\n```";
+  // The command line is not a filename, so unlabelled block doesn't bind to "head -n 50 index.html"
+  const edits = parseWorkspaceEdits(commandMention);
+  assert.ok(!edits.some((e) => e.path.includes("head") || e.path.includes("index.html")));
+});
+

@@ -537,7 +537,16 @@ test("an unterminated heredoc stays one command rather than shredding", () => {
   const requests = parseAgentCommands(fenceOf("python3 - <<'EDIT'", "import os", "print(os.getcwd())"));
   assert.equal(requests.length, 1);
   assert.match(requests[0].command, /print\(os\.getcwd\(\)\)$/);
+  assert.equal(requests[0].risk, "blocked", "unterminated heredoc is blocked from executing");
 });
+
+test("an unterminated heredoc is blocked to prevent writing truncated files", () => {
+  const requests = parseAgentCommands(fenceOf("cat <<'EOF' > style.css", "body { color: red;"));
+  assert.equal(requests.length, 1);
+  assert.equal(requests[0].risk, "blocked");
+  assert.match(requests[0].reason, /unterminated heredoc/);
+});
+
 
 /*
   Which files the conversation has actually read.

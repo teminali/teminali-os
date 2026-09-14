@@ -72,7 +72,7 @@ export const ChangeReviewDock: React.FC<{ width?: "column" | "fill" }> = ({ widt
 
         <button
           type="button"
-          onClick={() => void rejectAll()}
+          onClick={() => void useChangeStore.getState().rejectAll()}
           disabled={busyPath !== null}
           className="h-6 px-2.5 rounded-md text-xs text-ink-muted hover:text-danger hover:bg-danger/10 disabled:opacity-40 transition-colors duration-ds ease-ds"
         >
@@ -80,9 +80,9 @@ export const ChangeReviewDock: React.FC<{ width?: "column" | "fill" }> = ({ widt
         </button>
         <button
           type="button"
-          onClick={acceptAll}
+          onClick={() => useChangeStore.getState().acceptAll()}
           disabled={busyPath !== null}
-          className="h-6 px-2.5 rounded-md text-xs font-medium bg-accent/15 text-accent hover:bg-accent/25 disabled:opacity-40 transition-colors duration-ds ease-ds"
+          className="h-6 px-2.5 rounded-md text-xs font-medium bg-emerald-500 hover:bg-emerald-600 text-white disabled:opacity-40 disabled:pointer-events-none transition-colors duration-ds ease-ds shadow-sm"
         >
           Accept all
         </button>

@@ -67,9 +67,9 @@ export interface ChatSession {
 export const PROFILES_LIST: ModelProfile[] = [
   {
     id: "flash",
-    name: "Frontier Flash",
+    name: "Flash",
     provider: "ollama",
-    modelName: "Frontier Flash · fast local execution",
+    modelName: "Flash · fast local execution",
     costLabel: "$0.00 local",
     badge: "Fast · lightweight · resource-safe",
     badgeColor: "bg-emerald-500/15 text-emerald-300 border-emerald-500/30",
@@ -77,9 +77,9 @@ export const PROFILES_LIST: ModelProfile[] = [
   },
   {
     id: "auto",
-    name: "Frontier Auto",
+    name: "Auto",
     provider: "hybrid",
-    modelName: "Frontier Auto · adaptive local routing",
+    modelName: "Auto · adaptive local routing",
     costLabel: "$0.00 local",
     badge: "Flagship · official router wrapper",
     badgeColor: "bg-[#FF6C37]/15 text-[#FF6C37] border-[#FF6C37]/30",
@@ -87,23 +87,13 @@ export const PROFILES_LIST: ModelProfile[] = [
   },
   {
     id: "max",
-    name: "Frontier Max",
+    name: "Max",
     provider: "gemini",
-    modelName: "Frontier Max · Google Gemini 3.8 Flash",
+    modelName: "Max · Google Gemini 3.8 Flash",
     costLabel: "Online (Included)",
     badge: "Gemini 3.8 Flash",
     badgeColor: "bg-purple-500/15 text-purple-300 border-purple-500/30",
     description: "Online flagship model powered by Google Gemini 3.8 Flash via Claude Code with Teminali OS built-in key.",
-  },
-  {
-    id: "gemini",
-    name: "Gemini Flash (BYOK)",
-    provider: "gemini",
-    modelName: "Gemini Flash · Bring Your Own Key",
-    costLabel: "Free · Online (BYOK)",
-    badge: "Free (BYOK)",
-    badgeColor: "bg-emerald-500/15 text-emerald-300 border-emerald-500/30",
-    description: "Free online tier powered by Claude Code with your own free Google AI Studio key.",
   },
 ];
 

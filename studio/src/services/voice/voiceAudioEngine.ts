@@ -64,6 +64,7 @@ export class VoiceAudioEngine {
   userAnalyser: AnalyserNode | null = null;
   assistantAnalyser: AnalyserNode | null = null;
   isTTSPlaying = false;
+  ttsStoppedAt = 0;
   isMuted = false;
 
   onAudioChunkReady: ((buf: ArrayBuffer) => void) | null = null;
@@ -96,7 +97,8 @@ export class VoiceAudioEngine {
     if (!this.batchBuffer || !this.batchView) return;
     const ts = Date.now() & 0xffffffff;
     this.batchView.setUint32(0, ts, false); // big-endian
-    const flags = this.isTTSPlaying ? 1 : 0;
+    const isDucked = this.isTTSPlaying || Date.now() - this.ttsStoppedAt < 400;
+    const flags = isDucked ? 1 : 0;
     this.batchView.setUint32(4, flags, false); // big-endian
 
     if (this.onAudioChunkReady && !this.isMuted) {
@@ -118,42 +120,21 @@ export class VoiceAudioEngine {
     }
   }
 
+  private startGeneration = 0;
+
   async start() {
-    if (!this.audioContext) {
+    const generation = ++this.startGeneration;
+
+    if (!this.audioContext || this.audioContext.state === "closed") {
       const AudioCtx = window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
       this.audioContext = new AudioCtx({ sampleRate: 48000 });
     }
     if (this.audioContext.state === "suspended") {
       await this.audioContext.resume();
     }
+    if (this.startGeneration !== generation) return;
 
-    /*
-      All three processors stay on. Chromium's audio processing applies a gain
-      stage whenever noise suppression or AGC is enabled, and in a quiet room it
-      drives the peaks to full scale -- measured through this app's own
-      microphone, 2026-09-11, 102400 samples each, same room, back to back:
-
-        nothing on        peak -12.9 dBFS   rms -31.1   0 clipped
-        AEC only          peak  -9.8 dBFS   rms -31.2   0 clipped
-        AEC + NS          peak   0.0 dBFS   rms -23.8   5 clipped
-        AEC + AGC         peak   0.0 dBFS   rms -22.9   3 clipped
-        AEC + NS + AGC    peak  -0.0 dBFS   rms -24.5   clipping
-
-      Clipped audio is what Whisper answers with repetition loops and with its
-      canonical silence artifact, "Thank you very much", so it is worth fixing.
-      It was tried here and must not be tried again this way: turning AGC and NS
-      off dropped what actually reached the pipeline to peak -29.2 dBFS, rms
-      -58.3, measured off the wire in the frames the app sends. The recogniser
-      never triggered at all. AGC is not decoration; it is the only thing
-      putting a quiet room at a level the VAD can hear.
-
-      The fix, when someone takes it on, belongs downstream of the gain rather
-      than instead of it -- a limiter in `pcmWorkletProcessor`, which already
-      clamps to +/-1 and so has the peak in its hands -- and it needs to be
-      judged on what leaves the socket, not on what an AnalyserNode reads from a
-      separate stream. Those two disagreed by 20 dB here.
-    */
-    this.mediaStream = await navigator.mediaDevices.getUserMedia({
+    const stream = await navigator.mediaDevices.getUserMedia({
       audio: {
         channelCount: 1,
         echoCancellation: true,
@@ -161,6 +142,20 @@ export class VoiceAudioEngine {
         noiseSuppression: true,
       },
     });
+
+    if (this.startGeneration !== generation) {
+      stream.getTracks().forEach((track) => track.stop());
+      return;
+    }
+    this.mediaStream = stream;
+
+    if (!this.audioContext || this.audioContext.state === "closed") {
+      const AudioCtx = window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
+      this.audioContext = new AudioCtx({ sampleRate: 48000 });
+    }
+    if (this.audioContext.state === "suspended") {
+      await this.audioContext.resume();
+    }
 
     this.userAnalyser = this.audioContext.createAnalyser();
     this.userAnalyser.fftSize = 128;
@@ -209,6 +204,7 @@ export class VoiceAudioEngine {
         this.onTTSPlaybackStarted?.();
       } else if (type === "ttsPlaybackStopped") {
         this.isTTSPlaying = false;
+        this.ttsStoppedAt = Date.now();
         this.onTTSPlaybackStopped?.();
       } else if (type === "ttsProgress") {
         this.onTTSProgress?.(event.data.secondsPlayed as number);
@@ -234,6 +230,7 @@ export class VoiceAudioEngine {
 
   stopTTSPlayback() {
     this.isTTSPlaying = false;
+    this.ttsStoppedAt = Date.now();
     if (this.ttsWorklet) {
       this.ttsWorklet.port.postMessage({ type: "clear" });
     }
@@ -263,6 +260,9 @@ export class VoiceAudioEngine {
   }
 
   cleanup() {
+    this.startGeneration++;
+    this.isTTSPlaying = false;
+    this.ttsStoppedAt = 0;
     this.flushRemainder();
     if (this.micSource) {
       try { this.micSource.disconnect(); } catch {}

@@ -263,7 +263,7 @@ export const CursorMarkdownRenderer: React.FC<CursorMarkdownRendererProps> = ({
   // The stage's own prose metrics, and `text-current` so the voice screen's
   // palette governs rather than the token ramp — see `scale` on the props.
   const shell = stage
-    ? "markdown-body font-sans text-[16px] text-current leading-[1.75] space-y-4"
+    ? "markdown-body stage-prose font-sans !text-[16px] text-current !leading-[1.6] space-y-4"
     : `markdown-body font-sans ${body} text-ink-prose leading-[1.7] space-y-2.5`;
   // The last paragraph takes the caret. Anything else (a list, a table, a code
   // block) has no sentence to end, so it falls through to a trailing sibling.

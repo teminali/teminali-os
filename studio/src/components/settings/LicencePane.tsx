@@ -46,10 +46,9 @@ const formatBytes = (bytes: number): string => {
 };
 
 const PROFILE_LABEL: Record<ModelProfileId, string> = {
-  flash: "Frontier Flash",
-  auto: "Frontier Auto",
-  max: "Frontier Max",
-  gemini: "Gemini",
+  flash: "Flash",
+  auto: "Auto",
+  max: "Max",
 };
 
 export const LicencePane: React.FC = () => {

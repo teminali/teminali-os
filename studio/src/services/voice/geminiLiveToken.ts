@@ -62,7 +62,11 @@ export async function fetchGeminiLiveToken(signal?: AbortSignal): Promise<Gemini
   let response: Response;
   try {
     response = await GatewayClient.request("/api/voice/realtime/token", { method: "GET", signal });
-  } catch {
+  } catch (err: unknown) {
+    const isAbort = signal?.aborted || (err instanceof Error && (err.name === "AbortError" || err.name === "TimeoutError"));
+    if (isAbort) {
+      return failure("mint-failed", "Token request timed out. Retrying voice connection...");
+    }
     return failure("gateway-unreachable", "The local Frontier gateway is not reachable, so voice cannot authenticate.");
   }
 

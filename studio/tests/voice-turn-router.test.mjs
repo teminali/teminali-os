@@ -145,6 +145,25 @@ test("a stop during a run stops the run and says so", () => {
   assert.equal(decision.suppressPipelineAnswer, true);
 });
 
+test("assistant-directed stop commands during a run stop the run and say so", () => {
+  const phrases = [
+    "stop the assistant",
+    "stop the other assistant",
+    "stop the agent",
+    "cancel the assistant",
+    "cancel the other assistant",
+    "stop what you're doing",
+    "stop whatever you're doing",
+    "kill the assistant",
+  ];
+  for (const text of phrases) {
+    const decision = during(text);
+    assert.equal(decision.action.kind, "stop", `Expected "${text}" to stop the run`);
+    assert.equal(decision.speak, STOP_ACKNOWLEDGEMENT);
+    assert.equal(decision.suppressPipelineAnswer, true);
+  }
+});
+
 test("asking for quiet stops the voice and leaves the run alone", () => {
   const decision = during("stop talking");
   assert.equal(decision.action.kind, "hush");

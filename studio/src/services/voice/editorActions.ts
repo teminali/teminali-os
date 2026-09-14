@@ -723,6 +723,11 @@ export function parseEditorCommand(text: string): EditorCommand | null {
   }
 
   /* the razor and the bin */
+  const splitAtMatch = /^(?:cut|split|slice|chop|razor)\s+(?:at\s+)?(.+)$/i.exec(said);
+  if (splitAtMatch) {
+    const ms = parseSpokenMs(splitAtMatch[1]);
+    if (ms !== null) return timeline("split", `Cut at ${spellMs(ms)}.`, { ms });
+  }
   if (SPLIT_HERE.test(said) || SPLIT_PLAIN.test(said)) return timeline("split", "Cut.");
   if (DELETE_SELECTED.test(said)) return timeline("delete_selected", "Deleted.");
   if (UNDO.test(said)) return timeline("undo", "Undone.");

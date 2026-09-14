@@ -134,6 +134,20 @@ test("attention words during a busy run do not trigger 'acknowledge' intent", ()
   assert.equal(classifyTurnIntent("okay cool carry on", busy).intent, "acknowledge");
 });
 
+test("assistant-directed stop phrases trigger 'stop' intent", () => {
+  const busy = { busy: true, speaking: false };
+  const idle = { busy: false, speaking: false };
+
+  for (const ctx of [busy, idle]) {
+    assert.equal(classifyTurnIntent("stop the assistant", ctx).intent, "stop");
+    assert.equal(classifyTurnIntent("stop the other assistant", ctx).intent, "stop");
+    assert.equal(classifyTurnIntent("stop the agent", ctx).intent, "stop");
+    assert.equal(classifyTurnIntent("cancel the assistant", ctx).intent, "stop");
+    assert.equal(classifyTurnIntent("stop what you're doing", ctx).intent, "stop");
+    assert.equal(classifyTurnIntent("can you stop the assistant", ctx).intent, "stop");
+  }
+});
+
 test("sanitizeOngoingAssist converts robotic 'today' phrasing to 'now' in ongoing turns", () => {
   assert.equal(
     sanitizeOngoingAssist("Hello! How can I assist you today?"),

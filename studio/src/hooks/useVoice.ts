@@ -30,7 +30,7 @@ function loadSettings(): VoiceSettings {
     // 2026-09-05; only that exact value is treated as "never chosen".
     if (parsed.ttsRate === 1.02) delete parsed.ttsRate;
     const wakeWords = Array.isArray(parsed.wakeWords)
-      ? Array.from(new Set(["temy", "teminali", ...parsed.wakeWords]))
+      ? Array.from(new Set(["temy", "temi", "teminali", "timmy", ...parsed.wakeWords]))
       : DEFAULT_VOICE_SETTINGS.wakeWords;
     return { ...DEFAULT_VOICE_SETTINGS, ...parsed, wakeWords };
   } catch {

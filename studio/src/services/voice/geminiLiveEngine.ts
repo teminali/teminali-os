@@ -67,8 +67,6 @@ import { EchoGuard } from "./echoGuard.ts";
  *
  * The promise settles at app boot; a session is opened by a user action, behind
  * an awaited `primeTemiMemory()` network round trip. There is no race to lose.
- * When that specifier gains its extension, this collapses back into a one-line
- * static import and nothing else here changes.
  */
 let readResidentMemory: () => readonly MemoryAtom[] = () => [];
 void import("./temiMemoryStore.ts")

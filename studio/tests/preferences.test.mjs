@@ -139,15 +139,15 @@ test("nothing is hidden until the operator hides it", () => {
 });
 
 test("the picker offers what is not hidden", () => {
-  const profiles = [{ id: "flash" }, { id: "auto" }, { id: "max" }, { id: "gemini" }];
-  const shown = visibleModelProfiles(profiles, ["max", "gemini"], "flash");
+  const profiles = [{ id: "flash" }, { id: "auto" }, { id: "max" }];
+  const shown = visibleModelProfiles(profiles, ["max"], "flash");
   assert.deepEqual(shown.map((profile) => profile.id), ["flash", "auto"]);
 });
 
 test("the picker always names the profile it is running, hidden or not", () => {
   // CommandPaletteModal and GeminiKeyModal both call setProfile without asking
   // this list, so the active profile really can be a hidden one.
-  const profiles = [{ id: "flash" }, { id: "auto" }, { id: "max" }, { id: "gemini" }];
-  const shown = visibleModelProfiles(profiles, ["flash", "auto", "max", "gemini"], "max");
+  const profiles = [{ id: "flash" }, { id: "auto" }, { id: "max" }];
+  const shown = visibleModelProfiles(profiles, ["flash", "auto", "max"], "max");
   assert.deepEqual(shown.map((profile) => profile.id), ["max"]);
 });

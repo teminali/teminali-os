@@ -5,24 +5,31 @@ export type ActivityType = "cmd" | "edit" | "read" | "test";
 export interface AssistantActivityItem {
   id: string;
   type: ActivityType;
+  category?: "cmd" | "explore" | "edit" | "task" | "test" | "tool" | "video";
   timestamp: number;
   timeLabel?: string;
+  title?: string;
   cmd?: string;
   result?: string;
+  details?: string;
+  output?: string;
   file?: string;
   badge?: "modify" | "create" | "delete" | "read";
   plus?: string;
   minus?: string;
   desc?: string;
   status?: "success" | "running" | "failed";
+  count?: number;
+  subItems?: Array<{ id?: string; text: string; status?: "completed" | "running" | "failed" }>;
 }
 
 export type CodingEngine = "codex" | "claude" | "gemini" | "frontier";
 
 export interface AssistantActivityState {
   items: AssistantActivityItem[];
-  /** Whether the activity dialog is open. Nothing opens it but a click. */
+  /** Whether the CLI streaming panel is expanded above the chatbox. */
   isOpen: boolean;
+  isPanelExpanded: boolean;
   selectedVoice: string;
   activeEngine: CodingEngine;
   isTaskRunning: boolean;
@@ -30,6 +37,8 @@ export interface AssistantActivityState {
   latestProgress: string | null;
   toggleOpen: () => void;
   setOpen: (open: boolean) => void;
+  togglePanelExpanded: () => void;
+  setPanelExpanded: (expanded: boolean) => void;
   setSelectedVoice: (voice: string) => void;
   setActiveEngine: (engine: CodingEngine) => void;
   setTaskRunning: (running: boolean, prompt?: string | null) => void;
@@ -81,13 +90,16 @@ function saveVoice(voice: string): void {
 export const useAssistantActivityStore = create<AssistantActivityState>((set) => ({
   items: INITIAL_ITEMS,
   isOpen: false,
+  isPanelExpanded: false,
   selectedVoice: readSavedVoice(),
   activeEngine: "codex",
   isTaskRunning: false,
   currentTaskPrompt: null,
   latestProgress: null,
-  toggleOpen: () => set((state) => ({ isOpen: !state.isOpen })),
-  setOpen: (isOpen) => set({ isOpen }),
+  toggleOpen: () => set((state) => ({ isOpen: !state.isOpen, isPanelExpanded: !state.isPanelExpanded })),
+  setOpen: (isOpen) => set({ isOpen, isPanelExpanded: isOpen }),
+  togglePanelExpanded: () => set((state) => ({ isPanelExpanded: !state.isPanelExpanded, isOpen: !state.isPanelExpanded })),
+  setPanelExpanded: (isPanelExpanded) => set({ isPanelExpanded, isOpen: isPanelExpanded }),
   setSelectedVoice: (selectedVoice) => {
     if (isGeminiVoiceName(selectedVoice)) saveVoice(selectedVoice);
     set({ selectedVoice });
@@ -98,6 +110,9 @@ export const useAssistantActivityStore = create<AssistantActivityState>((set) =>
       isTaskRunning,
       currentTaskPrompt: isTaskRunning ? prompt : null,
       latestProgress: isTaskRunning ? "Starting task..." : null,
+      // Auto-expand the CLI streaming drawer when a task starts running
+      isPanelExpanded: isTaskRunning ? true : undefined,
+      isOpen: isTaskRunning ? true : undefined,
     }),
   setLatestProgress: (latestProgress) => set({ latestProgress }),
   logAction: (action) =>
@@ -114,3 +129,8 @@ export const useAssistantActivityStore = create<AssistantActivityState>((set) =>
     })),
   clearActivity: () => set({ items: [] }),
 }));
+
+if (typeof window !== "undefined") {
+  (window as unknown as { __assistantActivityStore: typeof useAssistantActivityStore }).__assistantActivityStore =
+    useAssistantActivityStore;
+}

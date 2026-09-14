@@ -266,11 +266,11 @@ export class MicEndpointer {
       this.windowMs = event.windowMs;
       this.lastEndpointAtMs = at;
       this.prosody.reset();
-      const hadVocalSpeech = this.periodicFramesInTurn > 0;
+      const hadVocalSpeech = this.periodicFramesInTurn >= 2;
       this.periodicFramesInTurn = 0;
-      // If the turn contained zero periodic vowel frames across its entire duration,
-      // it was mechanical noise (table scratching, keyboard rattle, desk bumping)
-      // without human speech. Discard it.
+      // If the turn contained fewer than 2 periodic vowel frames across its entire duration,
+      // it was mechanical noise (table scratching, keyboard rattle, breath puff)
+      // without sustained human speech. Discard it.
       if (!hadVocalSpeech) {
         return { type: "discarded", durationMs: event.durationMs };
       }

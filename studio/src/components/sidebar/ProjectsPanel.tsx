@@ -3,6 +3,7 @@ import { Clapperboard, FolderGit2, FolderOpen, RefreshCw } from "lucide-react";
 
 import { useProjectLibrary } from "../../hooks/useProjectLibrary";
 import { usePanelStore } from "../../store/panelStore";
+import { useStudioStore } from "../../store/studioStore";
 import { openVideoProject } from "../../video/project/io";
 import { EmptyState, IconButton, SectionLabel, SidebarRow } from "../ui";
 import type { ProjectEntry } from "../../services/workspaceService";
@@ -39,6 +40,7 @@ function age(iso?: string): string {
 
 export const ProjectsPanel: React.FC = () => {
   const { current, recent, error, loading, reload, openEntry } = useProjectLibrary();
+  const workspacePath = useStudioStore((state) => state.workspacePath);
   const focusOrOpen = usePanelStore((state) => state.focusOrOpen);
 
   /* The current root is a project like any other, and showing it twice would
@@ -96,7 +98,7 @@ export const ProjectsPanel: React.FC = () => {
           <SidebarRow
             key={entry.path}
             title={entry.path}
-            active={entry.path === current?.path}
+            active={entry.path === current?.path || (Boolean(workspacePath) && entry.path === workspacePath)}
             onClick={() => open(entry)}
             trailing={age(entry.openedAt)}
             icon={

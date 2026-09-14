@@ -19,6 +19,9 @@ import { runExport } from "./video/engine/exportPipeline";
 import { useProjectStore } from "./video/store/projectStore";
 import { useTimelineStore } from "./video/store/timelineStore";
 import { usePanelStore } from "./store/panelStore";
+import { useAssistantActivityStore } from "./store/assistantActivityStore";
+import { useApprovalStore } from "./store/approvalStore";
+import { useChangeStore } from "./store/changeStore";
 
 /**
  * Which surface this document is.
@@ -71,6 +74,7 @@ if (typeof window !== "undefined") {
     useTimelineStore,
   };
   (window as unknown as { __panelStore: typeof usePanelStore }).__panelStore = usePanelStore;
+  (window as unknown as { __changeStore: typeof useChangeStore }).__changeStore = useChangeStore;
 }
 
 /*

@@ -16,6 +16,16 @@ const SCAFFOLD_FILENAMES: Record<string, string> = {
 
 const CODE_LANGUAGES = new Set(["css", "csv", "go", "html", "java", "javascript", "js", "json", "jsx", "markdown", "md", "mjs", "py", "python", "rb", "rs", "sql", "svg", "toml", "ts", "tsx", "typescript", "xml", "yaml", "yml"]);
 
+const NON_EDIT_LANGUAGES = new Set([
+  "bash", "sh", "shell", "zsh", "console", "terminal",
+  "frontier-run", "frontier-command", "video-tool", "player-tool",
+  "ask", "screen",
+]);
+
+const SHELL_COMMAND_PREFIX = /^(?:cat|head|tail|grep|sed|awk|wc|rm|python\d*|node|bash|sh|zsh|git|ls|mkdir|touch|chmod|cp|mv|echo)\s+/i;
+const SHELL_FLAG_OR_PIPE = /(?:\s-(?:[a-zA-Z0-9]+|-[\w-]+)\b|[;&|<>])/;
+const MULTI_FILE_MENTION = /\.[a-z0-9]+\s+.*\.[a-z0-9]+/i;
+
 /**
  * A workspace-relative path, or null when the value is not one.
  *
@@ -28,8 +38,34 @@ export function normalizeWorkspacePath(value?: string): string | null {
   if (!value) return null;
   const normalized = value.trim().replace(/^["'`]|["'`]$/g, "").replace(/^\.\//, "").replace(/\\/g, "/");
   if (!normalized || normalized.length > 2_048 || normalized.startsWith("/") || normalized.includes("\0")) return null;
+  if (/[<>:*?"|`]/.test(normalized)) return null;
+  if (normalized === "." || normalized === "..") return null;
   if (normalized.split("/").some((part) => part === ".." || part === "")) return null;
+  if (SHELL_COMMAND_PREFIX.test(normalized) || SHELL_FLAG_OR_PIPE.test(normalized) || MULTI_FILE_MENTION.test(normalized)) return null;
   return normalized;
+}
+
+function isLanguageCompatibleWithPath(lang: string, filePath: string): boolean {
+  const ext = filePath.split(".").pop()?.toLowerCase();
+  if (!ext) return false;
+  const langMap: Record<string, string[]> = {
+    js: ["js", "mjs", "cjs", "jsx"],
+    javascript: ["js", "mjs", "cjs", "jsx"],
+    ts: ["ts", "tsx"],
+    typescript: ["ts", "tsx"],
+    html: ["html", "htm"],
+    css: ["css", "scss", "less"],
+    json: ["json"],
+    py: ["py"],
+    python: ["py"],
+    sql: ["sql"],
+    sh: ["sh", "bash"],
+    bash: ["sh", "bash"],
+    svg: ["svg"],
+    md: ["md", "markdown"],
+    markdown: ["md", "markdown"],
+  };
+  return langMap[lang]?.includes(ext) ?? true;
 }
 
 export function parseWorkspaceEdits(text: string, options: { activePath?: string; userPrompt?: string } = {}): ParsedWorkspaceEdit[] {
@@ -38,43 +74,65 @@ export function parseWorkspaceEdits(text: string, options: { activePath?: string
   let match: RegExpExecArray | null;
   while ((match = fence.exec(text)) !== null) {
     const metadata = match[1].trim();
-    const language = metadata.split(/\s+/)[0]?.toLowerCase() || "";
-    const metadataPath = metadata.match(/\bpath\s*=\s*(?:"([^"]+)"|'([^']+)'|([^\s]+))/i);
-    const positionalPath = metadata.split(/\s+/).slice(1).find((part) => /(?:\/|\.)/.test(part));
+    // Handle colon notation e.g. ```javascript:app.js or ```js:src/main.js
+    const colonMatch = metadata.match(/^([\w-]+):([^\s"']+)/);
+    const language = (colonMatch ? colonMatch[1] : metadata.split(/\s+/)[0])?.toLowerCase() || "";
+    if (NON_EDIT_LANGUAGES.has(language)) continue;
+
+    const metadataPath = metadata.match(/\b(?:path|file|filename|title)\s*=\s*(?:"([^"]+)"|'([^']+)'|([^\s]+))/i);
+    const bracketMatch = metadata.match(/(?:^|\s+)[(\[]([^\s)\]]+)[)\]]/);
+    const positionalPath = colonMatch
+      ? colonMatch[2]
+      : bracketMatch
+        ? bracketMatch[1]
+        : metadata.split(/\s+/).slice(1).find((part) => /(?:\/|\.)/.test(part));
+
     const precedingText = text.slice(Math.max(0, match.index - 240), match.index);
-    const precedingCandidates = [...precedingText.matchAll(/(?:^|\n)\s*(?:#{1,6}\s+)?(?:\*\*|`)?([\w@+.,() -]*(?:\/[^\s*`]+)+|[\w@+.,() -]+\.[a-z0-9]+)(?:\*\*|`)?\s*$/gim)];
-    const precedingPath = precedingCandidates.at(-1)?.[1]?.trim();
+    const precedingCandidates = [...precedingText.matchAll(/(?:^|\n)\s*(?:#{1,6}\s+)?(?:\*\*|`)?([a-zA-Z0-9_./-]+\.[a-zA-Z0-9]+)(?:\*\*|`)?:?\s*$/gim)];
+    let precedingPath = precedingCandidates.at(-1)?.[1]?.trim();
+    if (!precedingPath) {
+      // Check for inline backticked or colon-labelled path in recent lines, e.g. "Here is `app.js`:" or "File: app.js"
+      const inlineCandidates = [...precedingText.matchAll(/(?:`|(?:\b(?:file|create|update|in|for|edit|path)\b\s*:?\s*(?:\*\*|`)?))([a-zA-Z0-9_./-]+\.[a-zA-Z0-9]+)(?:`|\*\*|\b)/gi)];
+      precedingPath = inlineCandidates.at(-1)?.[1]?.trim();
+    }
+
     const headerPath = normalizeWorkspacePath(metadataPath?.[1] || metadataPath?.[2] || metadataPath?.[3] || positionalPath || precedingPath);
     let content = match[2];
-    const firstLine = content.match(/^\s*(?:(?:\/\/|#)\s*(?:file|path)\s*:\s*([^\s]+)|<!--\s*(?:file|path)\s*:\s*([^>]+?)\s*-->)\s*\n/i);
-    const commentPath = normalizeWorkspacePath(firstLine?.[1] || firstLine?.[2]);
+    const firstLine = content.match(/^\s*(?:(?:\/\/|#|\/\*|<!--)\s*(?:(?:file|path|filename)\s*:\s*)?([a-zA-Z0-9_./-]+\.[a-zA-Z0-9]+)\s*(?:\*\/|-->)?)\s*\n/i);
+    const commentPath = normalizeWorkspacePath(firstLine?.[1]);
     if (commentPath && firstLine) content = content.slice(firstLine[0].length);
     const path = headerPath || commentPath;
     candidates.push({ path: path || "", content, complete: match[3] === "```", explicit: Boolean(path), language });
   }
 
-  const explicit = candidates.filter((candidate) => candidate.explicit);
+  const explicit = candidates.filter((candidate) => candidate.explicit && (!candidate.language || isLanguageCompatibleWithPath(candidate.language, candidate.path)));
   if (explicit.length > 0) return explicit.map(({ path, content, complete }) => ({ path, content, complete }));
 
   const activePath = normalizeWorkspacePath(options.activePath);
   const editable = candidates.filter((candidate) => CODE_LANGUAGES.has(candidate.language));
-  if (activePath && editable.length === 1 && EDIT_INTENT.test(options.userPrompt || "")) {
+  if (activePath && editable.length === 1 && EDIT_INTENT.test(options.userPrompt || "") && isLanguageCompatibleWithPath(editable[0].language, activePath)) {
     const [{ content, complete }] = editable;
     return [{ path: activePath, content, complete }];
   }
 
-  // A scaffold request ("build a landing page") is normally answered with one
-  // html/css/js block per file and no path header at all. Without this, every
-  // such answer parsed to zero edits and nothing reached disk — the model looked
-  // like it had written files when it had only printed them.
+  const promptFiles = [...((options.userPrompt || "").matchAll(/\b([a-zA-Z0-9_./-]+\.(?:js|mjs|cjs|ts|tsx|jsx|html|css|json|py|sh|sql|svg|md))\b/gi))].map((m) => m[1]);
+
+  // A scaffold or prompt-driven request: map editable blocks to prompt-mentioned files or conventional names
   if (EDIT_INTENT.test(options.userPrompt || "") && editable.length > 0) {
-    const inferred = editable.map((candidate) => ({
-      path: SCAFFOLD_FILENAMES[candidate.language] || "",
-      content: candidate.content,
-      complete: candidate.complete,
-    }));
-    // Only commit when every block has a conventional home and no two blocks
-    // claim the same one; a repeated language is genuinely ambiguous.
+    const assigned = new Set<string>();
+    const inferred = editable.map((candidate) => {
+      const target = promptFiles.find((pf) => !assigned.has(pf) && isLanguageCompatibleWithPath(candidate.language, pf));
+      if (target) {
+        assigned.add(target);
+        return { path: target, content: candidate.content, complete: candidate.complete };
+      }
+      return {
+        path: SCAFFOLD_FILENAMES[candidate.language] || "",
+        content: candidate.content,
+        complete: candidate.complete,
+      };
+    });
+    // Only commit when every block has a conventional home and no two blocks claim the same one
     const paths = inferred.map((edit) => edit.path);
     if (paths.every(Boolean) && new Set(paths).size === paths.length) return inferred;
   }
@@ -102,4 +160,149 @@ export function isTruncatingRewrite(base: string, next: string): boolean {
   const baseLines = base.split("\n").length;
   const nextLines = next.split("\n").length;
   return baseLines >= 25 && nextLines * 2 < baseLines;
+}
+
+export interface ParsedHeredoc {
+  path: string;
+  delimiter: string;
+  content: string;
+  complete: boolean;
+}
+
+export function parseHeredocs(text: string): ParsedHeredoc[] {
+  const heredocs: ParsedHeredoc[] = [];
+  const lines = text.split(/\r?\n/);
+  let current: { path: string; delimiter: string; lines: string[] } | null = null;
+
+  for (const line of lines) {
+    if (!current) {
+      const m1 = line.match(/^\s*cat\s+<<-?\s*['"]?(\w+)['"]?\s*>\s*['"]?([^\s\r\n'"]+)['"]?/);
+      const m2 = line.match(/^\s*cat\s+>\s*['"]?([^\s\r\n'"]+)['"]?\s*<<-?\s*['"]?(\w+)['"]?/);
+      const m3 = line.match(/^\s*tee\s+(?:-a\s+)?['"]?([^\s\r\n'"]+)['"]?\s*<<-?\s*['"]?(\w+)['"]?/);
+
+      const header = m1
+        ? { delimiter: m1[1], path: m1[2] }
+        : m2
+          ? { delimiter: m2[2], path: m2[1] }
+          : m3
+            ? { delimiter: m3[2], path: m3[1] }
+            : null;
+
+      if (header) {
+        const norm = normalizeWorkspacePath(header.path);
+        if (norm) {
+          current = { path: norm, delimiter: header.delimiter, lines: [] };
+        }
+      }
+    } else {
+      if (line.trim().replace(/;$/, "") === current.delimiter) {
+        heredocs.push({
+          path: current.path,
+          delimiter: current.delimiter,
+          content: current.lines.join("\n"),
+          complete: true,
+        });
+        current = null;
+      } else {
+        current.lines.push(line);
+      }
+    }
+  }
+
+  if (current) {
+    heredocs.push({
+      path: current.path,
+      delimiter: current.delimiter,
+      content: current.lines.join("\n"),
+      complete: false,
+    });
+  }
+
+  return heredocs;
+}
+
+/**
+ * Extracts all file paths targeted for creation or modification by shell commands or markdown edits.
+ */
+export function extractWrittenPathsFromTurn(text: string, options: { userPrompt?: string } = {}): string[] {
+  const found = new Set<string>();
+
+  // 1. Heredocs: cat << 'EOF' > path, cat > path << 'EOF', tee path << 'EOF'
+  const heredocs = parseHeredocs(text);
+  for (const h of heredocs) {
+    found.add(h.path);
+  }
+
+  // 2. Lines outside heredocs: shell redirection and file commands
+  const lines = text.split(/\r?\n/);
+  let insideHeredoc = false;
+  let activeDelimiter = "";
+
+  for (const line of lines) {
+    if (!insideHeredoc) {
+      const m1 = line.match(/^\s*cat\s+<<-?\s*['"]?(\w+)['"]?\s*>\s*['"]?([^\s\r\n'"]+)['"]?/);
+      const m2 = line.match(/^\s*cat\s+>\s*['"]?([^\s\r\n'"]+)['"]?\s*<<-?\s*['"]?(\w+)['"]?/);
+      const m3 = line.match(/^\s*tee\s+(?:-a\s+)?['"]?([^\s\r\n'"]+)['"]?\s*<<-?\s*['"]?(\w+)['"]?/);
+      const header = m1 || m2 || m3;
+      if (header) {
+        insideHeredoc = true;
+        activeDelimiter = (m1 ? m1[1] : m2 ? m2[2] : m3 ? m3[2] : "") || "";
+        continue;
+      }
+
+      // Shell redirection to files: command > path or command >> path (not <<, not /dev/, not &)
+      const redirectMatch = line.match(/(?:^|[^<])>>?[^\S\r\n]+['"]?([^\s\r\n'";&|]+)['"]?/);
+      if (redirectMatch) {
+        const raw = redirectMatch[1];
+        if (!raw.startsWith("&") && !raw.startsWith("/dev/")) {
+          const norm = normalizeWorkspacePath(raw);
+          if (norm) found.add(norm);
+        }
+      }
+
+      // touch / cp / mv targets
+      const touchMatch = line.match(/\b(?:touch|cp\s+\S+|mv\s+\S+)[^\S\r\n]+['"]?([^\s\r\n'";&|]+)['"]?/);
+      if (touchMatch) {
+        const norm = normalizeWorkspacePath(touchMatch[1]);
+        if (norm) found.add(norm);
+      }
+    } else {
+      if (line.trim().replace(/;$/, "") === activeDelimiter) {
+        insideHeredoc = false;
+        activeDelimiter = "";
+      }
+    }
+  }
+
+  // 3. Markdown code edits
+  const edits = parseWorkspaceEdits(text, { userPrompt: options.userPrompt });
+  for (const edit of edits) {
+    const norm = normalizeWorkspacePath(edit.path);
+    if (norm) found.add(norm);
+  }
+
+  return Array.from(found);
+}
+
+/**
+ * Extracts the currently streaming draft file and its content from active tokens.
+ * Works for both shell heredocs (cat << 'EOF' > path) and markdown code fences.
+ */
+export function extractStreamingDraft(text: string, userPrompt?: string): { path: string; content: string } | null {
+  // 1. Heredoc draft: find all heredocs and take the last active one
+  const heredocs = parseHeredocs(text);
+  const lastHeredoc = heredocs.at(-1);
+  if (lastHeredoc) {
+    return { path: lastHeredoc.path, content: lastHeredoc.content };
+  }
+
+  // 2. Markdown fence draft
+  const edits = parseWorkspaceEdits(text, { userPrompt });
+  const lastEdit = edits.at(-1);
+  if (lastEdit && lastEdit.path && lastEdit.content) {
+    const norm = normalizeWorkspacePath(lastEdit.path);
+    if (norm) return { path: norm, content: lastEdit.content };
+  }
+
+  return null;
 }

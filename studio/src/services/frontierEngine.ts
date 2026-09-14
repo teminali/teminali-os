@@ -14,8 +14,13 @@ import { budgetFor, fitHistory } from "./contextBudget";
 import { composeSystemPrompt } from "./systemPrompt";
 import { CompletenessEngine } from "./completenessEngine";
 import { DiligenceEngine } from "./diligenceEngine";
-import { parseScreenToolCalls, screenToolCall } from "./screenToolCalls";
-import { parseWorkspaceEdits } from "./liveEditProtocol";
+import {
+  parseWorkspaceEdits,
+  normalizeWorkspacePath,
+  extractWrittenPathsFromTurn,
+  extractStreamingDraft,
+} from "./liveEditProtocol";
+export { extractWrittenPathsFromTurn, extractStreamingDraft } from "./liveEditProtocol";
 import { GatewayClient, GatewayError } from "./gatewayClient";
 import { VISION_MODEL } from "./attachmentPolicy";
 import {
@@ -54,6 +59,10 @@ import {
   parseFallbackAskToolCalls,
   type AskExecutor,
 } from "./askToolCalls";
+import {
+  parseScreenToolCalls,
+  screenToolCall,
+} from "./screenToolCalls";
 import type { TurnOrigin } from "./voice/types";
 import {
   createTagStripper,
@@ -68,6 +77,10 @@ import type { ChatMessage, InferenceTelemetry, ModelModeId, ToolCall } from "../
 export interface EngineCapabilities {
   /** Executes a workspace command and reports its real result. */
   runCommand?: CommandExecutor;
+  /** Reads a workspace file, returning content, size, and modified timestamp. */
+  readFile?: (path: string) => Promise<{ content: string; size?: number; modified?: string } | null>;
+  /** Writes a workspace file, returning size and modified timestamp. */
+  writeFile?: (path: string, content: string) => Promise<{ size?: number; modified?: string } | null>;
   /**
    * The editor tools the host exposes, for the prompt to advertise.
    *
@@ -138,6 +151,15 @@ export interface VideoToolSummary {
 export interface StreamCallbacks {
   onToken: (token: string) => void;
   onToolCall?: (toolCall: ToolCall) => void;
+  onDraftEdit?: (draft: { path: string; content: string }) => void;
+  onEdit?: (event: {
+    path: string;
+    before: string;
+    after: string;
+    existedBefore: boolean;
+    size?: number;
+    modified?: string;
+  }) => void;
   onComplete: (data: {
     fullText: string;
     costUsd: number;
@@ -596,6 +618,21 @@ CRITICAL VISUAL DESIGN RULES:
         observation = thrashing.notice;
         investigated = true;
       } else if (capabilities.runCommand && hasExecutableCommands(turnText) && investigationTurns < MAX_INVESTIGATION_TURNS) {
+        const targetPaths = extractWrittenPathsFromTurn(turnText, { userPrompt: groundedPrompt });
+        const beforeStates = new Map<string, { content: string; existedBefore: boolean }>();
+        for (const p of targetPaths) {
+          try {
+            const file = await capabilities.readFile?.(p);
+            if (file) {
+              beforeStates.set(p, { content: file.content, existedBefore: true });
+            } else {
+              beforeStates.set(p, { content: "", existedBefore: false });
+            }
+          } catch {
+            beforeStates.set(p, { content: "", existedBefore: false });
+          }
+        }
+
         const executions = await runAgentCommands(turnText, {
           execute: capabilities.runCommand!,
           signal: controller.signal,
@@ -605,15 +642,79 @@ CRITICAL VISUAL DESIGN RULES:
           ...commandPolicy(),
         });
         allExecutions.push(...executions);
-        if (executions.some((execution) => execution.executed)) {
-          observation = buildCommandEvidence(executions);
+
+        for (const p of targetPaths) {
+          try {
+            const afterFile = await capabilities.readFile?.(p);
+            if (afterFile) {
+              const before = beforeStates.get(p) ?? { content: "", existedBefore: false };
+              callbacks.onEdit?.({
+                path: p,
+                before: before.content,
+                after: afterFile.content,
+                existedBefore: before.existedBefore,
+                size: afterFile.size,
+                modified: afterFile.modified ? String(afterFile.modified) : undefined,
+              });
+            }
+          } catch {
+            // Ignored if file wasn't created
+          }
+        }
+        // Also persist any markdown code blocks emitted in this turn alongside the commands
+        const writtenBlocks = parseWorkspaceEdits(turnText, { userPrompt: groundedPrompt })
+          .filter((edit) => edit.complete && edit.path && !targetPaths.includes(edit.path));
+        for (let fIdx = 0; fIdx < writtenBlocks.length; fIdx++) {
+          const f = writtenBlocks[fIdx];
+          let beforeContent = "";
+          let existedBefore = false;
+          try {
+            const old = await capabilities.readFile?.(f.path);
+            if (old) {
+              beforeContent = old.content;
+              existedBefore = true;
+            }
+          } catch {}
+          let writtenMeta: { size?: number; modified?: string } | null = null;
+          try {
+            writtenMeta = (await capabilities.writeFile?.(f.path, f.content)) ?? null;
+          } catch (err) {
+            console.warn("[FrontierEngine] Failed writing generated file:", f.path, err);
+          }
+          callbacks.onToolCall?.({
+            id: `patch-${f.path}-${iteration}-${fIdx}`,
+            name: "frontier.patch_file",
+            arguments: { path: f.path },
+            status: "completed",
+            result: "Complete implementation written",
+          });
+          callbacks.onEdit?.({
+            path: f.path,
+            before: beforeContent,
+            after: f.content,
+            existedBefore,
+            size: writtenMeta?.size,
+            modified: writtenMeta?.modified ? String(writtenMeta.modified) : undefined,
+          });
+        }
+
+        const anyExecuted = executions.some((execution) => execution.executed);
+        const anyMutated = (targetPaths.length > 0 || writtenBlocks.length > 0) && anyExecuted;
+        const directive = anyMutated
+          ? "\n\n[All requested commands finished. Files have been created. Do NOT re-run, truncate, or overwrite files with partial code snippets. Provide your final concise 1-2 sentence spoken response to the operator now.]"
+          : anyExecuted
+            ? "\n\n[All requested commands finished. If you need to write or update workspace files to fulfill the request, emit them now using complete files or in-place edits. Otherwise provide your spoken response.]"
+            : "\n\n[The requested commands were blocked or refused and did NOT run. Files were NOT created or modified. Please re-emit complete, valid commands or write complete files now.]";
+
+        if (anyExecuted) {
+          observation = buildCommandEvidence(executions) + directive;
           investigated = true;
         } else if (executions.length > 0 && deniedFeedback < MAX_DENIED_FEEDBACK) {
           // Nothing ran: every command was blocked or the user declined it.
           // buildCommandEvidence renders that as "# not run — <reason>", which
           // is the only way the model learns the difference between a command
           // that failed and one it never got to try.
-          observation = buildCommandEvidence(executions);
+          observation = buildCommandEvidence(executions) + directive;
           deniedFeedback += 1;
           investigated = true;
         }
@@ -798,7 +899,23 @@ CRITICAL VISUAL DESIGN RULES:
           .filter((edit) => edit.complete)
           .map((edit) => ({ path: edit.path, content: edit.content }));
         if (written.length > 0) {
-          written.forEach((f, fIdx) => {
+          for (let fIdx = 0; fIdx < written.length; fIdx++) {
+            const f = written[fIdx];
+            let beforeContent = "";
+            let existedBefore = false;
+            try {
+              const old = await capabilities.readFile?.(f.path);
+              if (old) {
+                beforeContent = old.content;
+                existedBefore = true;
+              }
+            } catch {}
+            let writtenMeta: { size?: number; modified?: string } | null = null;
+            try {
+              writtenMeta = (await capabilities.writeFile?.(f.path, f.content)) ?? null;
+            } catch (err) {
+              console.warn("[FrontierEngine] Failed writing generated file:", f.path, err);
+            }
             callbacks.onToolCall?.({
               id: `patch-${f.path}-${iteration}-${fIdx}`,
               name: "frontier.patch_file",
@@ -806,7 +923,15 @@ CRITICAL VISUAL DESIGN RULES:
               status: "completed",
               result: "Complete implementation written",
             });
-          });
+            callbacks.onEdit?.({
+              path: f.path,
+              before: beforeContent,
+              after: f.content,
+              existedBefore,
+              size: writtenMeta?.size,
+              modified: writtenMeta?.modified ? String(writtenMeta.modified) : undefined,
+            });
+          }
           const findings = CompletenessEngine.auditGeneratedFiles(written);
           if (findings.length > 0) {
             const reviewId = `tool-review-${id}-${iteration}`;
@@ -1086,7 +1211,7 @@ async function streamFromGemini(
   history: ChatMessage[],
   callbacks: StreamCallbacks,
   options: {
-    mode?: "max" | "gemini";
+    mode?: "max";
     signal?: AbortSignal;
     model?: string;
     origin?: TurnOrigin;
@@ -1110,7 +1235,7 @@ async function streamFromGemini(
   let totalInputTokens = 0;
   let totalOutputTokens = 0;
   const isVoice = options.origin === "voice";
-  const modelToUse = options.model || (isVoice ? "gemini-2.5-flash" : "gemini-3.8-flash");
+  const modelToUse = options.model || "gemini-3.6-flash";
 
   // Use injected workspace state to ground the model
   const projects = options.workspaceProjects;
@@ -1145,8 +1270,16 @@ When the operator asks a question or gives an instruction that requires inspecti
 <command>
 \`\`\`
 3. The system executes the command automatically and returns the real command output in an observation turn before you deliver your spoken response.
-4. After receiving the output, synthesize and state the answer directly in natural spoken dialogue without code fences.`
+4. When writing or updating files, write complete, valid, self-contained file contents using cat << 'EOF' > <file> directly in the workspace root (e.g. index.html, style.css, app.js). NEVER prefix filenames with 'workspace/' and never create a subfolder named 'workspace'. Do not truncate files.
+5. Once the requested files are created or updated, summarize what you built in 1 to 2 spoken sentences without emitting additional commands.
+6. After receiving the output, synthesize and state the answer directly in natural spoken dialogue without code fences.`
     : "";
+
+  const multiAgentMandate = `\n\n[MULTI-AGENT COGNITIVE FRAMEWORK & ZERO-HALF-WORK MANDATE]
+You operate as a synchronized multi-agent engineering team:
+1. RECONNAISSANCE: If the task requires understanding existing code, inspect the exact files using \`\`\`frontier-run with read-only commands (e.g. \`cat path/to/file\`, \`git status\`, \`find\`, \`grep\`) before modifying code.
+2. IMPLEMENTATION: Emit production-grade, complete files. Never truncate, never use placeholder comments (e.g. '// ... rest of code'), and preserve all existing unaffected methods. When updating files, use cat << 'EOF' > <file> directly or emit complete code blocks with \`\`\`<lang> path="<file>"\`\`\`.
+3. VERIFICATION: Verify your work by running project tests or syntax checks with \`\`\`frontier-run (e.g. \`npx tsc --noEmit\`, \`npm test\`) to confirm zero regressions.`;
 
   const system = isVoice
     ? `Your name is Temy, the real-time voice assistant inside Teminali OS. You are speaking directly with the operator.
@@ -1171,6 +1304,7 @@ Spoken Dialogue Rules:
    confirmation. Never read a tag, a path attribute or an angle bracket aloud.
 7. Answer immediately without filler greetings or preamble unless greeted.
 ${commandInstructions}
+${multiAgentMandate}
 
 Current Workspace: ${currentName} (${currentPath})
 Recent Workspaces:
@@ -1178,6 +1312,7 @@ ${recentList || "None"}
 ${editorContext}`
     : `Your name is Temy, the assistant inside Teminali Code. If asked who or what you are, you are Temy. Be concise, direct, helpful, and never claim commands ran without evidence.
 ${commandInstructions}
+${multiAgentMandate}
 
 Current Workspace: ${currentName} (${currentPath})
 Recent Workspaces:
@@ -1217,29 +1352,87 @@ Always include a natural, friendly confirmation message explaining what you did.
   ];
 
   const MAX_AGENT_TURNS = 5;
+  const appliedMarkdownPaths = new Set<string>();
+
+  const persistMarkdownEdits = async (sourceText: string) => {
+    const edits = parseWorkspaceEdits(sourceText, { userPrompt });
+    const completedEdits = edits.filter((edit) => edit.complete && edit.path && !appliedMarkdownPaths.has(edit.path));
+    if (completedEdits.length > 0) {
+      for (const edit of completedEdits) {
+        appliedMarkdownPaths.add(edit.path);
+        let beforeContent = "";
+        let existedBefore = false;
+        try {
+          const old = await options.capabilities?.readFile?.(edit.path);
+          if (old) {
+            beforeContent = old.content;
+            existedBefore = true;
+          }
+        } catch {
+          beforeContent = "";
+          existedBefore = false;
+        }
+        try {
+          const written = await options.capabilities?.writeFile?.(edit.path, edit.content);
+          callbacks.onEdit?.({
+            path: edit.path,
+            before: beforeContent,
+            after: edit.content,
+            existedBefore,
+            size: written?.size,
+            modified: written?.modified ? String(written.modified) : undefined,
+          });
+        } catch (err) {
+          console.warn("[FrontierEngine] Failed writing markdown edit to disk:", edit.path, err);
+        }
+      }
+    }
+  };
 
   for (let turn = 0; turn < MAX_AGENT_TURNS; turn++) {
     if (options.signal?.aborted) break;
 
-    const response = await GatewayClient.request("/api/gemini/v1/messages", {
-      method: "POST",
-      signal: options.signal,
-      body: JSON.stringify({
-        model: modelToUse,
-        max_tokens: 4096,
-        stream: true,
-        system,
-        messages,
-      }),
-    });
-    await GatewayClient.expectOk(response);
-    if (!response.body) throw new GatewayError("Gemini returned no response stream.", "EMPTY_STREAM", 502);
+    let response: Response | null = null;
+    const maxRetries = 3;
+    for (let attempt = 0; attempt < maxRetries; attempt++) {
+      try {
+        const res = await GatewayClient.request("/api/gemini/v1/messages", {
+          method: "POST",
+          signal: options.signal,
+          body: JSON.stringify({
+            model: modelToUse,
+            max_tokens: 4096,
+            stream: true,
+            system,
+            messages,
+          }),
+        });
+        await GatewayClient.expectOk(res);
+        response = res;
+        break;
+      } catch (err: any) {
+        const status = err?.status ?? err?.statusCode;
+        const isRateLimit = status === 429 || status === 503 || err?.code === "RATE_LIMITED" || String(err?.message || "").includes("429");
+        if (isRateLimit && attempt < maxRetries - 1 && !options.signal?.aborted) {
+          const waitMs = (attempt + 1) * 6000;
+          console.warn(`[FrontierEngine] Gemini rate-limited or unavailable (HTTP ${status}). Backing off for ${waitMs}ms before retry ${attempt + 1}/${maxRetries}...`);
+          await new Promise((resolve) => setTimeout(resolve, waitMs));
+          continue;
+        }
+        throw err;
+      }
+    }
+    if (!response || !response.body) throw new GatewayError("Gemini returned no response stream.", "EMPTY_STREAM", 502);
 
     const reader = response.body.getReader();
     const decoder = new TextDecoder();
     let buffer = "";
     let turnText = "";
     const stripper = createTagStripper();
+
+    let activeDraftPath: string | null = null;
+    let lastDraftContent: string | null = null;
+    let lastDraftSyncAt = 0;
 
     try {
       while (true) {
@@ -1271,6 +1464,20 @@ Always include a natural, friendly confirmation message explaining what you did.
             // become a tag.
             const speakable = stripper.push(data.delta.text);
             if (speakable) callbacks.onToken(speakable);
+
+            // Live code streaming to side pane / editor
+            const now = performance.now();
+            if (now - lastDraftSyncAt > 50) {
+              lastDraftSyncAt = now;
+              const draft = extractStreamingDraft(turnText, userPrompt);
+              if (draft && draft.path) {
+                if (activeDraftPath !== draft.path || draft.content !== lastDraftContent) {
+                  activeDraftPath = draft.path;
+                  lastDraftContent = draft.content;
+                  callbacks.onDraftEdit?.(draft);
+                }
+              }
+            }
           }
         }
       }
@@ -1279,6 +1486,12 @@ Always include a natural, friendly confirmation message explaining what you did.
       // Anything the stripper is still holding was never a tag. Say it.
       const tail = stripper.flush();
       if (tail) callbacks.onToken(tail);
+
+      // Final draft sync for any trailing code tokens
+      const finalDraft = extractStreamingDraft(turnText, userPrompt);
+      if (finalDraft && finalDraft.path && finalDraft.content !== lastDraftContent) {
+        callbacks.onDraftEdit?.(finalDraft);
+      }
     }
 
     if (!turnText.trim() && turn === 0) {
@@ -1287,6 +1500,21 @@ Always include a natural, friendly confirmation message explaining what you did.
 
     // Check if turnText contains executable commands
     if (options.capabilities?.runCommand && hasExecutableCommands(turnText)) {
+      const targetPaths = extractWrittenPathsFromTurn(turnText, { userPrompt });
+      const beforeStates = new Map<string, { content: string; existedBefore: boolean }>();
+      for (const p of targetPaths) {
+        try {
+          const file = await options.capabilities?.readFile?.(p);
+          if (file) {
+            beforeStates.set(p, { content: file.content, existedBefore: true });
+          } else {
+            beforeStates.set(p, { content: "", existedBefore: false });
+          }
+        } catch {
+          beforeStates.set(p, { content: "", existedBefore: false });
+        }
+      }
+
       const executions = await runAgentCommands(turnText, {
         execute: options.capabilities.runCommand,
         signal: options.signal,
@@ -1295,18 +1523,79 @@ Always include a natural, friendly confirmation message explaining what you did.
         maxOutputChars: 4000,
         ...commandPolicy(),
       });
+
+      for (const p of targetPaths) {
+        try {
+          const afterFile = await options.capabilities?.readFile?.(p);
+          if (afterFile) {
+            const before = beforeStates.get(p) ?? { content: "", existedBefore: false };
+            callbacks.onEdit?.({
+              path: p,
+              before: before.content,
+              after: afterFile.content,
+              existedBefore: before.existedBefore,
+              size: afterFile.size,
+              modified: afterFile.modified ? String(afterFile.modified) : undefined,
+            });
+          }
+        } catch {
+          // File may not have been created if command failed
+        }
+      }
+
+      // Persist any markdown code blocks emitted in this turn alongside the commands
+      await persistMarkdownEdits(turnText);
+
       const observation = buildCommandEvidence(executions);
+      const anyExecuted = executions.some((e) => e.executed);
+      const anyMutated = targetPaths.length > 0 && anyExecuted;
+      const directive = anyMutated
+        ? "\n\n[All requested commands finished. Files have been created. Do NOT re-run, truncate, or overwrite files with partial code snippets. Provide your final concise 1-2 sentence spoken response to the operator now.]"
+        : anyExecuted
+          ? "\n\n[All requested commands finished. If you need to write or update workspace files to fulfill the request, emit them now using complete files or in-place edits. Otherwise provide your spoken response.]"
+          : "\n\n[The requested commands were blocked or refused and did NOT run. Files were NOT created or modified. Please re-emit complete, valid commands or write complete files now.]";
       messages.push({ role: "assistant", content: turnText });
-      messages.push({ role: "user", content: observation });
+      messages.push({ role: "user", content: observation + directive });
       callbacks.onToken("\n\n");
       accumulated += "\n\n";
       // Continue next turn so Gemini can answer based on command evidence
       continue;
     }
 
+    // No commands were run: check if turnText emitted completed markdown edits
+    await persistMarkdownEdits(turnText);
+
+    // If the model printed a documentation ```bash block instead of an executable fence, redirect it
+    if (options.capabilities?.runCommand && !hasExecutableCommands(turnText) && turn < MAX_AGENT_TURNS - 1) {
+      const shellBlock = documentationShellFence(turnText);
+      if (shellBlock) {
+        callbacks.onToolCall?.({
+          id: `gemini-protocol-${id}-${turn}`,
+          name: "frontier.correct_protocol",
+          arguments: { fence: "bash" },
+          status: "completed",
+          result: "A shell block was printed instead of an executable fence.",
+        });
+        const reminder =
+          "[PROTOCOL NOTICE] You printed that command in a ```bash block, which is documentation and is never executed. " +
+          "You have live shell access. If you meant to run it, emit it now in a ```frontier-run fence:\n" +
+          "```frontier-run\n" +
+          `${shellBlock}\n` +
+          "```";
+        messages.push({ role: "assistant", content: turnText });
+        messages.push({ role: "user", content: reminder });
+        callbacks.onToken("\n\n");
+        accumulated += "\n\n";
+        continue;
+      }
+    }
+
     // No commands to run, turn complete
     break;
   }
+
+  // Ensure all completed markdown edits across any turn are persisted
+  await persistMarkdownEdits(accumulated);
 
   // Execute every workspace action the model emitted, in the order it emitted
   // them. Every one: "open the readme and then open package.json" is two tags,
@@ -1350,7 +1639,7 @@ Always include a natural, friendly confirmation message explaining what you did.
 
   const totalDurationMs = performance.now() - started;
   const isMax = options.mode === "max";
-  const engineUsed = isVoice ? "Gemini Voice Assistant" : isMax ? "Frontier Max (Gemini)" : "Gemini Flash";
+  const engineUsed = isVoice ? "Gemini Voice Assistant" : "Frontier Max (Gemini)";
   callbacks.onComplete({
     // The actions have run; the markup that asked for them is not speech. The
     // voice bridge overwrites everything onToken streamed with this string and
@@ -1358,12 +1647,12 @@ Always include a natural, friendly confirmation message explaining what you did.
     // truncated at the first dot in the path, which is where a sentence ends.
     fullText: stripWorkspaceTags(accumulated),
     costUsd: 0.0005,
-    costLabel: isMax ? "Included" : "Free (BYOK)",
+    costLabel: "Online (Included)",
     tokensCount: totalInputTokens + totalOutputTokens,
     durationSec: Number((totalDurationMs / 1000).toFixed(2)),
     engineUsed,
-    mode: isMax ? "max" : "gemini",
-    routeReason: isVoice ? "voice_assistant_gemini" : isMax ? "frontier_max_gemini" : "gemini_flash_byok",
+    mode: "max",
+    routeReason: isVoice ? "voice_assistant_gemini" : "frontier_max_gemini",
     telemetry: {
       requestId: id,
       model: modelToUse,

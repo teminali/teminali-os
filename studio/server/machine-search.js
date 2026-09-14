@@ -34,8 +34,8 @@
  */
 
 import { spawn } from "node:child_process";
-import { stat } from "node:fs/promises";
-import { basename } from "node:path";
+import { stat, readdir } from "node:fs/promises";
+import { basename, join } from "node:path";
 import { homedir, platform } from "node:os";
 
 /** At most this many rows are classified and returned. */
@@ -122,6 +122,49 @@ export async function searchMachine(rawQuery, options = {}) {
   const query = machineSearchQuery(rawQuery);
   if (!query) return { available: true, reason: null, results: [] };
 
+  // 1. Direct fast scan of primary user directories (Downloads, Movies, Desktop, Documents)
+  const directResults = [];
+  const seenPaths = new Set();
+  const stopWords = new Set(["episode", "video", "file", "the", "a", "an", "and", "in", "of"]);
+  const tokens = query
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]/g, " ")
+    .split(/\s+/)
+    .filter((t) => t.length > 1 && !stopWords.has(t));
+
+  const keyFolders = [
+    join(root, "Downloads"),
+    join(root, "Movies"),
+    join(root, "Desktop"),
+    join(root, "Documents"),
+  ];
+
+  for (const folder of keyFolders) {
+    try {
+      const entries = await readdir(folder, { withFileTypes: true });
+      for (const entry of entries) {
+        if (entry.name.startsWith(".")) continue;
+        const cleanName = entry.name.toLowerCase().replace(/[^a-z0-9]/g, " ");
+        const matchesExact = cleanName.includes(query.toLowerCase());
+        const matchesTokens = tokens.length >= 2 && tokens.every((tok) => cleanName.includes(tok));
+        if (matchesExact || matchesTokens) {
+          const fullPath = join(folder, entry.name);
+          if (!seenPaths.has(fullPath)) {
+            seenPaths.add(fullPath);
+            directResults.push({
+              path: fullPath,
+              name: entry.name,
+              directory: entry.isDirectory(),
+            });
+          }
+        }
+      }
+    } catch {
+      // Folder does not exist or unreadable; skip silently
+    }
+  }
+
+  // 2. Spotlight index search for deeper file matches
   const stdout = await new Promise((resolve) => {
     let output = "";
     let child;
@@ -166,15 +209,19 @@ export async function searchMachine(rawQuery, options = {}) {
   });
 
   const paths = parseSpotlightOutput(stdout, limit);
-  const results = [];
+  const results = [...directResults];
+
   for (const path of paths) {
+    if (seenPaths.has(path)) continue;
     try {
       const entry = await statImpl(path);
+      seenPaths.add(path);
       results.push({ path, name: basename(path), directory: entry.isDirectory() });
     } catch {
       // The index is a snapshot; a file deleted since it was written is not a
       // result, and it is not an error either.
     }
+    if (results.length >= limit) break;
   }
-  return { available: true, reason: null, results };
+  return { available: true, reason: null, results: results.slice(0, limit) };
 }

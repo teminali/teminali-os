@@ -18,6 +18,7 @@ import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
   ArrowUp,
   ChevronDown,
+  ChevronUp,
   CircleDashed,
   Folder,
   History,
@@ -25,11 +26,16 @@ import {
   MicOff,
   Plus,
   Square,
+  ShieldAlert,
   X,
 } from "lucide-react";
 
 import { ModelPicker } from "../chat/ModelPicker";
 import { ComposerMenu } from "../chat/ComposerMenu";
+import { CliStreamingBody } from "./CliStreamingPanel";
+import { SpokenApprovalPrompt } from "./SpokenApprovalPrompt";
+import { useApprovalStore } from "../../store/approvalStore";
+import { useAssistantActivityStore } from "../../store/assistantActivityStore";
 import { useProjectLibrary } from "../../hooks/useProjectLibrary";
 import { useGitHubStatus } from "../../hooks/useGitHubStatus";
 import { useRecorderDialogStore } from "../../store/recorderDialogStore";
@@ -77,6 +83,7 @@ export interface TemiComposerProps {
    * empties itself the moment you send your first prompt is worse than none.
    */
   onNavigateHistory?: (direction: "older" | "newer", current: string) => string | null;
+  onReviewChanges?: () => void;
   placeholder?: string;
   className?: string;
 }
@@ -99,9 +106,16 @@ export const TemiComposer: React.FC<TemiComposerProps> = ({
   isRunning = false,
   onStop,
   onNavigateHistory,
+  onReviewChanges,
   placeholder = "Do anything",
   className = "",
 }) => {
+  const isPanelExpanded = useAssistantActivityStore((state) => state.isPanelExpanded);
+  const togglePanelExpanded = useAssistantActivityStore((state) => state.togglePanelExpanded);
+  const activityItems = useAssistantActivityStore((state) => state.items);
+  const isTaskRunning = useAssistantActivityStore((state) => state.isTaskRunning);
+  const pendingApproval = useApprovalStore((state) => state.pending);
+
   const [pickerOpen, setPickerOpen] = useState(false);
   const areaRef = useRef<HTMLTextAreaElement>(null);
 
@@ -238,17 +252,69 @@ export const TemiComposer: React.FC<TemiComposerProps> = ({
           A row of two controls rather than one control: the activity strip is
           itself clickable (it opens the log) and a button inside a button is
           not markup a browser will honour. */}
-      <div className="mx-3 flex w-[calc(100%-1.5rem)] items-center gap-2 rounded-t-[14px] bg-[#212121] px-4 pb-3.5 pt-2 text-[13px]">
-        <button
-          type="button"
-          onClick={onChooseProject}
-          title={projectLabel ? `Working in ${projectLabel} — click to open another` : "Choose the project this chat works in"}
-          className="flex min-w-0 items-center gap-2 text-left leading-none text-[#a0a0a0] transition-colors hover:text-[#e8e8e8]"
+      {/* The project tab sliding drawer. When collapsed, it is a narrow tab behind
+          the composer box with only its top strip showing. When expanded, this EXACT
+          SAME component smoothly slides up, revealing the Gemini-style CLI streaming
+          steps and live tool calls, and slides back down when collapsed. */}
+      <div
+        className={`mx-3 w-[calc(100%-1.5rem)] rounded-t-[14px] bg-[#212121] border border-b-0 border-[#333537] overflow-hidden transition-all duration-300 ease-[cubic-bezier(0.16,1,0.3,1)] ${
+          isPanelExpanded ? "max-h-[520px] shadow-[0_-12px_36px_rgba(0,0,0,0.75)]" : "max-h-[38px]"
+        }`}
+      >
+        <div
+          onClick={(e) => {
+            if ((e.target as HTMLElement).tagName === "DIV") {
+              togglePanelExpanded();
+            }
+          }}
+          className={`flex items-center gap-2 px-4 pt-2 text-[13px] select-none transition-colors ${
+            isPanelExpanded ? "h-9 border-b border-[#2d2f31] pb-2 bg-[#1d1e20]" : "pb-3.5 hover:bg-[#262626] cursor-pointer"
+          }`}
         >
-          <Folder size={15} strokeWidth={1.8} className="flex-shrink-0" />
-          <span className="truncate">{projectLabel ?? "Choose project"}</span>
-        </button>
-        {activity}
+          <button
+            type="button"
+            onClick={onChooseProject}
+            title={projectLabel ? `Working in ${projectLabel} — click to open another` : "Choose the project this chat works in"}
+            className="flex min-w-0 items-center gap-2 text-left leading-none text-[#a0a0a0] transition-colors hover:text-[#e8e8e8]"
+          >
+            <Folder size={15} strokeWidth={1.8} className="flex-shrink-0" />
+            <span className="truncate">{projectLabel ?? "Choose project"}</span>
+          </button>
+          {activity}
+          <div className="flex-1" />
+          <button
+            type="button"
+            onClick={togglePanelExpanded}
+            title={isPanelExpanded ? "Collapse CLI live stream" : "Expand CLI live stream"}
+            aria-label={isPanelExpanded ? "Collapse CLI live stream" : "Expand CLI live stream"}
+            className="flex h-5 items-center gap-1.5 rounded px-1.5 text-[11px] text-[#8e918f] transition-colors hover:bg-[#2d2f31] hover:text-[#e3e3e3]"
+          >
+            {pendingApproval ? (
+              <span className="flex items-center gap-1 rounded-full bg-amber-500/20 px-2 py-0.5 text-[10.5px] font-semibold text-amber-300 animate-pulse border border-amber-500/30">
+                <ShieldAlert size={12} className="text-amber-400" />
+                Approval Needed
+              </span>
+            ) : isTaskRunning ? (
+              <span className="flex items-center gap-1 text-emerald-400 font-medium text-[10.5px]">
+                <span className="h-1.5 w-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                Live
+              </span>
+            ) : activityItems.length > 0 ? (
+              <span className="font-mono text-[10px] text-[#8e918f]">{activityItems.length} steps</span>
+            ) : null}
+            {isPanelExpanded ? <ChevronDown size={13} /> : <ChevronUp size={13} />}
+          </button>
+        </div>
+
+        {/* When expanded, the CLI live streaming body is revealed inside the SAME component */}
+        {isPanelExpanded && <CliStreamingBody onReviewChanges={onReviewChanges} />}
+
+        {/* Prominent floating Approval Gate when panel is collapsed/minimized */}
+        {pendingApproval && !isPanelExpanded && (
+          <div className="mx-3 mb-2.5">
+            <SpokenApprovalPrompt pending={pendingApproval} />
+          </div>
+        )}
       </div>
 
       <div className="relative -mt-3 rounded-[16px] bg-[#252525] px-3.5 pb-2.5 pt-3.5 shadow-[0_8px_28px_-6px_rgba(0,0,0,0.55)]">

@@ -187,15 +187,15 @@ export function describeApprovalRequest(request: SpokenApprovalRequest): string 
   const answers = !always
     // No scope to widen — this prompt genuinely has only two answers, and
     // offering a third the gate would ignore is worse than offering none.
-    ? "Say yes to allow it, or no to refuse."
+    ? "Would you like to allow it? You can say yes or no."
     : always.length <= MAX_SPOKEN_ACTION
-      ? `Say yes to allow it, always to stop asking about ${always}, or no to refuse.`
-      : "Say yes to allow it, always to stop asking, or no to refuse.";
+      ? `Would you like to allow it? You can say yes, always for ${always}, or no.`
+      : "Would you like to allow it? You can say yes, always, or no.";
 
   if (!action) return `${asker} is asking for permission. ${answers}`;
 
   if (action.length > MAX_SPOKEN_ACTION) {
-    return `${asker} wants to run a command — it is on screen. ${answers}`;
+    return `${asker} wants to run a command on screen. ${answers}`;
   }
   return `${asker} wants to run ${action}. ${answers}`;
 }

@@ -300,6 +300,14 @@ export class TeminaliAgentBridge {
   }
 
   /**
+   * Explicitly record a spoken report (such as from hard-coded system accessibility fast paths)
+   * so follow-up recall questions can answer from it immediately.
+   */
+  public static recordReport(text: string): void {
+    this.lastReport = { text, finishedAt: Date.now() };
+  }
+
+  /**
    * The voice lane's own permission gate.
    *
    * `aiService` denies every CLI permission event when no gate is passed, and
@@ -389,7 +397,11 @@ export class TeminaliAgentBridge {
       requestedEngine === "gemini" ? "frontier" : requestedEngine;
 
     const streamMode: ModelModeId =
-      requestedEngine === "gemini" ? "max" : "auto";
+      requestedEngine === "gemini" || store.currentProfile === "max"
+        ? "max"
+        : (named?.heard === "frontier flash" || store.currentProfile === "flash")
+          ? "flash"
+          : "auto";
 
     /** What the operator calls this engine. "GEMINI" is not a thing he ever said. */
     const engineLabel = ENGINE_LABELS[requestedEngine];
@@ -472,7 +484,7 @@ export class TeminaliAgentBridge {
               options.onProgress?.(desc);
             }
 
-            if (name === "runCommand" || name === "bash") {
+            if (name === "runCommand" || name === "bash" || name === "frontier.run_command") {
               const cmd = (args as any)?.command || inputStr;
               const cmdStr = typeof cmd === "string" ? cmd : "command";
               activityStore.logAction({
@@ -511,6 +523,7 @@ export class TeminaliAgentBridge {
         [],
         {
           mode: streamMode,
+          workingDirectory: workspace || undefined,
           signal: options.signal || controller.signal,
           origin: "voice",
           // Without this the CLI's first permission event is denied on the
@@ -571,6 +584,21 @@ export class TeminaliAgentBridge {
               }
             }
           },
+          onDraftEdit: (draft) => {
+            const fileName = draft.path.split("/").pop() || draft.path;
+            const studio = useStudioStore.getState();
+            studio.openFile({
+              path: draft.path,
+              name: fileName,
+              content: draft.content,
+              language: languageForPath(draft.path),
+            });
+            studio.syncFileContent({ path: draft.path, content: draft.content });
+            void import("../../store/panelStore").then(({ usePanelStore }) => {
+              usePanelStore.getState().focusOrOpen({ kind: "file", path: draft.path, label: fileName });
+              usePanelStore.getState().setOpen(true);
+            });
+          },
           onEdit: (event) => {
             useChangeStore.getState().record({
               path: event.path,
@@ -580,15 +608,21 @@ export class TeminaliAgentBridge {
               origin: "agent",
               requestId: `dual-${Date.now()}`,
             });
-            store.openFile({
+            const fileName = event.path.split("/").pop() || event.path;
+            const studio = useStudioStore.getState();
+            studio.openFile({
               path: event.path,
-              name: event.path.split("/").pop() || event.path,
+              name: fileName,
               content: event.after,
               language: languageForPath(event.path),
               encoding: "utf8",
               mimeType: "text/plain",
               size: event.size ?? undefined,
               modified: event.modified ?? undefined,
+            });
+            void import("../../store/panelStore").then(({ usePanelStore }) => {
+              usePanelStore.getState().focusOrOpen({ kind: "file", path: event.path, label: fileName });
+              usePanelStore.getState().setOpen(true);
             });
             const counts = diffLineCounts(event.before, event.after);
             observed.push({

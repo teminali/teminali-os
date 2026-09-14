@@ -208,7 +208,7 @@ export const DiffInspectorModal: React.FC = () => {
             </button>
             <button
               onClick={handleAcceptAll}
-              className="px-6 py-2.5 rounded-xl bg-ink-high hover:bg-accent-hover text-frame-mid font-semibold text-xs font-sans transition-colors duration-ds ease-ds flex items-center gap-2 cursor-pointer"
+              className="px-6 py-2.5 rounded-xl bg-emerald-500 hover:bg-emerald-600 text-white font-semibold text-xs font-sans transition-colors duration-ds ease-ds flex items-center gap-2 cursor-pointer shadow-sm"
             >
               <Check className="w-4 h-4 stroke-[3]" />
               <span>Accept & Apply Patch (⌘↵)</span>

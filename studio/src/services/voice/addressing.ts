@@ -60,6 +60,17 @@ const THIRD_PARTY_MARKERS = [
   "not you", "i meant the other", "nilikuwa naongea na",
 ];
 
+export const GREETING_TOKENS = [
+  "hello", "hi", "hey", "yo", "howdy", "morning", "afternoon", "evening", "mambo", "habari",
+];
+
+export const ANSWER_TOKENS = [
+  "yes", "yeah", "yep", "sure", "ok", "okay", "no", "nope", "do it", "go ahead",
+  "make it", "add", "change", "fix", "deploy", "build", "run", "push", "test",
+  "ndiyo", "hapana", "sawa", "fanya",
+];
+
+
 /**
  * Another assistant, by name.
  *
@@ -204,7 +215,7 @@ export function scoreAddressing(
   context: AddressingContext,
 ): { verdict: AddressingVerdict; needsClassifier: boolean } {
   const lower = text.toLowerCase().trim();
-  const words = lower.split(/\s+/).filter(Boolean);
+  const words = lower.replace(/[^\w\s]/g, " ").split(/\s+/).filter(Boolean);
 
   const { matched: wakeWord } = stripWakeWord(text, context.wakeWords);
   const followUpWindow =
@@ -243,7 +254,23 @@ export function scoreAddressing(
     half a second after a question is overwhelmingly a reply to it, and the same
     words eight seconds later are much more often the room.
   */
-  const followUpTrusted = followUpWindow && !thirdParty && !speakerMismatch;
+  const isGreeting = words.some((w) => GREETING_TOKENS.includes(w));
+  const isDirectAnswer = words.some((w) => ANSWER_TOKENS.includes(w));
+
+  // Active continuous conversation: the assistant spoke recently (within FOLLOW_UP_WINDOW_MS),
+  // so the conversation floor is open. When the user asks a follow-up question, answers directly,
+  // or continues the thought, the turn is trusted without needing repetitive wake words.
+  const isConversationalFollowUp =
+    words.length >= 1 &&
+    (lower.endsWith("?") ||
+      isDirectAnswer ||
+      !context.requireWakeWord ||
+      /^(what|why|how|when|where|who|which|can|could|would|will|should|is|are|do|does|tell|show|and|also|what about|how about)\b/i.test(lower));
+
+  const followUpTrusted =
+    (followUpWindow || (context.msSinceAssistantTurn < FOLLOW_UP_WINDOW_MS && isConversationalFollowUp)) &&
+    !thirdParty &&
+    !speakerMismatch;
   const followUpWeight = followUpTrusted
     ? 1 - 0.55 * Math.min(1, Math.max(0, context.msSinceAssistantTurn) / FOLLOW_UP_WINDOW_MS)
     : 0;
@@ -347,17 +374,6 @@ export function scoreAddressing(
   // (greetings, second-person address, questions, directives) lift it over the line (0.62).
   let score = 0.34;
 
-  const GREETING_TOKENS = [
-    "hello", "hi", "hey", "yo", "howdy", "morning", "afternoon", "evening", "mambo", "habari",
-  ];
-  const isGreeting = words.some((w) => GREETING_TOKENS.includes(w));
-
-  const ANSWER_TOKENS = [
-    "yes", "yeah", "yep", "sure", "ok", "okay", "no", "nope", "do it", "go ahead",
-    "make it", "add", "change", "fix", "deploy", "build", "run", "push", "test",
-    "ndiyo", "hapana", "sawa", "fanya",
-  ];
-  const isDirectAnswer = words.some((w) => ANSWER_TOKENS.includes(w));
 
   if (wakeWord) score += 0.5;
   if (isGreeting) score += 0.35; // "hello", "hi", "hey" -> 0.34 + 0.35 = 0.69 >= 0.62 (DIRECTED)
@@ -415,7 +431,7 @@ export function scoreAddressing(
   const reason = wakeWord
     ? "Addressed by name."
     : followUpTrusted && directed
-      ? "Answering the question just asked."
+      ? (context.assistantAskedQuestion ? "Answering the question just asked." : "Active conversation follow-up.")
       : thirdParty
         ? "Sounds like it was meant for someone else."
         : imperative

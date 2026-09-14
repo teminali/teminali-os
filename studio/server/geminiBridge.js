@@ -13,7 +13,7 @@
 import { randomUUID } from "node:crypto";
 
 export const GEMINI_OPENAI_BASE = "https://generativelanguage.googleapis.com/v1beta/openai";
-export const DEFAULT_GEMINI_MODEL = "gemini-3.8-flash";
+export const DEFAULT_GEMINI_MODEL = "gemini-3.6-flash";
 
 /**
  * Normalizes an incoming model identifier to a supported Gemini model name.
@@ -21,8 +21,12 @@ export const DEFAULT_GEMINI_MODEL = "gemini-3.8-flash";
 export function normalizeGeminiModel(model) {
   if (!model || typeof model !== "string") return DEFAULT_GEMINI_MODEL;
   const trimmed = model.trim().toLowerCase();
+  if (trimmed === "gemini-flash-latest" || trimmed === "flash-latest") return "gemini-flash-latest";
   if (trimmed.includes("3.8-flash") || trimmed.includes("3.8")) return "gemini-3.8-flash";
+  if (trimmed.includes("3.7-flash") || trimmed.includes("3.7")) return "gemini-3.7-flash";
   if (trimmed.includes("3.6-flash") || trimmed.includes("3.6")) return "gemini-3.6-flash";
+  if (trimmed.includes("3.5-flash-lite")) return "gemini-3.5-flash-lite";
+  if (trimmed.includes("3.5-flash") || trimmed.includes("3.5")) return "gemini-flash-latest";
   if (trimmed.includes("2.5-flash")) return "gemini-2.5-flash";
   if (trimmed.includes("2.0-flash")) return "gemini-2.0-flash";
   if (trimmed.includes("2.5-pro") || trimmed.includes("pro")) return "gemini-2.5-pro";

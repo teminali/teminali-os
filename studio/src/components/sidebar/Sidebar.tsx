@@ -2,6 +2,8 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { Boxes, Check, FilePlus, Folder, FolderOpen, FolderPlus, LoaderCircle, RefreshCw, Search as SearchIcon, X } from "lucide-react";
 import { SKILLS_LIST, useStudioStore } from "../../store/studioStore";
 import { usePanelStore } from "../../store/panelStore";
+import { useChangeStore } from "../../store/changeStore";
+import { useAssistantActivityStore } from "../../store/assistantActivityStore";
 import { WorkspaceService } from "../../services/workspaceService";
 import { GlobalSearchView } from "../search/GlobalSearchView";
 import { EmptyState, IconButton, Input, SectionLabel } from "../ui";
@@ -95,15 +97,34 @@ const ExplorerPanel: React.FC = () => {
     [setFiles],
   );
 
+  const changesCount = useChangeStore((state) => state.changes.length);
+  const isTaskRunning = useAssistantActivityStore((state) => state.isTaskRunning);
+  const activityItemsCount = useAssistantActivityStore((state) => state.items.length);
+  const tabsCount = useStudioStore((state) => state.tabs.length);
+  const activeTabId = useStudioStore((state) => state.activeTabId);
+
   // `workspacePath` is a dependency and not decoration: the tree route reads
   // whatever root the gateway is bound to, so opening a project from My
   // Projects changes what `listFiles` returns without changing this component.
-  // Without it the Explorer keeps drawing the previous repository.
+  // We also refresh whenever changes stage, activity logs, or tabs open.
   useEffect(() => {
     const controller = new AbortController();
     void refresh(controller.signal);
     return () => controller.abort();
-  }, [refresh, workspacePath]);
+  }, [refresh, workspacePath, changesCount, activityItemsCount, tabsCount, activeTabId]);
+
+  // While a background agent or task is actively executing, poll every 1.5s so
+  // newly created files appear live without requiring a manual window refresh.
+  useEffect(() => {
+    if (!isTaskRunning) {
+      void refresh();
+      return;
+    }
+    const timer = setInterval(() => {
+      void refresh();
+    }, 1500);
+    return () => clearInterval(timer);
+  }, [isTaskRunning, refresh]);
 
   const handleChooseFolder = async () => {
     try {

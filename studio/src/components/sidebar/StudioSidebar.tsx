@@ -65,6 +65,7 @@ export interface StudioSidebarProps {
 
 export const StudioSidebar: React.FC<StudioSidebarProps> = () => {
   const { chatSessions, activeSessionId, switchSession, newChatSession } = useStudioStore();
+  const workspacePath = useStudioStore((state) => state.workspacePath);
   /*
     The same hook the composer's recents row and My Projects read, rather than
     a third copy of the fetch. It is also what carries `path` and `kind`, which
@@ -279,7 +280,7 @@ export const StudioSidebar: React.FC<StudioSidebarProps> = () => {
               <div className="relative group">
                 <SidebarRow
                   title={entry ? entry.path : undefined}
-                  active={Boolean(entry) && entry?.path === current?.path}
+                  active={Boolean(entry) && (entry?.path === current?.path || (Boolean(workspacePath) && entry?.path === workspacePath))}
                   // Only a row with a project behind it is pressable. The rest
                   // are headings, and `SidebarRow` draws them as such.
                   onClick={entry ? () => openRepository(entry) : undefined}

@@ -25,22 +25,82 @@
  */
 
 import React from "react";
-import { FileText, FilePen, Terminal, FlaskConical, Sparkles } from "lucide-react";
+import { FileText, FilePen, Terminal, FlaskConical } from "lucide-react";
 
 import { useAssistantActivityStore } from "../../store/assistantActivityStore";
 import { currentActivityPhrase, type ActivityPhrase } from "../../services/voice/activityPhrase";
+import { BrandGlyph } from "../ui";
+import { TemiFace } from "./CliStreamingPanel";
 
 const ICONS = {
   read: FileText,
   edit: FilePen,
   run: Terminal,
   test: FlaskConical,
-  think: Sparkles,
 } as const;
+
+/**
+ * Renders the active running CLI logo icon:
+ * - Claude Code -> Claude mark
+ * - Codex -> Codex mark
+ * - Frontier -> Canonical Temi eyes & mouth mark (> _ <)
+ * - Gemini -> Gemini mark
+ */
+export const EngineGlyph: React.FC<{
+  engine?: string;
+  size?: number;
+  className?: string;
+  failed?: boolean;
+  running?: boolean;
+}> = ({ engine = "frontier", size = 14, className = "", failed = false, running = false }) => {
+  const norm = (engine || "").toLowerCase();
+
+  if (norm.includes("claude")) {
+    return (
+      <BrandGlyph
+        brand="claude"
+        size={size}
+        className={`flex-shrink-0 ${className} ${running && !failed ? "animate-pulse" : ""}`}
+      />
+    );
+  }
+
+  if (norm.includes("codex")) {
+    return (
+      <BrandGlyph
+        brand="codex"
+        size={size}
+        className={`flex-shrink-0 ${className} ${running && !failed ? "animate-pulse" : ""}`}
+      />
+    );
+  }
+
+  if (norm.includes("gemini")) {
+    return (
+      <BrandGlyph
+        brand="gemini"
+        size={size}
+        className={`flex-shrink-0 ${className} ${running && !failed ? "animate-pulse" : ""}`}
+      />
+    );
+  }
+
+  // Frontier / default: our eyes and mouth logo!
+  return (
+    <TemiFace
+      size={size + 2}
+      className={`flex-shrink-0 ${
+        failed ? "text-rose-400" : running ? "text-emerald-400" : "text-[#8f8f8f]"
+      } ${running && !failed ? "animate-pulse" : ""} ${className}`}
+    />
+  );
+};
 
 export interface AgentActivityTickerProps {
   /** What to show. `null` draws nothing but the live region — see the note on absence. */
   phrase: ActivityPhrase | null;
+  /** Active running engine name: "claude" | "codex" | "frontier" | "gemini" */
+  engine?: string;
   /** Optional click-through, for surfaces that can open the full activity log. */
   onClick?: () => void;
   className?: string;
@@ -59,21 +119,47 @@ export interface AgentActivityTickerProps {
  * they already know about. It is `sr-only`, and therefore absolutely
  * positioned, so it is not a flex item and adds no gap to the bar.
  */
-export const AgentActivityTicker: React.FC<AgentActivityTickerProps> = ({ phrase, onClick, className = "" }) => {
-  const Icon = phrase ? ICONS[phrase.icon] || Sparkles : Sparkles;
+export const AgentActivityTicker: React.FC<AgentActivityTickerProps> = ({
+  phrase,
+  engine,
+  onClick,
+  className = "",
+}) => {
+  const storeEngine = useAssistantActivityStore((state) => state.activeEngine);
+  const activeEngine = engine || storeEngine || "frontier";
+
   const failed = phrase?.state === "failed";
   const running = phrase?.state === "running";
   const spoken = phrase ? `${phrase.verb} ${phrase.full ?? phrase.target}`.trim() : "";
 
+  // The diamonds icon was rendered when phrase.icon is "think" or unrecognized.
+  // Replaced with the current running CLI logo icon:
+  // - Claude Code -> Claude logo
+  // - Codex -> Codex logo
+  // - Frontier -> Our eyes and mouth logo (TemiFace)
+  const isThinkOrDiamond = !phrase || phrase.icon === "think" || !(phrase.icon in ICONS);
+  const IconComponent = !isThinkOrDiamond ? ICONS[phrase.icon as keyof typeof ICONS] : null;
+
+  const glyph = IconComponent ? (
+    <IconComponent
+      size={13}
+      strokeWidth={1.8}
+      className={`flex-shrink-0 ${failed ? "text-rose-400" : running ? "text-emerald-400" : "text-[#8f8f8f]"} ${
+        running && !failed ? "animate-pulse" : ""
+      }`}
+    />
+  ) : (
+    <EngineGlyph
+      engine={activeEngine}
+      size={14}
+      failed={failed}
+      running={running}
+    />
+  );
+
   const body = phrase ? (
     <>
-      <Icon
-        size={13}
-        strokeWidth={1.8}
-        className={`flex-shrink-0 ${failed ? "text-rose-400" : running ? "text-emerald-400" : "text-[#8f8f8f]"} ${
-          running && !failed ? "animate-pulse" : ""
-        }`}
-      />
+      {glyph}
       <span
         className={`flex-shrink-0 transition-colors ${
           failed ? "text-rose-300" : "text-[#a0a0a0] group-hover:text-[#e8e8e8]"
@@ -137,10 +223,18 @@ export const AgentActivityTicker: React.FC<AgentActivityTickerProps> = ({ phrase
   );
 };
 
-/** The same strip, reading this application's assistant activity. */
+/** The same strip, reading this application's assistant activity and active engine. */
 export const ConnectedAgentActivity: React.FC<{ onClick?: () => void; className?: string }> = ({ onClick, className }) => {
   const items = useAssistantActivityStore((state) => state.items);
   const isRunning = useAssistantActivityStore((state) => state.isTaskRunning);
   const latestProgress = useAssistantActivityStore((state) => state.latestProgress);
-  return <AgentActivityTicker phrase={currentActivityPhrase(items, isRunning, latestProgress)} onClick={onClick} className={className} />;
+  const activeEngine = useAssistantActivityStore((state) => state.activeEngine);
+  return (
+    <AgentActivityTicker
+      phrase={currentActivityPhrase(items, isRunning, latestProgress)}
+      engine={activeEngine}
+      onClick={onClick}
+      className={className}
+    />
+  );
 };

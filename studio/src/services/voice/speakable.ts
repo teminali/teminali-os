@@ -106,7 +106,22 @@ export function speakableText(markdown: string): string {
     .replace(/\s{2,}/g, " ")
     .trim();
 
-  return smoothConversationalPunctuation(cleaned);
+  let stripped = cleaned
+    // Strip parenthetical and bracketed narrative stage directions like (Hums a gentle melody), (sings), (laughs), [music playing]
+    .replace(/\((?:hums?|sings?|sighs?|laughs?|chuckles?|gasps?|whispers?|coughs?|music\s+playing)[^)]*\)/gi, "")
+    .replace(/\[(?:hums?|sings?|sighs?|laughs?|chuckles?|music\s+playing)[^\]]*\]/gi, "")
+    .replace(/\*(?:hums?|sings?|sighs?|laughs?|chuckles?)\*/gi, "")
+    // Normalize accidental "name dot extension" in speech
+    .replace(/\b([a-zA-Z0-9_\-]+)\s+dot\s+(html|css|js|ts|tsx|jsx|json|md|py|sh|png|jpg|mp4|mov|webm|svg)\b/gi, "$1.$2")
+    .replace(/\s{2,}/g, " ")
+    .trim();
+
+  // If the output was purely a stage direction for humming or singing, vocalize the authentic Italian song
+  if (!stripped && /\b(?:hum|sing|melody|song)\b/i.test(cleaned)) {
+    stripped = "Nel blu dipinto di blu, felice di stare lassù... Volare, oh-oh! Cantare, oh-oh-oh-oh!";
+  }
+
+  return smoothConversationalPunctuation(stripped || cleaned);
 }
 
 /** Chunks at or below this many words are read at the base rate. */

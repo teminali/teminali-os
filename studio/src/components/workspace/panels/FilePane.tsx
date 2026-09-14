@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Loader2, Save, RotateCcw, AlertTriangle, FolderInput, Globe } from "lucide-react";
 import { WorkspaceService } from "../../../services/workspaceService";
 import { highlightCode } from "../../../utils/syntaxHighlight";
@@ -240,6 +240,23 @@ export const FilePane: React.FC<{ panel: PanelTab }> = ({ panel }) => {
 
   const dirty = content !== null && content !== original;
   const language = useMemo(() => languageOf(panel.path ?? ""), [panel.path]);
+
+  const storeTabContent = useStudioStore(
+    useCallback(
+      (state) => (panel.path ? state.tabs.find((t) => t.path === panel.path)?.content : undefined),
+      [panel.path],
+    ),
+  );
+
+  useEffect(() => {
+    if (storeTabContent !== undefined && !dirty) {
+      setContent(storeTabContent);
+      setOriginal(storeTabContent);
+      setLoading(false);
+      setError(null);
+    }
+  }, [storeTabContent, dirty]);
+
   const highlighted = useMemo(
     () => (content === null ? "" : highlightCode(content, language)),
     [content, language],

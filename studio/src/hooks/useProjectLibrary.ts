@@ -18,10 +18,12 @@
   offered as one.
 */
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect } from "react";
+import { create } from "zustand";
 
 import { WorkspaceService, type ProjectEntry } from "../services/workspaceService";
 import { useStudioStore } from "../store/studioStore";
+import { workspaceLabel } from "../utils/chatSessions";
 import { openVideoProjectAt } from "../video/project/io";
 
 export interface ProjectLibrary {
@@ -35,38 +37,61 @@ export interface ProjectLibrary {
   openEntry: (entry: ProjectEntry) => Promise<void>;
 }
 
+interface ProjectLibraryStore {
+  current: ProjectEntry | null;
+  recent: ProjectEntry[];
+  error: string | null;
+  loading: boolean;
+  setProjects: (current: ProjectEntry | null, recent: ProjectEntry[]) => void;
+  setError: (error: string | null) => void;
+  setLoading: (loading: boolean) => void;
+  fetchProjects: () => Promise<void>;
+}
+
+export const useProjectLibraryStore = create<ProjectLibraryStore>((set) => ({
+  current: null,
+  recent: [],
+  error: null,
+  loading: true,
+  setProjects: (current, recent) => set({ current, recent, error: null, loading: false }),
+  setError: (error) => set({ error, loading: false }),
+  setLoading: (loading) => set({ loading }),
+  fetchProjects: async () => {
+    try {
+      const response = await WorkspaceService.listProjects();
+      set({ current: response.current, recent: response.recent, error: null, loading: false });
+    } catch (failure: unknown) {
+      set({
+        error: failure instanceof Error ? failure.message : "Projects are unavailable.",
+        loading: false,
+      });
+    }
+  },
+}));
+
+if (typeof window !== "undefined") {
+  (window as unknown as { __projectLibraryStore?: typeof useProjectLibraryStore }).__projectLibraryStore =
+    useProjectLibraryStore;
+}
+
 export function useProjectLibrary(): ProjectLibrary {
-  const [current, setCurrent] = useState<ProjectEntry | null>(null);
-  const [recent, setRecent] = useState<ProjectEntry[]>([]);
-  const [error, setError] = useState<string | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [nonce, setNonce] = useState(0);
+  const current = useProjectLibraryStore((state) => state.current);
+  const recent = useProjectLibraryStore((state) => state.recent);
+  const error = useProjectLibraryStore((state) => state.error);
+  const loading = useProjectLibraryStore((state) => state.loading);
+  const fetchProjects = useProjectLibraryStore((state) => state.fetchProjects);
+  const setProjects = useProjectLibraryStore((state) => state.setProjects);
 
   const workspacePath = useStudioStore((state) => state.workspacePath);
   const setWorkspacePath = useStudioStore((state) => state.setWorkspacePath);
 
   useEffect(() => {
-    const controller = new AbortController();
-    setLoading(true);
-    WorkspaceService.listProjects(controller.signal)
-      .then((response) => {
-        setCurrent(response.current);
-        setRecent(response.recent);
-        setError(null);
-      })
-      .catch((failure: unknown) => {
-        if (controller.signal.aborted) return;
-        // A gateway that is down must not blank the surface — it says so and
-        // the rest of the screen keeps working.
-        setError(failure instanceof Error ? failure.message : "Projects are unavailable.");
-      })
-      .finally(() => {
-        if (!controller.signal.aborted) setLoading(false);
-      });
-    return () => controller.abort();
-  }, [workspacePath, nonce]);
+    void fetchProjects();
+  }, [workspacePath, fetchProjects]);
 
-  const reload = useCallback(() => setNonce((n) => n + 1), []);
+  const reload = useCallback(() => {
+    void fetchProjects();
+  }, [fetchProjects]);
 
   const openEntry = useCallback(
     async (entry: ProjectEntry) => {
@@ -80,15 +105,35 @@ export function useProjectLibrary(): ProjectLibrary {
       try {
         const response = await WorkspaceService.openProject(entry.path);
         setWorkspacePath(response.current.path);
-        setCurrent(response.current);
-        setRecent(response.recent);
-        setError(null);
+        setProjects(response.current, response.recent);
       } catch (failure: unknown) {
-        setError(failure instanceof Error ? failure.message : "That project could not be opened.");
+        useProjectLibraryStore.getState().setError(
+          failure instanceof Error ? failure.message : "That project could not be opened.",
+        );
       }
     },
-    [reload, setWorkspacePath],
+    [reload, setProjects, setWorkspacePath],
   );
 
-  return { current, recent, error, loading, reload, openEntry };
+  // Compute effective current project: if workspacePath is set, it always aligns with it
+  const effectiveCurrent: ProjectEntry | null =
+    current && (!workspacePath || current.path === workspacePath)
+      ? current
+      : workspacePath
+        ? recent.find((r) => r.path === workspacePath) || {
+            path: workspacePath,
+            name: workspaceLabel(workspacePath),
+            kind: "code" as const,
+          }
+        : current;
+
+  return {
+    current: effectiveCurrent,
+    recent,
+    error,
+    loading,
+    reload,
+    openEntry,
+  };
 }
+

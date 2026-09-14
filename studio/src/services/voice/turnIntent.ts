@@ -99,6 +99,17 @@ const STOP_PHRASES = [
   "don't bother", "dont bother", "do not bother", "no need", "not needed",
   "that's enough", "thats enough", "enough", "enough enough", "pause", "pause that",
   "no no", "no no no", "no stop", "no wait",
+  // Directed assistant/agent stop phrases:
+  "stop the assistant", "stop the other assistant", "stop the agent",
+  "stop the background assistant", "stop the background agent", "stop the coding assistant", "stop the coding agent",
+  "cancel the assistant", "cancel the other assistant", "cancel the agent",
+  "cancel the background assistant", "cancel the background agent",
+  "kill the assistant", "kill the other assistant", "kill the agent",
+  "stop what you're doing", "stop what youre doing",
+  "stop whatever you're doing", "stop whatever youre doing",
+  "stop what it's doing", "stop what its doing",
+  "stop whatever it's doing", "stop whatever its doing",
+  "stop doing that", "stop doing this",
   "acha", "achana nayo", "acha hiyo", "wacha hiyo", "sahau", "simama", "subiri", "ngoja", "tosha", "wacha",
 ];
 
@@ -343,9 +354,19 @@ export function classifyTurnIntent(text: string, context: TurnIntentContext): Tu
     return { intent: "repeat", reason: "Asked to hear it again." };
   }
 
+  // Explicit stop targeting the assistant/agent or what is currently being done:
+  // e.g. "stop the assistant", "can you stop the other assistant", "stop what you're doing"
+  const isAssistantStop =
+    /\b(?:stop|cancel|abort|kill|halt)\s+(?:the\s+)?(?:other\s+)?(?:assistant|agent|coding\s+assistant|background\s+assistant|run|task|execution)\b/i.test(joined) ||
+    /\b(?:stop|cancel)\s+(?:what|whatever)\s+(?:you(?:'re|re)?|it(?:'s|s)?)\s+doing\b/i.test(joined);
+
   // A bare stop is a stop whether or not anything is running; "stop the
   // server" is not, because something follows the verb.
-  if (consumedBy(stem, STOP_PHRASES) || (core.length === 0 && consumedBy(words, STOP_PHRASES))) {
+  if (
+    isAssistantStop ||
+    consumedBy(stem, STOP_PHRASES) ||
+    (core.length === 0 && consumedBy(words, STOP_PHRASES))
+  ) {
     return { intent: "stop", reason: "Asked to stop." };
   }
   // "no, stop" / "okay stop now" — a short utterance that contains a stop word

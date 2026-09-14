@@ -80,8 +80,8 @@ export const DEFAULT_ENDPOINTER: EndpointerConfig = {
   maxSilenceMs: 1800,
   minUtteranceMs: 220,
   onsetFrames: 3,
-  pacingCeilingMs: 2000,
-  resumeWindowMs: 1200,
+  pacingCeilingMs: 1800,
+  resumeWindowMs: 1000,
 };
 
 /**
@@ -105,7 +105,7 @@ const PAUSE_NOTICE_MS = 120;
  * relax this fraction of the way back to the configured one, so a fast talker
  * who once thought for a while is not waited on forever.
  */
-const PACING_RELAX = 0.95;
+const PACING_RELAX = 0.85;
 
 export type TurnEvent =
   /**
@@ -160,9 +160,17 @@ export function completenessScore(text: string): number {
   // ("port five one seven…").
   if (/\d$/.test(last)) score -= 0.15;
 
-  // Questions are complete by construction.
-  if (/^(what|why|how|when|where|who|which|can|could|should|would|is|are|do|does|did|nini|kwa ?nini|vipi|lini|wapi|nani)\b/.test(words[0])) {
-    score += 0.15;
+  // Question structure: a complete question clause vs an open stem.
+  const isQuestionStart = /^(what|why|how|when|where|who|which|can|could|should|would|is|are|do|does|did|nini|kwa ?nini|vipi|lini|wapi|nani)\b/.test(words[0]);
+  if (isQuestionStart) {
+    // If it's a very short question stem ending on an auxiliary/determiner (e.g. "what is my", "how much"),
+    // the operator is composing the subject/predicate, so hold the turn open.
+    const isAuxiliaryEnd = /^(is|are|am|was|were|do|does|did|my|the|a|an|to|for|with)$/.test(last);
+    if (words.length < 5 && isAuxiliaryEnd) {
+      score -= 0.25;
+    } else if (words.length >= 4) {
+      score += 0.15;
+    }
   }
 
   return Math.max(0, Math.min(1, score));
@@ -218,6 +226,7 @@ export function silenceWindowMs(config: EndpointerConfig, finality: number, eage
 export class Endpointer {
   private speaking = false;
   private onsetRun = 0;
+  private resumeRun = 0;
   private silenceRun = 0;
   private speechStartedAt = 0;
   private lastFrameAt = 0;
@@ -241,6 +250,7 @@ export class Endpointer {
   reset(): void {
     this.speaking = false;
     this.onsetRun = 0;
+    this.resumeRun = 0;
     this.silenceRun = 0;
     this.speechStartedAt = 0;
   }
@@ -273,34 +283,46 @@ export class Endpointer {
     this.lastFrameAt = now;
 
     if (voiced) {
-      if (this.speaking && this.silenceRun >= PAUSE_NOTICE_MS) {
-        // A pause we held through: the speaker was not finished, and this is
-        // how long they were quiet for.
-        this.learnPause(this.silenceRun);
-      }
-      this.silenceRun = 0;
-      if (!this.speaking) {
-        this.onsetRun += 1;
-        if (this.onsetRun >= this.config.onsetFrames) {
-          this.speaking = true;
-          this.speechStartedAt = now - this.onsetRun * this.frameMs;
-          this.onsetRun = 0;
-          const sinceEnd = this.lastEndAt ? this.speechStartedAt - this.lastEndAt : Infinity;
-          if (sinceEnd <= this.config.resumeWindowMs) {
-            // We called the turn over and the speaker carried on. The silence
-            // we cut into was the window that fired plus the gap since.
-            const gapMs = Math.round(this.lastWindowMs + Math.max(0, sinceEnd));
-            this.learnPause(gapMs);
-            this.lastEndAt = 0;
-            return { type: "speech-start", resumedAfterEndpoint: true, gapMs };
+      if (this.speaking) {
+        if (this.silenceRun >= PAUSE_NOTICE_MS) {
+          // In the middle of a noticeable pause, an isolated 1-frame click/pop
+          // (breath, key press, chair squeak) must not wipe out the silence run
+          // or escalate pacing. Real speech resumption requires a confirmed run
+          // of at least 2 consecutive voiced frames (~40 ms).
+          this.resumeRun += 1;
+          if (this.resumeRun >= 2) {
+            this.learnPause(this.silenceRun);
+            this.silenceRun = 0;
+            this.resumeRun = 0;
           }
-          return { type: "speech-start" };
+          return null;
         }
+        this.silenceRun = 0;
+        this.resumeRun = 0;
+        return null;
+      }
+      this.onsetRun += 1;
+      if (this.onsetRun >= this.config.onsetFrames) {
+        this.speaking = true;
+        this.speechStartedAt = now - this.onsetRun * this.frameMs;
+        this.onsetRun = 0;
+        this.resumeRun = 0;
+        const sinceEnd = this.lastEndAt ? this.speechStartedAt - this.lastEndAt : Infinity;
+        if (sinceEnd <= this.config.resumeWindowMs) {
+          // We called the turn over and the speaker carried on. The silence
+          // we cut into was the window that fired plus the gap since.
+          const gapMs = Math.round(this.lastWindowMs + Math.max(0, sinceEnd));
+          this.learnPause(gapMs);
+          this.lastEndAt = 0;
+          return { type: "speech-start", resumedAfterEndpoint: true, gapMs };
+        }
+        return { type: "speech-start" };
       }
       return null;
     }
 
     this.onsetRun = 0;
+    this.resumeRun = 0;
     if (!this.speaking) return null;
 
     this.silenceRun += this.frameMs;

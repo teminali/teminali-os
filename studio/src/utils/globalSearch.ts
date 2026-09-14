@@ -70,16 +70,26 @@ export function scoreText(query: string, text: string): number {
   if (!needle) return 0;
   const hay = text.toLowerCase();
   const at = hay.indexOf(needle);
-  if (at === -1) return 0;
+  if (at !== -1) {
+    const tier =
+      hay === needle ? 1000
+      : at === 0 ? 800
+      // A word start: after a space, a slash, a dash, a dot or an underscore.
+      : /[\s/\-_.]/.test(hay[at - 1]) ? 600
+      : 400;
+    // At most 99, so it can never lift a candidate into the tier above.
+    return tier + Math.max(0, 99 - Math.min(99, hay.length));
+  }
 
-  const tier =
-    hay === needle ? 1000
-    : at === 0 ? 800
-    // A word start: after a space, a slash, a dash, a dot or an underscore.
-    : /[\s/\-_.]/.test(hay[at - 1]) ? 600
-    : 400;
-  // At most 99, so it can never lift a candidate into the tier above.
-  return tier + Math.max(0, 99 - Math.min(99, hay.length));
+  // Multi-token fallback: if the query has multiple words (e.g. "one piece episode" or "one piece")
+  // and the text contains all significant tokens
+  const stopWords = new Set(["episode", "video", "file", "the", "a", "an", "and", "in", "of", "to", "for"]);
+  const tokens = needle.split(/[\s_\-.]+/).filter((t) => t.length > 1 && !stopWords.has(t));
+  if (tokens.length >= 2 && tokens.every((tok) => hay.includes(tok))) {
+    return 350 + Math.max(0, 49 - Math.min(49, hay.length));
+  }
+
+  return 0;
 }
 
 /**

@@ -94,7 +94,7 @@ const OPINION_FRAMES = [
  * a value for belongs on both lists or on neither.
  */
 const MACHINE_NOUNS =
-  /\b(file|files|folder|folders|directory|dir|project|projects|workspace|workspaces|repo|repository|video|clip|movie|track|audio|song|music|playback|player|terminal|command|shell|script|build|tests?|suite|server|app|code|function|component|readme|config|package|branch|commit|log|logs|screen|window|tab|pane|editor|timeline|path|document|note|notes|bug|bugs|error|errors|warning|warnings|issue|issues|crash|regression|feature|dependency|dependencies|import|imports|type|types|deploy|deployment|release|install|migration|pipeline|job|task|port|ports|version|versions|model|models|router|routers|route|routes|endpoint|endpoints|module|modules|gate|gates|handler|handlers|hook|hooks|schema|query|queries|panel|panels|sidebar|storage|memory|disk|drive|desktop)\b/i;
+  /\b(file|files|folder|folders|directory|dir|project|projects|workspace|workspaces|repo|repository|website|websites|webpage|webpages|site|sites|landing\s+page|html|css|stylesheet|stylesheets|video|clip|movie|track|audio|song|music|playback|player|terminal|command|shell|script|build|tests?|suite|server|app|code|function|component|readme|config|package|branch|commit|log|logs|screen|window|tab|pane|editor|timeline|path|document|note|notes|bug|bugs|error|errors|warning|warnings|issue|issues|crash|regression|feature|dependency|dependencies|import|imports|type|types|deploy|deployment|release|install|migration|pipeline|job|task|port|ports|version|versions|model|models|router|routers|route|routes|endpoint|endpoints|module|modules|gate|gates|handler|handlers|hook|hooks|schema|query|queries|panel|panels|sidebar|storage|memory|disk|drive|desktop)\b/i;
 
 /**
  * `it`, `this` and `that` are objects only when they are the thing the verb is
@@ -177,7 +177,7 @@ const PRONOUN_ANYWHERE = /\b(it|this|that|these|those)\b/i;
  * cannot read a file she was not sent to.
  */
 const SPOKEN_FILENAME =
-  /\b[\w-]+\s+dot\s+(?:json|js|jsx|ts|tsx|md|mjs|cjs|yml|yaml|toml|txt|py|sh|lock|env|css|html)\b/i;
+  /\b[\w-]+(?:\s+dot\s+|\.)(?:json|js|jsx|ts|tsx|md|mjs|cjs|yml|yaml|toml|txt|py|sh|lock|env|css|html)\b/i;
 
 const DEFINITE_OBJECT = /^\W*(?:the|this|that|these|those)\s+[\w.\-]+(?:\s+[\w.\-]+){0,2}/i;
 
@@ -228,7 +228,7 @@ const DURATION_OBJECT =
  * clause for this purpose, as does any sentence punctuation.
  */
 function objectWindow(after: string): string {
-  const boundary = after.search(/[.,;:?!]|\b(?:and|but|or|so|because|while|then|if|when|with)\b/i);
+  const boundary = after.search(/\.(?:\s|$)|[,;:?!]|\b(?:and|but|or|so|because|while|then|if|when|with)\b/i);
   return boundary === -1 ? after : after.slice(0, boundary);
 }
 

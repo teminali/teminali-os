@@ -62,6 +62,9 @@ export function speakablePath(path: string): string {
 
 function describeCommand(command: string): string {
   const lower = command.toLowerCase();
+  if (/\b(df|du|diskutil|system_profiler|findmnt)\b/.test(lower)) {
+    return "Checking computer storage";
+  }
   if (/\b(vitest|jest|mocha|pytest|node --test|npm test|npm run test|pnpm test|yarn test|cargo test|go test)\b/.test(lower) || /\btest\b/.test(lower)) {
     return "Running the tests";
   }
@@ -265,6 +268,9 @@ function dropLeadingCommandLines(text: string): string {
  * the answer removed, which is worse than silence. Keep what was inside the
  * backticks; lose only the backticks.
  */
+const INTENT_ANNOUNCEMENT =
+  /^(?:i(?:'ll|\s+will|\s+am\s+going\s+to)?\s+(?:run|execute|check|inspect|look|see|find)|let\s+me\s+(?:run|execute|check|inspect|look|see)|running\s+(?:a\s+command|commands)|checking\s+(?:now|your|the|computer|disk|storage)|taking\s+a\s+look|one\s+second|just\s+a\s+second|one\s+moment|just\s+a\s+moment|hang\s+on)\b/i;
+
 function firstSentence(text: string, max = 160): string {
   const clean = dropLeadingCommandLines(text)
     .replace(/```[\s\S]*?```/g, unfence)
@@ -273,9 +279,18 @@ function firstSentence(text: string, max = 160): string {
     .replace(/\s+/g, " ")
     .trim();
   if (!clean) return "";
-  const match = clean.match(/^[^.!?]+[.!?]/);
-  const sentence = (match ? match[0] : clean).trim();
-  return sentence.length > max ? `${sentence.slice(0, max - 1).trim()}…` : sentence;
+
+  const sentences = clean.split(/(?<=[.!?])\s+/).filter(Boolean);
+  let sentence = sentences[0] || clean;
+
+  if (sentences.length > 1 && INTENT_ANNOUNCEMENT.test(sentence)) {
+    const outcome = sentences.slice(1).find((s) => !INTENT_ANNOUNCEMENT.test(s));
+    if (outcome) sentence = outcome;
+  }
+
+  const match = sentence.match(/^[^.!?]+[.!?]/);
+  const final = (match ? match[0] : sentence).trim();
+  return final.length > max ? `${final.slice(0, max - 1).trim()}…` : final;
 }
 
 function elapsedPhrase(ms: number): string {
@@ -378,7 +393,24 @@ export function summariseOutcome(run: RunProgress): string {
     const path = pick(call.arguments ?? {}, PATH_KEYS);
     if (path && /(edit|write|patch|replace|create|apply|multiedit|str_replace)/.test(name)) edits.add(basename(path));
   }
-  const note = firstSentence(run.lastText, 140);
+  let note = firstSentence(run.lastText, 140);
+  if (run.kind === "inspect" && (!note || !/\d/.test(note))) {
+    for (const call of run.toolCalls) {
+      const cmd = String((call.arguments as any)?.command || "");
+      const res = String(call.result || "");
+      if (/\bdf\b/i.test(cmd) && res) {
+        const dfMatch =
+          res.match(/\n\S+\s+(\d+(?:\.\d+)?[A-Za-z]+)\s+(\d+(?:\.\d+)?[A-Za-z]+)\s+(\d+(?:\.\d+)?[A-Za-z]+)\s+(\d+%\s+.*\/$)/m) ||
+          res.match(/\s+(\d+(?:\.\d+)?(?:Gi|GB|G|Ti|TB|Mi|MB))\s+\d+%/i);
+        if (dfMatch) {
+          const rawAvail = dfMatch[3] || dfMatch[1];
+          const avail = rawAvail.replace(/Gi/i, " gigabytes").replace(/G\b/i, " gigabytes");
+          note = `You have ${avail} free on your main disk.${note ? ` ${note}` : ""}`;
+          break;
+        }
+      }
+    }
+  }
   if (edits.size === 0) {
     if (note) return note;
     if (run.kind === "inspect") return NO_ANSWER;

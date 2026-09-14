@@ -132,7 +132,7 @@ export const TemiCanvasOrb: React.FC<TemiCanvasOrbProps> = ({
      tick like a metronome instead of a habit. */
   const clockRef = useRef(0);
   const lastFrameRef = useRef(0);
-  const pointerRef = useRef({ x: 0, y: 0, seen: false });
+  const pointerRef = useRef({ x: 0, y: 0, seen: false, lastMoveAt: 0, prevX: 0, prevY: 0 });
   const rectRef = useRef<DOMRect | null>(null);
   const gazeRef = useRef({ x: 0, y: 0, vx: 0, vy: 0 });
   const microRef = useRef({ x: 0, y: 0, at: 0.8 });
@@ -142,6 +142,22 @@ export const TemiCanvasOrb: React.FC<TemiCanvasOrbProps> = ({
   const hoverRef = useRef(false);
   const glowRef = useRef<Stop[]>(cloneStops(GLOW_IDLE));
   const shaderRef = useRef<Stop[]>(cloneStops(ORB_IDLE));
+
+  /* Temi Autonomous Persona: when the pointer rests for less than half a second (>=380ms),
+     Temi breaks the rigid cursor stare and enters her own autonomous life:
+     looking at the operator, glancing at the workspace, tilting her head with
+     trademark poise, and exploring with organic micro-saccades and asymmetric brow lifts. */
+  const autoPersonaRef = useRef({
+    pointerWeight: 0,
+    targetX: 0,
+    targetY: -0.1,
+    headTilt: 0,
+    targetHeadTilt: 0,
+    leftBrowLift: 0,
+    targetLeftBrowLift: 0,
+    nextShiftAt: 1.2,
+    mode: "operator" as "operator" | "workspace" | "pondering" | "ambient",
+  });
 
   // Expose ripple trigger for interruptions/clicks
   const triggerInterruptionWave = () => {
@@ -153,7 +169,17 @@ export const TemiCanvasOrb: React.FC<TemiCanvasOrbProps> = ({
      room is the thing that reads as alive. */
   useEffect(() => {
     const onMove = (event: PointerEvent) => {
-      pointerRef.current = { x: event.clientX, y: event.clientY, seen: true };
+      const now = performance.now();
+      const p = pointerRef.current;
+      const moved = Math.hypot(event.clientX - p.prevX, event.clientY - p.prevY) > 2;
+      p.x = event.clientX;
+      p.y = event.clientY;
+      p.seen = true;
+      if (moved) {
+        p.lastMoveAt = now;
+        p.prevX = event.clientX;
+        p.prevY = event.clientY;
+      }
     };
     const onLeave = () => {
       pointerRef.current.seen = false;
@@ -298,19 +324,91 @@ export const TemiCanvasOrb: React.FC<TemiCanvasOrbProps> = ({
         rectAge = 0;
       }
       const rect = rectRef.current;
-      let targetX = 0;
-      let targetY = 0;
-      if (rect && pointerRef.current.seen) {
-        const dx = pointerRef.current.x - (rect.left + rect.width / 2);
-        const dy = pointerRef.current.y - (rect.top + rect.height / 2);
+      const nowMs = performance.now();
+      const pointer = pointerRef.current;
+      const auto = autoPersonaRef.current;
+
+      /* Pointer rest detector (<400ms):
+         If the pointer has rested for >=380ms (less than half a second), pointerWeight decays,
+         allowing Temi to break the rigid cursor stare and express her autonomous persona.
+         When the pointer actively moves again across the screen, she naturally re-engages. */
+      const isPointerResting = (nowMs - pointer.lastMoveAt) >= 380;
+      const targetWeight = (pointer.seen && !isPointerResting) ? 1.0 : 0.0;
+      const weightEaseSpeed = targetWeight > auto.pointerWeight ? 14.0 : 4.8;
+      auto.pointerWeight += (targetWeight - auto.pointerWeight) * Math.min(1, dt * weightEaseSpeed);
+
+      // Raw pointer tracking target
+      let pointerTargetX = 0;
+      let pointerTargetY = 0;
+      if (rect && pointer.seen) {
+        const dx = pointer.x - (rect.left + rect.width / 2);
+        const dy = pointer.y - (rect.top + rect.height / 2);
         const dist = Math.hypot(dx, dy);
         if (dist > 0.001) {
-          // Saturates quickly: eyes look *at* a thing, they do not lerp to it.
           const reach = Math.min(1, dist / 130);
-          targetX = (dx / dist) * reach;
-          targetY = (dy / dist) * reach;
+          pointerTargetX = (dx / dist) * reach;
+          pointerTargetY = (dy / dist) * reach;
         }
       }
+
+      /* Autonomous Persona Engine:
+         Temi has her own life, poise, and curiosity. She glances at the operator,
+         inspects the workspace, tilts her head with European wit, and makes
+         thoughtful, intelligent micro-movements instead of being frozen. */
+      if (clock > auto.nextShiftAt) {
+        const roll = Math.random();
+        if (currentPlaying || activeUserEnergy > 0.05) {
+          // In active conversation: keen operator eye contact, thoughtful tilts, subtle listening brow
+          if (roll < 0.72) {
+            auto.mode = "operator";
+            auto.targetX = (Math.random() - 0.5) * 0.12;
+            auto.targetY = -0.14 + (Math.random() - 0.5) * 0.08;
+            auto.targetHeadTilt = (Math.random() - 0.5) * 0.07;
+            auto.targetLeftBrowLift = Math.random() < 0.45 ? 0.22 : 0.04;
+          } else {
+            auto.mode = "pondering";
+            auto.targetX = 0.26 + Math.random() * 0.18;
+            auto.targetY = -0.28 - Math.random() * 0.14;
+            auto.targetHeadTilt = 0.05 + Math.random() * 0.04;
+            auto.targetLeftBrowLift = 0.26;
+          }
+          auto.nextShiftAt = clock + 1.3 + Math.random() * 2.2;
+        } else {
+          // Idle / resting on stage: autonomous glances at code, operator, or stage
+          if (roll < 0.44) {
+            auto.mode = "operator";
+            auto.targetX = (Math.random() - 0.5) * 0.15;
+            auto.targetY = -0.12 + (Math.random() - 0.5) * 0.06;
+            auto.targetHeadTilt = (Math.random() - 0.5) * 0.05;
+            auto.targetLeftBrowLift = 0.02;
+            auto.nextShiftAt = clock + 2.0 + Math.random() * 2.8;
+          } else if (roll < 0.74) {
+            // Workspace glance (inspecting the project files or terminal)
+            auto.mode = "workspace";
+            auto.targetX = -0.44 + (Math.random() - 0.5) * 0.14;
+            auto.targetY = 0.22 + (Math.random() - 0.5) * 0.12;
+            auto.targetHeadTilt = -0.04 - Math.random() * 0.03;
+            auto.targetLeftBrowLift = 0.16;
+            auto.nextShiftAt = clock + 1.2 + Math.random() * 1.9;
+          } else {
+            // Ambient curious glance
+            auto.mode = "ambient";
+            auto.targetX = 0.36 + (Math.random() - 0.5) * 0.16;
+            auto.targetY = -0.16 + (Math.random() - 0.5) * 0.14;
+            auto.targetHeadTilt = 0.05 + Math.random() * 0.04;
+            auto.targetLeftBrowLift = 0.18;
+            auto.nextShiftAt = clock + 1.5 + Math.random() * 2.5;
+          }
+        }
+      }
+
+      // Smoothly ease head tilt and wry brow lift
+      auto.headTilt += (auto.targetHeadTilt - auto.headTilt) * Math.min(1, dt * 5.2);
+      auto.leftBrowLift += (auto.targetLeftBrowLift - auto.leftBrowLift) * Math.min(1, dt * 6.4);
+
+      // Blend pointer tracking with autonomous persona
+      let targetX = pointerTargetX * auto.pointerWeight + auto.targetX * (1 - auto.pointerWeight);
+      let targetY = pointerTargetY * auto.pointerWeight + auto.targetY * (1 - auto.pointerWeight);
 
       /* Thinking looks away. Up-and-left is where a person's eyes go to recall
          something, and it is the cheapest possible signal that she is not
@@ -407,7 +505,7 @@ export const TemiCanvasOrb: React.FC<TemiCanvasOrbProps> = ({
       // The face sits on a sphere: it tilts and slides with the gaze, and the
       // eyes travel further than the mouth, which is what gives it depth.
       ctx.translate(cx + gaze.x * radius * 0.06, cy + gaze.y * radius * 0.05);
-      ctx.rotate(gaze.x * 0.075);
+      ctx.rotate(gaze.x * 0.075 + auto.headTilt);
       ctx.scale(breath, breath);
       ctx.lineCap = "round";
       ctx.lineJoin = "round";
@@ -419,10 +517,10 @@ export const TemiCanvasOrb: React.FC<TemiCanvasOrbProps> = ({
 
       /* One chevron. `dir` is +1 for the `>` on the left and −1 for the `<` on
          the right, so both point inward exactly as the mark does. */
-      const chevron = (ox: number, dir: number, offset: number) => {
+      const chevron = (ox: number, dir: number, offset: number, extraBrow = 0) => {
         const reachX = eyeReachX * (1 - face.squint * 0.22);
         const reachY = eyeReachY * openness;
-        const brow = face.brow * eyeReachY * 0.55;
+        const brow = (face.brow + extraBrow) * eyeReachY * 0.55;
         const ax = ox - dir * reachX;
         ctx.beginPath();
         ctx.moveTo(ax, eyeY + eyeShiftY - reachY - brow + offset);
@@ -472,14 +570,14 @@ export const TemiCanvasOrb: React.FC<TemiCanvasOrbProps> = ({
       // - where concentric it reads as light coming off the glyph.
       ctx.strokeStyle = bloom;
       ctx.lineWidth = stroke * 2.2;
-      chevron(-eyeDX + eyeShiftX, 1, 0);
+      chevron(-eyeDX + eyeShiftX, 1, 0, auto.leftBrowLift);
       chevron(eyeDX + eyeShiftX, -1, 0);
       lips(0, false);
       ctx.lineWidth = stroke;
 
       ctx.strokeStyle = ink;
       ctx.fillStyle = ink;
-      chevron(-eyeDX + eyeShiftX, 1, 0);
+      chevron(-eyeDX + eyeShiftX, 1, 0, auto.leftBrowLift);
       chevron(eyeDX + eyeShiftX, -1, 0);
       lips(0, true);
       ctx.restore();

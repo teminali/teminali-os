@@ -55,12 +55,15 @@ class TTSPlaybackProcessor extends AudioWorkletProcessor {
   }
 
   process(inputs, outputs) {
-    const outputChannel = outputs[0][0];
+    const output0 = outputs[0]?.[0];
+    if (!output0) return true;
+    const output1 = outputs[0]?.[1];
 
     if (this.samplesRemaining === 0) {
-      outputChannel.fill(0);
+      output0.fill(0);
+      if (output1) output1.fill(0);
       if (this.isPlaying) {
-        this.silenceSamples += outputChannel.length;
+        this.silenceSamples += output0.length;
         if (this.silenceSamples >= this.debounceSampleThreshold) {
           this.isPlaying = false;
           this.silenceSamples = 0;
@@ -78,10 +81,12 @@ class TTSPlaybackProcessor extends AudioWorkletProcessor {
     }
 
     let outIdx = 0;
-    while (outIdx < outputChannel.length && this.bufferQueue.length > 0) {
+    while (outIdx < output0.length && this.bufferQueue.length > 0) {
       const currentBuffer = this.bufferQueue[0];
       const sampleValue = currentBuffer[this.readOffset] / 32768;
-      outputChannel[outIdx++] = sampleValue;
+      output0[outIdx] = sampleValue;
+      if (output1) output1[outIdx] = sampleValue;
+      outIdx++;
 
       this.readOffset++;
       this.samplesRemaining--;
@@ -94,8 +99,10 @@ class TTSPlaybackProcessor extends AudioWorkletProcessor {
       }
     }
 
-    while (outIdx < outputChannel.length) {
-      outputChannel[outIdx++] = 0;
+    while (outIdx < output0.length) {
+      output0[outIdx] = 0;
+      if (output1) output1[outIdx] = 0;
+      outIdx++;
     }
 
     if (this.samplesSinceProgress >= this.progressIntervalSamples) {

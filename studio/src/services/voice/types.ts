@@ -448,7 +448,7 @@ export const DEFAULT_VOICE_SETTINGS: VoiceSettings = {
     repair cannot rewrite somebody's name. A wake word list is the right place
     for "what the recogniser produces" rather than "how the word is spelt".
   */
-  wakeWords: ["temy", "temi", "teminali"],
+  wakeWords: ["temy", "temi", "teminali", "timmy"],
   endpointSilenceMs: 500,
   allowBargeIn: true,
   narrateProgress: true,

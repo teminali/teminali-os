@@ -472,8 +472,8 @@ export const AgentPane: React.FC<{ panel: PanelTab & { kind: AgentEngine } }> = 
                 says that saying it works too. */}
             {spokenApproval.listening && (
               <span className="flex items-center gap-1 text-ink-muted" title={'Say "yes", "always", or "no"'}>
-                <Mic size={10} className="opacity-70" />
-                say yes
+                <Mic size={10} className="opacity-70 text-amber-400 animate-pulse" />
+                say <span className="text-ink-high font-medium">yes</span> · <span className="text-ink-high font-medium">always</span> · <span className="text-ink-high font-medium">no</span>
               </span>
             )}
             {approvals.length > 1 && <span className="text-ink-disabled">{approvals.length - 1} more waiting</span>}

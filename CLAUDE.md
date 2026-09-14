@@ -57,6 +57,12 @@ it. That duplication is what drifted last time.
    intention the code has not reached, mark it explicitly as not yet true.
 4. **A code comment is a doc.** Correct it in the same edit that invalidates it.
 
+## Core Rules (Across All Sessions)
+
+1. **Zero Legacy Code & Ruthless Pruning**: Always delete superseded, dead, or deprecated legacy implementation code. Never leave duplicate systems, abandoned parallel paths, or commented-out code blocks. Keep the codebase clean, lean, and easily understandable.
+2. **Cumulative Battle Testing**: `studio/scripts/hands-free-temi-dev.mjs` is the non-negotiable release gate. Tests are strictly additive: every run must test all accumulated capabilities plus any new features.
+3. **Sub-3s / 0-Token Local Fast Paths**: Local accessibility tasks, telemetry, and OS control must run through fast paths taking < 50ms and consuming 0 model tokens.
+
 ## Scaling the local lane
 
 Two things here are called Frontier. `gateway/frontier-runner.js` drives the
@@ -75,7 +81,7 @@ because reasoning about this was wrong twice in one session.
 
 ```bash
 npm test              # root gateway/runner/licence/billing suite — 143 tests
-npm run studio:test   # application suite — 2966 tests
+npm run studio:test   # application suite — 2961 tests
 npm run verify:all    # both, plus studio typecheck and production build
 cd studio && npm run eval:local   # the chat's local lane vs the real model — a score, not a pass/fail
 ```

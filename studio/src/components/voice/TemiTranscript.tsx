@@ -16,6 +16,7 @@
 import React, { useCallback, useState } from "react";
 import { Check, Copy, MoreHorizontal, ThumbsUp } from "lucide-react";
 import { CursorMarkdownRenderer } from "../chat/CursorMarkdownRenderer";
+import { formatSpelledNumbers } from "../../services/voice/numberWords";
 
 export interface DialogueTurn {
   id: string;
@@ -171,14 +172,14 @@ export const TemiTranscript: React.FC<TemiTranscriptProps> = ({
       turn.role === "user" ? (
         // The operator: a bubble, right-aligned, never wider than 70% of the
         // column so the ragged left edge stays legible.
-        <div key={turn.id} className="flex justify-end">
+        <div key={turn.id} data-turn-bubble data-role="user" className="flex justify-end">
           <div className="max-w-[70%] whitespace-pre-wrap break-words rounded-3xl bg-[#06512f] px-5 py-3.5 text-[16px] leading-[1.6] text-white">
             {turn.content}
             {turn.pending && <LiveCaret tone="user" />}
           </div>
         </div>
       ) : (
-        <div key={turn.id} className="group flex flex-col items-start">
+        <div key={turn.id} data-turn-bubble data-role="assistant" className="group flex flex-col items-start">
           {/*
             Temi's side is markdown, the operator's is not.
 
@@ -194,7 +195,7 @@ export const TemiTranscript: React.FC<TemiTranscriptProps> = ({
           */}
           <div className="max-w-full break-words text-[16px] leading-[1.75] text-[#f3f3f3]">
             <CursorMarkdownRenderer
-              content={turn.content}
+              content={turn.role === "assistant" ? formatSpelledNumbers(turn.content) : turn.content}
               scale="stage"
               isStreaming={turn.pending}
               trailing={turn.pending ? <LiveCaret tone="assistant" /> : undefined}
@@ -204,7 +205,11 @@ export const TemiTranscript: React.FC<TemiTranscriptProps> = ({
               copy yet, and the row would jump as the text grows. Emptiness is
               not re-checked here: `hasWords` has already dropped those turns. */}
           {!turn.pending && (
-            <AssistantActions text={turn.content} onRepeat={onRepeat} onCopied={onCopied} />
+            <AssistantActions
+              text={formatSpelledNumbers(turn.content)}
+              onRepeat={onRepeat}
+              onCopied={onCopied}
+            />
           )}
         </div>
       )

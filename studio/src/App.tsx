@@ -27,6 +27,7 @@ import { GitHubModal } from "./components/github/GitHubModal";
 import { useStudioStore } from "./store/studioStore";
 import { usePanelStore } from "./store/panelStore";
 import { WorkspaceService } from "./services/workspaceService";
+import { useProjectLibraryStore } from "./hooks/useProjectLibrary";
 import { openVideoProject, saveVideoProject } from "./video/project/io";
 import { useProjectStore } from "./video/store/projectStore";
 
@@ -353,6 +354,7 @@ export default function App() {
       .then((response) => {
         const root = response.current?.path;
         if (root) useStudioStore.getState().setWorkspacePath(root);
+        useProjectLibraryStore.getState().setProjects(response.current, response.recent);
       })
       .catch(() => {
         // A gateway that is down leaves the root unconfirmed rather than

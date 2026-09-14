@@ -450,7 +450,16 @@ async function installedModelNames(fetchImpl, config) {
     if (!res.ok) return null;
     const body = await res.json();
     if (!Array.isArray(body.models)) return null;
-    return new Set(body.models.map((m) => m?.name).filter((n) => typeof n === "string"));
+    const names = new Set();
+    for (const m of body.models) {
+      if (typeof m?.name === "string") {
+        names.add(m.name);
+        if (m.name.endsWith(":latest")) {
+          names.add(m.name.slice(0, -7));
+        }
+      }
+    }
+    return names;
   } catch {
     return null;
   }
@@ -473,8 +482,8 @@ async function installedModelNames(fetchImpl, config) {
  */
 function laneAvailability(installed, model) {
   if (installed === null) return { available: false, reason: "Ollama is not reachable." };
-  if (installed.has(model.model)) return { available: true };
-  if (model.source && installed.has(model.source)) return { available: true };
+  if (installed.has(model.model) || installed.has(`${model.model}:latest`)) return { available: true };
+  if (model.source && (installed.has(model.source) || installed.has(`${model.source}:latest`))) return { available: true };
   return {
     available: false,
     reason: model.source
@@ -1472,13 +1481,14 @@ export async function createGateway(options = {}) {
             (isLikelyGoogleKey(process.env.GEMINI_API_KEY) ? process.env.GEMINI_API_KEY : null);
 
           // Backup key resolution: saved backup -> env backup -> fallback between store and env
+          const savedBackup = isLikelyGoogleKey(googleSaved?.backupKey) ? googleSaved.backupKey.trim() : null;
           let backupKey =
-            (isLikelyGoogleKey(googleSaved?.backupKey) ? googleSaved.backupKey : null) ||
-            (isLikelyGoogleKey(process.env.GEMINI_API_KEY_BACKUP) ? process.env.GEMINI_API_KEY_BACKUP : null);
+            (savedBackup && savedBackup !== primaryKey ? savedBackup : null) ||
+            (isLikelyGoogleKey(process.env.GEMINI_API_KEY_BACKUP) ? process.env.GEMINI_API_KEY_BACKUP.trim() : null);
 
           if (!backupKey) {
-            const storeKey = isLikelyGoogleKey(googleSaved?.key) ? googleSaved.key : null;
-            const envKey = isLikelyGoogleKey(process.env.GEMINI_API_KEY) ? process.env.GEMINI_API_KEY : null;
+            const storeKey = isLikelyGoogleKey(googleSaved?.key) ? googleSaved.key.trim() : null;
+            const envKey = isLikelyGoogleKey(process.env.GEMINI_API_KEY) ? process.env.GEMINI_API_KEY.trim() : null;
             if (primaryKey === storeKey && envKey && envKey !== primaryKey) {
               backupKey = envKey;
             } else if (primaryKey === envKey && storeKey && storeKey !== primaryKey) {
@@ -1554,7 +1564,7 @@ export async function createGateway(options = {}) {
 
           // Model resilience: If requested model returns 429 (quota exhausted on preview model), UNAVAILABLE (503), or NOT_FOUND (404), fall back gracefully
           if (!upstream.ok && (upstream.status === 429 || upstream.status === 503 || upstream.status === 404)) {
-            const fallbackCandidates = ["gemini-3.5-flash", "gemini-flash-latest", "gemini-3.6-flash", "gemini-3.8-flash"];
+            const fallbackCandidates = ["gemini-3.6-flash", "gemini-3.1-flash-lite", "gemini-3.5-flash-lite", "gemini-3.7-flash", "gemma-4-31b-it", "gemini-flash-latest"];
             for (const candidate of fallbackCandidates) {
               if (candidate === openAIPayload.model) continue;
               await audit.write({

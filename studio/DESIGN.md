@@ -8714,6 +8714,159 @@ machine noun in the clause still wins, so "make the error message sound
 friendlier" is still an edit. `tests/machine-action.test.mjs` holds the spoken
 sentence verbatim beside those counter-cases.
 
+#### 6.0.53 Ambient room noise triggered watchdog stall loops and "[noise]" transcriptions (`services/voice/voiceActivity.ts`, `services/voice/micEndpoint.ts`, `services/voice/geminiLiveEngine.ts`, 2026-09-13)
+
+The voice stage displayed an error banner repeatedly: *"I could not tell when you
+stopped, so I took the turn. Say that again if I cut you off."* Temi was no
+longer responding smoothly, turns stalled for 15 s, and the stage intermittently
+displayed `"noice"` or `"[noise]"` during background silence.
+
+Four compounding faults caused the stall loop:
+
+1. **Deadlocked noise floor.** `NoiseFloor` started at `0.004` and refused to
+   update whenever `voiced` was true. Because `isVoicedFrame` treats RMS > `floor × 2.8`
+   (0.0112) as loud speech, room noise (RMS ~0.016, e.g. fans or air conditioning)
+   was classified as `voiced` from frame 1. The floor never adapted to the room,
+   trapping the detector in perpetual speech.
+2. **Pacing ceiling escalation.** With room noise seen as speech, `silenceRun`
+   reset continuously. Any transient dip treated as a pause caused `learnPause` to
+   raise `pacingFloorMs` to its 2000 ms ceiling. Because unbroken silence never
+   reached 2000 ms, `guardAgainstEndlessTurn()` fired at 15 s (`MAX_UTTERANCE_MS`).
+3. **Refractory loop.** On stall, `endpointer.reset()` did not clear the learned
+   pacing floor and enforced no cooldown. Within 60 ms, room noise re-triggered
+   `speech-start`, opened `activityStart`, and immediately cut off Gemini's
+   spoken reply (`START_OF_ACTIVITY_INTERRUPTS`), looping every 15 seconds.
+4. **Non-speech tag leak.** While streaming 15 seconds of background noise to
+   Gemini Live, the server returned acoustic descriptors (`[noise]`, `(noise)`,
+   `noice`). These were emitted as `partial_user_request` and `final_user_request`,
+   causing `gateSpokenTurn` to fail and barge-in to silence Temi's audio.
+
+The repairs:
+
+- **Adaptive rolling minimum noise floor (`voiceActivity.ts`).** `NoiseFloor` now
+  tracks minimum statistics over a 75-frame (1.5 s) circular buffer with a
+  10-frame fast bootstrap on startup. Speech dips during consonant closures and
+  pauses while stationary room noise sits at the minimum. The floor adapts upward
+  to room noise (e.g. 0.016) so `isVoicedFrame` reliably identifies silence.
+- **Pacing recovery and refractory cooldown (`micEndpoint.ts`, `geminiLiveEngine.ts`).**
+  `MicEndpointer.forgetPacing()` clears `pacingFloorMs` on watchdog stall.
+  `guardAgainstEndlessTurn()` enforces an 800 ms `stallCooldownUntil` refractory
+  window so room noise cannot immediately reopen the activity bracket, and only
+  emits `ENDPOINT_STALL_NOTE` if actual user speech was transcribed.
+- **Non-speech tag filtering (`geminiLiveEngine.ts`).** `withoutNonSpeechTags()`
+  strips bracketed tags (`[...]`, `<...>`, `(...)`, `*...*`) and bare acoustic
+  noise tokens (`noise`, `noice`, `background noise`).
+- **End-to-end full experience battle test (`tests/voice-full-experience-battle.test.mjs`).**
+  Exercises the full 48 kHz WebAudio batch -> downsample -> MicEndpointer -> GeminiLiveEngine
+  -> transcription -> watchdog recovery -> ducking / barge-in -> multi-turn flow.
+  Paired with `tests/voice-noise-tag.test.mjs`.
+
+#### 6.0.54 "How does that all work?" was delegated to the workspace assistant and conversational reasoning was suppressed (`services/voice/machineAction.ts`, `services/voice/temiPersona.ts`, `services/voice/geminiLiveEngine.ts`, 2026-09-13)
+
+When the operator asked conversational questions like *"How does that all work? How am
+I talking to you right now?"* or *"Why are you checking for that?"*, Temi responded
+*"Checking now."* and handed off the prompt to Claude Code in the workspace, which
+began scanning repository files on disk. Furthermore, when the operator told Temi
+*"Do not use the other assistants"*, she ignored or deflected the request, claiming
+it was "protocol" or that she was not permitted to answer directly.
+
+Three compounding issues caused this breakdown in reasoning and conversational flow:
+
+1. **Regex over-match on `work` (`machineAction.ts`).**
+   `STATE_QUESTIONS` matched `\b(did|has|have|does|do)\b[^?.]{0,60}?\b(finish|...|work|worked)\b/i`.
+   Combined with `PRONOUN_ANYWHERE` matching *"that"* or *"this"*, *"How does that
+   all work?"* was classified by regex as `{ kind: 'inspect', reason: 'a question
+   about machine state — does that all work' }`. In `voiceTurnRouter.ts`, this emitted
+   `acknowledgeAction("inspect")` (*"Checking now."*), silenced Gemini Live, and
+   delegated the turn to the workspace coding agent (`TeminaliAgentBridge.delegateTask`).
+2. **Persona intimidation and self-suppression (`temiPersona.ts`).**
+   The prompt told Temi: *"The assistant is more capable than you are and knows things
+   you do not... the moment you are about to say something specific nobody told you,
+   ask it instead... Guessing costs you the call."* This caused Gemini Live to suppress
+   its own reasoning, technical understanding, and explanations, treating any general
+   question as a cue to invoke `ask_the_assistant`.
+3. **Suppression on mentions of "assistants" (`temiPersona.ts`).**
+   Under `WHO IS IN THE ROOM`, the instruction *"If a sentence names another assistant,
+   it is theirs. Do not answer it"* triggered whenever the operator said *"Do not use
+   the other assistants"* or *"Stop using other assistants"*. The word *"assistants"*
+   caused Temi to treat the sentence as belonging to another assistant, causing her
+   to ignore the operator or justify it as an unchangeable protocol.
+
+The repairs:
+
+- **Explanatory patterns in `OPINION_FRAMES` (`machineAction.ts`).**
+  `OPINION_FRAMES` now captures explanatory queries (`how does/do/am/are/can/could...
+  work/talk/function`, `why are you checking/looking/reading`, `explain how/why/what`)
+  and explicit negative delegation directives (`do not/don't/never/stop use/call/reach
+  for other assistants/agents/tools`, `just talk/speak/answer to me directly/yourself`).
+  These match early and evaluate to `null` (`CONVERSE`), ensuring they are handled
+  directly by voice conversation rather than being intercepted as machine actions.
+- **Restoring Temi's reasoning autonomy and obedience (`temiPersona.ts`).**
+  `TEMI_PERSONA` now explicitly states that Temi has full technical understanding of
+  the stack, architecture, and concepts, and reasons for herself. The background
+  assistant is strictly for physical filesystem and workspace modifications. Crucially:
+  *"If the operator tells you NOT to use the assistant, to answer yourself, or to just
+  talk, OBEY THEM. Never claim it is 'protocol' or that you cannot answer. Answer
+  directly using your own reasoning."* `WHO IS IN THE ROOM` was refined so that only
+  direct wake-name addresses to other devices ("Hey Siri", "Alexa") are left alone,
+  while conversations or instructions about assistants are answered directly.
+- **Clarifying tool description (`geminiLiveEngine.ts`).**
+  The `ASK_THE_ASSISTANT` declaration description now explicitly forbids calling the
+  assistant for conceptual questions, system explanations, or when the operator has
+  instructed Temi to speak or answer directly.
+- **Delegation safety regression suite (`tests/voice-delegation-safety.test.mjs`).**
+  Expanded `MUST_NOT_DELEGATE` with *"Do not use the other assistants."*, *"How does
+  that all work? How am I talking to you right now?"*, *"How does this work?"*, and
+  *"Why are you checking for that?"*. All pass as `null` (CONVERSE).
+
+#### 6.0.55 Low latency, ambient noise rejection, and speech ignore prevention (`services/voice/voiceActivity.ts`, `services/voice/turnTaking.ts`, `services/voice/geminiLiveEngine.ts`, 2026-09-13)
+
+When operating in environments with stationary background sounds (fans, air conditioning,
+ambient hum) or low-level speaker bleed, the operator observed severe latency (seconds of
+dead silence before responses or getting stuck in the `THINKING` state) and reported that
+Temi frequently got interrupted by ambient sounds and ended up ignoring their speech entirely.
+
+Investigation traced this behavior to three interlocking failures:
+
+1. **Missing Energy Gate on Pitch (`services/voice/voiceActivity.ts`).**
+   The periodic pitch detector checked whether fundamental frequency fell within human range
+   (`f0 >= 80 && f0 <= 420`) and met clarity criteria, but returned `periodic` without verifying
+   that frame RMS exceeded `pitchFloor`. Consequently, low-level room noise (120/240 Hz hum,
+   fan vibration, AC whir) at RMS 0.003–0.015 was flagged as `voiced`.
+2. **Post-Commit Turn Abort Loop (`services/voice/geminiLiveEngine.ts`).**
+   When the operator stopped speaking, `closeActivity` committed the utterance and sent `activityEnd`
+   to Gemini Live. While Gemini was preparing the audio stream (typically 200–500 ms latency), the
+   operator took a natural breath, or quiet room noise produced a periodic frame. Because `isVoicedFrame`
+   called it voiced, `speech-start` immediately fired and `openActivity` sent `activityStart` to Gemini.
+   In the Gemini Live bidirectional protocol, `activityStart` aborts any in-flight response generation.
+   The noisy or breath turn then ended with zero speech, Gemini responded with nothing, and the operator's
+   original utterance was completely ignored.
+3. **Endpointer Pacing Inflation and Slow Decay (`services/voice/turnTaking.ts`).**
+   When silence between phrases or at turn end was interrupted by false voiced frames, `learnPause`
+   treated the gap as a speaker pause and raised `pacing` to `pacingCeilingMs` (2000 ms). With
+   `PACING_RELAX = 0.95`, it took over 20 clean turns to decay back to the 600 ms floor, forcing the
+   operator to endure two full seconds of dead silence on every subsequent turn.
+
+The fixes:
+- **Restored Pitch Energy Gate and Ducked Rejection (`voiceActivity.ts`).**
+  `pitchFloor` is strictly enforced: `ducked ? Math.max(noiseFloor * 2.8, 0.02) : Math.max(noiseFloor * 1.6, 0.009)`.
+  A frame is voiced only if `(periodic && rms > pitchFloor) || loud`. Ducked rejection at 0.02 rejects
+  speaker bleed while allowing deliberate barge-in (RMS > 0.025). `NoiseFloor.update` skips learning
+  when `voiced` or `ducked`, tracking room silence via a 1.5 s rolling window minimum without
+  contamination from playback bleed or user speech.
+- **Pacing Ceiling, Decisive Decay, and Spike Filter (`turnTaking.ts`).**
+  `pacingCeilingMs` is capped at 1800 ms (matching `maxSilenceMs`), `resumeWindowMs` is tuned to 1000 ms,
+  and `PACING_RELAX` is accelerated to `0.85`, easing pacing back to the responsive baseline in 3–4 turns.
+  During noticeable pauses (`PAUSE_NOTICE_MS: 120 ms`), single-frame noise spikes no longer reset the
+  silence run or inflate pacing without confirmed continuation (`resumeRun >= 2`).
+- **Clean Endpointer State & Timestamps (`geminiLiveEngine.ts`).**
+  `guardAgainstEndlessTurn` passes simulation timestamps `(now, now)` to `closeActivity`.
+- **Battle Suite Verification (`tests/voice-full-experience-battle.test.mjs`).**
+  Six deterministic battle tests cover fan noise rejection (RMS 0.016), thinking pause recovery,
+  `[noise]` tag suppression, watchdog stall cooldown and pacing reset, speaker bleed rejection vs. barge-in,
+  and multi-turn flow. Full studio suite passes with 2911/2911 tests.
+
+
 ### 6.1 Turn semantics while a run is in flight (2026-09-05)
 
 A directed utterance is not automatically an instruction. `turnIntent.ts`
@@ -12187,4 +12340,24 @@ would widen every match in the file.
 The three remaining copies are not this bug and were left: `hooks/useVoice.ts:33`
 and `voice/turnIntent.ts:67` are filler-word sets, and `voice/voiceTurnRouter.ts`
 is the dictation lane.
+
+### 6.51 Vocal delivery directives, voice-assistant envelope framing, and full duplex cancellation (2026-09-13)
+
+When the operator asked Temi to "sing the song longer" or "make it longer", the pre-model regex in `machineAction.ts` matched the causative "make" under code `edit`. The router intercepted the turn before Gemini Live could speak, announced "Making the change.", and forwarded the singing request to Claude Code via `TeminaliAgentBridge.delegateTask`. Claude Code, having no context that this was a vocal performance request directed at Temi, attempted to search files and hit Anthropic rate limits. Concurrently, post-speech breaths and sighs (RMS 0.018–0.030) triggered unpitched loud frames in `voiceActivity.ts`, repeatedly wiping `silenceRun` and driving pacing up to 2000ms, while extended silence caused Gemini Live ASR to hallucinate non-speech Japanese kana (`"はい。"`).
+
+Four invariants were established:
+
+1. **Vocal Performance & Delivery Protection (`services/voice/machineAction.ts`)**:
+   Expanded `OPINION_FRAMES` and `PRONOUN_DELIVERY` to recognise performance and vocal delivery qualifiers (`longer`, `shorter`, `faster`, `slower`, `louder`, `quieter`, `softer`, `higher`, `lower`, `better`, `worse`, `sing longer`, `sing another one`). Utterances modifying vocal delivery remain strictly in `converse` and never route as engineering actions.
+
+2. **Voice Assistant Context Envelope (`services/voice/assistantHandoff.ts`, `services/voice/teminaliAgentBridge.ts`)**:
+   `frameVoiceDelegatedTask` wraps all prompts passed to `AIService.streamMessage` from the voice bridge. It identifies that the task was routed by Temi Voice and instructs the background assistant that conversational, vocal, or non-engineering tasks must not modify files or run shell commands, but must report back concisely to be spoken.
+
+3. **Full Duplex Cancellation (`services/voice/turnIntent.ts`)**:
+   Added `isAssistantStop` and assistant-directed phrases (`"stop the assistant"`, `"stop the other assistant"`, `"stop the agent"`, `"cancel the assistant"`, `"stop what you're doing"`) to `STOP_PHRASES`. Spoken cancellation during an active run immediately aborts `activeController`, drops queued delegations, and announces "Stopped."
+
+4. **Breathing & Silence Resiliency (`turnTaking.ts`, `voiceActivity.ts`, `geminiLiveEngine.ts`)**:
+   `turnTaking.ts` requires confirmed consecutive frames (`resumeRun >= 2`) to reset `silenceRun` during pauses, preventing isolated breath spikes from inflating `learnPause`. `voiceActivity.ts` raised unpitched loud thresholds (0.016, 3.2× noise floor). `geminiLiveEngine.ts` filters non-Latin script hallucinations and silence/breathing artifacts.
+
+Measured: studio **2911/2911** tests pass; root **143/143** tests pass; `npm run studio:typecheck` clean.
 

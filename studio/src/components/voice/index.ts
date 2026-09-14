@@ -10,5 +10,6 @@ export * from "./AstraVoiceOrb";
 export * from "./TemiCanvasOrb";
 export * from "./TemiTranscript";
 export * from "./TemiActivityDialog";
+export * from "./CliStreamingPanel";
 export * from "./TemiStagePanels";
 export * from "./TemiVoiceStage";

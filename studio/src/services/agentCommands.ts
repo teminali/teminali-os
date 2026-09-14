@@ -125,7 +125,7 @@ const BLOCKED_PATTERNS: Array<{ pattern: RegExp; reason: string }> = [
   { pattern: /\bsudo\b|\bsu\b\s|\bdoas\b/, reason: "privilege escalation" },
   { pattern: /\brm\b[^|;&]*\s(-[a-zA-Z]*[rf][a-zA-Z]*\s+)?(\/|~)(\s|$)/, reason: "recursive delete outside the workspace" },
   { pattern: /\b(mkfs|fdisk|diskutil|dd)\b/, reason: "disk-level operation" },
-  { pattern: /\b(shutdown|reboot|halt|killall)\b/, reason: "machine control" },
+  { pattern: /\b(shutdown|reboot|halt|killall|pkill)\b|\bkill\s+-[0-9a-zA-Z]+/, reason: "machine control" },
   { pattern: /\bchmod\b\s+(-R\s+)?777\s+\//, reason: "permission change on the filesystem root" },
   { pattern: /(curl|wget)[^|;&]*\|\s*(sh|bash|zsh)/, reason: "piping a remote script into a shell" },
   { pattern: /:\(\)\s*\{.*\}\s*;?\s*:/, reason: "fork bomb" },
@@ -229,50 +229,6 @@ function classifySegment(segment: string): { risk: CommandRisk; reason: string }
     : { risk: "confirm", reason: `${binary} ${subcommand} is not a known read-only subcommand` };
 }
 
-export function classifyCommand(command: string): { risk: CommandRisk; reason: string } {
-  const normalized = command.trim();
-  if (!normalized) return { risk: "blocked", reason: "empty command" };
-
-  for (const { pattern, reason } of BLOCKED_PATTERNS) {
-    if (pattern.test(normalized)) return { risk: "blocked", reason };
-  }
-  // Output redirection can overwrite a file, so it always needs a human.
-  // Excludes the arrow-like sequences that appear in ordinary arguments (->, =>, >=).
-  if (/(?<![-=>])>>?(?!=)/.test(normalized)) {
-    return { risk: "confirm", reason: "writes to a file via redirection" };
-  }
-
-  // The riskiest segment decides the whole line: a pipeline is only as safe as
-  // the command that mutates the most.
-  for (const part of segments(normalized)) {
-    const verdict = classifySegment(part);
-    if (verdict.risk === "confirm") return verdict;
-  }
-  return { risk: "auto", reason: "read-only inspection or verification" };
-}
-
-/*
-  A fence is one command per line — except when it is not.
-
-  A heredoc, a trailing backslash and an unclosed quote each continue a command
-  onto the next line, and splitting them does not merely lose the command: it
-  runs the pieces. Measured on this repo 2026-09-07, a four-line
-  `python3 - <<'EDIT'` edit parsed as **five** commands — a bare `python3`
-  reading a stdin that never closes, three python statements handed to the
-  shell, and the terminator — each raising its own approval prompt, with
-  nothing edited at the end of it. That is why [TO CHANGE A FILE YOU HAVE NOT
-  SEEN IN FULL] had to teach a one-line `python3 -c` form: the prompt was
-  working around this function.
-
-  Quote and heredoc state is tracked by scanning, not by regex, because `<<`
-  inside a quoted string opens nothing and a `#` comment ends the scan. `<<<`
-  is a herestring and stays on its line.
-
-  Heredoc *bodies* are still classified as commands by `classifyCommand`,
-  which splits on newlines: content that would be blocked as a command is
-  blocked when it is written as data too. That is deliberate — a body is an
-  obvious place to hide one — and it is the conservative side of the trade.
-*/
 interface LineScan {
   /** The quote left open at the end of the line, if any. */
   openQuote: "'" | '"' | null;
@@ -337,6 +293,83 @@ function scanLine(line: string, carried: "'" | '"' | null): LineScan {
   }
 
   return { openQuote: quote, continues, heredocs };
+}
+
+export function hasUnterminatedHeredoc(command: string): boolean {
+  const lines = command.split("\n");
+  let pending: { delim: string; dashed: boolean }[] = [];
+  let quote: "'" | '"' | null = null;
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    if (pending.length > 0) {
+      const doc = pending[0];
+      if ((doc.dashed ? line.replace(/^\t+/, "") : line) === doc.delim) {
+        pending.shift();
+      }
+      continue;
+    }
+    const scan = scanLine(line, quote);
+    quote = scan.openQuote;
+    if (scan.heredocs.length) pending = [...scan.heredocs];
+  }
+  return pending.length > 0;
+}
+
+export function hasUnclosedQuote(command: string): boolean {
+  const lines = command.split("\n");
+  let quote: "'" | '"' | null = null;
+  let pending: { delim: string; dashed: boolean }[] = [];
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    if (pending.length > 0) {
+      const doc = pending[0];
+      if ((doc.dashed ? line.replace(/^\t+/, "") : line) === doc.delim) {
+        pending.shift();
+      }
+      continue;
+    }
+    const scan = scanLine(line, quote);
+    quote = scan.openQuote;
+    if (scan.heredocs.length) pending = [...scan.heredocs];
+  }
+  return quote !== null;
+}
+
+export function classifyCommand(command: string): { risk: CommandRisk; reason: string } {
+  const normalized = command.trim();
+  if (!normalized) return { risk: "blocked", reason: "empty command" };
+
+  for (const { pattern, reason } of BLOCKED_PATTERNS) {
+    if (pattern.test(normalized)) return { risk: "blocked", reason };
+  }
+
+  if (hasUnterminatedHeredoc(normalized)) {
+    return {
+      risk: "blocked",
+      reason: "unterminated heredoc (missing closing delimiter; would truncate file)",
+    };
+  }
+
+  if (hasUnclosedQuote(normalized)) {
+    return {
+      risk: "blocked",
+      reason: "unclosed quote (command was truncated mid-string)",
+    };
+  }
+
+  // Output redirection can overwrite a file, so it always needs a human.
+  // Excludes the arrow-like sequences that appear in ordinary arguments (->, =>, >=).
+  if (/(?<![-=>])>>?(?!=)/.test(normalized)) {
+    return { risk: "confirm", reason: "writes to a file via redirection" };
+  }
+
+  // The riskiest segment decides the whole line: a pipeline is only as safe as
+  // the command that mutates the most.
+  for (const part of segments(normalized)) {
+    const verdict = classifySegment(part);
+    if (verdict.risk === "confirm") return verdict;
+  }
+  return { risk: "auto", reason: "read-only inspection or verification" };
 }
 
 /**

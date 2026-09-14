@@ -5,6 +5,7 @@ import { usePanelStore } from "../../store/panelStore";
 import { useChangeStore } from "../../store/changeStore";
 import { languageForPath } from "../../services/language";
 import { useVoice, type UseVoiceResult } from "../../hooks/useVoice";
+import type { UseAssistantResult } from "../../hooks/useAssistant";
 import { useAttachments } from "../../hooks/useAttachments";
 import { composePrompt } from "../../services/fileService";
 import { agentSessionKeyFor, resumableAgentSession } from "../../utils/chatSessions";
@@ -41,8 +42,9 @@ import { interruptTurn } from "../../services/interruption";
 import { openBrowserAt } from "../../services/browserNavigation";
 import { UsageService } from "../../services/usageService";
 import { TemiVoiceStage } from "../voice";
-import type { UseAssistantResult } from "../../hooks/useAssistant";
 import { dispatchPlayerCommand, type PlayerCommand } from "../../services/playerControl";
+import { executeActionChain } from "../../services/voice/compoundActionRunner";
+import { TeminaliAgentBridge } from "../../services/voice/teminaliAgentBridge";
 
 /**
  * The centre column — the conversation itself.
@@ -319,6 +321,42 @@ export const StudioChat: React.FC<{
       // Universal Interruption: a new prompt pre-empts the run in flight, and
       // stops it exactly the way the stop button does.
       if (isStreaming) stop();
+
+      // Fast-path for deterministic system telemetry, computer accessibility & compound actions (< 50ms, 0 tokens)
+      if (!attachments.attachments.length) {
+        const chainResult = await executeActionChain(typed);
+        if (chainResult && chainResult.handled) {
+          setInput("");
+          attachments.clear();
+          addMessageToEngine("frontier", {
+            role: "user",
+            content: typed,
+            tokensCount: 0,
+          });
+
+          // Record to bridge so voice can recall the facts across turns
+          TeminaliAgentBridge.recordReport(chainResult.spoken);
+
+          addMessageToEngine("frontier", {
+            role: "assistant",
+            content: chainResult.displayMarkdown || chainResult.spoken,
+            isStreaming: false,
+            tokensCount: 0,
+            costUsd: 0,
+            costLabel: "$0.00 (Local Fast-Path · 0 tokens)",
+          });
+
+          // Spoken output if voice is active or speakReplies is on
+          const currentVoice = voiceRef.current;
+          if (
+            currentVoice &&
+            (currentVoice.settings.speakReplies || options?.origin === "voice" || currentVoice.mode === "conversation")
+          ) {
+            void currentVoice.enqueueSpeechChunk(chainResult.spoken, true);
+          }
+          return;
+        }
+      }
 
       turnIdRef.current += 1;
       const currentTurnId = turnIdRef.current;
@@ -619,6 +657,20 @@ export const StudioChat: React.FC<{
               store.setWorkspacePath(event.path);
             }
           },
+          onDraftEdit: (draft) => {
+            const fileName = draft.path.split("/").pop() || draft.path;
+            useStudioStore.getState().openFile({
+              path: draft.path,
+              name: fileName,
+              content: draft.content,
+              language: languageForPath(draft.path),
+            });
+            useStudioStore.getState().syncFileContent({ path: draft.path, content: draft.content });
+            void import("../../store/panelStore").then(({ usePanelStore }) => {
+              usePanelStore.getState().focusOrOpen({ kind: "file", path: draft.path, label: fileName });
+              usePanelStore.getState().setOpen(true);
+            });
+          },
           /*
             And a file it wrote becomes a reviewable row, the way one the chat
             authored itself already does. Same dock, different road: the chat
@@ -634,15 +686,20 @@ export const StudioChat: React.FC<{
               origin: "agent",
               requestId: String(currentTurnId),
             });
+            const fileName = event.path.split("/").pop() || event.path;
             useStudioStore.getState().openFile({
               path: event.path,
-              name: event.path.split("/").pop() || event.path,
+              name: fileName,
               content: event.after,
               language: languageForPath(event.path),
               encoding: "utf8",
               mimeType: "text/plain",
               size: event.size ?? undefined,
               modified: event.modified ?? undefined,
+            });
+            void import("../../store/panelStore").then(({ usePanelStore }) => {
+              usePanelStore.getState().focusOrOpen({ kind: "file", path: event.path, label: fileName });
+              usePanelStore.getState().setOpen(true);
             });
           },
         },

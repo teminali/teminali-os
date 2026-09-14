@@ -105,6 +105,7 @@ export interface StreamRequestOptions {
   onWorkspace?: AgentStreamCallbacks["onWorkspace"];
   /** Claude Code / Codex only: a file the agent wrote, for the review dock. */
   onEdit?: AgentStreamCallbacks["onEdit"];
+  onDraftEdit?: (draft: { path: string; content: string }) => void;
 }
 
 /**
@@ -160,6 +161,8 @@ function studioCapabilities(
         ...options,
         ...(workingDirectory ? { cwd: workingDirectory } : {}),
       }),
+    readFile: (path) => WorkspaceService.readFile(path),
+    writeFile: (path, content) => WorkspaceService.writeFile(path, content),
     videoTools: videoToolSummaries(),
     /*
       No transport. The ported editor's Zustand stores live in this renderer,
@@ -261,43 +264,60 @@ export class AIService {
     options: StreamRequestOptions = {},
   ): Promise<void> {
     try {
-      if (engine === "frontier") {
-        const isVoiceTurn = options.origin === "voice";
-        if (options.mode === "max" || options.mode === "gemini" || isVoiceTurn) {
-          const projects = await WorkspaceService.listProjects().catch(() => null);
-          await FrontierEngine.streamGemini(
-            userPrompt,
-            history,
-            callbacks,
-            {
-              mode: options.mode === "max" ? "max" : "gemini",
-              signal: options.signal,
-              images: attachedImages,
-              model: options.agentModel ?? (isVoiceTurn ? "gemini-2.5-flash" : "gemini-3.8-flash"),
-              origin: options.origin,
-              capabilities: studioCapabilities(options.workingDirectory, options.askOperator, options.lookAtScreen),
-              approveCommand: options.approveCommand,
-              workingDirectory: options.workingDirectory,
-              workspaceProjects: projects ? {
-                current: projects.current,
-                recent: projects.recent,
-              } : undefined,
-              onWorkspace: (event) => {
-                if (event.action === "open-project") {
-                  void WorkspaceService.openProject(event.path).catch(console.error);
-                }
-                options.onWorkspace?.(event);
+      if (engine === "frontier" || (engine as string) === "gemini") {
+        const isVoiceConversation = options.origin === "voice" && !options.mode;
+        const useGemini = (engine as string) === "gemini" || options.mode === "max" || isVoiceConversation;
+        if (useGemini) {
+          try {
+            const projects = await WorkspaceService.listProjects().catch(() => null);
+            await FrontierEngine.streamGemini(
+              userPrompt,
+              history,
+              {
+                ...callbacks,
+                onDraftEdit: options.onDraftEdit,
+                onEdit: options.onEdit,
               },
-            },
-          );
-          return;
+              {
+                mode: "max",
+                signal: options.signal,
+                images: attachedImages,
+                model: options.agentModel ?? "gemini-3.6-flash",
+                origin: options.origin,
+                capabilities: studioCapabilities(options.workingDirectory, options.askOperator, options.lookAtScreen),
+                approveCommand: options.approveCommand,
+                workingDirectory: options.workingDirectory,
+                workspaceProjects: projects ? {
+                  current: projects.current,
+                  recent: projects.recent,
+                } : undefined,
+                onWorkspace: (event) => {
+                  if (event.action === "open-project") {
+                    void WorkspaceService.openProject(event.path).catch(console.error);
+                  }
+                  options.onWorkspace?.(event);
+                },
+              },
+            );
+            return;
+          } catch (geminiError) {
+            if (options.signal?.aborted) {
+              throw geminiError;
+            }
+            console.warn("[AIService] Frontier Gemini stream failed, falling back to local runner:", geminiError);
+            callbacks.onToken?.(`\n*[Cloud Gemini rate-limited or unavailable; falling back to local Frontier model]*\n`);
+          }
         }
 
         await FrontierEngine.streamLocal(
           userPrompt,
           history,
           attachedImages,
-          callbacks,
+          {
+            ...callbacks,
+            onDraftEdit: options.onDraftEdit || callbacks.onDraftEdit,
+            onEdit: options.onEdit || callbacks.onEdit,
+          },
           options.mode ?? "auto",
           options.signal,
           options.skill,

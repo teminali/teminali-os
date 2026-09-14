@@ -128,6 +128,23 @@ test("a sentence that merely mentions a command is left whole", () => {
   assert.equal(outcome("df -h / says 26 gigabytes.\nThat is plenty."), "df -h / says 26 gigabytes.");
 });
 
+test("an intent announcement followed by an outcome skips the announcement and speaks the outcome", () => {
+  assert.equal(
+    outcome(
+      "I will run a command to check your computer's storage space. You have about 26 gigabytes of available storage space remaining.",
+      { kind: "inspect" },
+    ),
+    "You have about 26 gigabytes of available storage space remaining.",
+  );
+  assert.equal(
+    outcome(
+      "Checking computer storage now. There are 45 gigabytes free on your main drive.",
+      { kind: "inspect" },
+    ),
+    "There are 45 gigabytes free on your main drive.",
+  );
+});
+
 /* ── When there is no answer, say so ──────────────────────────────────────── */
 
 test("an inspect run that came back with nothing admits it instead of saying Done", () => {

@@ -50,9 +50,13 @@ export function handoffAcknowledgement(note: string): string {
  * path. She may rephrase what is in the report. She may not add to it.
  */
 export function frameAssistantReport(report: string): string {
+  const cleanReport = report
+    .replace(/(\b[a-zA-Z0-9_-]+)\s+dot\s+(html|css|js|ts|tsx|jsx|json|py|md|txt|sh|yml|yaml|sql|png|jpg|svg)\b/gi, "$1.$2")
+    .trim();
   return (
-    `[The assistant has reported back: "${report.trim()}"\n` +
+    `[The assistant has reported back: "${cleanReport}"\n` +
     "Answer the user's question now, in one short natural sentence, using only what is in that report. " +
+    "Refer to files by their real file names with extensions (e.g. 'index.html', 'style.css'). Never say 'index dot html' or spell out the word 'dot'. " +
     "Do not add any number, name, date, path or version that is not written there.]"
   );
 }
@@ -68,4 +72,25 @@ export function frameAssistantReport(report: string): string {
  */
 export function isAssistantReportEcho(text: string): boolean {
   return /^\[\s*The assistant has reported back\b/i.test((text ?? "").trim());
+}
+
+/**
+ * Frames a prompt delegated from Temi Voice to the background coding assistant.
+ *
+ * Provides clear context that this request was spoken by an operator to a
+ * voice assistant and routed for workspace execution. Instructs the assistant
+ * that if the request is conversational, a vocal performance (e.g. singing,
+ * chatting), or not an actual file, terminal, or codebase operation, it should
+ * NOT attempt to modify workspace files or run commands. Instead, return a
+ * concise report stating what it observed so Temi can speak back to the operator.
+ */
+export function frameVoiceDelegatedTask(task: string): string {
+  const clean = (task ?? "").trim();
+  return [
+    "[VOICE ASSISTANT CONTEXT: This task was spoken by the operator to Temi (voice assistant) and routed to you for workspace action.",
+    "If this request is conversational, a vocal performance (e.g. singing, chatting), or not an actual file, terminal, or codebase operation, DO NOT attempt to modify workspace files or run commands. Instead, return a concise report stating what you observed so Temi can speak the answer back to the operator.",
+    "IMPORTANT FOR SYSTEM INSPECTIONS: When checking system state, disk space, storage, folder sizes, or test outcomes, ALWAYS report the exact numbers and units found (e.g., 'You have 33 GB free out of 460 GB on your disk' or 'All 14 tests passed'). Never give vague answers like 'storage is fine' without stating the actual figures.]",
+    "",
+    clean,
+  ].join("\n");
 }

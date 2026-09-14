@@ -288,7 +288,6 @@ const ENGINE_NAMES: ReadonlyArray<readonly [string, VoiceEngineChoice]> = [
   ["codex", "codex"],
   ["code x", "codex"],
   ["frontier max", "gemini"],
-  ["gemini flash", "gemini"],
   ["gemini", "gemini"],
   ["frontier flash", "frontier"],
   ["frontier auto", "frontier"],
@@ -432,6 +431,9 @@ const RUN_RECALL_PATTERNS: RegExp[] = [
   /^(?:so|and|ok|okay)?\s*(?:how\s+did|did)\s+(?:it|that)\s+(?:go|work|finish|pass|succeed|end)\b/,
   /^(?:so|and|ok|okay)?\s*tell\s+me\s+what\s+(?:it|that|you)\s+(?:did|changed|found)\b/,
   /^(?:so|and|ok|okay)?\s*(?:what|which)\s+files?\s+(?:did\s+it\s+)?(?:changed?|touched?|edited?)\b/,
+  /^(?:so|and|ok|okay)?\s*how\s+(?:many|much)\s+[^?.]{0,50}?\b(?:did\s+you|was|were)\s+(?:just\s+)?(?:find|found|see|say|report|have|left|free)\b/,
+  /^(?:so|and|ok|okay)?\s*(?:what|how\s+much)\s+(?:was\s+the\s+)?(?:storage|disk|space|size|number|count|result|outcome)\b/,
+  /\b(?:did\s+you\s+just\s+find|you\s+just\s+found|did\s+you\s+find)\b/,
 ];
 
 export function isRunRecallQuestion(text: string): boolean {

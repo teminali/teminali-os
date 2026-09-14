@@ -1,5 +1,5 @@
-import { GatewayClient } from "../gatewayClient";
-import type { MemoryAtom } from "./temiMemory";
+import { GatewayClient } from "../gatewayClient.ts";
+import type { MemoryAtom } from "./temiMemory.ts";
 
 /**
  * The renderer's half of Temi's memory: fetching it, holding it, handing it back.

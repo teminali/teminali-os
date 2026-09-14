@@ -64,8 +64,8 @@ export const ApiProviders: React.FC = () => {
             <span className="text-2xs text-ink-faint">via {data.routing.providerLabel}</span>
           </div>
           <div className="divide-y divide-edge-chrome border-t border-edge-chrome">
-            <HostedLane icon={<Zap size={12} className="text-accent" strokeWidth={2.2} />} lane="Frontier Flash" model={data.routing.light} />
-            <HostedLane icon={<Sparkles size={12} className="text-reason" />} lane="Frontier Auto — heavy lane" model={data.routing.heavy} />
+            <HostedLane icon={<Zap size={12} className="text-accent" strokeWidth={2.2} />} lane="Flash" model={data.routing.light} />
+            <HostedLane icon={<Sparkles size={12} className="text-reason" />} lane="Auto — heavy lane" model={data.routing.heavy} />
             {data.routing.flagshipExcluded && (
               <div className="px-3 py-2 flex items-center gap-3 text-2xs text-ink-faint">
                 <span className="w-3 flex-shrink-0" />

@@ -1,6 +1,6 @@
 {
   "name": "@teminali/core",
-  "version": "0.0.17",
+  "version": "0.0.18",
   "private": true,
   "type": "module",
   "scripts": {
@@ -17,6 +17,8 @@
     "voice:hands-free": "npm --prefix studio run voice:hands-free",
     "voice:hands-free:commit": "npm --prefix studio run voice:hands-free:commit",
     "voice:hands-free:quick": "npm --prefix studio run voice:hands-free:quick",
+    "voice:code": "npm --prefix studio run voice:code",
+    "voice:website": "npm --prefix studio run voice:website",
     "verify:all": "npm test && npm --prefix studio run verify:core",
     "agent:start": "zsh scripts/start-controlled-agent.zsh",
     "agent:start-claude": "AGENT_PROFILE=claude-sonnet zsh scripts/start-frontier-agent.zsh",

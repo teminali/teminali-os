@@ -1,4 +1,4 @@
-import { GatewayClient } from "./gatewayClient";
+import { GatewayClient } from "./gatewayClient.ts";
 
 export interface TerminalOutputChunk {
   type: "stdout" | "stderr";

@@ -300,7 +300,7 @@ const RoutingCard: React.FC<{
       <div className="divide-y divide-edge-chrome border-t border-edge-chrome">
         <LaneRow
           icon={<Zap size={12} className="text-accent" strokeWidth={2.2} />}
-          lane="Frontier Flash"
+          lane="Flash"
           detail="Every everyday turn"
           model={routing.light}
           suggested={routing.suggested?.light ?? null}
@@ -309,7 +309,7 @@ const RoutingCard: React.FC<{
         />
         <LaneRow
           icon={<Sparkles size={12} className="text-reason" />}
-          lane="Frontier Auto — heavy lane"
+          lane="Auto — heavy lane"
           detail="Refactors, debugging, architecture"
           model={routing.heavy}
           suggested={routing.suggested?.heavy ?? null}

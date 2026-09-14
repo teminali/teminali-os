@@ -1,7 +1,7 @@
 {
   "name": "@teminali/os",
   "productName": "Teminali OS",
-  "version": "0.0.17",
+  "version": "0.0.18",
   "description": "Teminali OS — Autonomous AI Studio for full-stack, design-system-first development",
   "author": {
     "name": "Teminali",
@@ -32,6 +32,9 @@
     "voice:hands-free": "node scripts/hands-free-temi-dev.mjs",
     "voice:hands-free:commit": "node scripts/hands-free-temi-dev.mjs --commit",
     "voice:hands-free:quick": "node scripts/hands-free-temi-dev.mjs --quick",
+    "voice:code": "node scripts/live-coding-voice-session.mjs",
+    "voice:website": "node scripts/live-website-hands-free-test.mjs",
+    "voice:endurance": "node scripts/endurance-edit-tester.mjs",
     "eval:memory": "node evals/temi-memory.mjs",
     "verify:core": "npm run typecheck && npm test && npm run build",
     "verify": "node quality-runtime/cli.mjs quality-runtime/frontier.config.json",

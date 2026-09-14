@@ -204,6 +204,7 @@ test("every caller of the dispatch lives in the studio window", () => {
     "services/aiService.ts",
     "services/playerControl.ts",
     "services/voice/playerActions.ts",
+    "services/voice/systemActions.ts",
   ]);
 
   // And neither second surface is one of them. `src/main.tsx` renders a single

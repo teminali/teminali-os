@@ -26,7 +26,7 @@
  */
 
 /** The engines a turn can be routed to. Mirrors `AIService.streamMessage`. */
-export type EngineId = "frontier" | "antigravity" | "claude" | "codex";
+export type EngineId = "frontier" | "antigravity" | "claude" | "codex" | "gemini";
 
 /**
  * Characters per token, measured — not assumed.
@@ -58,10 +58,11 @@ const DEFAULT_WINDOW_TOKENS: Record<EngineId, number> = {
   antigravity: 8_192,
   claude: 200_000,
   codex: 200_000,
+  gemini: 1_000_000,
 };
 
 /** Lanes whose context is managed by the agent itself, not by Teminali. */
-const SELF_MANAGED: ReadonlySet<EngineId> = new Set<EngineId>(["claude", "codex"]);
+const SELF_MANAGED: ReadonlySet<EngineId> = new Set<EngineId>(["claude", "codex", "gemini"]);
 
 /**
  * The share of the window each part of a turn may occupy.
