@@ -70,15 +70,6 @@ jobs:
           cache-dependency-path: studio/package-lock.json
       - run: npm ci
         working-directory: studio
-      # voice-runtime/tests import the sidecar's modules, and tts.js imports
-      # kokoro-js at load — so without the sidecar's own node_modules the whole
-      # file fails to import and the suite is one red test short of the truth.
-      - run: npm run voice:install
-        working-directory: studio
-        # onnxruntime-node's postinstall pulls the CUDA 12 execution provider
-        # on linux/x64 only, hundreds of megabytes this job never uses.
-        env:
-          ONNXRUNTIME_NODE_INSTALL: skip
       # Gated the same way the build matrix gates it. The script exits 1 off
       # darwin by design, so an ungated copy is what pins this job to macOS.
       - run: npm run build:pointer
@@ -207,12 +198,6 @@ jobs:
         run: npm ci
         working-directory: studio
 
-      # The speech sidecar has its own package.json and is not covered by the
-      # npm ci above. Without this the packaged app ships voice-runtime's
-      # source with no node_modules beside it, and the sidecar cannot start.
-      - name: Install the speech sidecar's dependencies
-        run: npm run voice:install
-        working-directory: studio
 
       # The screen assistant's pointer helper is Swift and macOS-only. It is
       # compiled here rather than committed: an unsigned Mach-O in git is one
