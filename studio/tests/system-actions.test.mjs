@@ -333,4 +333,32 @@ test("executeSystemAction handles non-existent files with graceful fault toleran
   assert.ok(result.spoken.includes("couldn't find"));
 });
 
+test("parseSystemCommand correctly categorizes capabilities directory queries", () => {
+  const capCmd1 = parseSystemCommand("what are your capabilities?");
+  assert.ok(capCmd1);
+  assert.equal(capCmd1.kind, "capabilities_directory");
 
+  const capCmd2 = parseSystemCommand("show capabilities directory");
+  assert.ok(capCmd2);
+  assert.equal(capCmd2.kind, "capabilities_directory");
+
+  const capCmd3 = parseSystemCommand("what can you do?");
+  assert.ok(capCmd3);
+  assert.equal(capCmd3.kind, "capabilities_directory");
+});
+
+test("executeSystemAction capabilities_directory returns structured markdown directory with zero tokens", async () => {
+  const { executeSystemAction } = await import("../src/services/voice/systemActions.ts");
+  const result = await executeSystemAction({
+    kind: "capabilities_directory",
+    raw: "show capabilities",
+  });
+  assert.equal(result.handled, true);
+  assert.equal(result.kind, "capabilities_directory");
+  assert.equal(result.tokensUsed, 0);
+  assert.ok(result.latencyMs < 50);
+  assert.ok(result.spoken.includes("capability directory"));
+  assert.ok(result.displayMarkdown.includes("Capability Directory"));
+  assert.ok(result.displayMarkdown.includes("Battery & Power Health"));
+  assert.ok(result.displayMarkdown.includes("Teminali OS Media Player"));
+});

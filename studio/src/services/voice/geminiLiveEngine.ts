@@ -1,10 +1,8 @@
 /**
  * The Gemini Live half of the voice lane.
  *
- * This is a drop-in for the `Realtime8000ProtocolManager` that used to live in
- * `voiceAudioEngine.ts` and talk a binary WebSocket protocol to a local Python
- * pipeline on :8000 (Whisper in, Kokoro out). That pipeline is gone. The shape
- * of this class is deliberately unchanged from it — same callbacks, same
+ * This is a drop-in for the protocol manager that used to talk
+ * to the local lane. The shape of this class is deliberately clean and unified:
  * `send*` methods, same six inbound message types — because the consumer,
  * `components/voice/TemiVoiceStage.tsx`, is a large state machine that was
  * tuned against that surface and should not have to learn a new one.
@@ -1735,9 +1733,8 @@ export class GeminiLiveEngine {
   }
 
   /**
-   * No-op. The Python lane passed a speed to Kokoro; Gemini's native audio has
-   * no rate control, and the persona is where pace is asked for now. Kept
-   * because the settings panel still offers the slider to the other lane.
+   * No-op on Gemini Live lane: Gemini's native audio has
+   * no rate control, and the persona is where pace is asked for.
    */
   sendSpeedChange(_speed: number): void {}
 

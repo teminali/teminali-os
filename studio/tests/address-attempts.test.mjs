@@ -67,7 +67,3 @@ test("main.cjs raises the deadline at load, before the gateway is imported", () 
   assert.ok(call > -1, "main.cjs never calls raiseAddressAttemptBudget() at top level");
   assert.ok(call < mainSource.indexOf("await import(gatewayUrl)"), "the deadline is raised after the gateway loads");
 });
-
-test("the voice sidecar is spawned with the same deadline", () => {
-  assert.match(mainSource, /spawn\(process\.execPath, \[\.\.\.addressAttemptArgs\(\), entry\]/);
-});

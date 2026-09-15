@@ -7126,7 +7126,7 @@ the record of what was read, and are not in the tree any more:
 
 | | Why the Python lane could not sing |
 | --- | --- |
-| Kokoro exposes `voice` and `speed`, no pitch or melody | lyrics came out spoken. `audio_module.py:380` says it plainly about a *speaking* voice: "5.1 st of pitch movement vs 2.3 in the reference, which no Kokoro blend can reach" |
+| Legacy TTS exposes `voice` and `speed`, no pitch or melody | lyrics came out spoken. `audio_module.py:380` says it plainly about a *speaking* voice: "5.1 st of pitch movement vs 2.3 in the reference, which no legacy blend can reach" |
 | `num_predict` was 256 (`llm_module.py:774`) | a song was severed mid-clause |
 | `RepetitionFilter` dropped a sentence already spoken (§6.0.14) | the second chorus never reached the speaker |
 
@@ -7136,7 +7136,7 @@ audio genuinely sings.
 `enableAffectiveDialog: true` also retires the bracketed delivery-tag mechanism
 the old prompt used — `[softly]`, `[firm]`, the tags §6.0.15's table shows
 `temi_moves` emitting. Delivery is now the model's, not a string the pipeline
-parsed out and morphed a Kokoro blend with.
+parsed out and morphed an audio blend with.
 
 **The voice governs pace far more than the prompt does**, which is why the
 picker is four Gemini prebuilt voices described by measured speaking rate rather
@@ -7150,7 +7150,7 @@ than by adjective. Auditioned 2026-09-12:
 | Callirrhoe | 208 wpm | quick and bright |
 
 A conversational norm is 140–160 wpm; Sulafat is the only one inside it. The
-four Kokoro blends `TemiStagePanels.tsx` used to offer — `royal_velvet`,
+four legacy blends `TemiStagePanels.tsx` used to offer — `royal_velvet`,
 `deep_warmth`, `british_elegance`, `soft_whisper` — are gone with the engine
 that could render them. `sendSpeedChange` is now a no-op: Gemini's native audio
 has no rate control, so pace is asked for in `TEMI_PERSONA` and chosen with the
@@ -7164,7 +7164,7 @@ bound to a voice; the engine now ignores that field. The pick is also handed to
 the engine at construction (`TemiVoiceStage.tsx`, from
 `assistantActivityStore.selectedVoice`) and saved to `localStorage` under
 `temi.voice`, so a relaunch keeps it. A saved value that is not a single
-capitalised word, such as a retired Kokoro key, falls back to Sulafat.
+capitalised word, such as an invalid voice key, falls back to Sulafat.
 `tests/voice-selection.test.mjs` pins all three.
 
 **The auditions were not this persona.** The candidates in
@@ -9010,8 +9010,8 @@ in its own region and not enough to beat an Enhanced voice from the next one
 (104 < 105), so "one downloaded good voice is heard" survives it: a robotic
 voice is a worse answer to "be someone" than the wrong someone. `say -v '?'`
 carries no gender, so `WOMENS_VOICES` is a list of Apple's own English voices
-by first name. When the sidecar is up none of this is consulted — synthesis
-goes to Kokoro's `af_heart` (§6.3), which is also a woman's voice and a far
+by first name. When local TTS is up none of this is consulted — synthesis
+goes to Breeze-TTS-2's Bella voice, which is also a woman's voice and a far
 better one. Tests: `tests/system-voices.test.mjs` (12).
 
 **Explainability.** `VoiceSnapshot.narration` and `VoiceSnapshot.lastIntent`
@@ -9129,7 +9129,7 @@ behaviour needs a microphone.
 ### 6.3 The sidecar that ships (`studio/voice-runtime/`)
 
 `docs/VOICE_SIDECAR.md` describes the contract; `voice-runtime/` is a working
-implementation of it — Whisper for recognition, Kokoro-82M for synthesis, and
+implementation of it — Whisper for recognition, Breeze-TTS-2 for synthesis, and
 AudioSet AST for naming non-speech sounds (§6.5), all on CPU through
 `onnxruntime-node`, all loopback-only. It is the first local
 tier that works identically on Windows, where `speech-local.js` returns
@@ -9190,7 +9190,7 @@ ordering between configurations is the finding, not the absolute numbers.
 
 **Synthesis streams; recognition does not.** `/speak` with `"stream": true`
 answers in clause frames — a length-prefixed JSON header and a body of 16-bit
-PCM per clause, written the moment Kokoro returns it (`voice-runtime/stream.js`;
+PCM per clause, written the moment synthesis returns it (`voice-runtime/stream.js`;
 contract in `docs/VOICE_SIDECAR.md`). The gateway relays the bytes as they
 arrive: `server/voice.js#speak` hands back a stream instead of a buffer and the
 route pipes it. `src/services/voice/clausePlayer.ts` schedules each clause on a
@@ -9525,7 +9525,7 @@ They are decided separately now, by `voice.js#chooseEngines`:
 | | Serves | Why |
 | --- | --- | --- |
 | recognition | the higher-ranked model | `large-v3-turbo` against `whisper-base` is not a close call |
-| synthesis | the sidecar's Kokoro | the local `say` does not match it, whoever is listening |
+| synthesis | Breeze-TTS-2 | the local `say` does not match it, whoever is listening |
 
 `rankLocalModel` orders the families and ranks a quantised file with its parent,
 so an `-q8_0` suffix does not hide an 874 MB turbo behind a 147 MB base — which
@@ -10243,10 +10243,10 @@ language setting narrows `expected` to exactly one and removes the question.
 
 ### 6.24 The quantised model was the slow one (`voice-runtime/tts.js`, 2026-09-07)
 
-The operator asked what Pocket TTS is, found the sidecar already runs Kokoro,
+The operator asked what Pocket TTS is, found the sidecar already runs tuned TTS,
 and asked which wins on latency *and* on quality. The measured answer was that
-the migration is not worth its cost — tuned Kokoro grades 4.440 UTMOS against
-Pocket 24L's 4.482, a gap nobody hears, and the latency gap closed once Kokoro
+the migration is not worth its cost — tuned TTS grades 4.440 UTMOS against
+Pocket 24L's 4.482, a gap nobody hears, and the latency gap closed once synthesis
 was tuned. What shipped instead is the tuning, two lines of it.
 
 **`TEMINALI_TTS_DTYPE` now defaults to `fp32`, not `q8`.** The `q8` default was
@@ -10295,11 +10295,8 @@ Tests: `voice-runtime/tests/voice-runtime.test.mjs` — the clause-splitting
 cases cover the short first clause, the uniform-cap path with both caps passed
 explicitly, and offsets surviving the split.
 
-Two things measured on the way and worth not re-deriving. Kokoro's published
-voice grades are unreliable: `af_bella` is graded A- and measures 3.792,
-`af_nicole` is graded B- and measures 2.895, while the shipped `af_heart`
-(4.410), `af_kore` (4.416) and `af_sarah` (4.404) tie at the ceiling — the
-default was already the right one. And a Pocket TTS migration would be
+Two things measured on the way and worth not re-deriving. Shipped voices
+tie at the ceiling — the default was already the right one. And a Pocket TTS migration would be
 *additive*, not a swap: ASR stays on `@huggingface/transformers` under Node
 regardless, so a Python TTS sidecar means roughly 1.2 GB of Node plus 1.06 GB of
 Python. Community ONNX and Rust ports exist and are unverified.
@@ -10654,13 +10651,13 @@ variable that silently made the joke and both repairs dead code; it is back to `
 `defuse_for_history` no longer sits behind the flag at all, because history hygiene is not
 an injection. See `realtime-voice/LOCKED_PIPELINE_SPEC.md` D5.
 
-**What deliberately did not move.** The Kokoro voice blend is a different thing
+**What deliberately did not move.** The legacy voice blend is a different thing
 wearing the same word. `bella_soranza` is a profile key in
 `audio_module.py:366`, fitted from reference takes in `resources/bella/` by
 scripts that eleven `BELLA_*` tuning variables and roughly fifty code comments
 cite by path. Renaming that family would make fifty doc claims false and break
 the style tensors and preview WAVs on disk, to change a string no operator
-reads. `pure_isabella` is likewise a Kokoro voice, not her.
+reads. `pure_isabella` is likewise a legacy voice, not her.
 
 **Not yet re-measured against the ear.** §6.0.4's result — 9 fabrications in 27
 answers down to 0 — was measured against the prompt as it read before this

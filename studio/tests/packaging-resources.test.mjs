@@ -200,68 +200,8 @@ test("the release workflow unsets empty signing variables before packaging", () 
   of one block — can quietly put all of it back. This asserts it stays out of
   every one of them, and fails if a new block forgets.
 */
-test("no platform ships the web half of transformers.js", () => {
+test("no platform ships the legacy voice-runtime sidecar", () => {
   const lines = config.split("\n");
-  const blocks = [];
-  let platform = null;
-
-  for (let i = 0; i < lines.length; i += 1) {
-    const top = lines[i].match(/^([A-Za-z][\w-]*):/);
-    if (top) platform = top[1];
-    if (!/^\s*-\s+from:\s*voice-runtime\/node_modules\s*$/.test(lines[i])) continue;
-
-    const patterns = [];
-    for (let j = i + 1; j < lines.length; j += 1) {
-      // The next entry, or the next key at or above this entry's level.
-      if (/^\s*-\s+from:/.test(lines[j]) || /^[A-Za-z]/.test(lines[j])) break;
-      const pattern = lines[j].match(/^\s*-\s*"([^"]+)"\s*$/);
-      if (pattern) patterns.push(pattern[1]);
-    }
-    blocks.push({ platform, patterns });
-  }
-
-  /*
-    Two, not three, and Windows is the one missing.
-
-    The rule this test exists for is "no platform ships what it cannot load",
-    and a platform that ships none of the sidecar's dependencies at all cannot
-    break it. Windows is that platform: packing the 573 MB into an NSIS archive
-    is the step that has never once finished — 0.0.2, 0.0.3 and 0.0.5 all died
-    on it — so the deps are dropped there entirely and `speech-local.js`
-    degrades instead. See the comment on `win:` in electron-builder.yml and the
-    wizard-download plan it points at. When that lands, Windows gets a block
-    again and this floor goes back to three.
-
-    Two is a floor, not a target: a NEW platform that ships the deps unpruned
-    still has to add its own block, and the pattern check below still runs over
-    every block that exists.
-  */
-  assert.ok(
-    blocks.length >= 2,
-    `expected the sidecar's dependencies to be pruned in every platform block that ships them, found ${blocks.length} — ` +
-    "a new target must prune them too, or it ships 91 MB it cannot load",
-  );
-
-  assert.ok(
-    !blocks.some((block) => block.platform === "win"),
-    "win has a sidecar block again — restore its pruning patterns and raise the floor above",
-  );
-
-  // Every one of these was proven droppable by deleting it and running a real
-  // Whisper transcription and a real Kokoro generation, not by reading imports.
-  const dead = [
-    "!**/onnxruntime-web/**",
-    "!**/transformers/dist/transformers.web*",
-    "!**/transformers/dist/*.wasm",
-  ];
-
-  for (const { platform: name, patterns } of blocks) {
-    for (const pattern of dead) {
-      assert.ok(
-        patterns.includes(pattern),
-        `the ${name} block does not exclude "${pattern}", so that build ships web assets ` +
-        "the Node sidecar never loads — 91 MB through NSIS's hardcoded -mx=9",
-      );
-    }
-  }
+  const hasVoiceRuntime = lines.some((line) => /^\s*-\s+from:\s*voice-runtime/.test(line));
+  assert.equal(hasVoiceRuntime, false, "legacy voice-runtime must never be packaged into electron resources");
 });

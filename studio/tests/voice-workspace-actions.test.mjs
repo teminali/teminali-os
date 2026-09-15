@@ -265,7 +265,7 @@ test("an exactly spelled name beats a near twin, but two exact names do not", ()
 });
 
 test("a name that is no project at all scores below the floor", () => {
-  for (const spoken of ["landing", "recorder", "kokoro", "the thing i was doing"]) {
+  for (const spoken of ["landing", "recorder", "random_project", "the thing i was doing"]) {
     assert.equal(resolveFolder(spoken, { candidates }), null, `"${spoken}" is not one of these four`);
   }
 });

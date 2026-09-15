@@ -52,7 +52,7 @@ Attempting to merge both roles into a single model forces unacceptable trade-off
 * **Primary Role:** User interaction, voice presence, empathy, status reporting, intent classification, constraint injection.
 * **Model Engine:** `qwen3:8b` (Q4_K_M, ~5.2 GB) or `qwen2.5:7b` (~4.7 GB).
 * **Execution Mode:** Strictly standard conversational prose (thinking mode hard-disabled `/no_think` for voice).
-* **Prompt Constraint:** Spoken prose only. Zero bullet points, zero markdown symbols, zero numbered lists. Kokoro TTS-ready.
+* **Prompt Constraint:** Spoken prose only. Zero bullet points, zero markdown symbols, zero numbered lists. Breeze-TTS-2 ready.
 * **Context Invariant:** **Never receives raw source code, ASTs, or terminal logs.** Receives only the distilled `FrontierTaskState` (~200–400 tokens), preserving sub-350ms TTFT.
 
 ### B. The Coding Worker (The Engineer)
@@ -127,7 +127,7 @@ When the user speaks to the voice agent during execution:
 │  IMMORTAL RESERVED POOL (~15.5 GB) — NEVER UNLOADED         │
 │  ├─ Voice Agent (Qwen3 8B / Qwen2.5 7B)            ~5.2 GB  │
 │  ├─ faster-whisper (small.en + base.en VAD)        ~1.5 GB  │
-│  ├─ Kokoro TTS + PyTorch Pipeline                  ~1.2 GB  │
+│  ├─ Breeze-TTS-2 C++ Metal Pipeline                ~1.2 GB  │
 │  ├─ Teminali OS / Studio UI + TS LSP               ~3.5 GB  │
 │  └─ macOS System Base                              ~4.0 GB  │
 ├─────────────────────────────────────────────────────────────┤
@@ -149,6 +149,6 @@ When the user speaks to the voice agent during execution:
 
 ## 5. Development Strategy
 
-1. **Phase 1 (Active Focus):** Optimize and polish the standalone voice assistant pipeline on `http://localhost:8000` (whisper small.en + Kokoro TTS + qwen2.5:7b / qwen3:8b, interruption latching, context memory).
+1. **Phase 1 (Active Focus):** Optimize and polish the standalone voice assistant pipeline on `http://localhost:8000` (whisper small.en + Breeze-TTS-2 + qwen2.5:7b / qwen3:8b, interruption latching, context memory).
 2. **Phase 2:** Integrate `FrontierTaskState` and WebSocket Event Bus into `studio/server/gateway.js`.
 3. **Phase 3:** Port the hardened voice runtime into Teminali OS as an autonomous companion overlay monitoring the coding agent.

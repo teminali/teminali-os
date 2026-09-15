@@ -40,8 +40,8 @@ flowchart TD
     end
 
     subgraph Synthesis ["4. Voice Output & Playback"]
-        TTS_IN -->|First 3-4 Words| KOKORO[Streaming Kokoro TTS]
-        KOKORO -->|Audio Chunks| AUDIO_OUT[ClausePlayer WebAudio]
+        TTS_IN -->|First 3-4 Words| BREEZE[Streaming Breeze-TTS-2]
+        BREEZE -->|Audio Chunks| AUDIO_OUT[ClausePlayer WebAudio]
         GEN -.->|Invalidate Stream| AUDIO_OUT
     end
 ```
@@ -100,7 +100,7 @@ flowchart TD
 | `studio/src/services/voice/turnTaking.ts` | Turn detection, silence timing, completeness scoring (`completenessScore`, `silenceWindowMs`). |
 | `studio/src/services/voice/conversation.ts` | State machine (`listening`, `hearing`, `deciding`, `speaking`), barge-in handler (`handleBargeIn`). |
 | `studio/src/services/voice/audioGraph.ts` | 50 FPS (20ms) audio analysis, VAD, RMS energy, and pitch detection. |
-| `studio/voice-runtime/tts.js` | Kokoro TTS streaming, clause splitting (`splitClauses`, `FIRST_CLAUSE_WORDS`). |
+| `studio/server/breeze-tts-cpp/` | Breeze-TTS-2 C++ server (Bella Italian voice clone, 24kHz Int16 mono streaming). |
 | `studio/src/services/voice/clausePlayer.ts` | WebAudio clause queue and playback scheduling. |
 | `studio/server/voice.js` | Gateway voice routes (`/api/voice/transcribe`, `/api/voice/speak`). |
 

@@ -48,7 +48,8 @@ const FLAGS = {
   commit: rawArgs.includes("--commit") || rawArgs.includes("--git-sync"),
   quick: rawArgs.includes("--quick"),
   noRestart: rawArgs.includes("--no-restart"),
-  noSpeech: rawArgs.includes("--no-speech"),
+  local: rawArgs.includes("--local") || rawArgs.includes("--engine=local"),
+  noSpeech: rawArgs.includes("--no-speech") || rawArgs.includes("--silent"),
   maxTurns: (() => {
     const t = rawArgs.find((a) => a.startsWith("--turns="));
     return t ? parseInt(t.split("=")[1], 10) : null;
@@ -193,24 +194,59 @@ class CDPClient {
     );
   }
 
-  call(method, params = {}) {
+  call(method, params = {}, timeoutMs = 20000) {
     const curId = this.id++;
     return new Promise((resolve, reject) => {
-      this.pending.set(curId, { resolve, reject });
+      const timer = setTimeout(() => {
+        this.pending.delete(curId);
+        reject(new Error(`CDP call ${method} timed out after ${timeoutMs}ms`));
+      }, timeoutMs);
+      this.pending.set(curId, {
+        resolve: (val) => {
+          clearTimeout(timer);
+          resolve(val);
+        },
+        reject: (err) => {
+          clearTimeout(timer);
+          reject(err);
+        },
+      });
       this.ws.send(JSON.stringify({ id: curId, method, params }));
     });
   }
 
-  async eval(expression, awaitPromise = false) {
-    const res = await this.call("Runtime.evaluate", {
-      expression,
-      awaitPromise,
-      returnByValue: true,
-    });
-    if (res?.exceptionDetails) {
-      throw new Error(res.exceptionDetails.text || "JS Evaluation Exception");
+  async eval(expression, awaitPromise = false, retries = 5) {
+    for (let i = 0; i < retries; i++) {
+      try {
+        const res = await this.call(
+          "Runtime.evaluate",
+          {
+            expression,
+            awaitPromise,
+            returnByValue: true,
+          },
+          awaitPromise ? 60000 : 20000
+        );
+        if (res?.exceptionDetails) {
+          const detail =
+            res.exceptionDetails.exception?.description ||
+            res.exceptionDetails.text ||
+            "JS Evaluation Exception";
+          if (i < retries - 1 && (detail.includes("context") || detail.includes("Uncaught") || detail.includes("undefined"))) {
+            await pause(1200);
+            continue;
+          }
+          throw new Error(detail);
+        }
+        return res?.result?.value;
+      } catch (err) {
+        if (i < retries - 1) {
+          await pause(1200);
+          continue;
+        }
+        throw err;
+      }
     }
-    return res?.result?.value;
   }
 
   async captureScreenshot(filename) {
@@ -280,7 +316,7 @@ async function diagnoseUIHealth(cdp) {
       hasVisualPresence,
       ringState,
       hasApprovalBanner,
-      selectedVoice: localStorage.getItem("temi.voice") || "Sulafat",
+      selectedVoice: (() => { try { return localStorage.getItem("temi.voice") || "Sulafat"; } catch { return "Sulafat"; } })(),
     };
   })()`);
 }
@@ -430,11 +466,30 @@ async function main() {
   // Reload page to ensure fresh React mount with newest code
   console.log("[CDP] Reloading studio page for fresh session...");
   await cdp.call("Page.reload");
-  await pause(3000);
+  await pause(2000);
+
+  // Poll until TemiVoiceStage has mounted and exposed window.__temiVoiceTest
+  console.log("[CDP] Waiting for Teminali Voice stage to mount...");
+  let mounted = false;
+  for (let attempt = 0; attempt < 30; attempt++) {
+    const ready = await cdp.eval(`Boolean(window.__temiVoiceTest?.runVoiceTestTurn)`).catch(() => false);
+    if (ready) {
+      mounted = true;
+      break;
+    }
+    await pause(500);
+  }
+  if (mounted) {
+    console.log("  ✔ Teminali Voice stage mounted and ready.\n");
+  } else {
+    console.warn("  ⚠ Timed out waiting for __temiVoiceTest; continuing with fallback.\n");
+  }
 
   // Ensure voice is set to the intended audition default (Sulafat - 153 wpm)
   await cdp.eval(`(() => {
-    localStorage.setItem("temi.voice", "Sulafat");
+    try {
+      localStorage.setItem("temi.voice", "Sulafat");
+    } catch {}
     if (window.__assistantActivityStore) {
       window.__assistantActivityStore.getState?.().setSelectedVoice?.("Sulafat");
     }
@@ -445,6 +500,28 @@ async function main() {
       window.__temiVoiceTest.clearDialogue();
     }
   })()`);
+
+  // Activate engine mode (local 100% offline vs cloud)
+  if (FLAGS.local) {
+    await cdp.eval(`(() => {
+      try {
+        localStorage.setItem("temi.voice.engineMode", "local");
+      } catch {}
+      if (window.__temiVoiceTest?.setEngineMode) {
+        window.__temiVoiceTest.setEngineMode("local");
+      }
+    })()`);
+    console.log("[CDP] Activated Local (100% Offline) voice engine for testing\n");
+  } else {
+    await cdp.eval(`(() => {
+      try {
+        localStorage.setItem("temi.voice.engineMode", "online");
+      } catch {}
+      if (window.__temiVoiceTest?.setEngineMode) {
+        window.__temiVoiceTest.setEngineMode("online");
+      }
+    })()`);
+  }
 
   // Ensure active listening
   await cdp.eval(`(async () => {
@@ -624,14 +701,14 @@ async function main() {
   // DYNAMIC CONVERSATION TURNS (CUMULATIVE BATTLE TEST SUITE)
   // ══════════════════════════════════════════════════════════════════════════
   try {
-    const maxAllowed = FLAGS.quick ? 2 : (FLAGS.maxTurns || 25);
+    const maxAllowed = FLAGS.quick ? 2 : (FLAGS.maxTurns || 28);
 
     // Turn 1: Identity, Presence & Accent Verification
     if (turnIndex < maxAllowed) {
       const t1 = await executeTurn("Temi, ciao! Tell me who you are and where that accent of yours comes from.");
 
       // Turn 2: Differentiation & Full-Duplex Architecture
-      if (!FLAGS.quick && turnIndex < maxAllowed) {
+      if (turnIndex < maxAllowed) {
         let q2 = "What makes your voice architecture in Teminali OS different from a standard cloud chatbot?";
         if (t1.transcript && /roma|rome|napoli|milan|italia|accent/i.test(t1.transcript)) {
           q2 = "I heard the pride in your voice about your Italian background! Now tell me, how is your full-duplex voice architecture built differently inside Teminali OS?";
@@ -776,6 +853,24 @@ async function main() {
       await executeTurn("Thank you for the magnificent session Temi! Summarize what we accomplished today.");
     }
 
+    // Turn 26: Unified Capabilities Directory Inspection (< 50ms, 0 tokens)
+    if (!FLAGS.quick && turnIndex < maxAllowed) {
+      console.log("\n[Capability Directory] Testing built-in capability directory inspection (< 50ms, 0 tokens)...");
+      await executeTurn("Temi, what are your built-in capabilities? Show me your system capability directory.");
+    }
+
+    // Turn 27: Offline Local Voice Engine Verification (< 50ms, 0 tokens)
+    if (!FLAGS.quick && turnIndex < maxAllowed) {
+      console.log("\n[Offline Local Engine] Testing memory telemetry and offline local mode readiness (< 50ms, 0 tokens)...");
+      await executeTurn("Temi, what is my system memory health and are you ready in 100% offline local mode?");
+    }
+
+    // Turn 28: Timeline Narration Waveform & Dual-Engine Multi-Modal Telemetry (< 50ms, 0 tokens)
+    if (!FLAGS.quick && turnIndex < maxAllowed) {
+      console.log("\n[Timeline Waveform & Dual-Engine] Testing video timeline duration and active waveform telemetry (< 50ms, 0 tokens)...");
+      await executeTurn("Temi, what is the timeline duration and how many clips are on the video timeline?");
+    }
+
   } catch (err) {
     console.error(`\n[ERROR] Hands-Free run encountered an exception: ${err.message}`);
   }
@@ -880,7 +975,7 @@ async function main() {
   // Guarantee clean shutdown of any lingering Electron process
   if (IS_MAC || !IS_WIN) {
     try {
-      spawn("pkill", ["-f", "electron.*main.cjs"]);
+      execSync("pkill -9 -f 'electron.*main.cjs' 2>/dev/null || true");
     } catch {}
   } else {
     try {

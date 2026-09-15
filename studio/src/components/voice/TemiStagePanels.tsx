@@ -121,8 +121,7 @@ export const TemiChatMenu: React.FC<TemiChatMenuProps> = ({
 /*
    Gemini Live's prebuilt voices, named as Gemini names them: the key is sent
    verbatim as `prebuiltVoiceConfig.voiceName`, so these are not labels we are
-   free to invent. They replace the four Kokoro blends the Python lane mixed
-   ("Royal Velvet" and friends), which no longer exist anywhere.
+   free to invent.
 
    The descriptions are speaking rate, because that is the one thing that was
    actually measured -- auditions read the same passage, 2026-09-12 -- and
@@ -130,7 +129,7 @@ export const TemiChatMenu: React.FC<TemiChatMenuProps> = ({
    140-160 wpm, which is why Sulafat is the default. Nothing here claims a
    timbre; that was not measured and would be invention.
 */
-const VOICE_OPTIONS = [
+export const CLOUD_VOICE_OPTIONS = [
   { key: "Sulafat", name: "Sulafat", desc: "Natural conversational Italian cadence — 153 wpm (Audition Default)" },
   { key: "Aoede", name: "Aoede", desc: "Lush, unhurried, melodic — 115 wpm" },
   { key: "Gacrux", name: "Gacrux", desc: "Measured and deliberate — 129 wpm" },
@@ -138,36 +137,46 @@ const VOICE_OPTIONS = [
   { key: "Callirrhoe", name: "Callirrhoe", desc: "Quick and bright — 208 wpm" },
 ];
 
+export const LOCAL_VOICE_OPTIONS = [
+  { key: "Bella", name: "Bella", desc: "Italian conversational cadence — Reference 00-BELLA (On-Device, 0 tokens)" },
+  { key: "Alice", name: "Alice", desc: "Measured and warm local speech — macOS Native" },
+  { key: "System", name: "System Default", desc: "Default on-device text-to-speech engine" },
+];
+
+export const VOICE_OPTIONS = CLOUD_VOICE_OPTIONS;
+
 export interface TemiStageSettingsProps {
   onClose: () => void;
   onSelectVoice: (voiceKey: string) => void;
   machineLabel: string;
+  engineMode?: "online" | "local";
 }
 
 export const TemiStageSettings: React.FC<TemiStageSettingsProps> = ({
   onClose,
   onSelectVoice,
   machineLabel,
+  engineMode = "online",
 }) => {
   const selectedVoice = useAssistantActivityStore((state) => state.selectedVoice);
   const setSelectedVoice = useAssistantActivityStore((state) => state.setSelectedVoice);
 
-  /* No round trip to ask which voice is speaking. The Python pipeline held
-     that as server state and served it from `/api/voices`; Gemini Live takes
-     the voice as session config and has nothing to ask. The store is now the
-     only record, and it is the durable one -- the engine reads it when it
-     opens a session, and changing it reopens one. */
+  const isLocal = engineMode === "local";
+  const options = isLocal ? LOCAL_VOICE_OPTIONS : CLOUD_VOICE_OPTIONS;
+  const activeVoiceKey = isLocal
+    ? (options.some((v) => v.key === selectedVoice) ? selectedVoice : "Bella")
+    : (options.some((v) => v.key === selectedVoice) ? selectedVoice : "Sulafat");
 
   return (
     <div role="menu" className={PANEL}>
-      <p className={SECTION}>Voice</p>
+      <p className={SECTION}>{isLocal ? "Local Voice" : "Cloud Voice"}</p>
       <div className="px-1.5 pb-1">
-        {VOICE_OPTIONS.map((voice) => (
+        {options.map((voice) => (
           <button
             key={voice.key}
             type="button"
             role="menuitemradio"
-            aria-checked={selectedVoice === voice.key}
+            aria-checked={activeVoiceKey === voice.key}
             onClick={() => {
               setSelectedVoice(voice.key);
               onSelectVoice(voice.key);
@@ -179,12 +188,12 @@ export const TemiStageSettings: React.FC<TemiStageSettingsProps> = ({
               <span className="block truncate text-[13px] text-[#ececec]">{voice.name}</span>
               <span className="block truncate text-[11px] text-[#8f8f8f]">{voice.desc}</span>
             </span>
-            {selectedVoice === voice.key && <Check size={14} className="flex-shrink-0 text-emerald-400" />}
+            {activeVoiceKey === voice.key && <Check size={14} className="flex-shrink-0 text-emerald-400" />}
           </button>
         ))}
       </div>
       <div className="mt-1 border-t border-[#3f3f3f] px-3.5 py-2 text-[11px] text-[#8f8f8f]">
-        Turns run on {machineLabel}
+        {isLocal ? `Runs 100% offline on ${machineLabel} (0 tokens)` : `Streamed from Cloud to ${machineLabel}`}
       </div>
     </div>
   );

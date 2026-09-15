@@ -34,6 +34,7 @@ export type SystemTaskKind =
   | "move_file"
   | "find_file"
   | "list_files"
+  | "capabilities_directory"
   | "unsupported";
 
 export interface SystemCommand {
@@ -61,8 +62,8 @@ export interface SystemActionResult {
 /* ── Pattern matching & extraction ───────────────────────────────────────── */
 
 const MOVE_FILE_REGEX = /\bmove\s+(?:the\s+)?(?:file\s+)?([a-zA-Z]:?[a-zA-Z0-9_\-./\\]+\.[a-zA-Z0-9]+)\s+to\s+(?:the\s+)?(?:folder\s+|directory\s+)?([a-zA-Z]:?[a-zA-Z0-9_\-./\\]+)\b/i;
-const PLAY_VIDEO_REGEX = /\b(?:play|watch|open)\s+(?:the\s+)?video(?:\s+(?:called\s+|named\s+)?([a-zA-Z]:?[a-zA-Z0-9_\-./\\]+\.[a-zA-Z0-9]+))?(?:\s+in\s+(?:the\s+)?(?:player|media\s+player))?(?:\s+instead)?\b|\bplay\s+([a-zA-Z]:?[a-zA-Z0-9_\-./\\]+\.(?:mp4|mov|mkv|webm|avi|m4v))\b/i;
-const NATURAL_PLAY_MEDIA_REGEX = /\b(?:play|watch)\s+(?:the\s+)?(?:latest\s+)?(?:episode\s+(?:of\s+)?|movie\s+(?:of\s+)?|video\s+(?:of|called|named\s+)?|clip\s+(?:of\s+)?)?([a-zA-Z0-9_\-./\\:\s]+?)(?:\s+(?:episode|movie|video|clip|in\s+(?:the\s+)?(?:media\s+)?player))?(?:\s+instead)?$/i;
+const PLAY_VIDEO_REGEX = /\b(?:play|pray|watch|open)\s+(?:the\s+)?video(?:\s+(?:called\s+|named\s+)?([a-zA-Z]:?[a-zA-Z0-9_\-./\\]+\.[a-zA-Z0-9]+))?(?:\s+in\s+(?:the\s+)?(?:player|media\s+player))?(?:\s+instead)?\b|\b(?:play|pray)\s+([a-zA-Z]:?[a-zA-Z0-9_\-./\\]+\.(?:mp4|mov|mkv|webm|avi|m4v))\b/i;
+const NATURAL_PLAY_MEDIA_REGEX = /\b(?:play|pray|watch)\s+(?:like\s+)?(?:the\s+)?(?:latest\s+)?(?:episode\s+(?:of\s+)?|movie\s+(?:of\s+)?|video\s+(?:of|called|named\s+)?|clip\s+(?:of\s+)?)?([a-zA-Z0-9_\-./\\:\s]+?)(?:\s+(?:episode|movie|video|clip|in\s+(?:the\s+)?(?:media\s+)?player))?(?:\s+instead)?$/i;
 const OPEN_FILE_REGEX = /\b(?:open|show|view|edit)\s+(?:the\s+)?(?:file\s+|document\s+|code\s+)?([a-zA-Z]:?[a-zA-Z0-9_\-./\\]+\.[a-zA-Z0-9]+)(?:\s+in\s+(?:the\s+)?(?:editor|viewer))?(?:\s+instead)?\b/i;
 const FIND_FILE_REGEX = /\b(?:find|where\s+is|locate|search\s+for)\s+(?:the\s+)?(?:file\s+)?([a-zA-Z]:?[a-zA-Z0-9_\-./\\]+\.[a-zA-Z0-9]+)(?:\s+instead)?\b/i;
 const LIST_FILES_REGEX = /\b(?:list|show|what)\s+(?:the\s+)?files(?:\s+in\s+(?:the\s+)?(?:folder\s+|directory\s+)?([a-zA-Z]:?[a-zA-Z0-9_\-./\\]+))?\b/i;
@@ -113,6 +114,13 @@ export function parseSystemCommand(utterance: string): SystemCommand | null {
   }
 
   const lower = text.toLowerCase();
+
+  // 0. Capabilities Directory Browser & Query
+  if (
+    /\b(?:capabilities|capability\s+directory|what\s+can\s+you\s+do|list\s+(?:your\s+)?capabilities|browse\s+capabilities|system\s+tools|help\s+with\s+commands|show\s+tools)\b/i.test(lower)
+  ) {
+    return { kind: "capabilities_directory", raw: utterance };
+  }
 
   // 1. Unsupported external or physical tasks — strictly clear developer boundary
   if (UNSUPPORTED_REGEX.test(lower)) {
@@ -194,16 +202,18 @@ export function parseSystemCommand(utterance: string): SystemCommand | null {
 
   // 7. Disk / Storage space
   if (
-    /\b(?:check|what(?:'s| is)?|how much|how many)\b[^?.]{0,50}?\b(?:storage|disk|space|hard\s*drive|drive\s*space|headroom|free\s*space|gigabytes(?:\s+free)?|gb\s+free)\b/i.test(lower) ||
-    /\b(?:check\s+(?:my\s+)?computer\s+storage|check\s+disk|disk\s+space)\b/i.test(lower)
+    /\b(?:check|what(?:'s| is)?|how\s+much|how\s+many|remaining|free|available|left|capacity)\b[^?.]{0,50}?\b(?:storage|disk|space|hard\s*drive|drive\s*space|headroom|free\s*space|gigabytes(?:\s+free)?|gb\s+free)\b/i.test(lower) ||
+    /\b(?:check\s+(?:my\s+)?computer\s+storage|check\s+disk|disk\s+space|storage\s+space|disk\s+usage|storage\s+usage|storage\s+capacity|disk\s+capacity)\b/i.test(lower)
   ) {
     return { kind: "disk", raw: utterance };
   }
 
   // 8. Battery / Power (including Italian & colloquial phrasing)
   if (
-    /\b(?:battery|power|charging|charger|plugged\s+in|battery\s+level|battery\s+life|battery\s+percentage|batteria)\b/i.test(lower) &&
-    (/(?:com['’]è|come\s+sta)/i.test(lower) || /\b(?:check|what|how\s+much|is|are|status|level|full)\b/i.test(lower))
+    /\b(?:battery|batteria|power|charging|charger|plugged\s+in)\b/i.test(lower) &&
+    (/(?:com['’]è|come\s+sta)/i.test(lower) ||
+      /\b(?:check|what|how\s+much|is|are|status|level|full|life|percentage|capacity|remaining|health|left|state)\b/i.test(lower) ||
+      /\b(?:battery\s+(?:level|life|percentage|capacity|status|health|state)|remaining\s+battery)\b/i.test(lower))
   ) {
     return { kind: "battery", raw: utterance };
   }
@@ -211,8 +221,8 @@ export function parseSystemCommand(utterance: string): SystemCommand | null {
   // 9. Memory / RAM (including human slang: "looking like", "gasping for air")
   if (
     (/\b(?:memory|ram)\b/i.test(lower) &&
-      /\b(?:check|what(?:'s| is)?|how\s+much|usage|using|full|available|free|status|load|looking\s+like)\b/i.test(lower)) ||
-    /\b(?:is\s+my\s+computer\s+gasping\s+for\s+air|how\s+much\s+ram\s+(?:do\s+i\s+have|am\s+i\s+using))\b/i.test(lower)
+      /\b(?:check|what(?:'s| is)?|how\s+much|usage|using|full|available|free|status|load|looking\s+like|health|capacity|remaining|consumption|stats)\b/i.test(lower)) ||
+    /\b(?:is\s+my\s+computer\s+gasping\s+for\s+air|how\s+much\s+ram\s+(?:do\s+i\s+have|am\s+i\s+using)|ram\s+usage|memory\s+usage|ram\s+health|memory\s+health|ram\s+stats|memory\s+stats)\b/i.test(lower)
   ) {
     return { kind: "memory", raw: utterance };
   }
@@ -1180,8 +1190,20 @@ export async function executeSystemAction(command: SystemCommand): Promise<Syste
       };
     }
 
+    case "capabilities_directory": {
+      const { formatCapabilitiesDirectoryMarkdown } = await import("./capabilityDirectory.ts");
+      return {
+        handled: true,
+        kind: "capabilities_directory",
+        spoken: "Here is my complete capability directory. Everything runs locally on your machine.",
+        displayMarkdown: formatCapabilitiesDirectoryMarkdown(),
+        tokensUsed: 0,
+        latencyMs: Date.now() - startTime,
+      };
+    }
+
     case "unsupported": {
-      const spoken = "I don't have the capability to perform external or physical actions like that; that remains developer work for you to handle directly.";
+      const spoken = "I don't have the capability to perform external tasks. That remains developer work.";
       return {
         handled: true,
         kind: "unsupported",

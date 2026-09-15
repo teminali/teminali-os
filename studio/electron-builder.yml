@@ -23,16 +23,6 @@ files:
   # 30 files that import nothing but Node builtins and each other, so there is
   # no reason to enumerate them.
   - server/**/*
-  # server/speech-local.js needs voice-runtime/lexicon.js, and it CANNOT come
-  # from here. electron-builder drops any `files` entry whose source is also an
-  # extraResources `from:` — voice-runtime is one, so the pattern is silently
-  # ignored and the asar ships without it. That was verified by adding
-  # `voice-runtime/lexicon.js` here and finding zero voice-runtime entries in
-  # the built archive.
-  #
-  # server/sidecar-paths.js resolves it at runtime instead, the same way
-  # electron/main.cjs finds cli.js: the in-package path in a checkout, and
-  # <Resources>/voice-runtime when packaged.
   - package.json
   - "!**/*.map"
   - "!server/**/*.test.js"
@@ -102,26 +92,7 @@ extraResources:
       - "**/*.json"
       - "!**/*.test.js"
       - "!fixtures/**"
-  # The local speech sidecar's source. It is a child process, not an import —
-  # onnxruntime's native binding cannot be loaded from inside an asar, so
-  # electron/main.cjs spawns cli.js from <Resources>/voice-runtime under this
-  # Electron binary with ELECTRON_RUN_AS_NODE=1, the way the MCP shim runs. It
-  # cannot go in `files` for the same reason the gateway cannot: `files` is
-  # the archive.
-  #
-  # Its node_modules are deliberately NOT carried by this entry, and cannot
-  # be: electron-builder's copier skips a directory named node_modules at the
-  # root of any `from:` (app-builder-lib/out/util/filter.js, "filter the root
-  # node_modules"), whatever the filter says — the first build with a
-  # `node_modules/**` pattern here shipped nine source files and nothing else.
-  # They ship from an entry rooted at voice-runtime/node_modules instead, one
-  # per platform block below, because each platform keeps only the
-  # onnxruntime binaries it can run and a top-level entry applies everywhere.
-  - from: voice-runtime
-    to: voice-runtime
-    filter:
-      - "*.js"
-      - "package.json"
+
   # ── The media stack: LGPL ffmpeg and mpv, built by us ──────────────
   #
   # `npm run build:media-stack` populates media-stack/ before packaging; the
@@ -209,57 +180,7 @@ mac:
       to: pointer
       filter:
         - teminali-pointer
-    # The sidecar's dependencies, pruned to this platform and architecture.
-    # onnxruntime-node ships a binary for every platform in its bin/ tree, so
-    # the ones a build cannot run are dropped; ${arch} expands to arm64 or
-    # x64, which are onnxruntime-node's directory names. The models are not
-    # here either: transformers.js caches weights in a `.cache` directory
-    # inside its own package — on a developer's machine, whatever that machine
-    # has already pulled — and the packaged sidecar is handed a directory
-    # under userData instead (TEMINALI_VOICE_CACHE, set by main.cjs, read by
-    # voice-runtime/cli.js). They download on first run; /status reports each
-    # model as it becomes ready.
-    #
-    # The sidecar's own top-level onnxruntime-node is not shipped: nothing
-    # imports it. @huggingface/transformers pins a different version and
-    # carries its own copy under its node_modules, which is the one that
-    # loads. voice-runtime/node_modules exists only after
-    # `npm run voice:install`; a build made without it ships the source alone
-    # and the packaged sidecar exits at its first import — the app logs that
-    # and keeps the built-in engine, as it did before the sidecar shipped.
-    - from: voice-runtime/node_modules
-      to: voice-runtime/node_modules
-      filter:
-        - "**/*"
-        - "!.bin/**"
-        - "!**/.cache/**"
-        - "!**/*.map"
-        - "!**/*.md"
-        - "!**/*.d.ts"
-        # The web half of transformers.js: 91 MB the Node sidecar never loads.
-        # Its package `exports` resolve the `node` condition to
-        # dist/transformers.node.mjs, which requires onnxruntime-node and
-        # onnxruntime-common and nothing else — never onnxruntime-web, nor the
-        # WASM backend that `ort-wasm-simd-threaded.jsep.wasm` and the
-        # transformers.web bundles exist to drive. Dropping all of it takes the
-        # sidecar's payload from 186 MB to 95 MB on every platform, which is
-        # what NSIS has to push through a hardcoded `-mx=9` on Windows.
-        #
-        # Verified by deleting the three of them outright and running a real
-        # Whisper transcription and a real Kokoro generation against the cached
-        # weights: both succeeded. Import resolution alone does not prove this —
-        # the backend is chosen when a session is created, not when the module
-        # is imported.
-        - "!**/onnxruntime-web/**"
-        - "!**/transformers/dist/transformers.web*"
-        - "!**/transformers/dist/*.wasm"
-        - "!**/onnxruntime-node/bin/**/linux/**"
-        - "!**/onnxruntime-node/bin/**/win32/**"
-        - "!**/onnxruntime-node/bin/**/darwin/*/**"
-        - "**/onnxruntime-node/bin/**/darwin/${arch}/**"
-        # Last, so the re-include above cannot bring it back: a later pattern
-        # wins, and the root copy has the same bin/ layout as the nested one.
-        - "!onnxruntime-node/**"
+
   # macOS refuses the microphone and the camera outright, without a dialog, if
   # the reason is not declared. Screen Recording and Accessibility need no key
   # — they are granted only in System Settings, by hand, and cannot be
@@ -328,31 +249,7 @@ win:
   # a .exe.blockmap too, so Windows carries the identical re-run trap; it has
   # simply never been observed, because no Windows job has ever finished.
   artifactName: Teminali-OS-Setup-${version}-Windows-${arch}.${ext}
-  # THE SIDECAR IS NOT PACKED ON WINDOWS. Deliberate, and load-bearing.
-  #
-  # `voice-runtime/node_modules` is 573 MB after filtering, and packing it into
-  # the NSIS archive is the step that has never finished on this platform: not
-  # in 0.0.2 (2h31m), not in 0.0.3, and not in 0.0.5, which was killed by the
-  # 60-minute cap 58 minutes after the last line it printed. macOS and Linux
-  # pack the identical payload in about four minutes and two minutes; Windows
-  # is the only target that goes through LZMA.
-  #
-  # Proven, not suspected: run `34122224708` dropped this one entry and nothing
-  # else, on the same runner and the same commit base, and Windows finished in
-  # **2m59s** with a 157 MB installer. The compression level, the differential
-  # package and `useZip` were each tested separately and each failed to help.
-  #
-  # Without it the app runs and local speech degrades rather than breaks —
-  # `server/speech-local.js:105` imports the lexicon with `.catch(() => null)`
-  # and carries on, warning that transcripts will not be vocabulary-repaired,
-  # and the local recogniser is already optional (`whisper.cpp is not
-  # installed` is a supported state, not a crash).
-  #
-  # This is the stop-gap, not the answer. The answer is fetching the sidecar in
-  # the installer wizard — `inetc::get`, the way electron-builder's own
-  # `webPackage.nsh` does it — so Windows gets the feature back without the
-  # packaging cost. Until that lands, this is what a downloadable Windows build
-  # costs. See `studio/docs/WINDOWS_PACKAGING.md`.
+
 
 # The assisted (multi-page) installer, with its own welcome and finish pages.
 # build/installer.nsh holds the pages; scripts/installer-art.sh draws the two
@@ -420,29 +317,7 @@ linux:
   category: Development
   # Space-free for the reason spelled out under `mac.artifactName`.
   artifactName: Teminali-OS-${version}-Linux-${arch}.${ext}
-  # The speech sidecar's dependencies, pruned to Linux and ${arch}. See the
-  # macOS entry for what each pattern is for.
-  extraResources:
-    - from: voice-runtime/node_modules
-      to: voice-runtime/node_modules
-      filter:
-        - "**/*"
-        - "!.bin/**"
-        - "!**/.cache/**"
-        - "!**/*.map"
-        - "!**/*.md"
-        - "!**/*.d.ts"
-        # The web half of transformers.js — see the macOS entry.
-        - "!**/onnxruntime-web/**"
-        - "!**/transformers/dist/transformers.web*"
-        - "!**/transformers/dist/*.wasm"
-        - "!**/onnxruntime-node/bin/**/darwin/**"
-        - "!**/onnxruntime-node/bin/**/win32/**"
-        - "!**/onnxruntime-node/bin/**/linux/*/**"
-        - "**/onnxruntime-node/bin/**/linux/${arch}/**"
-        # Last, so the re-include above cannot bring it back: a later pattern
-        # wins, and the root copy has the same bin/ layout as the nested one.
-        - "!onnxruntime-node/**"
+
   # Named explicitly. Left to itself electron-builder derives this from the
   # package name, which is scoped — "@teminali/os" becomes "@teminalios",
   # and an "@" is not legal in a Linux executable path. The AppImage build fails

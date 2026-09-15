@@ -147,7 +147,7 @@ export function paceFor(base: number, text: string): number {
 }
 
 /**
- * Smooths conversational punctuation so TTS engines (like Kokoro) do not
+ * Smooths conversational punctuation so TTS engines (like Breeze) do not
  * inject artificial 350ms dead-air pauses on commas before conjunctions,
  * after common conversational fillers, or on duplicated punctuation.
  */

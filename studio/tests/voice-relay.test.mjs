@@ -21,7 +21,7 @@ function encodeFrame(header, body = Buffer.alloc(0)) {
 async function sidecar(handleSpeak) {
   const requests = [];
   const server = createServer(async (request, response) => {
-    if (request.url === "/status") {
+    if (request.url === "/status" || request.url === "/v1/voices") {
       response.writeHead(200, { "content-type": "application/json" });
       response.end(JSON.stringify({ tts: { model: "fake", voices: ["a"], streaming: true } }));
       return;

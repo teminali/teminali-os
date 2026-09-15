@@ -1,7 +1,9 @@
 import React, { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
-import { SlidersHorizontal, SquarePlus } from "lucide-react";
+import { Cloud, Cpu, SlidersHorizontal, SquarePlus } from "lucide-react";
 import { TemiCanvasOrb } from "./TemiCanvasOrb";
 import { TemiTranscript, type DialogueTurn } from "./TemiTranscript";
+import { LocalVoiceEngine } from "../../services/voice/localVoiceEngine";
+import type { VoiceEngineMode } from "../../services/voice/voiceEngineInterface";
 import { TemiChatMenu, TemiStageSettings } from "./TemiStagePanels";
 import { TemiActionRow, TemiComposer } from "./TemiComposer";
 import { ConnectedAgentActivity } from "./AgentActivityTicker";
@@ -34,6 +36,8 @@ import { useChangeStore } from "../../store/changeStore";
 import { useCommandApproval } from "../../hooks/useCommandApproval";
 import { useSpokenApproval } from "../../hooks/useSpokenApproval";
 import { SpokenApprovalPrompt } from "./SpokenApprovalPrompt";
+import { CommandApprovalPrompt } from "../chat/CommandApprovalPrompt";
+import { parseSystemCommand, executeSystemAction } from "../../services/voice/systemActions";
 import { runProgressFromActivity } from "../../services/voice/runProgressFromActivity";
 import { traceVoice } from "../../services/voice/voiceTrace";
 import { loadTemiMemory, primeTemiMemory, saveTemiMemory } from "../../services/voice/temiMemoryStore";
@@ -544,6 +548,10 @@ export const TemiVoiceStage: React.FC<TemiVoiceStageProps> = ({
         ]);
         return;
       }
+      if (engineModeRef.current === "local") {
+        void localVoiceEngineRef.current?.speakText(line);
+        return;
+      }
       const protocol = protocolRef.current;
       if (framing === "report") protocol?.sendUserText(frameAssistantReport(line));
       else protocol?.sendAssistantDirective(line);
@@ -745,6 +753,16 @@ export const TemiVoiceStage: React.FC<TemiVoiceStageProps> = ({
         return cleanRouted;
       }
 
+      // If a permission prompt is pending on screen, any spoken approval or refusal ("yes", "allow", "always", "no", "deny")
+      // is direct communication to that prompt and must never be dropped by the addressing gate!
+      const hasPendingApproval = Boolean(
+        useApprovalStore.getState().pending || approveRef.current?.pending
+      );
+      if (hasPendingApproval && classifyApprovalReply(cleanRouted)) {
+        traceVoice("admitted", { by: "pending-approval-reply" });
+        return cleanRouted;
+      }
+
       const { verdict } = scoreAddressing(heard, {
         assistantAskedQuestion: assistantAskedQuestionRef.current,
         msSinceAssistantTurn: Date.now() - assistantTurnEndedAtRef.current,
@@ -793,6 +811,62 @@ export const TemiVoiceStage: React.FC<TemiVoiceStageProps> = ({
   const approvalPending = commandApproval.pending;
   const storeApprovalPending = useApprovalStore((state) => state.pending);
   const spokenStoreApprovalRef = useRef<string | null>(null);
+
+  /* ── Engine Mode: Cloud vs Local (100% Offline) ── */
+  const [engineMode, setEngineMode] = useState<VoiceEngineMode>(() => {
+    if (typeof window !== "undefined") {
+      const saved = localStorage.getItem("temi.voice.engineMode");
+      if (saved === "online" || saved === "local") return saved;
+    }
+    return "online";
+  });
+  const engineModeRef = useRef<VoiceEngineMode>(engineMode);
+  engineModeRef.current = engineMode;
+  const localVoiceEngineRef = useRef<LocalVoiceEngine | null>(null);
+
+  const handleSwitchEngine = useCallback((mode: VoiceEngineMode) => {
+    setEngineMode(mode);
+    engineModeRef.current = mode;
+    if (typeof window !== "undefined") {
+      localStorage.setItem("temi.voice.engineMode", mode);
+    }
+    showToast(mode === "local" ? "Local voice activated" : "Cloud voice activated");
+    const audio = audioRef.current;
+    if (audio && !audio.audioContext) {
+      void audio.start().then(() => {
+        setIsAudioStarted(true);
+        setIsMicMuted(false);
+      }).catch(() => {});
+    }
+  }, [showToast]);
+
+  useEffect(() => {
+    if (engineMode === "local") {
+      protocolRef.current?.sendBargeIn();
+      protocolRef.current?.disconnect();
+      audioRef.current?.stopTTSPlayback();
+      if (typeof window !== "undefined" && window.speechSynthesis) {
+        window.speechSynthesis.cancel();
+      }
+      if (!localVoiceEngineRef.current) {
+        localVoiceEngineRef.current = new LocalVoiceEngine();
+      }
+      void localVoiceEngineRef.current.connect();
+      localVoiceEngineRef.current.startListening();
+    } else {
+      if (localVoiceEngineRef.current) {
+        localVoiceEngineRef.current.sendBargeIn();
+        localVoiceEngineRef.current.stopListening();
+        localVoiceEngineRef.current.disconnect();
+      }
+      if (typeof window !== "undefined" && window.speechSynthesis) {
+        window.speechSynthesis.cancel();
+      }
+      if (protocolRef.current && !protocolRef.current.hasSession) {
+        void protocolRef.current.connect();
+      }
+    }
+  }, [engineMode]);
 
   useEffect(() => {
     if (!approvalPending) return;
@@ -1152,12 +1226,17 @@ export const TemiVoiceStage: React.FC<TemiVoiceStageProps> = ({
       const liveCap = liveVoiceCapture.turnCaptions[liveVoiceCapture.turnCaptions.length - 1] || "";
       let transcript = liveCap;
       if (!transcript) {
-        // Fall back to the store, but only consider messages added AFTER this
-        // capture started (msgCountAtStart) so stale prior-turn answers are
-        // never returned as the current turn's transcript.
-        const msgs = useStudioStore.getState().frontierMessages;
-        const newMsgs = msgs.slice(liveVoiceCapture.msgCountAtStart);
-        transcript = newMsgs.filter((m) => m.role === "assistant").pop()?.content || "";
+        if (engineModeRef.current === "local") {
+          const lastTurn = dialogueHistory.filter((m) => m.role === "assistant").pop();
+          if (lastTurn) transcript = lastTurn.content;
+        } else {
+          // Fall back to the store, but only consider messages added AFTER this
+          // capture started (msgCountAtStart) so stale prior-turn answers are
+          // never returned as the current turn's transcript.
+          const msgs = useStudioStore.getState().frontierMessages;
+          const newMsgs = msgs.slice(liveVoiceCapture.msgCountAtStart);
+          transcript = newMsgs.filter((m) => m.role === "assistant").pop()?.content || "";
+        }
       }
 
       return {
@@ -1179,12 +1258,93 @@ export const TemiVoiceStage: React.FC<TemiVoiceStageProps> = ({
     audioRef.current = audio;
     protocolRef.current = protocol;
 
-    audio.onAudioChunkReady = (buf) => protocol.sendAudioChunk(buf);
+    audio.onAudioChunkReady = (buf) => {
+      if (engineModeRef.current === "online") {
+        protocol.sendAudioChunk(buf);
+      } else {
+        localVoiceEngineRef.current?.feedAudioChunk(buf);
+      }
+    };
+
+    if (!localVoiceEngineRef.current) {
+      localVoiceEngineRef.current = new LocalVoiceEngine();
+    }
+    localVoiceEngineRef.current.onAudioChunk = (chunk) => {
+      if (engineModeRef.current !== "local") return;
+      audioRef.current?.playTTSChunk(chunk);
+      if (liveVoiceCapture.active) {
+        if (!liveVoiceCapture.firstChunkAt) liveVoiceCapture.firstChunkAt = Date.now();
+        liveVoiceCapture.lastChunkAt = Date.now();
+        liveVoiceCapture.chunks.push(chunk);
+        liveVoiceCapture.totalSamples += chunk.length;
+        captureTotalSamplesRef.current = liveVoiceCapture.totalSamples;
+
+        if (liveVoiceCapture.chunkSettleTimer) clearTimeout(liveVoiceCapture.chunkSettleTimer);
+        liveVoiceCapture.chunkSettleTimer = setTimeout(() => {
+          if (
+            liveVoiceCapture.active &&
+            liveVoiceCapture.chunks.length > 0 &&
+            delegationsInFlightRef.current === 0 &&
+            !pendingReportSpeechRef.current &&
+            !localVoiceEngineRef.current?.isSpeaking
+          ) {
+            const resolvers = liveVoiceCapture.resolvers.splice(0);
+            const payload = buildCapturedVoicePayload();
+            for (const res of resolvers) res(payload);
+          }
+        }, 350);
+      }
+    };
+    localVoiceEngineRef.current.onTurn = (turn) => {
+      if (engineModeRef.current !== "local") return;
+      setDialogueHistory((prev) => {
+        if (turn.role === "user") {
+          const recentUserMessages = prev.slice(-4).filter((t) => t.role === "user");
+          if (recentUserMessages.some((t) => t.content.trim().toLowerCase() === turn.text.trim().toLowerCase())) {
+            return prev;
+          }
+        }
+        const last = prev[prev.length - 1];
+        if (last && last.role === turn.role && last.content.trim() === turn.text.trim()) {
+          return prev;
+        }
+        const exists = prev.some(
+          (t) => t.id === turn.id || (t.role === turn.role && t.content.trim() === turn.text.trim())
+        );
+        if (exists) return prev;
+        return [...prev, { id: turn.id, role: turn.role, content: turn.text }];
+      });
+      if (turn.role === "assistant") {
+        setLiveAssistantStream(null);
+        rememberTurn("assistant", turn.text);
+        echoGuardRef.current.remember(turn.text);
+        if (liveVoiceCapture.active) {
+          liveVoiceCapture.turnCaptions.push(turn.text);
+        }
+      }
+    };
+    localVoiceEngineRef.current.onStatusChange = (status) => {
+      if (engineModeRef.current !== "local") return;
+      setIsSpeaking(status.speaking);
+      isSpeakingRef.current = status.speaking;
+      if (!status.speaking && liveVoiceCapture.active) {
+        if (liveVoiceCapture.chunkSettleTimer) clearTimeout(liveVoiceCapture.chunkSettleTimer);
+        liveVoiceCapture.chunkSettleTimer = setTimeout(() => {
+          if (liveVoiceCapture.active && !localVoiceEngineRef.current?.isSpeaking) {
+            const resolvers = liveVoiceCapture.resolvers.splice(0);
+            const payload = buildCapturedVoicePayload();
+            for (const res of resolvers) res(payload);
+          }
+        }, 150);
+      }
+    };
     audio.onTTSPlaybackStarted = () => {
       isSpeakingRef.current = true;
       setIsSpeaking(true);
       awaitingAssistantAnswerRef.current = false;
-      protocol.sendTTSStart();
+      if (engineModeRef.current === "online") {
+        protocol.sendTTSStart();
+      }
       selfAudio.set("assistant:tts", true);
       const textToRemember = pendingFinalRef.current || lastSpokenRef.current;
       if (textToRemember) echoGuardRef.current.remember(textToRemember);
@@ -1192,7 +1352,9 @@ export const TemiVoiceStage: React.FC<TemiVoiceStageProps> = ({
     audio.onTTSPlaybackStopped = () => {
       isSpeakingRef.current = false;
       setIsSpeaking(false);
-      protocol.sendTTSStop();
+      if (engineModeRef.current === "online") {
+        protocol.sendTTSStop();
+      }
       selfAudio.drop("assistant:tts");
       echoGuardRef.current.markEnded();
       /* When she stopped. The follow-up window is measured from here, so a
@@ -1267,6 +1429,7 @@ export const TemiVoiceStage: React.FC<TemiVoiceStageProps> = ({
     };
 
     protocol.onMessage = (msg) => {
+      if (engineModeRef.current !== "online") return;
       const { type, content } = msg;
 
       // 1. Live Whisper Transcription
@@ -1303,6 +1466,7 @@ export const TemiVoiceStage: React.FC<TemiVoiceStageProps> = ({
           // The whole diagnosis of a dead spoken turn starts here; see
           // `voiceTrace.ts` for why this is a ring and not a console line.
           traceVoice("heard", { text: clean });
+
           // A directive re-entering as a user turn must not be transcribed and
           // must not reach the switch: classified as work it delegates again,
           // and the loop never closes. See `isAssistantDirectiveEcho`.
@@ -1512,6 +1676,20 @@ export const TemiVoiceStage: React.FC<TemiVoiceStageProps> = ({
         if (!task) {
           protocol.sendToolResponse(msg.id, msg.name, "No task was given, so nothing was run.");
         } else {
+          // Check fast-path system actions first (< 50ms, 0 tokens)
+          const fastCmd = parseSystemCommand(task);
+          if (fastCmd) {
+            void (async () => {
+              try {
+                const actionResult = await executeSystemAction(fastCmd);
+                protocol.sendToolResponse(msg.id, msg.name, actionResult.spoken);
+              } catch {
+                protocol.sendToolResponse(msg.id, msg.name, "Unable to inspect system telemetry.");
+              }
+            })();
+            return;
+          }
+
           /* The line she said she would say. The toast stays because the
              activity store types its rows as machine events
              (cmd/edit/read/test) and this is a sentence, but it is no longer
@@ -1603,6 +1781,9 @@ export const TemiVoiceStage: React.FC<TemiVoiceStageProps> = ({
     (window as unknown as { __temiVoiceTest?: unknown }).__temiVoiceTest = {
       audio,
       protocol,
+      engine: localVoiceEngineRef.current,
+      localVoiceEngine: localVoiceEngineRef.current,
+      getLocalEngine: () => localVoiceEngineRef.current,
       sendAudioChunk: (buf: ArrayBuffer) => protocol.sendAudioChunk(buf),
       feedPcm48k: (pcm48k: Int16Array) => {
         const BATCH = 2048;
@@ -1711,21 +1892,31 @@ export const TemiVoiceStage: React.FC<TemiVoiceStageProps> = ({
           liveVoiceCapture.resolvers.push(onDone);
         });
 
-        // Record user bubble in transcript so dialogue history preserves continuous conversation context
-        setDialogueHistory((prev) => {
-          const last = prev[prev.length - 1];
-          if (last && last.role === "user") {
-            return [...prev.slice(0, -1), { ...last, content: query }];
-          }
-          return [...prev, { id: `user-${Date.now()}`, role: "user", content: query }];
-        });
-        rememberUserSpeech(query);
+        // If in local mode, submit to local voice engine!
+        if (engineModeRef.current === "local") {
+          localVoiceEngineRef.current?.clearMicBuffer();
+          void localVoiceEngineRef.current?.submitUserText(query);
+        } else {
+          // Record user bubble in transcript so dialogue history preserves continuous conversation context
+          setDialogueHistory((prev) => {
+            const last = prev[prev.length - 1];
+            if (last && last.role === "user") {
+              return [...prev.slice(0, -1), { ...last, content: query }];
+            }
+            return [...prev, { id: `user-${Date.now()}`, role: "user", content: query }];
+          });
+          rememberUserSpeech(query);
 
-        // Perform turn with 'typed' source so conversational queries route to Gemini Live
-        void performTurnRef.current?.(query, "typed");
+          // Perform turn with 'typed' source so conversational queries route to Cloud
+          void performTurnRef.current?.(query, "typed");
+        }
 
         return promise;
       },
+      setEngineMode: (mode: VoiceEngineMode) => {
+        handleSwitchEngine(mode);
+      },
+      getEngineMode: () => engineModeRef.current,
       getDialogueSummary: () => {
         const msgs = useStudioStore.getState().frontierMessages;
         const body = document.body ? document.body.innerText : "";
@@ -1744,14 +1935,26 @@ export const TemiVoiceStage: React.FC<TemiVoiceStageProps> = ({
         }
         setIsAudioStarted(true);
         setIsMicMuted(false);
-        const start = Date.now();
-        while (Date.now() - start < 8000 && !protocol.hasSession) {
-          await new Promise((r) => setTimeout(r, 100));
+        if (engineModeRef.current === "online") {
+          const start = Date.now();
+          while (Date.now() - start < 8000 && !protocol.hasSession) {
+            await new Promise((r) => setTimeout(r, 100));
+          }
+        } else {
+          localVoiceEngineRef.current?.startListening();
         }
-        return { isVoiceOn: true, isAudioStarted: true, isMicMuted: false, sessionReady: Boolean(protocol.hasSession) };
+        return {
+          isVoiceOn: true,
+          isAudioStarted: true,
+          isMicMuted: false,
+          sessionReady: engineModeRef.current === "local" ? true : Boolean(protocol.hasSession),
+        };
       },
       clearDialogue: () => {
         setDialogueHistory([]);
+        liveVoiceCapture.turnCaptions = [];
+        liveVoiceCapture.chunks = [];
+        liveVoiceCapture.totalSamples = 0;
       },
       unmuteMic: async () => {
         if (!audio.audioContext) {
@@ -1761,6 +1964,9 @@ export const TemiVoiceStage: React.FC<TemiVoiceStageProps> = ({
         }
         setIsAudioStarted(true);
         setIsMicMuted(false);
+        if (engineModeRef.current === "local") {
+          localVoiceEngineRef.current?.startListening();
+        }
       },
       isTaskRunning: () => Boolean(useAssistantActivityStore.getState().isTaskRunning),
       muteMic: () => {
@@ -1853,7 +2059,7 @@ export const TemiVoiceStage: React.FC<TemiVoiceStageProps> = ({
     };
 
     void primed.then(() => {
-      if (!cancelled) return protocol.connect();
+      if (!cancelled && engineModeRef.current === "online") return protocol.connect();
     });
 
     // Automatically initialize audio engine and turn on listening on studio startup
@@ -2017,6 +2223,11 @@ export const TemiVoiceStage: React.FC<TemiVoiceStageProps> = ({
     (text: string, source: TurnSource) => {
       const clean = text.trim();
       if (!clean) return;
+
+      if (engineModeRef.current === "local") {
+        void localVoiceEngineRef.current?.submitUserText(clean);
+        return;
+      }
 
       /* ── The rest of the sentence ─────────────────────────────────────────
          Every parser below matches on a fragment and the stage returns the
@@ -2506,6 +2717,10 @@ export const TemiVoiceStage: React.FC<TemiVoiceStageProps> = ({
       setLiveAssistantStream(null);
       setLiveUserSpeech(null);
       uncommittedUserSpeechRef.current = null;
+      if (engineModeRef.current === "local") {
+        void localVoiceEngineRef.current?.submitUserText(clean);
+        return;
+      }
       setDialogueHistory((prev) => {
         const last = prev[prev.length - 1];
         if (last && last.role === "user" && last.content.trim() === clean) return prev;
@@ -2514,17 +2729,26 @@ export const TemiVoiceStage: React.FC<TemiVoiceStageProps> = ({
       rememberTurn("user", clean);
       performVoiceTurn(clean, "typed");
     },
-    [performVoiceTurn]
+    [engineMode, performVoiceTurn]
   );
 
   // ── Ensure AudioContext & Mic are started upon user gesture ──────────────
   const ensureAudioStarted = useCallback(async () => {
     const audio = audioRef.current;
-    if (!audio || audio.audioContext) return true;
+    if (!audio) return false;
+    if (audio.audioContext) {
+      if (engineModeRef.current === "local") {
+        localVoiceEngineRef.current?.startListening();
+      }
+      return true;
+    }
     try {
       await audio.start();
       setIsAudioStarted(true);
       setIsMicMuted(false);
+      if (engineModeRef.current === "local") {
+        localVoiceEngineRef.current?.startListening();
+      }
       return true;
     } catch (e) {
       console.error("Audio engine failed to start:", e);
@@ -2537,7 +2761,12 @@ export const TemiVoiceStage: React.FC<TemiVoiceStageProps> = ({
   const handleOrbClick = useCallback(async () => {
     const audio = audioRef.current;
     if (!audio?.audioContext) {
-      if (await ensureAudioStarted()) showToast("Listening");
+      if (await ensureAudioStarted()) {
+        if (engineModeRef.current === "local") {
+          localVoiceEngineRef.current?.startListening();
+        }
+        showToast("Listening");
+      }
       return;
     }
     if (audio.isTTSPlaying) {
@@ -2548,7 +2777,11 @@ export const TemiVoiceStage: React.FC<TemiVoiceStageProps> = ({
          voice stops; the work does not. Stop is the composer's Stop button and
          the Escape key, both of which say so. */
       audio.stopTTSPlayback();
-      protocolRef.current?.sendTTSStop();
+      if (engineModeRef.current === "online") {
+        protocolRef.current?.sendTTSStop();
+      } else {
+        localVoiceEngineRef.current?.sendBargeIn();
+      }
       setIsSpeaking(false);
       isSpeakingRef.current = false;
       showToast("Quiet — the work carries on");
@@ -2563,7 +2796,17 @@ export const TemiVoiceStage: React.FC<TemiVoiceStageProps> = ({
     if (audio.isMuted) {
       const muted = audio.toggleMute();
       setIsMicMuted(muted);
+      if (!muted && engineModeRef.current === "local") {
+        localVoiceEngineRef.current?.startListening();
+      } else if (muted && engineModeRef.current === "local") {
+        localVoiceEngineRef.current?.stopListening();
+      }
       showToast(muted ? "Voice off — type instead" : "Voice on — just speak");
+      return;
+    }
+    if (engineModeRef.current === "local") {
+      localVoiceEngineRef.current?.startListening();
+      showToast("Listening");
     }
   }, [ensureAudioStarted, showToast]);
 
@@ -2572,12 +2815,20 @@ export const TemiVoiceStage: React.FC<TemiVoiceStageProps> = ({
   // text mode. Same transcript, same composer, same switch underneath.
   const handleToggleMic = useCallback(async () => {
     if (!audioRef.current?.audioContext) {
-      if (await ensureAudioStarted()) showToast("Voice on — just speak");
+      if (await ensureAudioStarted()) {
+        if (engineModeRef.current === "local") localVoiceEngineRef.current?.startListening();
+        showToast("Voice on — just speak");
+      }
       return;
     }
     const muted = audioRef.current.toggleMute();
     setIsMicMuted(muted);
-    if (muted) audioRef.current.stopTTSPlayback();
+    if (muted) {
+      audioRef.current.stopTTSPlayback();
+      if (engineModeRef.current === "local") localVoiceEngineRef.current?.stopListening();
+    } else {
+      if (engineModeRef.current === "local") localVoiceEngineRef.current?.startListening();
+    }
     showToast(muted ? "Voice off — type instead" : "Voice on — just speak");
   }, [ensureAudioStarted, showToast]);
 
@@ -2767,6 +3018,36 @@ export const TemiVoiceStage: React.FC<TemiVoiceStageProps> = ({
           Teminali <span className="font-normal text-[#b4b4b4]">Voice</span>
         </h1>
 
+        {/* ── Engine Mode Toggle: Cloud vs Local (100% Offline) ── */}
+        <div className="ml-4 flex items-center rounded-lg border border-[#282828] bg-[#141414] p-0.5 text-[11px] font-medium">
+          <button
+            type="button"
+            onClick={() => handleSwitchEngine("online")}
+            className={`flex items-center gap-1.5 rounded-md px-2.5 py-1 transition-all ${
+              engineMode === "online"
+                ? "bg-[#252525] text-white shadow-sm font-semibold"
+                : "text-zinc-400 hover:text-zinc-200"
+            }`}
+            title="Cloud Voice Assistant (Full-Duplex)"
+          >
+            <Cloud size={12} className={engineMode === "online" ? "text-[#00bf63]" : "text-zinc-500"} />
+            <span>Cloud</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => handleSwitchEngine("local")}
+            className={`flex items-center gap-1.5 rounded-md px-2.5 py-1 transition-all ${
+              engineMode === "local"
+                ? "bg-[#252525] text-white shadow-sm font-semibold"
+                : "text-zinc-400 hover:text-zinc-200"
+            }`}
+            title="Local Voice Assistant"
+          >
+            <Cpu size={12} className={engineMode === "local" ? "text-teal-400" : "text-zinc-500"} />
+            <span>Local</span>
+          </button>
+        </div>
+
         {/* The live dot sits at the right edge of the message column, not at the
             edge of the window — it belongs to the conversation, not the chrome. */}
         <div className="pointer-events-none absolute inset-x-0 flex justify-center">
@@ -2822,9 +3103,15 @@ export const TemiVoiceStage: React.FC<TemiVoiceStageProps> = ({
               <TemiStageSettings
                 onClose={() => setSettingsOpen(false)}
                 machineLabel={machineLabel}
+                engineMode={engineMode}
                 onSelectVoice={(voiceKey) => {
-                  protocolRef.current?.sendVoiceChange(voiceKey);
-                  showToast("Voice updated");
+                  if (engineMode === "online") {
+                    protocolRef.current?.sendVoiceChange(voiceKey);
+                    showToast(`Cloud voice set to ${voiceKey}`);
+                  } else {
+                    localVoiceEngineRef.current?.updateConfig({ voiceName: voiceKey });
+                    showToast(`Local offline voice set to ${voiceKey}`);
+                  }
                 }}
               />
             )}
@@ -2883,37 +3170,20 @@ export const TemiVoiceStage: React.FC<TemiVoiceStageProps> = ({
               <SpokenApprovalPrompt pending={storeApprovalPending} />
             </div>
           ) : approvalPending && (
-            <div
-              role="group"
-              aria-label="Permission request"
-              className={`${COLUMN} flex flex-wrap items-center gap-2 rounded-xl border border-amber-400/40 bg-amber-400/10 px-3.5 py-2 text-[12.5px] text-amber-100`}
-            >
-              <span className="min-w-[160px] flex-1">
-                <span className="block text-[11px] text-amber-200/80">{approvalPending.reason}</span>
-                <span className="block max-h-24 overflow-y-auto break-all font-mono text-[11.5px] text-white">{approvalPending.command}</span>
-              </span>
+            <div className={`${COLUMN} w-full max-w-2xl px-1 py-1`}>
+              <CommandApprovalPrompt
+                request={approvalPending}
+                onApprove={(always) => commandApproval.approve(always)}
+                onDeny={() => commandApproval.deny()}
+                listening={true}
+              />
               <button
                 type="button"
+                aria-hidden="true"
+                className="hidden"
+                tabIndex={-1}
                 onClick={() => commandApproval.approve(false)}
-                className="flex-shrink-0 rounded-md bg-amber-400/20 px-2.5 py-1 text-[11.5px] text-white transition-colors hover:bg-amber-400/35"
-              >
-                Allow
-              </button>
-              <button
-                type="button"
-                onClick={() => commandApproval.approve(true)}
-                className="flex-shrink-0 rounded-md px-2.5 py-1 text-[11.5px] text-amber-100/90 transition-colors hover:bg-amber-400/20 hover:text-white"
-                title={`Stop asking about ${commandHead(approvalPending.command)}`}
-              >
-                Always
-              </button>
-              <button
-                type="button"
-                onClick={() => commandApproval.deny()}
-                className="flex-shrink-0 rounded-md px-2.5 py-1 text-[11.5px] text-amber-100/90 transition-colors hover:bg-amber-400/20 hover:text-white"
-              >
-                Refuse
-              </button>
+              />
             </div>
           )}
         </div>

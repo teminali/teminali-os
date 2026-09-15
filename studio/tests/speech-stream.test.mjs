@@ -1,7 +1,5 @@
 /*
-  The studio's reader for a streamed `/speak` reply. The framing is the
-  sidecar's (`voice-runtime/stream.js`); the encoder here is a test-local copy
-  so this suite needs nothing from that package.
+  The studio's reader for a streamed speech reply.
 */
 import test from "node:test";
 import assert from "node:assert/strict";

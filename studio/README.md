@@ -819,20 +819,11 @@ and a recovery nobody counts looks exactly like a turn that was never cut.
 `teminaliTurnLatency()` returns the session's distribution, which is how it is
 read over CDP without opening devtools. See `DESIGN.md` §6.0.46 and §6.0.47.
 
-The two lower tiers are unchanged. Local by default: **whisper.cpp** for
-recognition, macOS `say` for synthesis. An optional sidecar on
-`127.0.0.1:8321` (`TEMINALI_VOICE_URL`) upgrades either or both, and
-[`voice-runtime/`](voice-runtime/README.md) is the one shipped in this repo:
-Whisper, Kokoro-82M and an AudioSet sound classifier on CPU, started with
-`npm run voice:serve`. On these tiers the voice is a woman's too: Kokoro's
-`af_heart` when the sidecar is up, and otherwise the best installed macOS voice
-with the same preference — an Enhanced or Premium Ava, Samantha, Serena or Kate
-wins over a man's voice across a region boundary, while a robotic one never
-does. Its synthesis streams clause by clause, so a long reply
-starts speaking after its first clause rather than after all of it — measured
-on an M4 Pro, a 35-word reply begins speaking at 0.29 s where the whole file
-takes 1.97 s. The browser
-speech engine is the always-available fallback. Each capability is routed
+The voice tiers are streamlined and local-first. Local by default: **whisper.cpp** for
+recognition and **Breeze-TTS-2 C++** on port 8081 for synthesis (Bella Italian voice clone).
+Its synthesis streams clause by clause, so a reply starts speaking after its first clause
+rather than after all of it — delivering sub-second response times on Apple Silicon.
+The browser speech engine is the fallback. Each capability is routed
 independently, so a sidecar serving only synthesis still leaves recognition on
 the local tier. Push-to-talk dictation and
 hands-free conversation with barge-in. Nothing reaches the chat unreviewed — every
@@ -1354,7 +1345,6 @@ Each is dependency-free Node with its own README and test entry point.
 | `visual-runtime/` | Deterministic PNG/RGBA comparison — exact differing-pixel counts and CIE76 deltas. Measurements, not a score. It does not capture browsers. |
 | `performance-runtime/` | Live Ollama latency harness through the gateway. Records Ollama's authoritative counts; never logs prompt content. |
 | `mcp-runtime/` | MCP client and image-proof helpers. |
-| `voice-runtime/` | Loopback speech sidecar: Whisper recognition, Kokoro synthesis and AudioSet sound labelling on CPU, nothing leaving the machine. The only runtime with its own `package.json`, installed with `npm run voice:install` and started in development with `npm run voice:serve`. Its dependencies are 1.2 GB in a development tree (including the 474 MB model cache); the packaged app ships a filtered 97 MB of them as an extra resource and downloads the models on first run. See [`voice-runtime/README.md`](voice-runtime/README.md). |
 
 ---
 
@@ -1452,64 +1442,29 @@ macOS in-app updates download the **`.zip`**, not the DMG (`server/updates.js`
 load-bearing. `latest-mac.yml` is not: nothing reads it. This app updates
 against the GitHub Releases API, not electron-updater.
 
-### What the asar can and cannot reach (`server/sidecar-paths.js`)
+### What the asar can and cannot reach
 
-**v0.0.1 shipped with no working backend.** `server/speech-local.js` imported
-`"../voice-runtime/lexicon.js"`. From `app.asar/server/` that is
-`app.asar/voice-runtime/lexicon.js`, and `voice-runtime/` ships *beside* the
-archive as an extra resource — onnxruntime's native binding cannot load from
-one. The import threw `ERR_MODULE_NOT_FOUND` while `server/gateway.js` was
-still loading, so `createGateway` never returned, nothing served `/api`, and
-every panel reported **"Failed to fetch"**: no repositories, no chat, no
-GitHub connect, and no update check either, since `/api/updates/check` is a
-gateway route. A checkout cannot reproduce it — there the same specifier
-resolves.
-
-The rule, and why the two cases differ:
+Packaged builds cleanly separate files inside the archive from external resources:
 
 | Import | From `app.asar/server/` | Ships as |
 | --- | --- | --- |
 | `../../gateway/frontier-runner.js` | `<Resources>/gateway/…` | extra resource ✓ |
 | `../../licence/format.js` | `<Resources>/licence/…` | extra resource ✓ |
-| `../voice-runtime/lexicon.js` | `app.asar/voice-runtime/…` | **nothing ships there** |
 
 `gateway/` and `licence/` sit *above* `studio/`, so `../../` lands in
 `<Resources>` in a packaged build and in the repo root in a checkout. Both
-work by the same path. `voice-runtime/` sits *inside* `studio/`, so no single
-specifier can serve both layouts.
-
-It cannot be fixed with a `files:` entry either: electron-builder drops any
-`files` pattern whose source is also an `extraResources` `from:`, so
-`voice-runtime/lexicon.js` was silently ignored and the built asar contained
-no `voice-runtime` entries at all. `server/sidecar-paths.js` resolves it at
-runtime instead — the in-package path first, then
-`process.resourcesPath/voice-runtime` — which is the same rule
-`electron/main.cjs` already uses to find `cli.js`. A missing lexicon now
-returns null and the recogniser returns text unrepaired, rather than taking
-the gateway down.
+work by the same path.
 
 `tests/packaged-imports.test.mjs` models the packaged tree and fails if any
 static import under `server/` lands somewhere neither the asar nor the extra
 resources carry.
 
-### The installed app no longer carries a Python pipeline
+### The installed app carries native local voice
 
-Until 2026-09-12 the realtime voice tier was a Python pipeline, and packaging it
-was its own chapter: an `extraResources` entry copying 1.5 MB of source to
-`<Resources>/studio/realtime-voice`, an allowlist keeping `experiments/`,
-`training/`, `resources/` and `wheels/` out of it, a runtime probe for an
-interpreter, and a message telling the operator to build a 2.2 GB virtualenv by
-hand because a virtualenv is not relocatable and notarising one is not a thing
-anyone wants to attempt.
-
-All of it is gone. The voice lane is now a live session the renderer opens to
-Gemini (`DESIGN.md` §6.0.16), so there is no interpreter to find, no
-`requirements.txt` to install against, and no `from: realtime-voice` entry in
-`electron-builder.yml`. The top voice tier needs a Google API key and a network,
-and packaging does not participate in either.
-
-What still ships for voice is the sidecar — `voice-runtime/` under
-`<Resources>/voice-runtime`, covered below — and it is unchanged.
+For local voice, Teminali OS uses a native C++ Breeze-TTS-2 server with Metal
+acceleration and local whisper.cpp, providing zero-token sub-50ms local fast paths
+and streaming Italian speech synthesis. All legacy Node voice sidecars and Python
+pipelines have been completely eliminated.
 
 One thing did arrive rather than leave. `@google/genai` is the **first
 third-party runtime dependency the gateway has ever had**: until this, `server/`
@@ -1767,90 +1722,9 @@ default: an operator who exports one still wins.
 
 ### The speech sidecar in a packaged app
 
-`voice-runtime/` ships under `<Resources>/voice-runtime` and the app starts
-it. Its source comes from a top-level `extraResources` entry; its production
-`node_modules` come from a second entry rooted at `voice-runtime/node_modules`,
-one per platform block. The split is forced: electron-builder's copier skips a
-directory named `node_modules` at the root of any `from:`
-(`app-builder-lib/out/util/filter.js`, "filter the root node_modules") whatever
-the filter says, and the first build with `node_modules/**` in the source entry
-shipped nine `.js` files and nothing else. Per platform because
-`onnxruntime-node` carries a binary for every platform, and each build keeps
-only `bin/**/<platform>/${arch}`. The sidecar's own top-level `onnxruntime-node`
-is not shipped at all — nothing imports it; `@huggingface/transformers` pins
-`1.21.0` and nests its own copy, which is the one that loads. Source maps,
-`.d.ts`, `.md` and the transformers `.cache` directory stay out, and so does
-the web half of transformers.js — the `onnxruntime-web` package, the
-`transformers.web` bundles and `ort-wasm-simd-threaded.jsep.wasm`. The sidecar
-is a Node child process, so its package `exports` resolve the `node` condition
-to `dist/transformers.node.mjs`, which requires `onnxruntime-node` and
-`onnxruntime-common` and nothing else; the WASM backend those 91 MB exist to
-drive is never selected. `tests/packaging-resources.test.mjs` fails if any
-platform block stops excluding them.
+Local voice synthesis is provided by **Breeze-TTS-2 C++** on port 8081, running native Metal acceleration on Apple Silicon and loopback-only streaming with zero cloud token consumption.
 
-`electron/main.cjs` spawns `<Resources>/voice-runtime/cli.js` under the app's
-own Electron binary with `ELECTRON_RUN_AS_NODE=1`, the way the MCP shim runs,
-so a packaged app needs no Node on the `PATH`; an unpackaged app never spawns
-it (`npm run voice:serve` is the development sidecar). The port is taken from
-`TEMINALI_VOICE_URL`, else `TEMINALI_VOICE_PORT`, else 8321, so the gateway and
-the sidecar cannot disagree. If that port is already held — a development
-sidecar, typically — no second one is started and the gateway talks to
-whatever answers there. The child's stderr is relayed into `studio-main.log`
-prefixed `Voice sidecar:`, its exit is logged, and `will-quit` sends it
-SIGTERM.
 
-The models are **not** in the bundle. transformers.js would cache them inside
-its own package, which is inside the signed app; the packaged sidecar is
-handed `userData/voice-models` instead (`TEMINALI_VOICE_CACHE`, which an
-operator's own value overrides), so an update does not discard the download.
-They download on first run, and `/status` — which the gateway already reads
-and caches for 15 s — reports each model as it becomes ready; a cold sidecar
-answers `{}` and the studio keeps the built-in engine until then. There is no
-other progress surface. Measured with `du -sh` on this machine's cache:
-`onnx-community/whisper-base` 76 MB, `onnx-community/Kokoro-82M-v1.0-ONNX`
-311 MB, `Xenova/ast-finetuned-audioset-10-10-0.4593` 87 MB — 474 MB in all.
-Kokoro was 88 MB and the total 251 MB until 2026-09-07, when synthesis stopped
-being quantised: `fp32` is 2.3x faster than `q8` on Apple Silicon and grades no
-worse, and the download is the only thing quantisation was buying
-(`DESIGN.md` §6.24). `TEMINALI_TTS_DTYPE=q4` gets 291 MB at the same speed, and
-`q8` is still there for 88 MB and the old latency.
-
-Measured on the `--mac --arm64 --dir` build, `du -sh`, the same tree built
-twice — once with the web exclusions and once with the config as it stood
-before them:
-
-| | `Resources/voice-runtime` | files | the `.app` |
-| --- | ---: | ---: | ---: |
-| Without the web exclusions | 195 MB | 1408 | 487 MB |
-| With them | **97 MB** | **985** | **388 MB** |
-
-The largest pieces that remain are `@huggingface` (42 MB, including the nested
-`onnxruntime-node` for `darwin/arm64`), `kokoro-js` (29 MB, of which 27 MB is
-voices) and `sharp` (16 MB).
-
-That the pruned build still speaks was checked, not assumed: its
-`cli.js` was spawned from `Contents/MacOS/Teminali OS` with
-`ELECTRON_RUN_AS_NODE=1` against a seeded cache, and `POST /speak` returned
-118 036 bytes of `audio/wav` with `/status` reporting both models ready.
-
-Launched from that build with its own `--user-data-dir`, the sidecar came up
-on the port the app was given and reported all three models ready from a
-pre-seeded cache; SIGTERM to the app took it down with nothing left listening.
-
-The release workflow installs the sidecar's dependencies before it packages:
-`npm run voice:install` runs after `npm ci` in
-`.github/workflows/release.yml`. Without it an artifact would carry the
-sidecar's source with no `node_modules` beside it, the packaged sidecar would
-exit at its first import, the app would log it, and voice would stay on the
-built-in engine. That step has not yet run in CI, so no published artifact has
-been checked for it.
-
-One thing this does not yet do. `sharp` installs
-only the host's platform package (`@img/sharp-darwin-arm64` is the only one
-present here), so the macOS x64 artifact, cross-built on an arm64 runner, would
-need that install to be told the target (`--cpu x64 --os darwin`) or its
-sidecar fails the same way. The Windows and Linux entries are written but have
-not been built here.
 
 **The media stack had the same shape and a worse ending, and that is what the
 universal build fixes.** One arm64 runner produces both `--arm64` and `--x64`

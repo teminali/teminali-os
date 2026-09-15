@@ -40,7 +40,7 @@ test("the stage hands the saved pick to the engine it builds", async () => {
   assert.match(stage, /new GeminiLiveEngine\(\{ voice: useAssistantActivityStore\.getState\(\)\.selectedVoice \}\)/);
 });
 
-test("a picked voice is saved and read back; a retired Kokoro key is not", () => {
+test("a picked voice is saved and read back; an invalid key is not", () => {
   useAssistantActivityStore.getState().setSelectedVoice("Gacrux");
   assert.equal(saved.get("temi.voice"), "Gacrux");
   assert.equal(readSavedVoice(), "Gacrux");

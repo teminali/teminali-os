@@ -62,8 +62,7 @@ const VOICE_STORAGE_KEY = "temi.voice";
 
 /**
  * Gemini's prebuilt voice names are one capitalised word ("Sulafat", "Aoede").
- * The retired Kokoro keys were lowercase with underscores ("royal_velvet"), and
- * sent as `voiceName` one of those would fail the session, so it is dropped.
+ * Any invalid key sent as `voiceName` would fail the session, so it is dropped.
  */
 const isGeminiVoiceName = (value: unknown): value is string =>
   typeof value === "string" && /^[A-Z][a-z]+$/.test(value);

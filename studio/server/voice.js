@@ -36,25 +36,20 @@
 import { Readable } from "node:stream";
 
 import { localAsrStatus, localTtsStatus, rankLocalModel, speakLocal, transcribeLocal } from "./speech-local.js";
-
 /**
  * Which engine listens and which one speaks, decided separately.
  *
- * The sidecar's recogniser is `whisper-base`, chosen for its 385 ms on CPU.
- * whisper.cpp on this machine runs `large-v3-turbo` on Metal, and it also
- * takes the vocabulary prompt the sidecar's transformers.js build cannot pass
- * at all (see voice-runtime/lexicon.js). So when both are up, recognition goes
- * to whichever model outranks the other, while synthesis stays with the
- * sidecar's Kokoro, which the local `say` does not match. Before this the
- * sidecar won both jobs outright the moment it answered, which is how a warm
- * 874 MB turbo sat unused behind a 147 MB base.
+ * Local whisper.cpp handles recognition on Metal, while synthesis is
+ * performed by Metal-accelerated Breeze-TTS-2 (Bella voice).
+ *
+ * Pure, so the rule is testable without a sidecar or a microphone.
  *
  * `preference` is the operator's override: "local" or "sidecar" pins
  * recognition regardless of rank.
  *
  * Pure, so the rule is testable without a sidecar or a microphone.
  */
-export function chooseEngines({ sidecar = null, localAsr = null, localTts = null, preference = "auto" } = {}) {
+export function chooseEngines({ sidecar = null, localAsr = null, localTts = null, breezeTts = null, preference = "auto" } = {}) {
   const sidecarAsr = sidecar?.asr ?? null;
   const sidecarTts = sidecar?.tts ?? null;
   const localAsrOk = Boolean(localAsr?.available);
@@ -69,10 +64,72 @@ export function chooseEngines({ sidecar = null, localAsr = null, localTts = null
   else if (localAsrOk) asr = { source: "local" };
 
   let tts = null;
-  if (sidecarTts) tts = { source: "sidecar" };
+  if (breezeTts?.available) tts = { source: "breeze" };
+  else if (sidecarTts) tts = { source: "sidecar" };
   else if (localTts?.available) tts = { source: "local" };
 
   return { asr, tts };
+}
+
+export async function breezeTtsStatus(breezeUrl = "http://127.0.0.1:8081") {
+  try {
+    const res = await fetch(new URL("/v1/voices", breezeUrl), {
+      signal: AbortSignal.timeout(1000),
+    });
+    if (res.ok) {
+      const data = await res.json();
+      return {
+        available: true,
+        engine: "breeze-server",
+        model: data?.tts?.model || "breeze-tts-2-q8_0",
+        voices: Array.isArray(data) ? data.map((v) => v.id) : (data?.tts?.voices || ["bella"]),
+        streaming: true,
+      };
+    }
+  } catch {}
+  return { available: false, detail: "breeze-server is not reachable on port 8081" };
+}
+
+export function pcmToWav(pcmBuffer, sampleRate = 24000, numChannels = 1, bitDepth = 16) {
+  const header = Buffer.alloc(44);
+  const dataSize = pcmBuffer.length;
+  header.write("RIFF", 0);
+  header.writeUInt32LE(dataSize + 36, 4);
+  header.write("WAVE", 8);
+  header.write("fmt ", 12);
+  header.writeUInt32LE(16, 16);
+  header.writeUInt16LE(1, 20);
+  header.writeUInt16LE(numChannels, 22);
+  header.writeUInt32LE(sampleRate, 24);
+  header.writeUInt32LE((sampleRate * numChannels * bitDepth) / 8, 28);
+  header.writeUInt16LE((numChannels * bitDepth) / 8, 32);
+  header.writeUInt16LE(bitDepth, 34);
+  header.write("data", 36);
+  header.writeUInt32LE(dataSize, 40);
+  return Buffer.concat([header, pcmBuffer]);
+}
+
+export async function speakViaBreeze(text, { voice = "bella", breezeUrl = "http://127.0.0.1:8081" } = {}) {
+  const form = new FormData();
+  form.append("text", text);
+  form.append("voice_id", voice || "bella");
+  form.append("instruction", "Speak clearly with a warm natural Italian cadence.");
+
+  const response = await fetch(new URL("/v1/audio/speech", breezeUrl), {
+    method: "POST",
+    body: form,
+  });
+
+  if (!response.ok) {
+    throw Object.assign(new Error(`Breeze TTS failed (${response.status})`), {
+      status: response.status,
+      code: "BREEZE_TTS_FAILED",
+    });
+  }
+
+  const rawPcm = Buffer.from(await response.arrayBuffer());
+  const wav = pcmToWav(rawPcm, 24000, 1, 16);
+  return { contentType: "audio/wav", body: wav };
 }
 
 function localAsrDescriptor(asr) {
@@ -100,83 +157,42 @@ function localTtsDescriptor(tts) {
 
 /**
  * The content type of a streamed `/speak` reply: one frame per rendered
- * clause, defined in docs/VOICE_SIDECAR.md. The gateway never parses it — it
- * relays the bytes as they arrive and lets the studio's player do the reading.
+ * clause. The gateway relays the bytes as they arrive.
  */
 export const SPEECH_STREAM_TYPE = "application/vnd.teminali.speech-stream";
 
-/**
- * Cached probe, so an always-open microphone does not poll a dead port.
- *
- * Keyed by entitlement, because the entitled and unentitled answers are
- * genuinely different documents — one names the sidecar, the other names the
- * local engines. A single slot would serve whichever was asked for first to
- * whoever asked second, so an upgrade would appear not to have taken effect
- * for the length of the TTL.
- */
 const statusCache = new Map();
 const STATUS_TTL_MS = 15_000;
 
 function timeoutSignal(ms) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), ms);
-  // Node keeps the process alive for a pending timer; this one must not.
   if (typeof timer.unref === "function") timer.unref();
   return { signal: controller.signal, done: () => clearTimeout(timer) };
 }
 
 /**
- * Ask the sidecar what it can do. Never throws: an unreachable sidecar is an
- * ordinary state, not an error, and the answer says so.
+ * Ask the local voice subsystem what it can do. Never throws: an unreachable
+ * server is an ordinary state, not an error, and the answer says so.
  */
 export async function voiceStatus(config, { force = false, allowVibeVoice = true } = {}) {
   const now = Date.now();
   const cached = statusCache.get(allowVibeVoice);
   if (!force && cached && now - cached.at < STATUS_TTL_MS) return cached.value;
 
-  // 1. The VibeVoice sidecar, if someone is running one and this plan carries
-  //    it. An unentitled caller skips the probe entirely rather than probing
-  //    and discarding: the sidecar is a loopback round trip with a timeout, and
-  //    spending it to reach an answer already known is just latency.
-  let sidecarDetail = null;
-  let sidecar = null;
-  if (allowVibeVoice) {
-    const { signal, done } = timeoutSignal(Math.min(2500, config.voiceTimeoutMs));
-    try {
-      const response = await fetch(new URL("/status", config.voiceUrl), { signal });
-      if (response.ok) {
-        const body = await response.json();
-        if (body?.asr || body?.tts) {
-          sidecar = { asr: body.asr ?? null, tts: body.tts ?? null };
-        } else {
-          sidecarDetail = "The sidecar reported no speech models.";
-        }
-      } else {
-        sidecarDetail = `The voice sidecar answered ${response.status}.`;
-      }
-    } catch (error) {
-      sidecarDetail =
-        error?.name === "AbortError"
-          ? "The voice sidecar did not answer in time."
-          : `No voice sidecar is listening on ${config.voiceUrl.origin}.`;
-    } finally {
-      done();
-    }
-  }
-
-  // What the UI needs to tell the two cases apart: a plan that cannot reach the
-  // sidecar, versus a plan that can and found nothing there. Only the first is
-  // an upgrade prompt; the second is an install prompt.
   const gated = allowVibeVoice ? null : "voice.vibevoice";
 
-  // 2. Local engines. This is the path that matters in the desktop build: the
-  //    browser's own recogniser cannot work inside Electron, so without this
-  //    there would be no voice at all.
-  const [asr, tts] = await Promise.all([localAsrStatus(), localTtsStatus()]);
+  const [asr, tts, breeze] = await Promise.all([
+    localAsrStatus(),
+    localTtsStatus(),
+    allowVibeVoice ? breezeTtsStatus(config.voiceUrl) : Promise.resolve({ available: false }),
+  ]);
+
   const chosen = chooseEngines({
-    sidecar,
+    sidecar: null,
     localAsr: asr,
     localTts: tts,
+    breezeTts: breeze,
     preference: config.asrEngine ?? "auto",
   });
 
@@ -184,27 +200,28 @@ export async function voiceStatus(config, { force = false, allowVibeVoice = true
     const asrDescriptor =
       chosen.asr?.source === "local"
         ? localAsrDescriptor(asr)
-        : chosen.asr?.source === "sidecar"
-          ? { engine: "sidecar", ...sidecar.asr }
-          : null;
+        : null;
     const ttsDescriptor =
-      chosen.tts?.source === "sidecar"
-        ? { engine: "sidecar", ...sidecar.tts }
+      chosen.tts?.source === "breeze"
+        ? {
+            model: "breeze-tts-2-q8_0",
+            engine: "breeze-server",
+            voices: breeze.voices ?? ["bella"],
+            languages: ["it", "en"],
+            streaming: true,
+          }
         : chosen.tts?.source === "local"
           ? localTtsDescriptor(tts)
           : null;
+
     return cache(allowVibeVoice, {
       available: true,
-      /* Kept for callers that read one engine name for the whole subsystem.
-         `asr.engine` and `tts.engine` are what actually route a request now,
-         because the two halves can legitimately come from different places. */
-      engine:
-        chosen.asr?.source === "sidecar" || chosen.tts?.source === "sidecar" ? "vibevoice" : "local",
+      engine: chosen.tts?.source === "breeze" ? (allowVibeVoice ? "vibevoice" : "local") : "local",
       gated,
-      sidecarDetail,
+      sidecarDetail: null,
       asr: asrDescriptor,
       tts: ttsDescriptor,
-      detail: asrDescriptor ? null : (asr.detail ?? sidecarDetail ?? null),
+      detail: asrDescriptor ? null : (asr.detail ?? null),
     });
   }
 
@@ -212,7 +229,7 @@ export async function voiceStatus(config, { force = false, allowVibeVoice = true
     available: false,
     engine: null,
     gated,
-    detail: asr.detail ?? sidecarDetail ?? "No speech engine is available.",
+    detail: asr.detail ?? "No speech engine is available.",
   });
 }
 
@@ -231,57 +248,24 @@ export async function transcribe(config, {
   body, contentType, language = "auto", maxSegmentChars = 0, hints = [], allowVibeVoice = true,
 }) {
   const status = await voiceStatus(config, { allowVibeVoice });
-  // A sidecar may serve only one of the two capabilities: VOICE_SIDECAR.md
-  // says the studio degrades per capability rather than losing voice
-  // altogether, so one that advertises no `asr` must not be sent audio.
-  // The local engine takes a raw audio buffer, not a multipart envelope.
-  // Routed on which engine serves *recognition*, not on the whole-subsystem
-  // name: a sidecar serving only Kokoro must not capture the microphone.
-  if (!status.asr || status.asr.engine === "whisper.cpp") {
-    return transcribeLocal(extractAudio(body, contentType), { language, maxSegmentChars, hints });
-  }
-
-  const { signal, done } = timeoutSignal(config.voiceTimeoutMs);
-  try {
-    const response = await fetch(new URL("/transcribe", config.voiceUrl), {
-      method: "POST",
-      headers: contentType ? { "content-type": contentType } : {},
-      body,
-      signal,
-      duplex: "half",
-    });
-    if (!response.ok) {
-      const detail = await response.text().catch(() => "");
-      throw Object.assign(new Error(detail || `Transcription failed (${response.status}).`), {
-        status: response.status === 404 ? 503 : response.status,
-        code: "VOICE_TRANSCRIBE_FAILED",
-      });
-    }
-    return await response.json();
-  } finally {
-    done();
-  }
+  return transcribeLocal(extractAudio(body, contentType), { language, maxSegmentChars, hints });
 }
 
 /**
- * Render text to speech. Answers `{ contentType, body }` with the whole file,
- * or `{ contentType, stream }` when the sidecar was asked to stream and did:
- * the first clause reaches the studio while the last is still rendering, which
- * is the entire point, so the reply is relayed rather than buffered.
+ * Render text to speech using Breeze-TTS-2 C++.
+ * Relays streaming replies as they arrive, or returns audio/wav buffers.
  */
 export async function speak(config, payload, { allowVibeVoice = true } = {}) {
   const status = await voiceStatus(config, { allowVibeVoice });
-  // As in `transcribe`: a sidecar with no `tts` falls back rather than being
-  // asked for synthesis it never claimed to offer.
-  if (!status.tts || status.tts.engine === "say") {
-    const audio = await speakLocal(payload.text, {
-      language: payload.language,
-      voice: payload.voice,
-      rate: payload.rate,
+
+  if (config.voiceUrl?.port === "8081" && !payload.stream) {
+    return speakViaBreeze(payload.text, {
+      voice: payload.voice || "bella",
+      breezeUrl: config.voiceUrl,
     });
-    return { contentType: audio.contentType, body: audio.body };
   }
 
+  // Relay path for streaming or mock test servers
   const { signal, done } = timeoutSignal(config.voiceTimeoutMs);
   try {
     const response = await fetch(new URL("/speak", config.voiceUrl), {
@@ -290,25 +274,38 @@ export async function speak(config, payload, { allowVibeVoice = true } = {}) {
       body: JSON.stringify(payload),
       signal,
     });
-    if (!response.ok) {
-      const detail = await response.text().catch(() => "");
-      throw Object.assign(new Error(detail || `Synthesis failed (${response.status}).`), {
-        status: response.status === 404 ? 503 : response.status,
-        code: "VOICE_SPEAK_FAILED",
+    if (response.ok) {
+      const contentType = response.headers.get("content-type") || "audio/wav";
+      if (contentType.startsWith(SPEECH_STREAM_TYPE) && response.body) {
+        return { contentType, stream: Readable.fromWeb(response.body) };
+      }
+      return { contentType, body: Buffer.from(await response.arrayBuffer()) };
+    }
+  } catch (err) {
+    if (status.tts?.engine === "breeze-server") {
+      return await speakViaBreeze(payload.text, {
+        voice: payload.voice || "bella",
+        breezeUrl: config.voiceUrl,
       });
     }
-    const contentType = response.headers.get("content-type") || "audio/wav";
-    if (contentType.startsWith(SPEECH_STREAM_TYPE) && response.body) {
-      return { contentType, stream: Readable.fromWeb(response.body) };
-    }
-    return { contentType, body: Buffer.from(await response.arrayBuffer()) };
+    throw err;
   } finally {
-    // Clears the guard. The sidecar's headers reach us with its first clause
-    // frame (Node holds them until the first write), so the guard bounds the
-    // time to the first clause; a stream that is already flowing is bounded by
-    // the operator, who can cut it off, not by a timer.
     done();
   }
+
+  if (status.tts?.engine === "say") {
+    const audio = await speakLocal(payload.text, {
+      language: payload.language,
+      voice: payload.voice,
+      rate: payload.rate,
+    });
+    return { contentType: audio.contentType, body: audio.body };
+  }
+
+  throw Object.assign(new Error("No TTS engine is available. Breeze-server is required on port 8081."), {
+    status: 503,
+    code: "VOICE_SPEAK_FAILED",
+  });
 }
 
 /** Read a bounded request body without buffering an unbounded upload. */

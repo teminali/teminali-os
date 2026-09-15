@@ -39,6 +39,11 @@ export default defineConfig({
           origin: "http://127.0.0.1:3000",
         },
       },
+      "/breeze": {
+        target: "http://127.0.0.1:8081",
+        changeOrigin: true,
+        rewrite: (path) => path.replace(/^\/breeze/, ""),
+      },
     },
   },
 });

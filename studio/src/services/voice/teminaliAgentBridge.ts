@@ -27,6 +27,7 @@ import {
   parseEngineChoice,
   ENGINE_LABELS,
 } from "./voiceTurnRouter.ts";
+import { executeActionChain } from "./compoundActionRunner.ts";
 import { languageForPath } from "../language";
 import {
   describeQueue,
@@ -169,6 +170,15 @@ export class TeminaliAgentBridge {
   static async delegateTask(prompt: string, options: TaskDelegationOptions = {}): Promise<string> {
     const aside = this.interceptAside(prompt, options);
     if (aside !== null) return aside;
+
+    // Hard-Coded Local Accessibility & Telemetry fast-path (< 50ms, 0 tokens)
+    const fast = await executeActionChain(prompt);
+    if (fast && fast.handled) {
+      options.onProgress?.(fast.spoken);
+      options.onCompleted?.(fast.spoken);
+      this.recordReport(fast.spoken);
+      return fast.spoken;
+    }
 
     if (this.activeController) {
       const result = enqueueTask<QueuedDelegation>(this.queue, {

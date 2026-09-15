@@ -16,6 +16,7 @@ import { TrackHeader } from './TrackHeader';
 import { ClipBlock } from './ClipBlock';
 import { Playhead, PlayheadHead } from './Playhead';
 import { MarkerLane } from './MarkerLane';
+import { TimelineNarrationWaveform } from './TimelineNarrationWaveform';
 import { MediaAsset } from '../../types/edl';
 import { useDensity } from '../../hooks/useDensity';
 
@@ -334,10 +335,15 @@ export const Timeline: React.FC = () => {
         <div ref={scrollRef} className="editor-timeline-lanes flex-1 overflow-x-auto overflow-y-auto relative bg-spectrum-sunken min-w-0">
           <div style={{ width: contentWidth, minHeight: '100%' }} className="relative">
             {/* Ruler + markers pinned to the top of the scroll area */}
-            <div className="editor-time-ruler-stack sticky top-0 z-30 bg-spectrum-panelHeader border-b border-line">
+            <div className="editor-time-ruler-stack sticky top-0 z-30 bg-spectrum-panelHeader border-b border-line relative">
               <TimelineRuler pxPerMs={pxPerMs} durationMs={project.durationMs} height={RULER_HEIGHT} />
               <MarkerLane pxPerMs={pxPerMs} height={MARKER_HEIGHT} />
               <PlayheadHead pxPerMs={pxPerMs} height={RULER_HEIGHT + MARKER_HEIGHT} />
+
+              {/* Temi Narration Waveform Micro-Animation */}
+              <div className="absolute right-3 top-1.5 z-40">
+                <TimelineNarrationWaveform />
+              </div>
             </div>
 
             {/* Lanes */}

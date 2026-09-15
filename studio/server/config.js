@@ -37,9 +37,8 @@ export function createConfig(environment = process.env, overrides = {}) {
     allowedOrigins: new Set(origins),
     ollamaUrl: loopbackUrl(environment.OLLAMA_BASE_URL, "http://127.0.0.1:11434", "OLLAMA_BASE_URL"),
     mcpUrl: loopbackUrl(environment.TEMINALI_CUT_MCP_URL || environment.KERF_MCP_URL, "http://127.0.0.1:3888", "TEMINALI_CUT_MCP_URL"),
-    // VibeVoice sidecar. Optional: absent means the studio falls back to the
-    // browser speech engine rather than losing voice altogether.
-    voiceUrl: loopbackUrl(environment.TEMINALI_VOICE_URL, "http://127.0.0.1:8321", "TEMINALI_VOICE_URL"),
+    // Local Breeze-TTS-2 engine on port 8081.
+    voiceUrl: loopbackUrl(environment.TEMINALI_VOICE_URL, "http://127.0.0.1:8081", "TEMINALI_VOICE_URL"),
     voiceTimeoutMs: positiveInteger(environment.TEMINALI_VOICE_TIMEOUT_MS, 30_000),
     voiceMaxAudioBytes: positiveInteger(environment.TEMINALI_VOICE_MAX_AUDIO_BYTES, 25 * 1024 * 1024),
     anthropicUrl: new URL("https://api.anthropic.com"),

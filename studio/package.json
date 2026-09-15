@@ -1,7 +1,7 @@
 {
   "name": "@teminali/os",
   "productName": "Teminali OS",
-  "version": "0.0.18",
+  "version": "0.0.19",
   "description": "Teminali OS — Autonomous AI Studio for full-stack, design-system-first development",
   "author": {
     "name": "Teminali",
@@ -17,11 +17,9 @@
     "build:pointer": "node scripts/build-pointer-helper.mjs",
     "build:media-stack": "bash scripts/build-media-stack.sh",
     "typecheck": "tsc --noEmit",
-    "test": "node --test server/gateway.test.js agent-runtime/runtime.test.js tests/*.test.mjs performance-runtime/metrics.test.js mcp-runtime/mcp-runtime.test.mjs visual-runtime/tests/visual-runtime.test.mjs quality-runtime/tests/orchestrator.test.mjs voice-runtime/tests/*.test.mjs",
+    "test": "node --test server/gateway.test.js agent-runtime/runtime.test.js tests/*.test.mjs performance-runtime/metrics.test.js mcp-runtime/mcp-runtime.test.mjs visual-runtime/tests/visual-runtime.test.mjs quality-runtime/tests/orchestrator.test.mjs",
     "test:gateway": "node --test server/gateway.test.js",
     "test:agent": "node --test agent-runtime/runtime.test.js",
-    "voice:serve": "node voice-runtime/cli.js",
-    "voice:install": "npm --prefix voice-runtime install",
     "test:contracts": "node --test tests/*.test.mjs",
     "eval:local": "esbuild evals/tool-manifest.ts --bundle --platform=node --format=esm --log-level=error --outfile=evals/.build/tool-manifest.mjs && node evals/local-lane.mjs",
     "eval:voice": "node evals/voice-lane.mjs",

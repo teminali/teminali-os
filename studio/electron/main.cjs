@@ -208,128 +208,7 @@ ipcMain.on("gateway:session-sync", (event) => {
   event.returnValue = gatewaySession;
 });
 
-/* ── The local speech sidecar ─────────────────────────────────────────────
-   voice-runtime/ ships beside the asar as an extra resource — see
-   electron-builder.yml — and runs as a child of this process, not inside it:
-   it is its own package with its own node_modules, onnxruntime's native
-   binding cannot be loaded out of an archive, and its warm-up is minutes of
-   CPU on a first run that must not stall the main process.
 
-   It runs under this Electron binary with ELECTRON_RUN_AS_NODE=1, the way the
-   MCP shim does, so a packaged app needs no Node on the PATH. An unpackaged
-   app never spawns it: `npm run voice:serve` is the development sidecar.
-
-   Nothing else in the app knows it exists. The gateway probes
-   TEMINALI_VOICE_URL (127.0.0.1:8321 unless moved) and reads /status, which
-   names each model as it becomes ready; a cold sidecar answers `{}` and the
-   studio keeps the built-in engine until then. That is the whole status
-   surface, and this adds nothing to it.
-   ───────────────────────────────────────────────────────────────────────── */
-
-let voiceSidecar = null;
-
-/**
- * One port for both ends. The gateway reads TEMINALI_VOICE_URL for where the
- * sidecar is; the sidecar reads TEMINALI_VOICE_PORT for where to listen. An
- * operator who moves one has moved the other.
- */
-function voiceSidecarPort() {
-  const url = process.env.TEMINALI_VOICE_URL;
-  if (url) {
-    try {
-      const { port } = new URL(url);
-      if (port) return Number(port);
-    } catch (error) {
-      log("Ignoring an unreadable TEMINALI_VOICE_URL:", error.message);
-    }
-  }
-  const port = Number(process.env.TEMINALI_VOICE_PORT);
-  return Number.isInteger(port) && port > 0 ? port : 8321;
-}
-
-/** Binds and releases the port, which is the only honest way to ask. */
-function isPortFree(port) {
-  return new Promise((resolve) => {
-    const probe = require("net").createServer();
-    probe.once("error", () => resolve(false));
-    probe.listen(port, "127.0.0.1", () => probe.close(() => resolve(true)));
-  });
-}
-
-async function startVoiceSidecar() {
-  const devRoot = path.join(__dirname, "..", "voice-runtime");
-  const packagedRoot = path.join(process.resourcesPath, "voice-runtime");
-  const root = fs.existsSync(path.join(devRoot, "cli.js")) ? devRoot : packagedRoot;
-  const entry = path.join(root, "cli.js");
-  if (!fs.existsSync(entry)) {
-    log("No voice sidecar in this build; voice stays on the built-in engine.");
-    return;
-  }
-  const port = voiceSidecarPort();
-  if (!(await isPortFree(port))) {
-    // A development sidecar, or the previous instance still winding down. The
-    // gateway talks to whatever answers there; a second one could only fail
-    // to bind.
-    log(`Voice sidecar port ${port} is taken; not starting another.`);
-    return;
-  }
-
-  // transformers.js caches model weights inside its own package by default,
-  // which here is inside the application bundle. The weights are a first-run
-  // download of a few hundred megabytes and belong in userData, where an
-  // update does not throw them away and a write does not touch the signed
-  // bundle. voice-runtime/cli.js reads this; an operator's own value wins.
-  const cache =
-    process.env.TEMINALI_VOICE_CACHE || path.join(app.getPath("userData"), "voice-models");
-  fs.mkdirSync(cache, { recursive: true });
-
-  // The sidecar decodes every utterance with ffmpeg and looks for it on PATH,
-  // which a Finder- or Start-menu-launched app does not have a useful one of.
-  // findFfmpeg() is the same search the video exporter uses, and it knows where
-  // each platform's package managers put it; null is passed as an empty string,
-  // which the sidecar treats as "not set" and falls back to PATH.
-  const ffmpeg = findFfmpeg();
-  // A child started from process.execPath is a fresh Node with the 250 ms
-  // connect deadline, and the sidecar downloads its models on first run.
-  const child = spawn(process.execPath, [...addressAttemptArgs(), entry], {
-    cwd: root,
-    env: {
-      ...process.env,
-      ELECTRON_RUN_AS_NODE: "1",
-      TEMINALI_VOICE_PORT: String(port),
-      TEMINALI_VOICE_CACHE: cache,
-      ...(ffmpeg ? { TEMINALI_FFMPEG: ffmpeg } : {}),
-    },
-    stdio: ["ignore", "pipe", "pipe"],
-    windowsHide: true,
-  });
-  voiceSidecar = child;
-  log(`Voice sidecar starting: pid ${child.pid}, port ${port}, models in ${cache}`);
-
-  // The sidecar writes its listen line and each "ready" line to stderr. They
-  // land in this log too, so a silent voice can be diagnosed from one file.
-  const relay = (stream) => {
-    let pending = "";
-    stream.setEncoding("utf8");
-    stream.on("data", (chunk) => {
-      pending += chunk;
-      let newline;
-      while ((newline = pending.indexOf("\n")) !== -1) {
-        const line = pending.slice(0, newline).trim();
-        pending = pending.slice(newline + 1);
-        if (line) log("Voice sidecar:", line);
-      }
-    });
-  };
-  relay(child.stdout);
-  relay(child.stderr);
-
-  child.on("error", (error) => log("Voice sidecar could not be spawned:", error.message));
-  child.on("exit", (code, signal) => {
-    if (voiceSidecar === child) voiceSidecar = null;
-    log(`Voice sidecar exited (${signal || `code ${code}`}); the gateway will find no sidecar on its next probe.`);
-  });
-}
 
 
 let mainWindow = null;
@@ -1171,11 +1050,7 @@ app.whenReady().then(async () => {
     } catch (error) {
       log("Gateway could not be started:", error?.stack || error?.message || error);
     }
-    // Not awaited: the window does not depend on it, and a first run spends
-    // minutes downloading weights that the sidecar reports through /status.
-    startVoiceSidecar().catch((error) => {
-      log("Voice sidecar could not be started:", error?.stack || error?.message || error);
-    });
+
   }
 
   // After the gateway, so a packaged app's media protocol reads the live root
@@ -1386,13 +1261,7 @@ app.on("will-quit", () => {
   } catch (error) {
     log("Could not close the gateway:", error.message);
   }
-  // SIGTERM, which cli.js answers by closing its server and exiting. Left
-  // alone it would outlive the app, holding the port and the loaded weights.
-  try {
-    voiceSidecar?.kill();
-  } catch (error) {
-    log("Could not stop the voice sidecar:", error.message);
-  }
+
 });
 
 /* The overlay points at other applications, so it stands down while the

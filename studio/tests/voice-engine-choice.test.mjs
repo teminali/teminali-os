@@ -3,19 +3,25 @@ import assert from "node:assert/strict";
 import { chooseEngines } from "../server/voice.js";
 import { rankLocalModel, buildPrompt, MODEL_PREFERENCE } from "../server/speech-local.js";
 
-const sidecarBase = { asr: { model: "onnx-community/whisper-base" }, tts: { model: "Kokoro-82M" } };
+const sidecarBase = { asr: { model: "onnx-community/whisper-base" }, tts: { model: "Breeze-TTS-2" } };
 const localTurbo = { available: true, modelName: "ggml-large-v3-turbo-q8_0.bin", rank: 5, multilingual: true };
 const localBase = { available: true, modelName: "ggml-base.bin", rank: 2, multilingual: true };
 const sayTts = { available: true, voices: [{ name: "Daniel", language: "en-GB" }] };
+const breezeTts = { available: true, model: "breeze-tts-2-q8_0", voices: ["bella"] };
 
 test("a better local model takes recognition from the sidecar", () => {
   const chosen = chooseEngines({ sidecar: sidecarBase, localAsr: localTurbo, localTts: sayTts });
   assert.equal(chosen.asr.source, "local");
 });
 
+test("Breeze synthesis beats `say`, whoever is listening", () => {
+  const chosen = chooseEngines({ localAsr: localTurbo, breezeTts, localTts: sayTts });
+  assert.equal(chosen.tts.source, "breeze", "Breeze beats `say`");
+});
+
 test("synthesis stays with the sidecar even when recognition does not", () => {
   const chosen = chooseEngines({ sidecar: sidecarBase, localAsr: localTurbo, localTts: sayTts });
-  assert.equal(chosen.tts.source, "sidecar", "Kokoro beats `say`, whoever is listening");
+  assert.equal(chosen.tts.source, "sidecar");
 });
 
 test("a weaker local model leaves recognition with the sidecar", () => {
@@ -29,7 +35,7 @@ test("the operator's preference overrides rank in both directions", () => {
 });
 
 test("a sidecar serving only synthesis does not capture the microphone", () => {
-  const chosen = chooseEngines({ sidecar: { asr: null, tts: { model: "Kokoro-82M" } }, localAsr: localBase, localTts: sayTts });
+  const chosen = chooseEngines({ sidecar: { asr: null, tts: { model: "Breeze-TTS-2" } }, localAsr: localBase, localTts: sayTts });
   assert.equal(chosen.asr.source, "local", "the only recogniser present must get the audio");
   assert.equal(chosen.tts.source, "sidecar");
 });
